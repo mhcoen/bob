@@ -1,4 +1,4 @@
-"""Entry point — the main loop."""
+"""Entry point for the main loop."""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def run_loop(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Loop — grind through a markdown checklist")
+    parser = argparse.ArgumentParser(description="Loop: grind through a markdown checklist")
     parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")

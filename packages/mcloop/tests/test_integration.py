@@ -1,4 +1,4 @@
-"""Integration tests — exercise the full loop with mocked subprocesses."""
+"""Integration tests. Exercise the full loop with mocked subprocesses."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -114,7 +114,7 @@ def test_checks_fail_then_pass(mock_run, mock_checks, mock_commit, mock_notify, 
 def test_max_retries_exhausted_stops_loop(
     mock_run, mock_checks, mock_commit, mock_notify, tmp_path
 ):
-    """Task fails all retries — marked [!] and loop stops."""
+    """Task fails all retries, marked [!] and loop stops."""
     md = _make_project(tmp_path, "- [ ] Hopeless task\n- [ ] Next task\n")
     mock_run.return_value = _fail_run_result()
 
@@ -132,7 +132,7 @@ def test_max_retries_exhausted_stops_loop(
 @patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
 @patch("loop.main.run_task")
 def test_rate_limit_waits(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
-    """Rate limit detected — waits then retries."""
+    """Rate limit detected, waits then retries."""
     md = _make_project(tmp_path, "- [ ] Task\n")
     mock_run.side_effect = [
         _fail_run_result(output="rate limit exceeded", exit_code=1),
@@ -166,7 +166,7 @@ def test_skips_already_checked(mock_run, mock_checks, mock_commit, mock_notify, 
 @patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
 @patch("loop.main.run_task")
 def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
-    """All items already checked — loop exits immediately."""
+    """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")
 
     stuck = run_loop(md)

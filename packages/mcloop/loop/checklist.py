@@ -1,4 +1,4 @@
-"""Markdown checklist parser — read/write `- [ ]` items."""
+"""Markdown checklist parser. Reads and writes `- [ ]` items."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def find_next(tasks: list[Task]) -> Task | None:
             child = find_next(task.children)
             if child:
                 return child
-            # All children are done — parent is the next candidate
+            # All children are done, parent is the next candidate
             # (it will be auto-checked by the main loop)
             return task
 

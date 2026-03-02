@@ -29,7 +29,12 @@ def run_task(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = f"Project context:\n{description}\n\nTask: {task_text}" if description else task_text
+    parts = []
+    if description:
+        parts.append(f"Project context:\n{description}")
+    parts.append(f"Task: {task_text}")
+    parts.append("Write unit tests where they make sense.")
+    prompt = "\n\n".join(parts)
     cmd = _build_command(cli, prompt)
     env_extra = {"LOOP_ASK": "1"}
 

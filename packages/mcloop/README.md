@@ -2,7 +2,7 @@
 
 Loop grinds through a markdown checklist using AI coding CLIs, committing as it goes and notifying you of progress.
 
-You write a `PLAN.md` in your repo — a project description followed by a checklist. Loop picks up the next unchecked item, launches a fresh Claude Code session to do it, runs your project's tests and linter, and only commits and checks off the item if everything passes. Task status is tracked in `PLAN.md`; per-attempt logs go to `logs/`.
+You write a `PLAN.md` in your repo with a project description and a checklist. Loop picks up the next unchecked item, launches a fresh Claude Code session to do it, runs your project's tests and linter, and only commits and checks off the item if everything passes. Task status is tracked in `PLAN.md`. Per-attempt logs go to `logs/`.
 
 ## Usage
 
@@ -15,13 +15,15 @@ python -m loop --max-retries 5    # Retry failed tasks up to 5 times (default: 3
 
 ## Writing a PLAN.md
 
-A `PLAN.md` has two parts: a project description in plain English, then a checklist. The description gives the CLI context for every task — what the project is, what technologies to use, any constraints. The checklist is what Loop executes.
+A `PLAN.md` has two parts: a project description in plain English, then a checklist. The description gives the CLI context for every task: what the project is, what technologies to use, any constraints. The checklist is what Loop executes.
 
 You can write it yourself, or have an AI generate it:
 
 ```
 Prompt: "Write a PLAN.md for a CLI tool that converts CSV files to JSON.
-         Python, no dependencies, with tests. Break it into small tasks."
+         Python, no dependencies, with tests. Start with a high-level
+         project description, then break it into a natural sequence of
+         small, concrete tasks as markdown checkboxes."
 ```
 
 ### Example
@@ -45,9 +47,9 @@ be pretty-printed by default with a --compact flag. Include tests with pytest.
 
 | Marker | Meaning |
 |--------|---------|
-| `- [ ]` | Pending — Loop will pick this up |
+| `- [ ]` | Pending. Loop will pick this up |
 | `- [x]` | Completed |
-| `- [!]` | Failed — Loop gave up after max retries |
+| `- [!]` | Failed. Loop gave up after max retries |
 
 When a parent has subtasks, Loop completes the subtasks first. The parent is auto-checked when all children are done.
 
@@ -57,12 +59,14 @@ When a parent has subtasks, Loop completes the subtasks first. The parent is aut
 while unchecked items remain:
     1. Parse PLAN.md, find next unchecked item (depth-first)
     2. Launch a fresh Claude Code session with the project description + task
-    3. Run project checks (tests, lint — auto-detected)
+    3. Run project checks (tests, lint, auto-detected)
     4. If checks pass  -> commit, check the box, notify, continue
     5. If checks fail  -> retry (up to --max-retries)
     6. If retries exhausted -> mark [!], notify, stop
     7. If rate-limited  -> pause, wait for reset, resume
 ```
+
+Each CLI session is instructed to write unit tests where they make sense. Loop then runs the project's test suite and linter before committing, so tasks only pass if the tests pass.
 
 Loop stops when a task fails all retries. Tasks may have implicit dependencies, so continuing past a failure is not safe.
 
@@ -117,7 +121,7 @@ pytest                    # Tests
 
 - Python >= 3.11
 - `claude` CLI on PATH
-- macOS (for iMessage notifications; Telegram works anywhere)
+- macOS (for iMessage notifications, Telegram works anywhere)
 
 ## Author
 

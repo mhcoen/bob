@@ -26,7 +26,7 @@ Standard markdown checkboxes in a file in the repo (default: `PLAN.md`). No spec
 - Supports nested subtasks (indented checkboxes under a parent)
 - Loop checks off items as they complete
 - Already-checked items are skipped
-- When a parent has subtasks, complete the subtasks first; parent gets checked when all children are done
+- When a parent has subtasks, complete the subtasks first. Parent gets checked when all children are done
 
 ## The loop
 
@@ -35,7 +35,7 @@ while unchecked items remain:
     1. Parse checklist, find next unchecked item (depth-first, top-down)
     2. Launch a fresh CLI session (Claude Code preferred, Codex as fallback)
     3. Give it the task description + relevant repo context
-    4. When session finishes, run checks (tests, lint — whatever the project uses)
+    4. When session finishes, run checks (tests, lint, whatever the project uses)
     5. If checks pass → commit, check the box, notify user, continue
     6. If checks fail → retry with failure context (up to max retries)
        - Notify on each failure
@@ -63,13 +63,13 @@ Telegram and iMessage notifications for:
 
 - One log file per task attempt in a `logs/` directory
 - Each log captures the CLI output and check results
-- Nothing fancy — just dump everything to a file
+- Nothing fancy, just dump everything to a file
 
 ## Tech
 
 - Python
 - Invokes `claude` and/or `codex` CLI via subprocess
-- Keep it simple — stdlib where possible:
+- Keep it simple, stdlib where possible:
   - `argparse` for CLI
   - `subprocess` for running CLIs and checks
   - `json` for any state
