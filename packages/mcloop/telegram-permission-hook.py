@@ -181,8 +181,9 @@ def main():
         _respond("allow")
         return
 
-    # Not whitelisted — notify via Telegram and return "ask" so Claude Code
-    # shows a permission prompt (approvable via Remote Control from phone)
+    # Not whitelisted — notify via Telegram, return no opinion so
+    # autoAllowBashIfSandboxed handles interactive sessions normally.
+    # For unattended sessions (LOOP_ASK=1), return "ask" to gate via Remote Control.
     desc = format_tool_description(tool_name, tool_input)
     msg = (
         f"*Permission needed* [{session_label}]\n\n"
@@ -192,11 +193,17 @@ def main():
 
     try:
         send_message(msg)
-        _dbg("EXIT: notified, returning ask")
+        _dbg("EXIT: notified")
     except Exception as e:
-        _dbg(f"EXIT: telegram send failed ({e}), returning ask anyway")
+        _dbg(f"EXIT: telegram send failed ({e})")
 
-    _respond("ask", "Awaiting approval via Remote Control")
+    # LOOP_ASK=1 means unattended session — gate via Remote Control prompt
+    if os.environ.get("LOOP_ASK") or _env.get("LOOP_ASK"):
+        _dbg("EXIT: returning ask (unattended)")
+        _respond("ask", "Awaiting approval via Remote Control")
+    else:
+        _dbg("EXIT: returning no opinion (interactive)")
+        json.dump({}, sys.stdout)
 
 
 if __name__ == "__main__":
