@@ -40,7 +40,7 @@ Loop is a single Python program with a straightforward flow:
 ### Data flow
 
 ```
-TODO.md → parse → next task → CLI subprocess → run checks → commit → update TODO.md → next
+PLAN.md → parse → next task → CLI subprocess → run checks → commit → update PLAN.md → next
 ```
 
 Logs go to `logs/` — one file per task attempt.

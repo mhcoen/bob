@@ -19,6 +19,17 @@ class Task:
     children: list[Task] = field(default_factory=list)
 
 
+def parse_description(path: str | Path) -> str:
+    """Extract prose before the first checkbox as a project description."""
+    lines = Path(path).read_text().splitlines()
+    desc_lines = []
+    for line in lines:
+        if CHECKBOX_RE.match(line):
+            break
+        desc_lines.append(line)
+    return "\n".join(desc_lines).strip()
+
+
 def parse(path: str | Path) -> list[Task]:
     """Read a markdown file and return a tree of Task objects."""
     lines = Path(path).read_text().splitlines()

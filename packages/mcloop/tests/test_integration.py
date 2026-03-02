@@ -10,7 +10,7 @@ from loop.runner import RunResult
 
 def _make_project(tmp_path, checklist_text):
     """Set up a minimal project dir with a checklist file."""
-    md = tmp_path / "TODO.md"
+    md = tmp_path / "PLAN.md"
     md.write_text(checklist_text)
     (tmp_path / "logs").mkdir()
     return md

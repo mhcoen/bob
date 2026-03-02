@@ -1,6 +1,6 @@
 """Tests for loop.checklist."""
 
-from loop.checklist import check_off, find_next, mark_failed, parse
+from loop.checklist import check_off, find_next, mark_failed, parse, parse_description
 
 SAMPLE = """\
 - [ ] Add user authentication
@@ -162,3 +162,30 @@ def test_mark_failed(tmp_path):
     assert tasks2[0].failed
     assert not tasks2[1].failed
     assert "- [!] Will fail" in f.read_text()
+
+
+def test_parse_description(tmp_path):
+    md = """\
+# My Project
+
+Build a REST API for managing widgets.
+Use Flask and SQLite.
+
+- [ ] Set up project structure
+- [ ] Add widget CRUD endpoints
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+
+    desc = parse_description(f)
+    assert "Build a REST API" in desc
+    assert "Flask and SQLite" in desc
+    assert "- [ ]" not in desc
+
+
+def test_parse_description_empty(tmp_path):
+    md = "- [ ] First task\n- [ ] Second task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+
+    assert parse_description(f) == ""

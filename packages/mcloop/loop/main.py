@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from loop.checklist import check_off, find_next, mark_failed, parse
+from loop.checklist import check_off, find_next, mark_failed, parse, parse_description
 from loop.checks import run_checks
 from loop.notify import notify
 from loop.ratelimit import (
@@ -42,6 +42,7 @@ def run_loop(
     """Run the main loop. Returns list of stuck task texts."""
     project_dir = checklist_path.parent
     log_dir = project_dir / "logs"
+    description = parse_description(checklist_path)
 
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
@@ -65,7 +66,7 @@ def run_loop(
 
         success = False
         for attempt in range(1, max_retries + 1):
-            result = run_task(task.text, cli, project_dir, log_dir)
+            result = run_task(task.text, cli, project_dir, log_dir, description)
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
@@ -106,7 +107,7 @@ def run_loop(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Loop — grind through a markdown checklist")
-    parser.add_argument("--file", default="TODO.md", help="Checklist file (default: TODO.md)")
+    parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
     return parser.parse_args()

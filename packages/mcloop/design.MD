@@ -4,7 +4,7 @@ Loop grinds through a markdown checklist using AI coding CLIs, committing as it 
 
 ## What it does
 
-- You write a markdown checklist (`TODO.md` in the repo) with `- [ ]` items, optionally nested as subtasks
+- You write a markdown checklist (`PLAN.md` in the repo) with `- [ ]` items, optionally nested as subtasks
 - You run one command
 - Loop picks the next unchecked item, launches a fresh Claude Code (preferred) or Codex session to do it, runs tests/lint, commits if it passes, checks the box
 - Repeats until everything is checked off or remaining items are stuck
@@ -12,7 +12,7 @@ Loop grinds through a markdown checklist using AI coding CLIs, committing as it 
 
 ## Checklist format
 
-Standard markdown checkboxes in a file in the repo (default: `TODO.md`). No special syntax.
+Standard markdown checkboxes in a file in the repo (default: `PLAN.md`). No special syntax.
 
 ```markdown
 - [ ] Add user authentication

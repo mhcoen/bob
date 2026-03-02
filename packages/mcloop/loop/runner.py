@@ -22,13 +22,15 @@ def run_task(
     cli: str,
     project_dir: str | Path,
     log_dir: str | Path,
+    description: str = "",
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = _build_command(cli, task_text)
+    prompt = f"Project context:\n{description}\n\nTask: {task_text}" if description else task_text
+    cmd = _build_command(cli, prompt)
     env_extra = {"LOOP_ASK": "1"}
 
     result = subprocess.run(
