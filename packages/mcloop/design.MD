@@ -2,13 +2,13 @@
 
 Loop grinds through a markdown checklist using AI coding CLIs, committing as it goes and notifying you of progress.
 
-## How it works
+## What it does
 
-1. You write a markdown checklist (`TODO.md` in your repo) with `- [ ]` items
-2. You run `loop`
-3. Loop picks the next unchecked item, launches a fresh Claude Code (or Codex) session to do it, runs your project's tests/lint, commits if they pass, checks the box
-4. Repeats until everything is done or remaining items are stuck
-5. Sends you notifications (Telegram + iMessage) on completions, failures, and pauses
+- You write a markdown checklist (`TODO.md` in the repo) with `- [ ]` items, optionally nested as subtasks
+- You run one command
+- Loop picks the next unchecked item, launches a fresh Claude Code (preferred) or Codex session to do it, runs tests/lint, commits if it passes, checks the box
+- Repeats until everything is checked off or remaining items are stuck
+- Sends you Telegram and iMessage notifications on completions, failures, and when it pauses/resumes
 
 ## Checklist format
 
@@ -26,29 +26,23 @@ Standard markdown checkboxes in a file in the repo (default: `TODO.md`). No spec
 - Supports nested subtasks (indented checkboxes under a parent)
 - Loop checks off items as they complete
 - Already-checked items are skipped
+- When a parent has subtasks, complete the subtasks first; parent gets checked when all children are done
 
 ## The loop
 
 ```
 while unchecked items remain:
-    1. Parse checklist, find next unchecked item (top-down order)
+    1. Parse checklist, find next unchecked item (depth-first, top-down)
     2. Launch a fresh CLI session (Claude Code preferred, Codex as fallback)
     3. Give it the task description + relevant repo context
     4. When session finishes, run checks (tests, lint — whatever the project uses)
     5. If checks pass → commit, check the box, notify user, continue
-    6. If checks fail → retry with failure context (up to max_retries)
+    6. If checks fail → retry with failure context (up to max retries)
        - Notify on each failure
        - After max retries, mark item as stuck and move on
     7. If rate-limited on current CLI → fall over to the other
        - If both limited → pause, wait for reset, notify user
 ```
-
-## Subtask handling
-
-When a parent item has nested subtasks:
-- Complete all subtasks first (top-down)
-- Parent is checked off only when all its children are done
-- If any subtask gets stuck, the parent is stuck too
 
 ## Rate limit handling
 
@@ -82,10 +76,3 @@ Telegram and iMessage notifications for:
   - `pathlib` for paths
   - `re` for parsing
 - `ruff` for linting, `pytest` for testing (of Loop itself)
-
-## Defaults
-
-- `max_retries`: 3
-- CLI preference: Claude Code first, Codex fallback
-- Checklist file: `TODO.md`
-- Log directory: `logs/`
