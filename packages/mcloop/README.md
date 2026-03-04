@@ -23,24 +23,32 @@ You can write it yourself, or have an AI generate it:
 Prompt: "Write a PLAN.md for a CLI tool that converts CSV files to JSON.
          Python, no dependencies, with tests. Start with a high-level
          project description, then break it into a natural sequence of
-         small, concrete tasks as markdown checkboxes."
+         feature-level tasks as markdown checkboxes. Each task should be
+         a meaningful unit of work (e.g. 'add input validation'), not a
+         single function or line of code."
 ```
 
 ### Example
 
+This is the PLAN.md that was used to build Loop itself:
+
 ```markdown
-# csv2json
+# Loop
 
-A CLI tool that reads CSV files and outputs JSON. Python 3.11+, no external
-dependencies. Use argparse for the CLI, csv module for parsing. Output should
-be pretty-printed by default with a --compact flag. Include tests with pytest.
+A Python CLI that grinds through a markdown checklist using AI coding CLIs.
+Read PLAN.md, find the next unchecked task, launch a fresh CLI session to do
+it, run the project's tests and linter, commit if everything passes, check off
+the item, and repeat. Notify the user via Telegram and iMessage on completions,
+failures, and rate limits. Python 3.11+, stdlib only, ruff for linting, pytest
+for tests.
 
-- [ ] Set up project scaffolding (pyproject.toml, src layout, empty test file)
-- [ ] Implement CSV-to-dict parsing with type inference (int, float, string)
-- [ ] Add CLI with argparse (input file, --output, --compact flags)
-- [ ] Add --array mode (list of lists) vs default --object mode (list of dicts)
-- [ ] Handle edge cases (empty files, missing values, quoted commas)
-- [ ] Write tests for each conversion mode and edge case
+- [ ] Project scaffolding (pyproject.toml, .gitignore, loop package, __main__.py)
+- [ ] Markdown checklist parser (parse tasks, find next unchecked, check off items)
+- [ ] Telegram and iMessage notifications
+- [ ] Auto-detect and run project test/lint suites
+- [ ] Rate limit detection and CLI fallover
+- [ ] CLI subprocess runner with logging
+- [ ] Main loop: parse, execute, verify, commit, notify, repeat
 ```
 
 ### Markers
@@ -86,13 +94,10 @@ Create `~/.claude/telegram-hook.env`:
 ```
 TELEGRAM_BOT_TOKEN=your-bot-token
 TELEGRAM_CHAT_ID=your-chat-id
+IMESSAGE_ID=your-phone-or-email
 ```
 
-Or set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as environment variables.
-
-### iMessage
-
-Works automatically on macOS via Messages.app (osascript).
+Or set these as environment variables. All are optional. Telegram needs both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. iMessage needs `IMESSAGE_ID` (a phone number or Apple ID email) and only works on macOS.
 
 ## Logging
 

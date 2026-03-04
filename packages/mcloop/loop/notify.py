@@ -27,6 +27,7 @@ def _load_env() -> dict[str, str]:
 _env = _load_env()
 _BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or _env.get("TELEGRAM_BOT_TOKEN", "")
 _CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or _env.get("TELEGRAM_CHAT_ID", "")
+_IMESSAGE_ID = os.environ.get("IMESSAGE_ID") or _env.get("IMESSAGE_ID", "")
 
 
 def _send_telegram(text: str) -> None:
@@ -45,9 +46,12 @@ def _send_telegram(text: str) -> None:
 
 
 def _send_imessage(text: str) -> None:
+    if not _IMESSAGE_ID:
+        return
+    chat_id = f"any;-;{_IMESSAGE_ID}"
     script = (
         'tell application "Messages"\n'
-        f'  send "{_escape_applescript(text)}" to buddy "me"\n'
+        f'  send "{_escape_applescript(text)}" to chat id "{_escape_applescript(chat_id)}"\n'
         "end tell"
     )
     try:
