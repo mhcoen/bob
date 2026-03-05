@@ -132,21 +132,20 @@ def run_loop(
                 continue
 
             if not _has_meaningful_changes(project_dir):
-                print(f"\n>>> Working tree clean, skipping commit for: {task.text}", flush=True)
-                check_off(checklist_path, task)
-                elapsed = _format_elapsed(
-                    time.monotonic() - task_start
-                )
-                completed.append(
-                    f"{label}) {task.text} (clean)"
-                )
+                last_error = "Task produced no file changes"
                 print(
-                    f"    [{elapsed}]",
+                    f"\n!!! No-op task "
+                    f"(attempt {attempt}/{max_retries}): "
+                    f"{task.text}",
                     flush=True,
                 )
-                notify(f"Skipped (clean): {task.text}")
-                success = True
-                break
+                notify(
+                    f"No-op task "
+                    f"(attempt {attempt}/{max_retries}): "
+                    + task.text,
+                    level="error",
+                )
+                continue
 
             check_result = run_checks(project_dir)
             if check_result.passed:

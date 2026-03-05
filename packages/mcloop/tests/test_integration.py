@@ -253,26 +253,83 @@ def test_skips_already_checked_no_extra_notifications(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks")
 @patch("mcloop.main.run_task")
-def test_skip_when_working_tree_clean(
+def test_noop_task_treated_as_failure(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """Task succeeds but working tree is clean: skip commit, check off, notify skipped."""
+    """Task succeeds but produces no file changes: treated as failure, marked [!]."""
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md)
+    stuck = run_loop(md, max_retries=3)
 
-    assert stuck == []
-    assert mock_run.call_count == 1
+    assert stuck == ["Already done task"]
+    assert mock_run.call_count == 3
     mock_commit.assert_not_called()
     mock_checks.assert_not_called()
     content = md.read_text()
-    assert "- [x] Already done task" in content
+    assert "- [!] Already done task" in content
 
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 2
-    assert calls[0] == ("Skipped (clean): Already done task", "info")
-    assert calls[1] == ("All tasks completed!", "info")
+    # Three no-op errors + giving up; no "all done"
+    assert len(calls) == 4
+    assert calls[0] == ("No-op task (attempt 1/3): Already done task", "error")
+    assert calls[1] == ("No-op task (attempt 2/3): Already done task", "error")
+    assert calls[2] == ("No-op task (attempt 3/3): Already done task", "error")
+    assert calls[3] == ("Giving up on: Already done task", "error")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_noop_then_changes_succeeds(
+    mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """Task produces no changes on first attempt but makes changes on retry: succeeds."""
+    md = _make_project(tmp_path, "- [ ] Retry task\n")
+    mock_run.return_value = _ok_run_result()
+
+    # First attempt: no changes. Second attempt: changes present.
+    with patch("mcloop.main._has_meaningful_changes", side_effect=[False, True]):
+        stuck = run_loop(md, max_retries=3)
+
+    assert stuck == []
+    assert mock_run.call_count == 2
+    mock_commit.assert_called_once()
+    content = md.read_text()
+    assert "- [x] Retry task" in content
+
+    calls = _notify_calls(mock_notify)
+    assert calls[0] == ("No-op task (attempt 1/3): Retry task", "error")
+    assert calls[1] == ("Completed: Retry task", "info")
+    assert calls[2] == ("All tasks completed!", "info")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_noop_with_max_retries_one(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """With max_retries=1, a single no-op attempt immediately marks task as failed."""
+    md = _make_project(tmp_path, "- [ ] One-shot task\n")
+    mock_run.return_value = _ok_run_result()
+
+    stuck = run_loop(md, max_retries=1)
+
+    assert stuck == ["One-shot task"]
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    content = md.read_text()
+    assert "- [!] One-shot task" in content
+
+    calls = _notify_calls(mock_notify)
+    assert calls[0] == ("No-op task (attempt 1/1): One-shot task", "error")
+    assert calls[1] == ("Giving up on: One-shot task", "error")
 
 
 # --- _commit unit tests ---
