@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json as _json
+import shlex
 import subprocess
 import sys
 import time
@@ -211,6 +212,8 @@ def run_loop(
     if not no_audit:
         _run_audit_fix_cycle(project_dir, log_dir, model=model)
 
+    _run_build(project_dir)
+
     total = time.monotonic() - run_start
     _print_summary(
         completed, None, "", [], total,
@@ -413,6 +416,15 @@ def _print_summary(
         for s in suggestions:
             print(f'  "{s}",', flush=True)
 
+    if project_dir:
+        config = _load_project_config(project_dir)
+        run_cmd = config.get("run")
+        if run_cmd:
+            print(
+                f"\nTo run: {run_cmd}",
+                flush=True,
+            )
+
     if project_dir and (project_dir / "NOTES.md").exists():
         print(
             "\nNOTES.md has observations worth"
@@ -527,6 +539,49 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return len(meaningful) > 0
     except Exception:
         return True  # if git fails, don't block
+
+
+def _load_project_config(project_dir: Path) -> dict:
+    """Load mcloop.json from the project root."""
+    config_path = project_dir / "mcloop.json"
+    if not config_path.exists():
+        return {}
+    try:
+        return _json.loads(config_path.read_text())
+    except (_json.JSONDecodeError, OSError):
+        return {}
+
+
+def _run_build(project_dir: Path) -> None:
+    """Run the build command from mcloop.json if present."""
+    config = _load_project_config(project_dir)
+    build_cmd = config.get("build")
+    if not build_cmd:
+        return
+    print(
+        f"\n>>> Building: {build_cmd}",
+        flush=True,
+    )
+    try:
+        result = subprocess.run(
+            shlex.split(build_cmd),
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode == 0:
+            print(">>> Build succeeded", flush=True)
+        else:
+            print(
+                f"!!! Build failed (exit {result.returncode})",
+                flush=True,
+            )
+            _print_error_tail(
+                result.stdout + result.stderr
+            )
+    except Exception as e:
+        print(f"!!! Build error: {e}", flush=True)
 
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"

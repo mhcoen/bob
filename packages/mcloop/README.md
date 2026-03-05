@@ -279,6 +279,22 @@ Each rule maps a marker file to a list of commands. If the marker
 exists in the project directory, the commands are added to the check
 list. Add rules for any language by editing this file.
 
+### Build and run
+
+After all tasks and the audit complete, McLoop runs the `build`
+command and shows the `run` command in the summary:
+
+```json
+{
+  "build": "./build-app.sh",
+  "run": "open MarkdownLook.app"
+}
+```
+
+If `build` succeeds, the summary prints "To run: open MarkdownLook.app"
+so you know exactly how to launch what was built. Both fields are
+optional.
+
 See [CHECKS.md](CHECKS.md) for complete examples.
 
 McLoop also verifies that each task produces meaningful file changes beyond
