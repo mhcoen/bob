@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcloop.main import _parse_args, _run_audit_fix_cycle
+from mcloop.main import _parse_args, _run_audit_fix_cycle, run_loop
 
 
 def _parse(*argv):
@@ -19,6 +19,12 @@ def test_defaults():
     assert args.max_retries == 3
     assert args.model is None
     assert args.command is None
+    assert args.no_audit is False
+
+
+def test_no_audit_flag():
+    args = _parse("--no-audit")
+    assert args.no_audit is True
 
 
 def test_file_flag():
@@ -137,6 +143,36 @@ def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_not_called()
+
+
+def test_run_loop_no_audit_skips_audit(tmp_path):
+    """When no_audit=True, _run_audit_fix_cycle is not called."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+
+    with patch("mcloop.main._checkpoint"), \
+         patch("mcloop.main.parse", return_value=[]), \
+         patch("mcloop.main._run_audit_fix_cycle") as mock_audit, \
+         patch("mcloop.main._print_summary"), \
+         patch("mcloop.main.notify"):
+        run_loop(plan, no_audit=True)
+
+    mock_audit.assert_not_called()
+
+
+def test_run_loop_audit_called_by_default(tmp_path):
+    """By default, _run_audit_fix_cycle is called after all tasks complete."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+
+    with patch("mcloop.main._checkpoint"), \
+         patch("mcloop.main.parse", return_value=[]), \
+         patch("mcloop.main._run_audit_fix_cycle") as mock_audit, \
+         patch("mcloop.main._print_summary"), \
+         patch("mcloop.main.notify"):
+        run_loop(plan, no_audit=False)
+
+    mock_audit.assert_called_once()
 
 
 def test_run_audit_fix_cycle_commits_when_checks_pass(tmp_path):

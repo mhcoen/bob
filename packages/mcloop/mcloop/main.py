@@ -7,6 +7,7 @@ import difflib
 import json as _json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from mcloop.checklist import Task, check_off, find_next, mark_failed, parse, parse_description
@@ -41,7 +42,12 @@ def main() -> None:
         _dry_run(parse(checklist_path))
         return
 
-    run_loop(checklist_path, max_retries=args.max_retries, model=args.model)
+    run_loop(
+        checklist_path,
+        max_retries=args.max_retries,
+        model=args.model,
+        no_audit=args.no_audit,
+    )
 
 
 def run_loop(
@@ -49,6 +55,7 @@ def run_loop(
     max_retries: int = 3,
     enabled_clis: tuple[str, ...] = ("claude",),
     model: str | None = None,
+    no_audit: bool = False,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
     project_dir = checklist_path.parent
@@ -173,7 +180,8 @@ def run_loop(
             )
             return [task.text]
 
-    _run_audit_fix_cycle(project_dir, log_dir, model=model)
+    if not no_audit:
+        _run_audit_fix_cycle(project_dir, log_dir, model=model)
 
     _print_summary(completed, None, "", [])
     notify("All tasks completed!")
@@ -186,6 +194,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
     parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
+    parser.add_argument(
+        "--no-audit", action="store_true", help="Skip the post-completion bug audit cycle"
+    )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
@@ -270,6 +281,19 @@ def _dry_run(tasks) -> None:
         print(f"\nNext task: {next_task.text}")
     else:
         print("\nNo unchecked tasks remaining.")
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format seconds into human-readable elapsed time."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = int(minutes // 60)
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"
 
 
 def _tail(text: str, max_lines: int = 50) -> str:
