@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -106,6 +107,36 @@ def _detect_commands(
         if '"test"' in pkg:
             commands.append("npm test")
 
+    # Swift
+    if (project_dir / "Package.swift").exists():
+        commands.append("swift build")
+
+    # Rust
+    if (project_dir / "Cargo.toml").exists():
+        commands.append("cargo clippy -- -D warnings")
+        commands.append("cargo test")
+
+    # Go
+    if (project_dir / "go.mod").exists():
+        commands.append("go vet ./...")
+        commands.append("go test ./...")
+
+    # Java/Kotlin (Gradle)
+    if (project_dir / "build.gradle").exists() or (
+        project_dir / "build.gradle.kts"
+    ).exists():
+        commands.append("gradle check")
+
+    # Ruby
+    if (project_dir / "Gemfile").exists():
+        if (project_dir / ".rubocop.yml").exists():
+            commands.append("rubocop")
+        commands.append("bundle exec rspec")
+
+    # Make
+    if (project_dir / "Makefile").exists():
+        commands.append("make check")
+
     # Marker-based rules from mcloop.json "detect" array
     detect = config.get("detect", [])
     for rule in detect:
@@ -117,3 +148,62 @@ def _detect_commands(
             commands.extend(cmds)
 
     return commands
+
+
+def detect_build(project_dir: str | Path) -> str | None:
+    """Auto-detect build command, with mcloop.json override."""
+    project_dir = Path(project_dir)
+    config = _load_config(project_dir)
+    override = config.get("build")
+    if override:
+        return str(override)
+
+    if (project_dir / "Package.swift").exists():
+        return "swift build -c release"
+    if (project_dir / "Cargo.toml").exists():
+        return "cargo build --release"
+    if (project_dir / "go.mod").exists():
+        return "go build ./..."
+    if (project_dir / "package.json").exists():
+        pkg = (project_dir / "package.json").read_text()
+        if '"build"' in pkg:
+            return "npm run build"
+    if (project_dir / "build.gradle").exists() or (
+        project_dir / "build.gradle.kts"
+    ).exists():
+        return "gradle build"
+    if (project_dir / "Makefile").exists():
+        return "make"
+    return None
+
+
+def detect_run(project_dir: str | Path) -> str | None:
+    """Auto-detect run command, with mcloop.json override."""
+    project_dir = Path(project_dir)
+    config = _load_config(project_dir)
+    override = config.get("run")
+    if override:
+        return str(override)
+
+    if (project_dir / "Package.swift").exists():
+        # Parse target name from Package.swift
+        try:
+            text = (project_dir / "Package.swift").read_text()
+            m = re.search(
+                r'executableTarget\s*\(\s*name:\s*"([^"]+)"',
+                text,
+            )
+            if m:
+                return f"swift run {m.group(1)}"
+        except OSError:
+            pass
+        return "swift run"
+    if (project_dir / "Cargo.toml").exists():
+        return "cargo run"
+    if (project_dir / "go.mod").exists():
+        return "go run ."
+    if (project_dir / "package.json").exists():
+        pkg = (project_dir / "package.json").read_text()
+        if '"start"' in pkg:
+            return "npm start"
+    return None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json as _json
 import shlex
 import subprocess
@@ -12,7 +13,7 @@ import time
 from pathlib import Path
 
 from mcloop.checklist import Task, check_off, find_next, mark_failed, parse, parse_description
-from mcloop.checks import run_checks
+from mcloop.checks import detect_build, detect_run, run_checks
 from mcloop.notify import notify
 from mcloop.ratelimit import (
     RateLimitState,
@@ -68,6 +69,7 @@ def run_loop(
 
     _checkpoint(project_dir)
 
+    notes_snapshot = _snapshot_notes(project_dir)
     run_start = time.monotonic()
     completed: list[str] = []
     failed_task: str | None = None
@@ -205,7 +207,7 @@ def run_loop(
                 completed, failed_task,
                 failed_reason,
                 parse(checklist_path), total,
-                project_dir,
+                project_dir, notes_snapshot,
             )
             return [task.text]
 
@@ -217,7 +219,7 @@ def run_loop(
     total = time.monotonic() - run_start
     _print_summary(
         completed, None, "", [], total,
-        project_dir,
+        project_dir, notes_snapshot,
     )
     notify("All tasks completed!")
     return []
@@ -346,6 +348,7 @@ def _print_summary(
     remaining_tasks: list[Task],
     total_seconds: float = 0,
     project_dir: Path | None = None,
+    notes_snapshot: tuple[str, int] | None = None,
 ) -> None:
     """Print a summary of what McLoop did."""
     print("\n" + "=" * 40, flush=True)
@@ -417,19 +420,16 @@ def _print_summary(
             print(f'  "{s}",', flush=True)
 
     if project_dir:
-        config = _load_project_config(project_dir)
-        run_cmd = config.get("run")
+        run_cmd = detect_run(project_dir)
         if run_cmd:
             print(
                 f"\nTo run: {run_cmd}",
                 flush=True,
             )
 
-    if project_dir and (project_dir / "NOTES.md").exists():
-        print(
-            "\nNOTES.md has observations worth"
-            " reviewing.",
-            flush=True,
+    if project_dir:
+        _print_notes_update(
+            project_dir, notes_snapshot,
         )
 
     print("=" * 40, flush=True)
@@ -541,21 +541,68 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return True  # if git fails, don't block
 
 
-def _load_project_config(project_dir: Path) -> dict:
-    """Load mcloop.json from the project root."""
-    config_path = project_dir / "mcloop.json"
-    if not config_path.exists():
-        return {}
-    try:
-        return _json.loads(config_path.read_text())
-    except (_json.JSONDecodeError, OSError):
-        return {}
+def _snapshot_notes(
+    project_dir: Path,
+) -> tuple[str, int]:
+    """Capture hash and line count of NOTES.md."""
+    notes_path = project_dir / "NOTES.md"
+    if not notes_path.exists():
+        return ("", 0)
+    content = notes_path.read_text()
+    h = hashlib.md5(content.encode()).hexdigest()
+    return (h, len(content.splitlines()))
+
+
+def _print_notes_update(
+    project_dir: Path,
+    snapshot: tuple[str, int] | None,
+) -> None:
+    """Show NOTES.md changes since snapshot."""
+    notes_path = project_dir / "NOTES.md"
+    if not notes_path.exists():
+        return
+    content = notes_path.read_text()
+    current_hash = hashlib.md5(
+        content.encode()
+    ).hexdigest()
+    lines = content.splitlines()
+
+    old_hash, old_count = snapshot or ("", 0)
+
+    if old_hash == "" and old_count == 0:
+        # NOTES.md is new this run
+        print(
+            f"\nNOTES.md created ({len(lines)} lines)."
+            " Review for observations.",
+            flush=True,
+        )
+    elif current_hash != old_hash:
+        new_count = len(lines) - old_count
+        if new_count > 0:
+            print(
+                f"\nNOTES.md updated "
+                f"({new_count} new lines).",
+                flush=True,
+            )
+        else:
+            print(
+                "\nNOTES.md was modified.",
+                flush=True,
+            )
+        # Show the last entry header
+        for line in reversed(lines):
+            if line.startswith("## "):
+                print(
+                    f"  Last entry: {line}",
+                    flush=True,
+                )
+                break
+    # If hash unchanged, say nothing
 
 
 def _run_build(project_dir: Path) -> None:
-    """Run the build command from mcloop.json if present."""
-    config = _load_project_config(project_dir)
-    build_cmd = config.get("build")
+    """Run the auto-detected or configured build command."""
+    build_cmd = detect_build(project_dir)
     if not build_cmd:
         return
     print(
