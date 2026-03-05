@@ -9,10 +9,10 @@ McLoop is designed for the long haul. Start with a few tasks, let it run while y
 ## Quickstart
 
 ```bash
-python -m mcloop                    # Run (reads PLAN.md by default)
-python -m mcloop --file other.md    # Use a different file
-python -m mcloop --dry-run          # Show what would run, don't execute
-python -m mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
+mcloop                    # Run (reads PLAN.md by default)
+mcloop --file other.md    # Use a different file
+mcloop --dry-run          # Show what would run, don't execute
+mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 ```
 
 ## Writing a PLAN.md
