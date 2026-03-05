@@ -35,8 +35,8 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Run this cycle once (no open-ended looping), then send the "All tasks completed" notification
   - [x] Add a --no-audit flag to skip the bug audit cycle
 - [ ] Integration tests
-  - [ ] Add a tests/integration/ directory gated behind pytest -m integration
-  - [ ] Test a minimal run: temp git repo, simple PLAN.md, verify file created, task checked off, commit made
+  - [x] Add a tests/integration/ directory gated behind pytest -m integration
+  - [x] Test a minimal run: temp git repo, simple PLAN.md, verify file created, task checked off, commit made
   - [ ] Test no-op detection: task that produces no file changes is treated as failure
   - [ ] Test subtask ordering: depth-first execution with parent auto-checking
   - [ ] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
