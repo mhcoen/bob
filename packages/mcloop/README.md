@@ -333,6 +333,14 @@ Each log captures the full CLI output and exit code.
 ## Development
 
 ```bash
+git clone https://github.com/mhcoen/mcloop.git
+cd mcloop
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+```bash
 ruff check .              # Lint
 ruff format --check .     # Format check
 pytest                    # Tests
