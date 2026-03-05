@@ -7,16 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from loop.checklist import check_off, find_next, mark_failed, parse, parse_description
-from loop.checks import run_checks
-from loop.notify import notify
-from loop.ratelimit import (
+from mcloop.checklist import check_off, find_next, mark_failed, parse, parse_description
+from mcloop.checks import run_checks
+from mcloop.notify import notify
+from mcloop.ratelimit import (
     RateLimitState,
     get_available_cli,
     is_rate_limited,
     wait_for_reset,
 )
-from loop.runner import run_task
+from mcloop.runner import run_task
 
 
 def main() -> None:

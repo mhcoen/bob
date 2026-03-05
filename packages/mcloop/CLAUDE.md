@@ -6,9 +6,9 @@ Loop grinds through a markdown checklist using AI coding CLIs (Claude Code, Code
 
 ```bash
 # Run
-python -m loop                    # Start the loop
-python -m loop --file tasks.md    # Use a different checklist file
-python -m loop --dry-run          # Parse and show what would run
+python -m mcloop                    # Start the loop
+python -m mcloop --file tasks.md    # Use a different checklist file
+python -m mcloop --dry-run          # Parse and show what would run
 
 # Dev
 ruff check .                      # Lint
@@ -29,7 +29,7 @@ Loop is a single Python program with a straightforward flow:
 
 ### Key modules
 
-- `loop/` - Main package
+- `mcloop/` - Main package
   - `main.py` - Entry point, the main loop
   - `checklist.py` - Markdown checklist parser (read/write `- [ ]` items)
   - `runner.py` - Subprocess management for Claude Code and Codex CLIs

@@ -1,11 +1,11 @@
 """Integration tests. Exercise the full loop with mocked subprocesses."""
 
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import patch
 
-from loop.checks import CheckResult
-from loop.main import run_loop
-from loop.runner import RunResult
+from mcloop.checks import CheckResult
+from mcloop.main import run_loop
+from mcloop.runner import RunResult
 
 
 def _make_project(tmp_path, checklist_text):
@@ -28,6 +28,9 @@ def _fail_run_result(**overrides):
     return RunResult(**defaults)
 
 
+_CHECKS_PASS = CheckResult(passed=True, output="ok", command="true")
+
+
 def _notify_calls(mock_notify):
     """Extract (message, level) pairs from notify mock calls."""
     result = []
@@ -38,10 +41,10 @@ def _notify_calls(mock_notify):
     return result
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_full_cycle_two_tasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
     """Two simple tasks both succeed on first attempt."""
     md = _make_project(tmp_path, "- [ ] Task one\n- [ ] Task two\n")
@@ -65,12 +68,12 @@ def test_full_cycle_two_tasks(mock_run, mock_checks, mock_commit, mock_notify, t
     assert calls[2] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_nested_subtasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
-    """Subtasks complete first, then parent auto-checks. No notification for auto-checked parent."""
+    """Subtasks complete first, then parent auto-checks. No notification for parent."""
     md = _make_project(
         tmp_path,
         "- [ ] Parent\n  - [ ] Child A\n  - [ ] Child B\n",
@@ -92,10 +95,10 @@ def test_nested_subtasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_pa
     assert calls[2] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_retry_then_succeed(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
     """Task fails once then succeeds on retry."""
     md = _make_project(tmp_path, "- [ ] Flaky task\n")
@@ -116,10 +119,10 @@ def test_retry_then_succeed(mock_run, mock_checks, mock_commit, mock_notify, tmp
     assert calls[2] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks")
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
 def test_checks_fail_then_pass(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
     """CLI succeeds but checks fail on first attempt, pass on second."""
     md = _make_project(tmp_path, "- [ ] Needs fixing\n")
@@ -143,10 +146,10 @@ def test_checks_fail_then_pass(mock_run, mock_checks, mock_commit, mock_notify, 
     assert calls[2] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_max_retries_exhausted_stops_loop(
     mock_run, mock_checks, mock_commit, mock_notify, tmp_path
 ):
@@ -171,10 +174,10 @@ def test_max_retries_exhausted_stops_loop(
     assert calls[3] == ("Giving up on: Hopeless task", "error")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_rate_limit_notifies(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
     """Rate limit detected, notifies warning, waits, then succeeds."""
     md = _make_project(tmp_path, "- [ ] Task\n")
@@ -183,7 +186,7 @@ def test_rate_limit_notifies(mock_run, mock_checks, mock_commit, mock_notify, tm
         _ok_run_result(),
     ]
 
-    with patch("loop.main.wait_for_reset", return_value="claude"):
+    with patch("mcloop.main.wait_for_reset", return_value="claude"):
         stuck = run_loop(md, max_retries=3)
 
     assert stuck == []
@@ -198,10 +201,10 @@ def test_rate_limit_notifies(mock_run, mock_checks, mock_commit, mock_notify, tm
     assert calls[2] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_skips_already_checked_no_extra_notifications(
     mock_run, mock_checks, mock_commit, mock_notify, tmp_path
 ):
@@ -221,10 +224,10 @@ def test_skips_already_checked_no_extra_notifications(
     assert calls[1] == ("All tasks completed!", "info")
 
 
-@patch("loop.main.notify")
-@patch("loop.main._commit")
-@patch("loop.main.run_checks", return_value=CheckResult(passed=True, output="ok", command="true"))
-@patch("loop.main.run_task")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
     """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")

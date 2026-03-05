@@ -10,3 +10,7 @@ build/
 .ruff_cache/
 .pytest_cache/
 logs/
+local
+*~
+\#*\#
+.#*

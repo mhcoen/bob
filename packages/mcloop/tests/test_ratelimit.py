@@ -2,7 +2,7 @@
 
 import time
 
-from loop.ratelimit import RateLimitState, get_available_cli, is_rate_limited
+from mcloop.ratelimit import RateLimitState, get_available_cli, is_rate_limited
 
 
 def test_is_rate_limited_detects_patterns():

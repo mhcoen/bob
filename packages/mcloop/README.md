@@ -7,10 +7,10 @@ You write a `PLAN.md` in your repo with a project description and a checklist. L
 ## Usage
 
 ```bash
-python -m loop                    # Start (reads PLAN.md by default)
-python -m loop --file other.md    # Use a different file
-python -m loop --dry-run          # Show what would run without doing anything
-python -m loop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
+python -m mcloop                    # Start (reads PLAN.md by default)
+python -m mcloop --file other.md    # Use a different file
+python -m mcloop --dry-run          # Show what would run without doing anything
+python -m mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 ```
 
 ## Writing a PLAN.md

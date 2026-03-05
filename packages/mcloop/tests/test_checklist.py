@@ -1,6 +1,6 @@
 """Tests for loop.checklist."""
 
-from loop.checklist import check_off, find_next, mark_failed, parse, parse_description
+from mcloop.checklist import check_off, find_next, mark_failed, parse, parse_description
 
 SAMPLE = """\
 - [ ] Add user authentication

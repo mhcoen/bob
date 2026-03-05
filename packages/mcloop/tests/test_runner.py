@@ -1,6 +1,6 @@
 """Tests for loop.runner."""
 
-from loop.runner import _build_command, _slugify
+from mcloop.runner import _build_command, _slugify
 
 
 def test_build_command_claude():

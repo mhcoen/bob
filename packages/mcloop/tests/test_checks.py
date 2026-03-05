@@ -1,6 +1,6 @@
 """Tests for loop.checks."""
 
-from loop.checks import _detect_commands, run_checks
+from mcloop.checks import _detect_commands, run_checks
 
 
 def test_detect_commands_pyproject(tmp_path):
