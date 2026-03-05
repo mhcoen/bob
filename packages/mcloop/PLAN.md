@@ -11,12 +11,33 @@ pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
 over-abstraction. This is a simple tool and should stay that way.
 
+- [ ] Safety commit before starting the task loop
+  - [ ] Stage and commit all tracked files with a message like "mcloop: checkpoint before run"
+  - [ ] Skip if working tree is clean
+  - [ ] Ignore untracked files
+- [ ] Push to origin after each successful commit
+  - [ ] Add git push to _commit() after git commit
+  - [ ] If no remote exists, skip the push silently
+  - [ ] Create the remote repo with gh repo create if it does not exist
 - [ ] Support a mcloop.json config file for custom check commands
   - [ ] If mcloop.json exists with a "checks" array, run those commands instead of auto-detecting
   - [ ] Fall back to auto-detection when no config file is present
   - [ ] Document mcloop.json in the README
+- [ ] Add a mcloop sync command
+  - [ ] Add sync subcommand to the CLI argument parser
+  - [ ] Launch a single Claude Code session that reads PLAN.md, README.md, CLAUDE.md, the git log, file tree, and source code
+  - [ ] Prompt Claude to add checked items for features, fixes, or changes reflected in the code but not in PLAN.md, matching existing granularity, appending only, never modifying existing items
+  - [ ] Prompt Claude to flag problems: checked items with no corresponding code, unchecked items that appear already implemented, description drifting from the codebase
+  - [ ] Show a diff of proposed PLAN.md changes before writing
 - [ ] After all checklist tasks are complete, automatically run a bug audit/fix cycle
   - [ ] Add a function that runs a Claude Code session to audit the codebase and write BUGS.md listing only actual defects (crashes, incorrect behavior, unhandled errors, security issues), not style or refactoring
   - [ ] If BUGS.md contains bugs, run a second session scoped to fixing only the bugs listed in BUGS.md, then delete BUGS.md
   - [ ] Run this cycle once (no open-ended looping), then send the "All tasks completed" notification
   - [ ] Add a --no-audit flag to skip the bug audit cycle
+- [ ] Integration tests
+  - [ ] Add a tests/integration/ directory gated behind pytest -m integration
+  - [ ] Test a minimal run: temp git repo, simple PLAN.md, verify file created, task checked off, commit made
+  - [ ] Test no-op detection: task that produces no file changes is treated as failure
+  - [ ] Test subtask ordering: depth-first execution with parent auto-checking
+  - [ ] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
+  - [ ] Test failing task: verify retry behavior and [!] marking after max retries
