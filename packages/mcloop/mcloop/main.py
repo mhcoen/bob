@@ -28,6 +28,10 @@ def main() -> None:
         print(f"Checklist not found: {checklist_path}", file=sys.stderr)
         sys.exit(1)
 
+    if args.command == "sync":
+        _cmd_sync(checklist_path)
+        return
+
     if args.dry_run:
         _dry_run(parse(checklist_path))
         return
@@ -175,7 +179,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
     parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
     return parser.parse_args()
+
+
+def _cmd_sync(checklist_path: Path) -> None:
+    """Sync PLAN.md with the codebase (not yet implemented)."""
+    print("sync: not yet implemented", file=sys.stderr)
+    sys.exit(1)
 
 
 def _dry_run(tasks) -> None:

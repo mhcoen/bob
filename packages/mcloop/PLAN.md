@@ -19,10 +19,10 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Add git push to _commit() after git commit
   - [x] If no remote exists, skip the push silently
   - [x] Create the remote repo with gh repo create if it does not exist
-- [ ] Support a mcloop.json config file for custom check commands
+- [x] Support a mcloop.json config file for custom check commands
   - [x] If mcloop.json exists with a "checks" array, run those commands instead of auto-detecting
   - [x] Fall back to auto-detection when no config file is present
-  - [ ] Document mcloop.json in the README
+  - [x] Document mcloop.json in the README
 - [ ] Add a mcloop sync command
   - [ ] Add sync subcommand to the CLI argument parser
   - [ ] Launch a single Claude Code session that reads PLAN.md, README.md, CLAUDE.md, the git log, file tree, and source code
