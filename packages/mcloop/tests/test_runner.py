@@ -176,3 +176,31 @@ def test_build_sync_prompt_empty_context():
     prompt = build_sync_prompt({})
     assert "APPEND ONLY" in prompt
     assert "- [x]" in prompt
+
+
+def test_build_sync_prompt_flags_checked_no_code():
+    prompt = build_sync_prompt({})
+    assert "CHECKED BUT NOT IMPLEMENTED" in prompt
+    assert "CHECKED ITEMS WITH NO CODE" in prompt
+
+
+def test_build_sync_prompt_flags_unchecked_already_done():
+    prompt = build_sync_prompt({})
+    assert "UNCHECKED BUT ALREADY DONE" in prompt
+    assert "UNCHECKED ITEMS ALREADY DONE" in prompt
+
+
+def test_build_sync_prompt_flags_description_drift():
+    prompt = build_sync_prompt({})
+    assert "DESCRIPTION DRIFT" in prompt
+
+
+def test_build_sync_prompt_problems_report_format():
+    prompt = build_sync_prompt({})
+    assert "--- SYNC PROBLEMS ---" in prompt
+    assert "--- END PROBLEMS ---" in prompt
+
+
+def test_build_sync_prompt_no_problems_instruction():
+    prompt = build_sync_prompt({})
+    assert "No problems found." in prompt
