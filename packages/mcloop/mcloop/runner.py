@@ -38,21 +38,29 @@ def run_task(
     cmd = _build_command(cli, prompt)
     env_extra = {"LOOP_ASK": "1"}
 
-    result = subprocess.run(
+    process = subprocess.Popen(
         cmd,
         cwd=project_dir,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         env={**dict(__import__("os").environ), **env_extra},
     )
 
-    output = result.stdout + result.stderr
-    log_path = _write_log(log_dir, task_text, cmd, output, result.returncode)
+    output_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        output_lines.append(line)
+    process.wait()
+
+    output = "".join(output_lines)
+    log_path = _write_log(log_dir, task_text, cmd, output, process.returncode)
 
     return RunResult(
-        success=result.returncode == 0,
+        success=process.returncode == 0,
         output=output,
-        exit_code=result.returncode,
+        exit_code=process.returncode,
         log_path=log_path,
     )
 
