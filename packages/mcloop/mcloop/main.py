@@ -50,6 +50,10 @@ def run_loop(
 
     _checkpoint(project_dir)
 
+    completed: list[str] = []
+    failed_task: str | None = None
+    failed_reason: str = ""
+
     while True:
         tasks = parse(checklist_path)
         task = find_next(tasks)
@@ -70,9 +74,14 @@ def run_loop(
 
         success = False
         attempt = 0
+        last_error = ""
         while attempt < max_retries:
             attempt += 1
-            result = run_task(task.text, cli, project_dir, log_dir, description, task_label=label, model=model)
+            result = run_task(
+                task.text, cli, project_dir, log_dir,
+                description, task_label=label,
+                model=model, prior_errors=last_error,
+            )
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
@@ -84,44 +93,77 @@ def run_loop(
                 continue
 
             if not result.success:
-                print(f"\n!!! Task failed (attempt {attempt}/{max_retries})", flush=True)
-                print(f"    Exit code: {result.exit_code}", flush=True)
+                last_error = _tail(result.output, 50)
+                print(
+                    f"\n!!! Task failed "
+                    f"(attempt {attempt}/{max_retries})",
+                    flush=True,
+                )
+                print(
+                    f"    Exit code: {result.exit_code}",
+                    flush=True,
+                )
                 _print_error_tail(result.output)
                 notify(
-                    f"Task failed (attempt {attempt}/{max_retries}): {task.text}",
+                    f"Task failed "
+                    f"(attempt {attempt}/{max_retries}): "
+                    + task.text,
                     level="error",
                 )
                 continue
 
             if not _has_meaningful_changes(project_dir):
-                print(f"\n!!! No files changed (attempt {attempt}/{max_retries})", flush=True)
-                notify(
-                    f"No files changed (attempt {attempt}/{max_retries}): {task.text}",
-                    level="error",
+                print(f"\n>>> Working tree clean, skipping commit for: {task.text}", flush=True)
+                check_off(checklist_path, task)
+                completed.append(
+                    f"{label}) {task.text} (clean)"
                 )
-                continue
+                notify(f"Skipped (clean): {task.text}")
+                success = True
+                break
 
             check_result = run_checks(project_dir)
             if check_result.passed:
                 _commit(project_dir, task.text)
                 check_off(checklist_path, task)
+                completed.append(f"{label}) {task.text}")
                 notify(f"Completed: {task.text}")
                 success = True
                 break
             else:
-                msg = f"Checks failed (attempt {attempt}/{max_retries}): {check_result.command}"
-                print(f"\n!!! {msg}", flush=True)
+                last_error = (
+                    f"Command: {check_result.command}\n"
+                    + _tail(check_result.output, 50)
+                )
+                print(
+                    f"\n!!! Checks failed "
+                    f"(attempt {attempt}/{max_retries}): "
+                    f"{check_result.command}",
+                    flush=True,
+                )
                 _print_error_tail(check_result.output)
                 notify(
-                    f"Checks failed (attempt {attempt}/{max_retries}): {task.text}",
+                    f"Checks failed "
+                    f"(attempt {attempt}/{max_retries}): "
+                    + task.text,
                     level="error",
                 )
 
         if not success:
             mark_failed(checklist_path, task)
-            notify(f"Giving up on: {task.text}", level="error")
+            failed_task = f"{label}) {task.text}"
+            failed_reason = last_error
+            notify(
+                f"Giving up on: {task.text}",
+                level="error",
+            )
+            _print_summary(
+                completed, failed_task, failed_reason,
+                parse(checklist_path),
+            )
             return [task.text]
 
+    _print_summary(completed, None, "", [])
     notify("All tasks completed!")
     return []
 
@@ -151,6 +193,61 @@ def _dry_run(tasks) -> None:
         print(f"\nNext task: {next_task.text}")
     else:
         print("\nNo unchecked tasks remaining.")
+
+
+def _tail(text: str, max_lines: int = 50) -> str:
+    """Return the last N lines of text."""
+    lines = text.strip().splitlines()
+    if len(lines) > max_lines:
+        lines = lines[-max_lines:]
+    return "\n".join(lines)
+
+
+def _print_summary(
+    completed: list[str],
+    failed_task: str | None,
+    failed_reason: str,
+    remaining_tasks: list[Task],
+) -> None:
+    """Print a summary of what McLoop did."""
+    print("\n" + "=" * 40, flush=True)
+    print("McLoop Summary", flush=True)
+    print("=" * 40, flush=True)
+
+    if completed:
+        print(
+            f"Completed: {len(completed)} task(s)",
+            flush=True,
+        )
+        for item in completed:
+            print(f"  {item}", flush=True)
+
+    if failed_task:
+        print(f"\nFailed: {failed_task}", flush=True)
+        if failed_reason:
+            for line in failed_reason.splitlines()[:10]:
+                print(f"  {line}", flush=True)
+
+    # Count remaining unchecked tasks
+    def _count_unchecked(tasks: list[Task]) -> int:
+        n = 0
+        for t in tasks:
+            if not t.checked and not t.failed:
+                n += 1
+            n += _count_unchecked(t.children)
+        return n
+
+    remaining = _count_unchecked(remaining_tasks)
+    if remaining:
+        print(
+            f"\nRemaining: {remaining} task(s)",
+            flush=True,
+        )
+
+    if not completed and not failed_task:
+        print("All tasks were already complete.", flush=True)
+
+    print("=" * 40, flush=True)
 
 
 def _print_error_tail(output: str, max_lines: int = 30) -> None:

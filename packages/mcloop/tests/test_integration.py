@@ -250,6 +250,34 @@ def test_skips_already_checked_no_extra_notifications(
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_skip_when_working_tree_clean(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """Task succeeds but working tree is clean: skip commit, check off, notify skipped."""
+    md = _make_project(tmp_path, "- [ ] Already done task\n")
+    mock_run.return_value = _ok_run_result()
+
+    stuck = run_loop(md)
+
+    assert stuck == []
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    mock_checks.assert_not_called()
+    content = md.read_text()
+    assert "- [x] Already done task" in content
+
+    calls = _notify_calls(mock_notify)
+    assert len(calls) == 2
+    assert calls[0] == ("Skipped (clean): Already done task", "info")
+    assert calls[1] == ("All tasks completed!", "info")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
 def test_all_done_noop(

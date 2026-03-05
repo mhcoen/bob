@@ -27,6 +27,7 @@ def run_task(
     description: str = "",
     task_label: str = "",
     model: str | None = None,
+    prior_errors: str = "",
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -38,7 +39,16 @@ def run_task(
         parts.append(f"Project context:\n{description}")
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
-    parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
+    parts.append(
+        "Do not chain shell commands with && or ;."
+        " Use separate Bash calls instead."
+    )
+    if prior_errors:
+        parts.append(
+            "IMPORTANT: A previous attempt at this task"
+            " failed. Fix these errors:\n"
+            + prior_errors
+        )
     prompt = "\n\n".join(parts)
     cmd = _build_command(cli, prompt, model=model)
     env = dict(os.environ)

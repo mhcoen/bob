@@ -13,7 +13,7 @@ over-abstraction. This is a simple tool and should stay that way.
 
 - [ ] Add a safety commit to the main loop before processing any tasks
   - [!] In run_loop(), before the while loop, stage and commit all tracked modified files with a message like "mcloop: checkpoint before run"
-  - [ ] Skip if the working tree is clean
+  - [!] Skip if the working tree is clean
   - [ ] Do not stage untracked files
 - [ ] Push to origin after each successful commit
   - [ ] Add git push to _commit() after git commit
