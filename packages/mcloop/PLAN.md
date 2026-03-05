@@ -39,5 +39,5 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Test a minimal run: temp git repo, simple PLAN.md, verify file created, task checked off, commit made
   - [x] Test no-op detection: task that produces no file changes is treated as failure
   - [x] Test subtask ordering: depth-first execution with parent auto-checking
-  - [ ] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
+  - [x] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
   - [ ] Test failing task: verify retry behavior and [!] marking after max retries

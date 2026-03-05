@@ -175,10 +175,30 @@ def match_rule(rule, tool_name, tool_input):
     return rule_arg in json.dumps(tool_input)
 
 
+def _unwrap_rtk(tool_input):
+    """If command starts with 'rtk proxy', return input with the unwrapped command."""
+    if "command" not in tool_input:
+        return tool_input
+    cmd = tool_input["command"].strip()
+    if cmd.startswith("rtk proxy "):
+        unwrapped = cmd[len("rtk proxy "):]
+        return {**tool_input, "command": unwrapped}
+    return tool_input
+
+
 def is_allowed(tool_name, tool_input):
     """Check if this tool call is covered by any allow rule."""
     rules = load_allow_rules()
-    return any(match_rule(rule, tool_name, tool_input) for rule in rules)
+    if any(match_rule(rule, tool_name, tool_input) for rule in rules):
+        return True
+    # Check if the unwrapped command (without rtk proxy) is allowed
+    unwrapped = _unwrap_rtk(tool_input)
+    if unwrapped is not tool_input:
+        return any(
+            match_rule(rule, tool_name, unwrapped)
+            for rule in rules
+        )
+    return False
 
 
 # --- Telegram ---
