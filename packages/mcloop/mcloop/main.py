@@ -48,6 +48,8 @@ def run_loop(
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
 
+    _checkpoint(project_dir)
+
     while True:
         tasks = parse(checklist_path)
         task = find_next(tasks)
@@ -107,7 +109,8 @@ def run_loop(
                 success = True
                 break
             else:
-                print(f"\n!!! Checks failed (attempt {attempt}/{max_retries}): {check_result.command}", flush=True)
+                msg = f"Checks failed (attempt {attempt}/{max_retries}): {check_result.command}"
+                print(f"\n!!! {msg}", flush=True)
                 _print_error_tail(check_result.output)
                 notify(
                     f"Checks failed (attempt {attempt}/{max_retries}): {task.text}",
@@ -201,6 +204,27 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return len(meaningful) > 0
     except Exception:
         return True  # if git fails, don't block
+
+
+def _checkpoint(project_dir: Path) -> None:
+    """Stage and commit all tracked modified files as a checkpoint."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            return
+        subprocess.run(["git", "add", "-u"], cwd=project_dir, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "mcloop: checkpoint before run"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+    except Exception:
+        pass
 
 
 def _commit(project_dir: Path, task_text: str) -> None:

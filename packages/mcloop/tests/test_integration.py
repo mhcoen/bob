@@ -1,10 +1,10 @@
 """Integration tests. Exercise the full loop with mocked subprocesses."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from mcloop.checks import CheckResult
-from mcloop.main import run_loop
+from mcloop.main import _checkpoint, run_loop
 from mcloop.runner import RunResult
 
 
@@ -42,10 +42,14 @@ def _notify_calls(mock_notify):
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_full_cycle_two_tasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_full_cycle_two_tasks(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """Two simple tasks both succeed on first attempt."""
     md = _make_project(tmp_path, "- [ ] Task one\n- [ ] Task two\n")
     mock_run.return_value = _ok_run_result()
@@ -69,10 +73,14 @@ def test_full_cycle_two_tasks(mock_run, mock_checks, mock_commit, mock_notify, t
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_nested_subtasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_nested_subtasks(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """Subtasks complete first, then parent auto-checks. No notification for parent."""
     md = _make_project(
         tmp_path,
@@ -96,10 +104,14 @@ def test_nested_subtasks(mock_run, mock_checks, mock_commit, mock_notify, tmp_pa
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_retry_then_succeed(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_retry_then_succeed(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """Task fails once then succeeds on retry."""
     md = _make_project(tmp_path, "- [ ] Flaky task\n")
     mock_run.side_effect = [_fail_run_result(), _ok_run_result()]
@@ -120,10 +132,14 @@ def test_retry_then_succeed(mock_run, mock_checks, mock_commit, mock_notify, tmp
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks")
 @patch("mcloop.main.run_task")
-def test_checks_fail_then_pass(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_checks_fail_then_pass(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """CLI succeeds but checks fail on first attempt, pass on second."""
     md = _make_project(tmp_path, "- [ ] Needs fixing\n")
     mock_run.return_value = _ok_run_result()
@@ -147,11 +163,12 @@ def test_checks_fail_then_pass(mock_run, mock_checks, mock_commit, mock_notify, 
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
 def test_max_retries_exhausted_stops_loop(
-    mock_run, mock_checks, mock_commit, mock_notify, tmp_path
+    mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
     """Task fails all retries, marked [!] and loop stops."""
     md = _make_project(tmp_path, "- [ ] Hopeless task\n- [ ] Next task\n")
@@ -175,10 +192,14 @@ def test_max_retries_exhausted_stops_loop(
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_rate_limit_notifies(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_rate_limit_notifies(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """Rate limit detected, notifies warning, waits, then succeeds."""
     md = _make_project(tmp_path, "- [ ] Task\n")
     mock_run.side_effect = [
@@ -202,11 +223,13 @@ def test_rate_limit_notifies(mock_run, mock_checks, mock_commit, mock_notify, tm
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
 def test_skips_already_checked_no_extra_notifications(
-    mock_run, mock_checks, mock_commit, mock_notify, tmp_path
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
     """Already-checked items are skipped. No notifications for them."""
     md = _make_project(tmp_path, "- [x] Done already\n- [ ] Still todo\n")
@@ -225,10 +248,13 @@ def test_skips_already_checked_no_extra_notifications(
 
 
 @patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_notify, tmp_path):
+def test_all_done_noop(
+    mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
     """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")
 
@@ -241,3 +267,70 @@ def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_notify, tmp_path
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
     assert calls[0] == ("All tasks completed!", "info")
+
+
+# --- _checkpoint unit tests ---
+
+
+@patch("mcloop.main.subprocess.run")
+def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
+    """_checkpoint stages and commits when tracked files are modified."""
+    dirty_result = MagicMock()
+    dirty_result.stdout = "src/foo.py\n"
+    mock_run.return_value = dirty_result
+
+    _checkpoint(tmp_path)
+
+    assert mock_run.call_count == 3
+    assert mock_run.call_args_list[0] == call(
+        ["git", "diff", "--name-only"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert mock_run.call_args_list[1] == call(
+        ["git", "add", "-u"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    assert mock_run.call_args_list[2] == call(
+        ["git", "commit", "-m", "mcloop: checkpoint before run"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+
+@patch("mcloop.main.subprocess.run")
+def test_checkpoint_skips_when_clean(mock_run, tmp_path):
+    """_checkpoint does nothing when there are no tracked modified files."""
+    clean_result = MagicMock()
+    clean_result.stdout = ""
+    mock_run.return_value = clean_result
+
+    _checkpoint(tmp_path)
+
+    assert mock_run.call_count == 1  # only the git diff check
+
+
+@patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
+def test_checkpoint_ignores_errors(mock_run, tmp_path):
+    """_checkpoint swallows exceptions and does not propagate them."""
+    _checkpoint(tmp_path)  # should not raise
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_checkpoint_called_before_loop(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """run_loop calls _checkpoint exactly once before processing tasks."""
+    md = _make_project(tmp_path, "- [ ] Task one\n")
+    mock_run.return_value = _ok_run_result()
+
+    run_loop(md)
+
+    mock_checkpoint.assert_called_once_with(tmp_path)

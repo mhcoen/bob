@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import json as _json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -26,6 +26,7 @@ def run_task(
     log_dir: str | Path,
     description: str = "",
     task_label: str = "",
+    model: str | None = None,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -39,7 +40,7 @@ def run_task(
     parts.append("Write unit tests where they make sense.")
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     prompt = "\n\n".join(parts)
-    cmd = _build_command(cli, prompt)
+    cmd = _build_command(cli, prompt, model=model)
     env = dict(os.environ)
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
@@ -70,9 +71,9 @@ def run_task(
     )
 
 
-def _build_command(cli: str, task_text: str) -> list[str]:
+def _build_command(cli: str, task_text: str, model: str | None = None) -> list[str]:
     if cli == "claude":
-        return [
+        cmd = [
             "claude", "-p", task_text,
             "--allowedTools", "Edit,Write,Bash,Read,Glob,Grep",
             "--permission-mode", "default",
@@ -80,6 +81,9 @@ def _build_command(cli: str, task_text: str) -> list[str]:
             "--verbose",
             "--include-partial-messages",
         ]
+        if model:
+            cmd.extend(["--model", model])
+        return cmd
     elif cli == "codex":
         return ["codex", "-q", task_text]
     else:
