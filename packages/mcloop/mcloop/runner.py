@@ -54,14 +54,69 @@ def run_task(
     env = dict(os.environ)
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
+    output, returncode = _run_session(
+        cmd, project_dir, env=env,
+    )
+    log_path = _write_log(
+        log_dir, task_text, cmd, output, returncode,
+    )
+
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
+
+
+def _build_command(
+    cli: str,
+    prompt: str | None = None,
+    model: str | None = None,
+    use_stdin: bool = False,
+) -> list[str]:
+    if cli == "claude":
+        cmd = ["claude", "-p"]
+        if not use_stdin and prompt:
+            cmd.append(prompt)
+        cmd.extend([
+            "--allowedTools",
+            "Edit,Write,Bash,Read,Glob,Grep",
+            "--permission-mode", "default",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+        ])
+        if model:
+            cmd.extend(["--model", model])
+        return cmd
+    elif cli == "codex":
+        return ["codex", "-q"] + (
+            [prompt] if prompt else []
+        )
+    else:
+        raise ValueError(f"Unknown CLI: {cli}")
+
+
+def _run_session(
+    cmd: list[str],
+    cwd: Path,
+    env: dict | None = None,
+    stdin_text: str | None = None,
+) -> tuple[str, int]:
+    """Run a CLI session, stream output, return (output, exit_code)."""
     process = subprocess.Popen(
         cmd,
-        cwd=project_dir,
+        cwd=cwd,
+        stdin=subprocess.PIPE if stdin_text else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         env=env,
     )
+    if stdin_text and process.stdin:
+        process.stdin.write(stdin_text)
+        process.stdin.close()
 
     output_lines: list[str] = []
     assert process.stdout is not None
@@ -69,35 +124,7 @@ def run_task(
         output_lines.append(line)
         _print_stream_event(line)
     process.wait()
-
-    output = "".join(output_lines)
-    log_path = _write_log(log_dir, task_text, cmd, output, process.returncode)
-
-    return RunResult(
-        success=process.returncode == 0,
-        output=output,
-        exit_code=process.returncode,
-        log_path=log_path,
-    )
-
-
-def _build_command(cli: str, task_text: str, model: str | None = None) -> list[str]:
-    if cli == "claude":
-        cmd = [
-            "claude", "-p", task_text,
-            "--allowedTools", "Edit,Write,Bash,Read,Glob,Grep",
-            "--permission-mode", "default",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-        ]
-        if model:
-            cmd.extend(["--model", model])
-        return cmd
-    elif cli == "codex":
-        return ["codex", "-q", task_text]
-    else:
-        raise ValueError(f"Unknown CLI: {cli}")
+    return "".join(output_lines), process.returncode
 
 
 def _print_stream_event(line: str) -> None:
@@ -251,30 +278,20 @@ def run_sync(
 
     context = gather_sync_context(project_dir)
     prompt = build_sync_prompt(context)
-    cmd = _build_command("claude", prompt, model=model)
-
-    process = subprocess.Popen(
-        cmd,
-        cwd=project_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+    cmd = _build_command(
+        "claude", model=model, use_stdin=True,
+    )
+    output, returncode = _run_session(
+        cmd, project_dir, stdin_text=prompt,
+    )
+    log_path = _write_log(
+        log_dir, "sync", cmd, output, returncode,
     )
 
-    output_lines: list[str] = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        output_lines.append(line)
-        _print_stream_event(line)
-    process.wait()
-
-    output = "".join(output_lines)
-    log_path = _write_log(log_dir, "sync", cmd, output, process.returncode)
-
     return RunResult(
-        success=process.returncode == 0,
+        success=returncode == 0,
         output=output,
-        exit_code=process.returncode,
+        exit_code=returncode,
         log_path=log_path,
     )
 
@@ -346,30 +363,20 @@ def run_audit(
 
     context = gather_audit_context(project_dir)
     prompt = build_audit_prompt(context)
-    cmd = _build_command("claude", prompt, model=model)
-
-    process = subprocess.Popen(
-        cmd,
-        cwd=project_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+    cmd = _build_command(
+        "claude", model=model, use_stdin=True,
+    )
+    output, returncode = _run_session(
+        cmd, project_dir, stdin_text=prompt,
+    )
+    log_path = _write_log(
+        log_dir, "audit", cmd, output, returncode,
     )
 
-    output_lines: list[str] = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        output_lines.append(line)
-        _print_stream_event(line)
-    process.wait()
-
-    output = "".join(output_lines)
-    log_path = _write_log(log_dir, "audit", cmd, output, process.returncode)
-
     return RunResult(
-        success=process.returncode == 0,
+        success=returncode == 0,
         output=output,
-        exit_code=process.returncode,
+        exit_code=returncode,
         log_path=log_path,
     )
 
@@ -411,30 +418,20 @@ def run_bug_fix(
 
     context = gather_audit_context(project_dir)
     prompt = build_bug_fix_prompt(bugs_content, context)
-    cmd = _build_command("claude", prompt, model=model)
-
-    process = subprocess.Popen(
-        cmd,
-        cwd=project_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+    cmd = _build_command(
+        "claude", model=model, use_stdin=True,
+    )
+    output, returncode = _run_session(
+        cmd, project_dir, stdin_text=prompt,
+    )
+    log_path = _write_log(
+        log_dir, "bug-fix", cmd, output, returncode,
     )
 
-    output_lines: list[str] = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        output_lines.append(line)
-        _print_stream_event(line)
-    process.wait()
-
-    output = "".join(output_lines)
-    log_path = _write_log(log_dir, "bug-fix", cmd, output, process.returncode)
-
     return RunResult(
-        success=process.returncode == 0,
+        success=returncode == 0,
         output=output,
-        exit_code=process.returncode,
+        exit_code=returncode,
         log_path=log_path,
     )
 
