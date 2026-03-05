@@ -18,7 +18,7 @@ from mcloop.ratelimit import (
     is_rate_limited,
     wait_for_reset,
 )
-from mcloop.runner import run_audit, run_sync, run_task
+from mcloop.runner import bugs_md_has_bugs, run_audit, run_bug_fix, run_sync, run_task
 
 
 def main() -> None:
@@ -172,6 +172,8 @@ def run_loop(
                 parse(checklist_path),
             )
             return [task.text]
+
+    _run_audit_fix_cycle(project_dir, log_dir, model=model)
 
     _print_summary(completed, None, "", [])
     notify("All tasks completed!")
@@ -447,6 +449,55 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return len(meaningful) > 0
     except Exception:
         return True  # if git fails, don't block
+
+
+def _run_audit_fix_cycle(
+    project_dir: Path,
+    log_dir: Path,
+    model: str | None = None,
+) -> None:
+    """Run one audit session; if bugs are found, run a fix session then delete BUGS.md."""
+    print("\n>>> Running bug audit...", flush=True)
+    audit_result = run_audit(project_dir, log_dir, model=model)
+    if not audit_result.success:
+        print(
+            f"audit: session exited with code {audit_result.exit_code}, skipping fix",
+            flush=True,
+        )
+        return
+
+    bugs_path = project_dir / "BUGS.md"
+    if not bugs_path.exists():
+        print("audit: BUGS.md not written, skipping fix", flush=True)
+        return
+
+    bugs_content = bugs_path.read_text()
+    if not bugs_md_has_bugs(bugs_content):
+        print("audit: no bugs found", flush=True)
+        bugs_path.unlink()
+        return
+
+    print("\n>>> Bugs found, running fix session...", flush=True)
+    fix_result = run_bug_fix(project_dir, log_dir, bugs_content, model=model)
+    bugs_path.unlink(missing_ok=True)
+
+    if not fix_result.success:
+        print(
+            f"bug-fix: session exited with code {fix_result.exit_code}",
+            flush=True,
+        )
+        return
+
+    if _has_meaningful_changes(project_dir):
+        check_result = run_checks(project_dir)
+        if check_result.passed:
+            _commit(project_dir, "Fix bugs from audit")
+        else:
+            print(
+                f"\n!!! Bug fix checks failed: {check_result.command}",
+                flush=True,
+            )
+            _print_error_tail(check_result.output)
 
 
 def _checkpoint(project_dir: Path) -> None:

@@ -8,7 +8,9 @@ from mcloop.runner import (
     _build_command,
     _slugify,
     _write_log,
+    bugs_md_has_bugs,
     build_audit_prompt,
+    build_bug_fix_prompt,
     build_sync_prompt,
     gather_audit_context,
     gather_sync_context,
@@ -292,3 +294,57 @@ def test_build_audit_prompt_empty_context():
     prompt = build_audit_prompt({})
     assert "BUGS.md" in prompt
     assert "No bugs found." in prompt
+
+
+# --- bugs_md_has_bugs ---
+
+
+def test_bugs_md_has_bugs_no_bugs():
+    assert bugs_md_has_bugs("# Bugs\n\nNo bugs found.\n") is False
+
+
+def test_bugs_md_has_bugs_with_bugs():
+    content = "# Bugs\n\n## foo.py:10 — Off-by-one\n**Severity**: low\nDetails.\n"
+    assert bugs_md_has_bugs(content) is True
+
+
+def test_bugs_md_has_bugs_empty():
+    assert bugs_md_has_bugs("") is True
+
+
+def test_bugs_md_has_bugs_partial_match():
+    # "No bugs found." must appear exactly — partial text doesn't count
+    assert bugs_md_has_bugs("# Bugs\n\nNo bugs.\n") is True
+
+
+# --- build_bug_fix_prompt ---
+
+
+def test_build_bug_fix_prompt_includes_bugs():
+    bugs = "## foo.py:5 — crash\n**Severity**: high\nUnhandled exception.\n"
+    prompt = build_bug_fix_prompt(bugs, {})
+    assert "foo.py:5" in prompt
+    assert "BUGS.md" in prompt
+
+
+def test_build_bug_fix_prompt_fix_only_instruction():
+    prompt = build_bug_fix_prompt("bugs", {})
+    assert "Fix ONLY" in prompt
+    assert "minimal" in prompt
+
+
+def test_build_bug_fix_prompt_no_delete_instruction():
+    prompt = build_bug_fix_prompt("bugs", {})
+    assert "deleted automatically" in prompt
+
+
+def test_build_bug_fix_prompt_includes_context():
+    ctx = {"app.py": "x = 1", "README.md": "# Hi"}
+    prompt = build_bug_fix_prompt("bugs", ctx)
+    assert "=== app.py ===" in prompt
+    assert "x = 1" in prompt
+
+
+def test_build_bug_fix_prompt_empty_context():
+    prompt = build_bug_fix_prompt("no bugs", {})
+    assert "Fix ONLY" in prompt

@@ -30,7 +30,7 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Prompt Claude to flag problems: checked items with no corresponding code, unchecked items that appear already implemented, description drifting from the codebase
   - [x] Show a diff of proposed PLAN.md changes before writing
 - [ ] After all checklist tasks are complete, automatically run a bug audit/fix cycle
-  - [ ] Add a function that runs a Claude Code session to audit the codebase and write BUGS.md listing only actual defects (crashes, incorrect behavior, unhandled errors, security issues), not style or refactoring
+  - [x] Add a function that runs a Claude Code session to audit the codebase and write BUGS.md listing only actual defects (crashes, incorrect behavior, unhandled errors, security issues), not style or refactoring
   - [ ] If BUGS.md contains bugs, run a second session scoped to fixing only the bugs listed in BUGS.md, then delete BUGS.md
   - [ ] Run this cycle once (no open-ended looping), then send the "All tasks completed" notification
   - [ ] Add a --no-audit flag to skip the bug audit cycle

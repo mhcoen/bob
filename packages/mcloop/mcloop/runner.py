@@ -374,6 +374,71 @@ def run_audit(
     )
 
 
+def bugs_md_has_bugs(content: str) -> bool:
+    """Return True if BUGS.md content contains actual bug reports."""
+    return "No bugs found." not in content
+
+
+def build_bug_fix_prompt(bugs_content: str, context: dict[str, str]) -> str:
+    """Build the prompt for the bug fix Claude session."""
+    parts = []
+    for name, content in context.items():
+        parts.append(f"=== {name} ===\n{content}")
+    context_block = "\n\n".join(parts)
+
+    instructions = (
+        "You are fixing bugs in a Python codebase.\n\n"
+        "Fix ONLY the bugs listed in BUGS.md below. Do not refactor, "
+        "reformat, or change anything else. Each bug entry includes a file, "
+        "line number, and description. Fix each bug with a minimal targeted change.\n\n"
+        "Do not delete BUGS.md — it will be deleted automatically after this session.\n\n"
+        f"=== BUGS.md ===\n{bugs_content}\n\n"
+        "Source code follows.\n\n"
+    )
+    return instructions + context_block
+
+
+def run_bug_fix(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    bugs_content: str,
+    model: str | None = None,
+) -> RunResult:
+    """Launch a Claude Code session to fix bugs listed in BUGS.md."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    context = gather_audit_context(project_dir)
+    prompt = build_bug_fix_prompt(bugs_content, context)
+    cmd = _build_command("claude", prompt, model=model)
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=project_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    output_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        output_lines.append(line)
+        _print_stream_event(line)
+    process.wait()
+
+    output = "".join(output_lines)
+    log_path = _write_log(log_dir, "bug-fix", cmd, output, process.returncode)
+
+    return RunResult(
+        success=process.returncode == 0,
+        output=output,
+        exit_code=process.returncode,
+        log_path=log_path,
+    )
+
+
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
     return slug.strip("-")[:50]

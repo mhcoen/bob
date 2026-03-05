@@ -1,10 +1,10 @@
-"""Unit tests for CLI argument parsing."""
+"""Unit tests for CLI argument parsing and main helpers."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcloop.main import _parse_args
+from mcloop.main import _parse_args, _run_audit_fix_cycle
 
 
 def _parse(*argv):
@@ -71,3 +71,90 @@ def test_no_subcommand_command_is_none():
 def test_invalid_subcommand_exits():
     with pytest.raises(SystemExit):
         _parse("bogus")
+
+
+# --- _run_audit_fix_cycle ---
+
+
+def _make_result(success=True, exit_code=0):
+    r = MagicMock()
+    r.success = success
+    r.exit_code = exit_code
+    return r
+
+
+def test_run_audit_fix_cycle_no_bugs(tmp_path):
+    """When audit writes 'No bugs found.', fix session is not run."""
+    bugs_path = tmp_path / "BUGS.md"
+
+    def fake_audit(project_dir, log_dir, model=None):
+        bugs_path.write_text("# Bugs\n\nNo bugs found.\n")
+        return _make_result()
+
+    with patch("mcloop.main.run_audit", side_effect=fake_audit) as mock_audit, \
+         patch("mcloop.main.run_bug_fix") as mock_fix:
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_audit.assert_called_once()
+    mock_fix.assert_not_called()
+    assert not bugs_path.exists()
+
+
+def test_run_audit_fix_cycle_with_bugs(tmp_path):
+    """When audit finds bugs, fix session runs and BUGS.md is deleted."""
+    bugs_path = tmp_path / "BUGS.md"
+    bug_content = "# Bugs\n\n## foo.py:1 — crash\n**Severity**: high\nBad.\n"
+
+    def fake_audit(project_dir, log_dir, model=None):
+        bugs_path.write_text(bug_content)
+        return _make_result()
+
+    check_result = MagicMock()
+    check_result.passed = False
+
+    with patch("mcloop.main.run_audit", side_effect=fake_audit), \
+         patch("mcloop.main.run_bug_fix", return_value=_make_result()) as mock_fix, \
+         patch("mcloop.main._has_meaningful_changes", return_value=False):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_fix.assert_called_once()
+    assert not bugs_path.exists()
+
+
+def test_run_audit_fix_cycle_audit_failure(tmp_path):
+    """When audit session fails, fix session is not run."""
+    with patch("mcloop.main.run_audit", return_value=_make_result(success=False, exit_code=1)), \
+         patch("mcloop.main.run_bug_fix") as mock_fix:
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_fix.assert_not_called()
+
+
+def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
+    """When audit succeeds but BUGS.md not written, fix session is not run."""
+    with patch("mcloop.main.run_audit", return_value=_make_result()), \
+         patch("mcloop.main.run_bug_fix") as mock_fix:
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_fix.assert_not_called()
+
+
+def test_run_audit_fix_cycle_commits_when_checks_pass(tmp_path):
+    """When fix session succeeds and checks pass, changes are committed."""
+    bugs_path = tmp_path / "BUGS.md"
+
+    def fake_audit(project_dir, log_dir, model=None):
+        bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
+        return _make_result()
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with patch("mcloop.main.run_audit", side_effect=fake_audit), \
+         patch("mcloop.main.run_bug_fix", return_value=_make_result()), \
+         patch("mcloop.main._has_meaningful_changes", return_value=True), \
+         patch("mcloop.main.run_checks", return_value=check_result), \
+         patch("mcloop.main._commit") as mock_commit:
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_commit.assert_called_once_with(tmp_path, "Fix bugs from audit")
