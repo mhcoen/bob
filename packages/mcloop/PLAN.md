@@ -25,7 +25,7 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Document mcloop.json in the README
 - [ ] Add a mcloop sync command
   - [x] Add sync subcommand to the CLI argument parser
-  - [ ] Launch a single Claude Code session that reads PLAN.md, README.md, CLAUDE.md, the git log, file tree, and source code
+  - [x] Launch a single Claude Code session that reads PLAN.md, README.md, CLAUDE.md, the git log, file tree, and source code
   - [ ] Prompt Claude to add checked items for features, fixes, or changes reflected in the code but not in PLAN.md, matching existing granularity, appending only, never modifying existing items
   - [ ] Prompt Claude to flag problems: checked items with no corresponding code, unchecked items that appear already implemented, description drifting from the codebase
   - [ ] Show a diff of proposed PLAN.md changes before writing

@@ -4,7 +4,13 @@ import subprocess
 
 import pytest
 
-from mcloop.runner import _build_command, _slugify, _write_log, gather_sync_context
+from mcloop.runner import (
+    _build_command,
+    _slugify,
+    _write_log,
+    build_sync_prompt,
+    gather_sync_context,
+)
 
 
 def test_build_command_claude():
@@ -131,3 +137,42 @@ def test_gather_sync_context_excludes_git_dir(tmp_path):
     ctx = gather_sync_context(tmp_path)
     # No .git/ paths should appear as source keys
     assert not any(".git" in k for k in ctx)
+
+
+# --- build_sync_prompt ---
+
+
+def test_build_sync_prompt_includes_context():
+    ctx = {"PLAN.md": "- [x] Do something", "README.md": "# Readme"}
+    prompt = build_sync_prompt(ctx)
+    assert "- [x] Do something" in prompt
+    assert "# Readme" in prompt
+    assert "=== PLAN.md ===" in prompt
+    assert "=== README.md ===" in prompt
+
+
+def test_build_sync_prompt_append_only_instruction():
+    prompt = build_sync_prompt({})
+    assert "APPEND ONLY" in prompt
+    assert "Never modify" in prompt
+
+
+def test_build_sync_prompt_checked_items_instruction():
+    prompt = build_sync_prompt({})
+    assert "- [x]" in prompt
+
+
+def test_build_sync_prompt_granularity_instruction():
+    prompt = build_sync_prompt({})
+    assert "granularity" in prompt
+
+
+def test_build_sync_prompt_no_duplicates_instruction():
+    prompt = build_sync_prompt({})
+    assert "duplicate" in prompt
+
+
+def test_build_sync_prompt_empty_context():
+    prompt = build_sync_prompt({})
+    assert "APPEND ONLY" in prompt
+    assert "- [x]" in prompt

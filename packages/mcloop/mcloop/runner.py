@@ -186,6 +186,32 @@ def gather_sync_context(project_dir: Path) -> dict[str, str]:
     return context
 
 
+def build_sync_prompt(context: dict[str, str]) -> str:
+    """Build the prompt for the sync Claude session."""
+    parts = []
+    for name, content in context.items():
+        parts.append(f"=== {name} ===\n{content}")
+    context_block = "\n\n".join(parts)
+
+    instructions = (
+        "You are synchronizing PLAN.md with the actual codebase.\n\n"
+        "Your task: identify features, fixes, or changes that are reflected in the "
+        "code (or git history) but are not yet documented in PLAN.md, then append "
+        "them as checked items.\n\n"
+        "Rules:\n"
+        "1. APPEND ONLY. Never modify, reorder, or delete any existing items.\n"
+        "2. New items must be checked: - [x]\n"
+        "3. Match the granularity of existing items — keep new entries at the same "
+        "level of detail as surrounding items.\n"
+        "4. Only add items for changes that are clearly implemented.\n"
+        "5. Do not duplicate existing items, even if worded differently.\n"
+        "6. Add new items at the end of the most relevant section, or at the end of "
+        "PLAN.md if no section fits.\n\n"
+        "Project context follows.\n\n"
+    )
+    return instructions + context_block
+
+
 def run_sync(
     project_dir: str | Path,
     log_dir: str | Path,
@@ -197,12 +223,7 @@ def run_sync(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     context = gather_sync_context(project_dir)
-
-    parts = []
-    for name, content in context.items():
-        parts.append(f"=== {name} ===\n{content}")
-
-    prompt = "\n\n".join(parts)
+    prompt = build_sync_prompt(context)
     cmd = _build_command("claude", prompt, model=model)
 
     process = subprocess.Popen(
