@@ -1,6 +1,6 @@
 # McLoop
 
-McLoop grinds through a markdown checklist using AI coding CLIs. You add tasks to a `PLAN.md` in your repo; McLoop picks up the next unchecked item, launches a fresh Claude Code (or Codex) session to do it, runs your tests and linter, and commits only if everything passes. Check off, repeat.
+McLoop lets you run Claude Code (or Codex) for hours at a time without babysitting it. You write a task list in `PLAN.md`; McLoop works through it continuously — launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it alerts you in real time via Telegram so you can approve from your phone and it keeps going.
 
 Each session starts with a clean context — no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
@@ -105,38 +105,43 @@ while unchecked items remain:
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
 
-## Remote permissions
+## Unattended operation
 
-When McLoop runs unattended, Claude Code may hit a tool call that requires
-permission — a destructive bash command, a file write outside the project, etc.
-Rather than blocking silently, McLoop notifies you in real time via Telegram and
-gates the tool call on your approval.
+McLoop is built to run without interaction. The recommended setup uses Claude
+Code's sandbox mode combined with the included permission hook.
 
-This works via `telegram-permission-hook.py`, a `PreToolUse` hook that intercepts
-every tool call Claude Code makes:
+**Sandbox mode** (`"sandbox": {"enabled": true}` in `settings.json`) restricts
+what Claude Code can do: network access is limited to an allowlist of domains,
+and filesystem writes outside the project require explicit permission. This means
+McLoop can run for hours without you watching it, and can't do anything
+catastrophic by accident.
 
-- **Whitelisted commands** (configured in `~/.claude/settings.json`) pass through
-  automatically with no notification.
+**The permission hook** (`telegram-permission-hook.py`) intercepts every tool
+call Claude Code makes as a `PreToolUse` hook:
+
+- **Whitelisted commands** (in `permissions.allow`) pass through automatically.
 - **Everything else** sends you a Telegram message describing exactly what Claude
-  Code is trying to do, then pauses and waits.
+  Code wants to do, then pauses and waits for your approval.
 
 To approve or deny from your phone, use the **Remote Control** feature in the
 Claude Code mobile app. McLoop resumes immediately once you respond.
 
-### Setting up the hook
+### Setup
 
-Register the hook in `~/.claude/settings.json`:
+Copy `settings.example.json` from this repo to `~/.claude/settings.json` (or
+merge it with your existing settings), then update the hook path:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "python /path/to/mcloop/telegram-permission-hook.py"
+            "command": "python3 /path/to/mcloop/telegram-permission-hook.py",
+            "timeout": 600000
           }
         ]
       }
@@ -145,22 +150,9 @@ Register the hook in `~/.claude/settings.json`:
 }
 ```
 
-Whitelist commands you always trust so they don't generate notifications:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(pytest)",
-      "Bash(ruff:*)",
-      "Bash(git:*)",
-      "Read",
-      "Edit",
-      "Write"
-    ]
-  }
-}
-```
+The `timeout` is 10 minutes — enough time to pick up your phone and respond.
+Add any commands you always trust to `permissions.allow` so they pass through
+without a notification. See `settings.example.json` for a recommended baseline.
 
 ## Notifications
 
