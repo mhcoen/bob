@@ -31,13 +31,14 @@ def main() -> None:
         _dry_run(parse(checklist_path))
         return
 
-    run_loop(checklist_path, max_retries=args.max_retries)
+    run_loop(checklist_path, max_retries=args.max_retries, model=args.model)
 
 
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
     enabled_clis: tuple[str, ...] = ("claude",),
+    model: str | None = None,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
     project_dir = checklist_path.parent
@@ -69,7 +70,7 @@ def run_loop(
         attempt = 0
         while attempt < max_retries:
             attempt += 1
-            result = run_task(task.text, cli, project_dir, log_dir, description, task_label=label)
+            result = run_task(task.text, cli, project_dir, log_dir, description, task_label=label, model=model)
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
@@ -81,6 +82,9 @@ def run_loop(
                 continue
 
             if not result.success:
+                print(f"\n!!! Task failed (attempt {attempt}/{max_retries})", flush=True)
+                print(f"    Exit code: {result.exit_code}", flush=True)
+                _print_error_tail(result.output)
                 notify(
                     f"Task failed (attempt {attempt}/{max_retries}): {task.text}",
                     level="error",
@@ -88,6 +92,7 @@ def run_loop(
                 continue
 
             if not _has_meaningful_changes(project_dir):
+                print(f"\n!!! No files changed (attempt {attempt}/{max_retries})", flush=True)
                 notify(
                     f"No files changed (attempt {attempt}/{max_retries}): {task.text}",
                     level="error",
@@ -102,6 +107,8 @@ def run_loop(
                 success = True
                 break
             else:
+                print(f"\n!!! Checks failed (attempt {attempt}/{max_retries}): {check_result.command}", flush=True)
+                _print_error_tail(check_result.output)
                 notify(
                     f"Checks failed (attempt {attempt}/{max_retries}): {task.text}",
                     level="error",
@@ -121,6 +128,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
+    parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
     return parser.parse_args()
 
 
@@ -140,6 +148,17 @@ def _dry_run(tasks) -> None:
         print(f"\nNext task: {next_task.text}")
     else:
         print("\nNo unchecked tasks remaining.")
+
+
+def _print_error_tail(output: str, max_lines: int = 30) -> None:
+    """Print the last N lines of output to help diagnose failures."""
+    lines = output.strip().splitlines()
+    tail = lines[-max_lines:] if len(lines) > max_lines else lines
+    if tail:
+        print("    --- last output ---", flush=True)
+        for line in tail:
+            print(f"    {line}", flush=True)
+        print("    ---", flush=True)
 
 
 def _task_label(tasks: list[Task], target: Task) -> str:
