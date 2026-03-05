@@ -1,6 +1,8 @@
 # McLoop
 
-McLoop grinds through a markdown checklist using AI coding CLIs. You add tasks to a `PLAN.md` in your repo; McLoop picks up the next unchecked item, launches a fresh Claude Code session to do it, runs your tests and linter, and commits only if everything passes. Check off, repeat.
+McLoop grinds through a markdown checklist using AI coding CLIs. You add tasks to a `PLAN.md` in your repo; McLoop picks up the next unchecked item, launches a fresh Claude Code (or Codex) session to do it, runs your tests and linter, and commits only if everything passes. Check off, repeat.
+
+Each session starts with a clean context — no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
 McLoop is designed for the long haul. Start with a few tasks, let it run while you do something else, add more tasks when you think of them, re-run. It's a persistent task queue backed by a text file — not a one-shot build script.
 
@@ -48,6 +50,11 @@ included in every CLI invocation, so every session has context about what the
 project is, what technologies to use, and what constraints matter. **Without a
 description, the CLI has no context and will make worse decisions.**
 
+Because each session starts fresh, the CLI can only work from what's in the
+repo at that moment. Keep your description, inline comments, and any other
+markdown docs current — they are the CLI's only memory of decisions made in
+previous sessions.
+
 The checklist is what McLoop executes. Each item should be a meaningful unit of
 work — a feature, a subsystem, a named refactor — not a single function or line.
 
@@ -86,7 +93,8 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 ```
 while unchecked items remain:
     1. Find next unchecked item (depth-first)
-    2. Launch a fresh Claude Code session with the project description + task
+    2. Launch a fresh Claude Code (or Codex) session — clean context every time
+       The CLI receives: project description + current task + your codebase
     3. Run project checks (tests, lint — auto-detected from project files)
     4. If checks pass  → commit, check the box, notify, continue
     5. If checks fail  → retry (up to --max-retries)
