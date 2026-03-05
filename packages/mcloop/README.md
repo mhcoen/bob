@@ -1,10 +1,10 @@
 # McLoop
 
-McLoop lets you run Claude Code (or Codex) for hours at a time without babysitting it. You write a task list in `PLAN.md`; McLoop works through it continuously — launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it alerts you in real time via Telegram so you can approve from your phone and it keeps going.
+McLoop lets you run Claude Code (or Codex) for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it alerts you in real time via Telegram so you can approve from your phone and it keeps going.
 
-Each session starts with a clean context — no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
+Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
-McLoop is designed for the long haul. Start with a few tasks, let it run while you do something else, add more tasks when you think of them, re-run. It's a persistent task queue backed by a text file — not a one-shot build script.
+McLoop is designed for the long haul. Start with a few tasks, let it run while you do something else, add more tasks when you think of them, re-run. It's a persistent task queue backed by a text file, not a one-shot build script.
 
 ## Quickstart
 
@@ -28,11 +28,11 @@ it, run the project's tests and linter, commit if everything passes, check off
 the item, and repeat. Notify the user via Telegram and iMessage on completions,
 failures, and rate limits.
 
-Python 3.11+, stdlib only — no external dependencies. Ruff for linting, pytest
+Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
 pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
-over-abstraction — this is a simple tool and should stay that way.
+over-abstraction. This is a simple tool and should stay that way.
 
 - [ ] Project scaffolding (pyproject.toml, .gitignore, loop package, __main__.py)
 - [ ] Markdown checklist parser (parse tasks, find next unchecked, check off items)
@@ -52,11 +52,12 @@ description, the CLI has no context and will make worse decisions.**
 
 Because each session starts fresh, the CLI can only work from what's in the
 repo at that moment. Keep your description, inline comments, and any other
-markdown docs current — they are the CLI's only memory of decisions made in
+markdown docs current. They are the CLI's only memory of decisions made in
 previous sessions.
 
 The checklist is what McLoop executes. Each item should be a meaningful unit of
-work — a feature, a subsystem, a named refactor — not a single function or line.
+work, such as a feature, a subsystem, or a named refactor, not a single function
+or line.
 
 **You don't have to write the whole checklist upfront.** McLoop picks up
 wherever you left off. Add tasks as you think of them, reorder them, break
@@ -81,9 +82,9 @@ auto-checks the parent when all children are done.
 
 | Marker | Meaning |
 |--------|---------|
-| `- [ ]` | Pending — McLoop will pick this up |
+| `- [ ]` | Pending. McLoop will pick this up. |
 | `- [x]` | Completed |
-| `- [!]` | Failed — McLoop gave up after max retries |
+| `- [!]` | Failed. McLoop gave up after max retries. |
 
 You can manually edit any marker. To retry a failed task, change `[!]` back to
 `[ ]` and re-run.
@@ -93,13 +94,13 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 ```
 while unchecked items remain:
     1. Find next unchecked item (depth-first)
-    2. Launch a fresh Claude Code (or Codex) session — clean context every time
-       The CLI receives: project description + current task + your codebase
-    3. Run project checks (tests, lint — auto-detected from project files)
-    4. If checks pass  → commit, check the box, notify, continue
-    5. If checks fail  → retry (up to --max-retries)
-    6. If retries exhausted → mark [!], notify, stop
-    7. If rate-limited → pause, wait for reset, resume
+    2. Launch a fresh Claude Code (or Codex) session with a clean context.
+       The CLI receives: project description + current task + your codebase.
+    3. Run project checks (tests, lint, auto-detected from project files)
+    4. If checks pass  -> commit, check the box, notify, continue
+    5. If checks fail  -> retry (up to --max-retries)
+    6. If retries exhausted -> mark [!], notify, stop
+    7. If rate-limited -> pause, wait for reset, resume
 ```
 
 McLoop stops when a task fails all retries. It does not continue to the next
@@ -111,9 +112,9 @@ McLoop is built to run without interaction. The recommended setup uses Claude
 Code's sandbox mode combined with the included permission hook.
 
 **Sandbox mode** (`"sandbox": {"enabled": true}` in `settings.json`) restricts
-what Claude Code can do: network access is limited to an allowlist of domains,
+what Claude Code can do. Network access is limited to an allowlist of domains,
 and filesystem writes outside the project require explicit permission. This means
-McLoop can run for hours without you watching it, and can't do anything
+McLoop can run for hours without you watching it and can't do anything
 catastrophic by accident.
 
 **The permission hook** (`telegram-permission-hook.py`) intercepts every tool
@@ -150,9 +151,10 @@ merge it with your existing settings), then update the hook path:
 }
 ```
 
-The `timeout` is 10 minutes — enough time to pick up your phone and respond.
-Add any commands you always trust to `permissions.allow` so they pass through
-without a notification. See `settings.example.json` for a recommended baseline.
+The timeout is 10 minutes, which is enough time to pick up your phone and
+respond. Add any commands you always trust to `permissions.allow` so they pass
+through without a notification. See `settings.example.json` for a recommended
+baseline.
 
 ## Notifications
 
