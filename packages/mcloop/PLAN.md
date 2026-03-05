@@ -15,7 +15,7 @@ over-abstraction. This is a simple tool and should stay that way.
   - [!] In run_loop(), before the while loop, stage and commit all tracked modified files with a message like "mcloop: checkpoint before run"
   - [!] Skip if the working tree is clean
   - [x] Do not stage untracked files
-- [ ] Push to origin after each successful commit
+- [x] Push to origin after each successful commit
   - [x] Add git push to _commit() after git commit
   - [x] If no remote exists, skip the push silently
   - [x] Create the remote repo with gh repo create if it does not exist

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,10 +15,27 @@ class CheckResult:
     command: str
 
 
+def _load_config_commands(project_dir: Path) -> list[str] | None:
+    """Return checks from mcloop.json if present, else None."""
+    config = project_dir / "mcloop.json"
+    if not config.exists():
+        return None
+    try:
+        data = json.loads(config.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    checks = data.get("checks")
+    if isinstance(checks, list):
+        return [str(c) for c in checks]
+    return None
+
+
 def run_checks(project_dir: str | Path) -> CheckResult:
     """Auto-detect and run the project's checks. Returns a CheckResult."""
     project_dir = Path(project_dir)
-    commands = _detect_commands(project_dir)
+    commands = _load_config_commands(project_dir)
+    if commands is None:
+        commands = _detect_commands(project_dir)
 
     if not commands:
         return CheckResult(passed=True, output="No check commands detected", command="(none)")
