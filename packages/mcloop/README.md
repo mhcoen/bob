@@ -6,6 +6,12 @@ Each session starts with a clean context, with no memory of previous sessions. T
 
 McLoop is designed for the long haul. Start with a few tasks, let it run while you do something else, add more tasks when you think of them, re-run. It's a persistent task queue backed by a text file, not a one-shot build script.
 
+## Install
+
+```bash
+pip install mcloop
+```
+
 ## Quickstart
 
 ```bash
@@ -161,18 +167,18 @@ without a notification. See `settings.example.json` for a recommended baseline.
 ## Notifications
 
 McLoop sends Telegram notifications for task completions, failures, rate limits,
-and when all tasks are done. Set `NOTIFY_VIA=imessage` to use iMessage instead.
+permission requests, and when all tasks are done. Set `NOTIFY_VIA=imessage` to use iMessage instead.
 
 Create `~/.claude/telegram-hook.env`:
 
 ```
 TELEGRAM_BOT_TOKEN=your-bot-token
 TELEGRAM_CHAT_ID=your-chat-id
-IMESSAGE_ID=your-phone-or-email
+IMESSAGE_ID=your-email
 ```
 
 All fields are optional. Telegram requires both `TELEGRAM_BOT_TOKEN` and
-`TELEGRAM_CHAT_ID`. iMessage requires `IMESSAGE_ID` (phone number or Apple ID)
+`TELEGRAM_CHAT_ID`. iMessage requires `IMESSAGE_ID` (Apple ID email)
 and only works on macOS. You can also set these as environment variables.
 
 ## Project checks
