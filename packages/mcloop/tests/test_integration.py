@@ -305,6 +305,21 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
     assert any("my task description" in arg for arg in commit_calls[0].args[0])
 
 
+@patch("mcloop.main.subprocess.run")
+def test_commit_pushes_after_commit(mock_run, tmp_path):
+    """_commit calls git push after committing."""
+    mock_run.return_value = MagicMock()
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    assert ["git", "push"] in commands
+    # push must come after commit
+    commit_idx = commands.index(["git", "commit", "-m", "Complete: some task"])
+    push_idx = commands.index(["git", "push"])
+    assert push_idx > commit_idx
+
+
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
 def test_commit_ignores_errors(mock_run, tmp_path):
     """_commit swallows exceptions and does not propagate them."""

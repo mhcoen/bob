@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json as _json
 import subprocess
 import sys
 from pathlib import Path
@@ -245,9 +246,59 @@ def _print_summary(
         )
 
     if not completed and not failed_task:
-        print("All tasks were already complete.", flush=True)
+        print(
+            "All tasks were already complete.",
+            flush=True,
+        )
+
+    suggestions = _whitelist_suggestions()
+    if suggestions:
+        print(
+            "\nWhitelist suggestions (approved this session):",
+            flush=True,
+        )
+        for s in suggestions:
+            print(f"  {s}", flush=True)
 
     print("=" * 40, flush=True)
+
+
+SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
+SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
+
+
+def _whitelist_suggestions() -> list[str]:
+    """Read session-approved patterns and suggest allowlist entries."""
+    try:
+        data = _json.loads(SESSION_FILE.read_text())
+        patterns = data.get("patterns", [])
+    except (OSError, _json.JSONDecodeError):
+        return []
+    if not patterns:
+        return []
+
+    # Load current allowlist
+    try:
+        settings = _json.loads(SETTINGS_FILE.read_text())
+        allow = settings.get("permissions", {}).get("allow", [])
+    except (OSError, _json.JSONDecodeError):
+        allow = []
+
+    allow_set = set(allow)
+    suggestions = []
+    for pattern in sorted(patterns):
+        # Convert "Bash:ruff check ." to "Bash(ruff check:*)"
+        if ":" in pattern:
+            tool, arg = pattern.split(":", 1)
+            # Suggest a prefix rule for the first word
+            first_word = arg.split()[0] if arg.split() else arg
+            rule = f"{tool}({first_word}:*)"
+        else:
+            rule = pattern
+        if rule not in allow_set:
+            suggestions.append(rule)
+            allow_set.add(rule)  # dedup
+    return suggestions
 
 
 def _print_error_tail(output: str, max_lines: int = 30) -> None:
@@ -325,7 +376,7 @@ def _checkpoint(project_dir: Path) -> None:
 
 
 def _commit(project_dir: Path, task_text: str) -> None:
-    """Stage all changes and commit."""
+    """Stage all changes, commit, and push."""
     try:
         subprocess.run(["git", "add", "-u"], cwd=project_dir, capture_output=True)
         subprocess.run(
@@ -333,5 +384,6 @@ def _commit(project_dir: Path, task_text: str) -> None:
             cwd=project_dir,
             capture_output=True,
         )
+        subprocess.run(["git", "push"], cwd=project_dir, capture_output=True)
     except Exception:
         pass
