@@ -4,14 +4,14 @@ McLoop lets you run Claude Code for hours at a time without babysitting it. You 
 
 Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
-McLoop is designed for the long haul. Start with a few tasks, let it run while
-you do something else, add more tasks when you think of them, re-run. It's a
-persistent task queue backed by a text file, not a one-shot build script.
-All state lives in the repository: the checklist in PLAN.md, the code on disk,
-and the git history. If McLoop is interrupted, killed, or hits a rate limit,
-just run `mcloop` again. It reads the current state of the checklist, finds
-the next unchecked task, and picks up exactly where it left off. No session
-files, no databases, nothing to reset.
+McLoop is designed for the long haul. Start with a few tasks, let it run
+while you do something else, add more tasks when you think of them, re-run.
+It's a persistent task queue backed by a text file, not a one-shot build
+script. All state lives in the repository: PLAN.md, source code,
+documentation, configuration, and git history. If McLoop is interrupted,
+killed, or hits a rate limit, just run `mcloop` again. It finds the next
+unchecked task and picks up exactly where it left off. No session files, no
+databases, nothing to reset.
 
 ## Install
 
