@@ -1,46 +1,36 @@
-# Loop
+# McLoop
 
-Loop grinds through a markdown checklist using AI coding CLIs, committing as it goes and notifying you of progress.
+McLoop grinds through a markdown checklist using AI coding CLIs. You add tasks to a `PLAN.md` in your repo; McLoop picks up the next unchecked item, launches a fresh Claude Code session to do it, runs your tests and linter, and commits only if everything passes. Check off, repeat.
 
-You write a `PLAN.md` in your repo with a project description and a checklist. Loop picks up the next unchecked item, launches a fresh Claude Code session to do it, runs your project's tests and linter, and only commits and checks off the item if everything passes. Task status is tracked in `PLAN.md`. Per-attempt logs go to `logs/`.
+McLoop is designed for the long haul. Start with a few tasks, let it run while you do something else, add more tasks when you think of them, re-run. It's a persistent task queue backed by a text file — not a one-shot build script.
 
-## Usage
+## Quickstart
 
 ```bash
-python -m mcloop                    # Start (reads PLAN.md by default)
+python -m mcloop                    # Run (reads PLAN.md by default)
 python -m mcloop --file other.md    # Use a different file
-python -m mcloop --dry-run          # Show what would run without doing anything
+python -m mcloop --dry-run          # Show what would run, don't execute
 python -m mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 ```
 
 ## Writing a PLAN.md
 
-A `PLAN.md` has two parts: a project description in plain English, then a checklist. The description gives the CLI context for every task: what the project is, what technologies to use, any constraints. The checklist is what Loop executes.
-
-You can write it yourself, or have an AI generate it:
-
-```
-Prompt: "Write a PLAN.md for a CLI tool that converts CSV files to JSON.
-         Python, no dependencies, with tests. Start with a high-level
-         project description, then break it into a natural sequence of
-         feature-level tasks as markdown checkboxes. Each task should be
-         a meaningful unit of work (e.g. 'add input validation'), not a
-         single function or line of code."
-```
-
-### Example
-
-This is the PLAN.md that was used to build Loop itself:
+A `PLAN.md` has two parts: a **project description**, then a **checklist**.
 
 ```markdown
-# Loop
+# McLoop
 
 A Python CLI that grinds through a markdown checklist using AI coding CLIs.
 Read PLAN.md, find the next unchecked task, launch a fresh CLI session to do
 it, run the project's tests and linter, commit if everything passes, check off
 the item, and repeat. Notify the user via Telegram and iMessage on completions,
-failures, and rate limits. Python 3.11+, stdlib only, ruff for linting, pytest
-for tests.
+failures, and rate limits.
+
+Python 3.11+, stdlib only — no external dependencies. Ruff for linting, pytest
+for tests. Each task should leave the repo in a passing state: ruff check and
+pytest must both pass before a commit is made. Prefer small, focused changes
+per task. Write unit tests for new functionality. Keep modules short and avoid
+over-abstraction — this is a simple tool and should stay that way.
 
 - [ ] Project scaffolding (pyproject.toml, .gitignore, loop package, __main__.py)
 - [ ] Markdown checklist parser (parse tasks, find next unchecked, check off items)
@@ -51,43 +41,123 @@ for tests.
 - [ ] Main loop: parse, execute, verify, commit, notify, repeat
 ```
 
-### Markers
+This is the PLAN.md that was used to build McLoop itself.
+
+The description runs from the top of the file down to the first checkbox. It's
+included in every CLI invocation, so every session has context about what the
+project is, what technologies to use, and what constraints matter. **Without a
+description, the CLI has no context and will make worse decisions.**
+
+The checklist is what McLoop executes. Each item should be a meaningful unit of
+work — a feature, a subsystem, a named refactor — not a single function or line.
+
+**You don't have to write the whole checklist upfront.** McLoop picks up
+wherever you left off. Add tasks as you think of them, reorder them, break
+them into subtasks. When McLoop finishes the current queue, just add more and
+re-run. This makes it equally useful for iterative refinement of an existing
+codebase as for building something from scratch.
+
+### Subtasks
+
+Nest subtasks with indentation. McLoop completes children before parents, and
+auto-checks the parent when all children are done.
+
+```markdown
+- [ ] Set up database
+  - [ ] Create users table
+  - [ ] Create sessions table
+  - [ ] Add indexes
+- [ ] Write login endpoint
+```
+
+### Task markers
 
 | Marker | Meaning |
 |--------|---------|
-| `- [ ]` | Pending. Loop will pick this up |
+| `- [ ]` | Pending — McLoop will pick this up |
 | `- [x]` | Completed |
-| `- [!]` | Failed. Loop gave up after max retries |
+| `- [!]` | Failed — McLoop gave up after max retries |
 
-When a parent has subtasks, Loop completes the subtasks first. The parent is auto-checked when all children are done.
+You can manually edit any marker. To retry a failed task, change `[!]` back to
+`[ ]` and re-run.
 
-## How it works
+## How McLoop works
 
 ```
 while unchecked items remain:
-    1. Parse PLAN.md, find next unchecked item (depth-first)
+    1. Find next unchecked item (depth-first)
     2. Launch a fresh Claude Code session with the project description + task
-    3. Run project checks (tests, lint, auto-detected)
-    4. If checks pass  -> commit, check the box, notify, continue
-    5. If checks fail  -> retry (up to --max-retries)
-    6. If retries exhausted -> mark [!], notify, stop
-    7. If rate-limited  -> pause, wait for reset, resume
+    3. Run project checks (tests, lint — auto-detected from project files)
+    4. If checks pass  → commit, check the box, notify, continue
+    5. If checks fail  → retry (up to --max-retries)
+    6. If retries exhausted → mark [!], notify, stop
+    7. If rate-limited → pause, wait for reset, resume
 ```
 
-Each CLI session is instructed to write unit tests where they make sense. Loop then runs the project's test suite and linter before committing, so tasks only pass if the tests pass.
+McLoop stops when a task fails all retries. It does not continue to the next
+task, since tasks may have implicit dependencies.
 
-Loop stops when a task fails all retries. Tasks may have implicit dependencies, so continuing past a failure is not safe.
+## Remote permissions
+
+When McLoop runs unattended, Claude Code may hit a tool call that requires
+permission — a destructive bash command, a file write outside the project, etc.
+Rather than blocking silently, McLoop notifies you in real time via Telegram and
+gates the tool call on your approval.
+
+This works via `telegram-permission-hook.py`, a `PreToolUse` hook that intercepts
+every tool call Claude Code makes:
+
+- **Whitelisted commands** (configured in `~/.claude/settings.json`) pass through
+  automatically with no notification.
+- **Everything else** sends you a Telegram message describing exactly what Claude
+  Code is trying to do, then pauses and waits.
+
+To approve or deny from your phone, use the **Remote Control** feature in the
+Claude Code mobile app. McLoop resumes immediately once you respond.
+
+### Setting up the hook
+
+Register the hook in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /path/to/mcloop/telegram-permission-hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Whitelist commands you always trust so they don't generate notifications:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest)",
+      "Bash(ruff:*)",
+      "Bash(git:*)",
+      "Read",
+      "Edit",
+      "Write"
+    ]
+  }
+}
+```
 
 ## Notifications
 
-Loop sends Telegram and iMessage notifications for:
-
-- Task completed
-- Task failed (each attempt, and when giving up)
-- Rate-limited / paused / resuming
-- All tasks done
-
-### Telegram setup
+McLoop sends Telegram and iMessage notifications for task completions, failures,
+rate limits, and when all tasks are done.
 
 Create `~/.claude/telegram-hook.env`:
 
@@ -97,22 +167,31 @@ TELEGRAM_CHAT_ID=your-chat-id
 IMESSAGE_ID=your-phone-or-email
 ```
 
-Or set these as environment variables. All are optional. Telegram needs both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. iMessage needs `IMESSAGE_ID` (a phone number or Apple ID email) and only works on macOS.
-
-## Logging
-
-One log file per task attempt in `logs/`, capturing CLI output and exit codes. Files are named `{timestamp}_{task-slug}.log`.
+All fields are optional. Telegram requires both `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID`. iMessage requires `IMESSAGE_ID` (phone number or Apple ID)
+and only works on macOS. You can also set these as environment variables.
 
 ## Project checks
 
-Loop auto-detects what to run based on project files:
+McLoop auto-detects what to run:
 
-| File | Commands |
-|------|----------|
+| File present | Command run |
+|---|---|
 | `pyproject.toml` with ruff config | `ruff check .` |
 | `pyproject.toml` with pytest config | `pytest` |
 | `package.json` with test script | `npm test` |
 | `Makefile` | `make check` |
+
+## Logging
+
+One log file per task attempt in `logs/`, named `{timestamp}_{task-slug}.log`.
+Each log captures the full CLI output and exit code.
+
+## Requirements
+
+- Python >= 3.11
+- `claude` CLI on PATH
+- macOS for iMessage notifications (Telegram works anywhere)
 
 ## Development
 
@@ -122,14 +201,8 @@ ruff format --check .     # Format check
 pytest                    # Tests
 ```
 
-## Requirements
-
-- Python >= 3.11
-- `claude` CLI on PATH
-- macOS (for iMessage notifications, Telegram works anywhere)
-
 ## Author
 
-**Michael H. Coen**
-Email: mhcoen@gmail.com | mhcoen@alum.mit.edu
-GitHub: [@mhcoen](https://github.com/mhcoen)
+**Michael H. Coen**  
+mhcoen@gmail.com | mhcoen@alum.mit.edu  
+[@mhcoen](https://github.com/mhcoen)
