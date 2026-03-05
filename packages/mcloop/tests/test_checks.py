@@ -83,6 +83,20 @@ def test_load_config_commands_checks_not_list(tmp_path):
 
 
 @patch("mcloop.checks.subprocess.run")
+def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
+    # No mcloop.json present; pyproject.toml should trigger auto-detection
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="ruff check .", returncode=0, stdout="All good\n", stderr=""
+    )
+    result = run_checks(tmp_path)
+    assert result.passed
+    assert mock_run.call_count == 1
+    called_cmd = mock_run.call_args[0][0]
+    assert called_cmd == "ruff check ."
+
+
+@patch("mcloop.checks.subprocess.run")
 def test_run_checks_uses_config_commands(mock_run, tmp_path):
     (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["echo hello"]}))
     # Also add a pyproject.toml to ensure auto-detect is NOT used

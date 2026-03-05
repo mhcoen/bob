@@ -20,7 +20,7 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] If no remote exists, skip the push silently
   - [x] Create the remote repo with gh repo create if it does not exist
 - [ ] Support a mcloop.json config file for custom check commands
-  - [ ] If mcloop.json exists with a "checks" array, run those commands instead of auto-detecting
+  - [x] If mcloop.json exists with a "checks" array, run those commands instead of auto-detecting
   - [ ] Fall back to auto-detection when no config file is present
   - [ ] Document mcloop.json in the README
 - [ ] Add a mcloop sync command
