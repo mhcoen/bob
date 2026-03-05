@@ -49,7 +49,8 @@ over-abstraction. This is a simple tool and should stay that way.
 - [ ] Main loop: parse, execute, verify, commit, notify, repeat
 ```
 
-This is the PLAN.md that was used to build McLoop itself.
+This is the PLAN.md that was used to build McLoop itself. See
+[PLAN.EXAMPLE.md](PLAN.EXAMPLE.md) for the full version with subtasks.
 
 The description runs from the top of the file down to the first checkbox. It's
 included in every CLI invocation, so every session has context about what the
