@@ -216,6 +216,25 @@ McLoop auto-detects what to run:
 | `Package.swift` | `swift build` |
 | `Makefile` | `make check` |
 
+### mcloop.json
+
+To override auto-detection, add an `mcloop.json` file to your project root
+with a `checks` array:
+
+```json
+{
+  "checks": [
+    "ruff check .",
+    "pytest",
+    "mypy src/"
+  ]
+}
+```
+
+When `mcloop.json` is present with a `checks` array, McLoop runs those
+commands in order and skips auto-detection entirely. If the file is absent or
+malformed, McLoop falls back to auto-detection.
+
 McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task
 is treated as failed and retried.
