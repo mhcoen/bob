@@ -279,6 +279,101 @@ def run_sync(
     )
 
 
+def gather_audit_context(project_dir: Path) -> dict[str, str]:
+    """Collect README.md, CLAUDE.md, and all Python source files for auditing."""
+    context: dict[str, str] = {}
+
+    for name in ("README.md", "CLAUDE.md"):
+        path = project_dir / name
+        if path.exists():
+            context[name] = path.read_text()
+
+    for path in sorted(project_dir.rglob("*.py")):
+        if ".git" not in path.parts:
+            rel = str(path.relative_to(project_dir))
+            try:
+                context[rel] = path.read_text()
+            except Exception:
+                pass
+
+    return context
+
+
+def build_audit_prompt(context: dict[str, str]) -> str:
+    """Build the prompt for the audit Claude session."""
+    parts = []
+    for name, content in context.items():
+        parts.append(f"=== {name} ===\n{content}")
+    context_block = "\n\n".join(parts)
+
+    instructions = (
+        "You are auditing a Python codebase for bugs.\n\n"
+        "Your task: read all source files provided and identify actual defects only.\n\n"
+        "Include ONLY:\n"
+        "- Crashes (unhandled exceptions, index errors, assertion failures, etc.)\n"
+        "- Incorrect behavior (logic errors, wrong output, off-by-one errors)\n"
+        "- Unhandled errors (missing error handling for operations that can fail, "
+        "unchecked return values that could cause silent failures)\n"
+        "- Security issues (command injection, path traversal, insecure defaults)\n\n"
+        "Do NOT include:\n"
+        "- Style issues or formatting problems\n"
+        "- Refactoring suggestions\n"
+        "- Performance improvements\n"
+        "- Missing documentation\n"
+        "- Hypothetical issues with no evidence in the code\n\n"
+        "Write your findings to BUGS.md in this exact format:\n"
+        "# Bugs\n\n"
+        "## <file>:<line> — <short title>\n"
+        "**Severity**: high|medium|low\n"
+        "<description of the defect and why it is a bug>\n\n"
+        "If no bugs are found, write BUGS.md containing only:\n"
+        "# Bugs\n\n"
+        "No bugs found.\n\n"
+        "Source code follows.\n\n"
+    )
+    return instructions + context_block
+
+
+def run_audit(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    model: str | None = None,
+) -> RunResult:
+    """Launch a Claude Code session to audit the codebase and write BUGS.md."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    context = gather_audit_context(project_dir)
+    prompt = build_audit_prompt(context)
+    cmd = _build_command("claude", prompt, model=model)
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=project_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    output_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        output_lines.append(line)
+        _print_stream_event(line)
+    process.wait()
+
+    output = "".join(output_lines)
+    log_path = _write_log(log_dir, "audit", cmd, output, process.returncode)
+
+    return RunResult(
+        success=process.returncode == 0,
+        output=output,
+        exit_code=process.returncode,
+        log_path=log_path,
+    )
+
+
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
     return slug.strip("-")[:50]

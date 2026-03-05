@@ -52,6 +52,17 @@ def test_sync_subcommand_with_file():
     assert args.file == "custom.md"
 
 
+def test_audit_subcommand():
+    args = _parse("audit")
+    assert args.command == "audit"
+
+
+def test_audit_subcommand_with_file():
+    args = _parse("--file", "custom.md", "audit")
+    assert args.command == "audit"
+    assert args.file == "custom.md"
+
+
 def test_no_subcommand_command_is_none():
     args = _parse("--dry-run")
     assert args.command is None

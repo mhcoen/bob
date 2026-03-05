@@ -8,7 +8,9 @@ from mcloop.runner import (
     _build_command,
     _slugify,
     _write_log,
+    build_audit_prompt,
     build_sync_prompt,
+    gather_audit_context,
     gather_sync_context,
 )
 
@@ -204,3 +206,89 @@ def test_build_sync_prompt_problems_report_format():
 def test_build_sync_prompt_no_problems_instruction():
     prompt = build_sync_prompt({})
     assert "No problems found." in prompt
+
+
+# --- gather_audit_context ---
+
+
+def test_gather_audit_context_reads_readme(tmp_path):
+    (tmp_path / "README.md").write_text("# Readme")
+    ctx = gather_audit_context(tmp_path)
+    assert ctx["README.md"] == "# Readme"
+
+
+def test_gather_audit_context_reads_claude_md(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("instructions")
+    ctx = gather_audit_context(tmp_path)
+    assert ctx["CLAUDE.md"] == "instructions"
+
+
+def test_gather_audit_context_skips_missing_files(tmp_path):
+    ctx = gather_audit_context(tmp_path)
+    assert "README.md" not in ctx
+    assert "CLAUDE.md" not in ctx
+
+
+def test_gather_audit_context_includes_python_source(tmp_path):
+    (tmp_path / "app.py").write_text("x = 1")
+    ctx = gather_audit_context(tmp_path)
+    assert "app.py" in ctx
+    assert ctx["app.py"] == "x = 1"
+
+
+def test_gather_audit_context_excludes_git_dir(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    ctx = gather_audit_context(tmp_path)
+    assert not any(".git" in k for k in ctx)
+
+
+def test_gather_audit_context_omits_plan_md(tmp_path):
+    (tmp_path / "PLAN.md").write_text("# Plan")
+    ctx = gather_audit_context(tmp_path)
+    assert "PLAN.md" not in ctx
+
+
+# --- build_audit_prompt ---
+
+
+def test_build_audit_prompt_includes_source():
+    ctx = {"app.py": "x = 1", "README.md": "# Hi"}
+    prompt = build_audit_prompt(ctx)
+    assert "=== app.py ===" in prompt
+    assert "x = 1" in prompt
+    assert "=== README.md ===" in prompt
+
+
+def test_build_audit_prompt_defect_categories():
+    prompt = build_audit_prompt({})
+    assert "Crashes" in prompt
+    assert "Incorrect behavior" in prompt
+    assert "Unhandled errors" in prompt
+    assert "Security issues" in prompt
+
+
+def test_build_audit_prompt_exclusions():
+    prompt = build_audit_prompt({})
+    assert "Style" in prompt or "style" in prompt
+    assert "Refactoring" in prompt or "refactoring" in prompt
+
+
+def test_build_audit_prompt_bugs_md_output():
+    prompt = build_audit_prompt({})
+    assert "BUGS.md" in prompt
+
+
+def test_build_audit_prompt_no_bugs_instruction():
+    prompt = build_audit_prompt({})
+    assert "No bugs found." in prompt
+
+
+def test_build_audit_prompt_format_severity():
+    prompt = build_audit_prompt({})
+    assert "Severity" in prompt
+
+
+def test_build_audit_prompt_empty_context():
+    prompt = build_audit_prompt({})
+    assert "BUGS.md" in prompt
+    assert "No bugs found." in prompt

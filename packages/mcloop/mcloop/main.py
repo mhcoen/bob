@@ -18,7 +18,7 @@ from mcloop.ratelimit import (
     is_rate_limited,
     wait_for_reset,
 )
-from mcloop.runner import run_sync, run_task
+from mcloop.runner import run_audit, run_sync, run_task
 
 
 def main() -> None:
@@ -31,6 +31,10 @@ def main() -> None:
 
     if args.command == "sync":
         _cmd_sync(checklist_path)
+        return
+
+    if args.command == "audit":
+        _cmd_audit(checklist_path)
         return
 
     if args.dry_run:
@@ -182,7 +186,23 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
+    subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
     return parser.parse_args()
+
+
+def _cmd_audit(checklist_path: Path) -> None:
+    """Launch a Claude Code session to audit the codebase and write BUGS.md."""
+    project_dir = checklist_path.parent
+    log_dir = project_dir / "logs"
+    result = run_audit(project_dir, log_dir)
+    if not result.success:
+        print(f"audit: session exited with code {result.exit_code}", file=sys.stderr)
+        sys.exit(result.exit_code)
+    bugs_path = project_dir / "BUGS.md"
+    if bugs_path.exists():
+        print(bugs_path.read_text())
+    else:
+        print("audit: BUGS.md was not written", file=sys.stderr)
 
 
 def _cmd_sync(checklist_path: Path) -> None:
