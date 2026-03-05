@@ -98,6 +98,10 @@ def _find_task_line(lines: list[str], task: Task) -> int:
         m = CHECKBOX_RE.match(line)
         if m and m.group(2) == " " and m.group(3).strip() == task.text:
             return i
+    if task.line_number >= len(lines):
+        raise IndexError(
+            f"Task line {task.line_number} out of range (file has {len(lines)} lines)"
+        )
     return task.line_number
 
 
@@ -121,7 +125,12 @@ def mark_failed(path: str | Path, task: Task) -> None:
     lines = p.read_text().splitlines()
     idx = _find_task_line(lines, task)
     line = lines[idx]
-    lines[idx] = line.replace("- [ ]", "- [!]", 1)
+    new_line = line.replace("- [ ]", "- [!]", 1)
+    if new_line == line:
+        raise RuntimeError(
+            f"Could not mark task as failed: line {idx} does not contain '- [ ]': {line!r}"
+        )
+    lines[idx] = new_line
     p.write_text("\n".join(lines) + "\n")
 
 

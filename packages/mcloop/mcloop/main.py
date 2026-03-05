@@ -539,29 +539,56 @@ def _run_audit_fix_cycle(
         bugs_path.unlink()
         return
 
-    print("\n>>> Bugs found, running fix session...", flush=True)
-    fix_result = run_bug_fix(
-        project_dir, log_dir, model=model,
-    )
-    bugs_path.unlink(missing_ok=True)
-
-    if not fix_result.success:
+    max_fix_attempts = 3
+    for attempt in range(1, max_fix_attempts + 1):
         print(
-            f"bug-fix: session exited with code {fix_result.exit_code}",
+            f"\n>>> Fixing bugs "
+            f"(attempt {attempt}/{max_fix_attempts})...",
             flush=True,
         )
-        return
+        fix_result = run_bug_fix(
+            project_dir, log_dir, model=model,
+        )
 
-    if _has_meaningful_changes(project_dir):
+        if not fix_result.success:
+            print(
+                "bug-fix: session exited with "
+                f"code {fix_result.exit_code}",
+                flush=True,
+            )
+            break
+
+        if not _has_meaningful_changes(project_dir):
+            print(
+                "bug-fix: no changes made",
+                flush=True,
+            )
+            break
+
         check_result = run_checks(project_dir)
         if check_result.passed:
             _commit(project_dir, "Fix bugs from audit")
-        else:
-            print(
-                f"\n!!! Bug fix checks failed: {check_result.command}",
-                flush=True,
-            )
-            _print_error_tail(check_result.output)
+            bugs_path.unlink(missing_ok=True)
+            return
+
+        error_ctx = (
+            f"Command: {check_result.command}\n"
+            + _tail(check_result.output, 50)
+        )
+        print(
+            f"\n!!! Bug fix checks failed "
+            f"(attempt {attempt}/{max_fix_attempts})",
+            flush=True,
+        )
+        _print_error_tail(check_result.output)
+
+        # Append error to BUGS.md so next attempt sees it
+        bugs_path.write_text(
+            bugs_content
+            + "\n\n## Post-fix check failure\n"
+            + error_ctx
+        )
+
 
 
 def _checkpoint(project_dir: Path) -> None:

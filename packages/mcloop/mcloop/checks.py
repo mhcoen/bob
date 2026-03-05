@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,8 +45,8 @@ def run_checks(project_dir: str | Path) -> CheckResult:
     for cmd in commands:
         try:
             result = subprocess.run(
-                cmd,
-                shell=True,
+                shlex.split(cmd),
+                shell=False,
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
