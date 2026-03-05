@@ -580,26 +580,53 @@ def _run_audit_fix_cycle(
         )
         return
 
-    print("\n>>> Running bug audit...", flush=True)
-    audit_result = run_audit(project_dir, log_dir, model=model)
-    if not audit_result.success:
-        print(
-            f"audit: session exited with code {audit_result.exit_code}, skipping fix",
-            flush=True,
-        )
-        return
-
     bugs_path = project_dir / "BUGS.md"
-    if not bugs_path.exists():
-        print("audit: BUGS.md not written, skipping fix", flush=True)
-        return
 
-    bugs_content = bugs_path.read_text()
-    if not bugs_md_has_bugs(bugs_content):
-        print("audit: no bugs found", flush=True)
-        bugs_path.unlink()
-        _save_audit_hash(project_dir)
-        return
+    # Resume from existing BUGS.md if present
+    if bugs_path.exists():
+        bugs_content = bugs_path.read_text()
+        if bugs_md_has_bugs(bugs_content):
+            print(
+                "\n>>> Found existing BUGS.md, "
+                "resuming fix cycle...",
+                flush=True,
+            )
+        else:
+            print(
+                "\n>>> Existing BUGS.md has no bugs",
+                flush=True,
+            )
+            bugs_path.unlink()
+            _save_audit_hash(project_dir)
+            return
+    else:
+        print("\n>>> Running bug audit...", flush=True)
+        audit_result = run_audit(
+            project_dir, log_dir, model=model,
+        )
+        if not audit_result.success:
+            print(
+                "audit: session exited with "
+                f"code {audit_result.exit_code}, "
+                "skipping fix",
+                flush=True,
+            )
+            return
+
+        if not bugs_path.exists():
+            print(
+                "audit: BUGS.md not written, "
+                "skipping fix",
+                flush=True,
+            )
+            return
+
+        bugs_content = bugs_path.read_text()
+        if not bugs_md_has_bugs(bugs_content):
+            print("audit: no bugs found", flush=True)
+            bugs_path.unlink()
+            _save_audit_hash(project_dir)
+            return
 
     max_fix_attempts = 3
     for attempt in range(1, max_fix_attempts + 1):

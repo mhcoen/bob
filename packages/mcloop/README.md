@@ -19,6 +19,10 @@ mcloop                    # Run (reads PLAN.md by default)
 mcloop --file other.md    # Use a different file
 mcloop --dry-run          # Show what would run, don't execute
 mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
+mcloop --model opus       # Use a specific Claude model
+mcloop --no-audit         # Skip the post-completion bug audit
+mcloop sync               # Sync PLAN.md with the codebase
+mcloop audit              # Run a standalone bug audit
 ```
 
 ## Writing a PLAN.md
@@ -113,24 +117,37 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 ## How McLoop works
 
 ```
+0. Safety commit all tracked modified files (skipped if clean)
 while unchecked items remain:
     1. Find next unchecked item (depth-first)
     2. Launch a fresh Claude Code session with a clean context.
        The CLI receives: project description + current task + your codebase.
+       On retries, the previous error output is included so Claude can fix it.
     3. Verify the session produced meaningful file changes
     4. Run project checks (tests, lint, auto-detected from project files)
-    5. If checks pass  -> commit, check the box, notify, continue
-    6. If checks fail  -> retry (up to --max-retries)
+    5. If checks pass  -> commit, push, check the box, notify, continue
+    6. If checks fail  -> retry with error context (up to --max-retries)
     7. If retries exhausted -> mark [!], notify, stop
     8. If rate-limited -> pause, wait for reset, resume
+9. Run bug audit/fix cycle (unless --no-audit)
+10. Print summary with elapsed time and whitelist suggestions
 ```
 
 McLoop streams Claude Code's output in real time, showing text, tool calls,
 and results as they happen. Each task is numbered (e.g., "Task 3.2)") to make
-it easy to track progress through the checklist.
+it easy to track progress through the checklist. Elapsed time is shown for
+each completed task and in the final summary.
+
+When a task or check fails, McLoop prints the error output directly in the
+terminal and includes it in the prompt for the next retry so Claude can fix
+the problem rather than repeating the same mistake.
 
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
+
+After each successful commit, McLoop pushes to the remote. If no remote
+exists, it creates a private GitHub repo using `gh repo create` and sets up
+the origin automatically.
 
 ## Unattended operation
 
@@ -187,6 +204,10 @@ without a notification. Safe read-only commands like `ls`, `cat`, `head`,
 `tail`, `which`, and `stat` are good candidates. See `settings.example.json`
 for a recommended baseline.
 
+If you use [RTK](https://github.com/rtk-ai/rtk) to reduce token usage, the
+hook automatically unwraps `rtk proxy` commands before matching. So
+`Bash(ruff:*)` in your allowlist will also permit `rtk proxy ruff check .`.
+
 ## Notifications
 
 McLoop sends Telegram notifications for task completions, failures, rate limits,
@@ -239,6 +260,57 @@ McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task
 is treated as failed and retried.
 
+## Bug audit
+
+After all checklist tasks complete, McLoop automatically runs a bug audit
+cycle (unless `--no-audit` is passed). It launches a Claude Code session that
+reads the entire codebase and writes a `BUGS.md` file listing actual defects:
+crashes, incorrect behavior, unhandled errors, and security issues. Style
+issues and refactoring suggestions are excluded.
+
+If bugs are found, McLoop launches a fix session scoped to only the bugs in
+`BUGS.md`. If the fix introduces check failures (e.g., a lint error), the
+error output is appended to `BUGS.md` and the fix is retried up to 3 times.
+On success, `BUGS.md` is deleted and the fix is committed. On failure,
+`BUGS.md` is left in place so you can see what was found.
+
+If McLoop starts and finds an existing `BUGS.md`, it skips the audit and
+resumes the fix cycle directly.
+
+To prevent the audit from running endlessly on the same code, McLoop writes
+the current git hash to `.mcloop-last-audit` after a successful audit cycle.
+On the next run, if no source files have changed since that hash, the audit
+is skipped. Delete `.mcloop-last-audit` to force a re-audit, or run
+`mcloop audit` for a standalone audit at any time.
+
+## Syncing PLAN.md
+
+Run `mcloop sync` to reconcile PLAN.md with the actual codebase. This
+launches a Claude Code session that reads the project files, git history, and
+existing plan, then:
+
+1. Appends checked items for any features, fixes, or changes reflected in the
+   code but not yet in PLAN.md, matching the granularity of existing items.
+2. Flags problems: checked items with no corresponding code, unchecked items
+   that appear already implemented, and descriptions that have drifted from
+   what the code actually does.
+
+Before writing, McLoop shows a diff of the proposed changes and asks for
+confirmation. No existing items are modified or removed.
+
+This is useful for keeping PLAN.md accurate after manual edits, interactive
+Claude Code sessions, or any other changes made outside McLoop.
+
+## Summary and whitelist suggestions
+
+When McLoop finishes (whether all tasks completed or one failed), it prints a
+summary showing completed tasks with elapsed times, the failed task with error
+details, remaining task count, and total elapsed time.
+
+If you approved any commands via Telegram during the run, McLoop suggests
+adding them to your allowlist in the format used by `settings.json`. Dangerous
+commands (like `rm`, `sudo`, `chmod`) are never suggested even if approved.
+
 ## Logging
 
 One log file per task attempt in `logs/`, named `{timestamp}_{task-slug}.log`.
@@ -248,6 +320,7 @@ Each log captures the full CLI output and exit code.
 
 - Python >= 3.11
 - `claude` CLI on PATH
+- `gh` CLI on PATH (for automatic GitHub repo creation and push)
 - macOS for iMessage notifications (Telegram works anywhere)
 
 ## Development
