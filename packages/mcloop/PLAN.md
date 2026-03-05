@@ -16,7 +16,7 @@ over-abstraction. This is a simple tool and should stay that way.
   - [!] Skip if the working tree is clean
   - [x] Do not stage untracked files
 - [ ] Push to origin after each successful commit
-  - [ ] Add git push to _commit() after git commit
+  - [x] Add git push to _commit() after git commit
   - [ ] If no remote exists, skip the push silently
   - [ ] Create the remote repo with gh repo create if it does not exist
 - [ ] Support a mcloop.json config file for custom check commands

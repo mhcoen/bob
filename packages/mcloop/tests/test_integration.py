@@ -307,8 +307,10 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
 
 @patch("mcloop.main.subprocess.run")
 def test_commit_pushes_after_commit(mock_run, tmp_path):
-    """_commit calls git push after committing."""
-    mock_run.return_value = MagicMock()
+    """_commit calls git push after committing when a remote exists."""
+    remote_result = MagicMock()
+    remote_result.stdout = "origin\n"
+    mock_run.return_value = remote_result
 
     _commit(tmp_path, "some task")
 
@@ -318,6 +320,19 @@ def test_commit_pushes_after_commit(mock_run, tmp_path):
     commit_idx = commands.index(["git", "commit", "-m", "Complete: some task"])
     push_idx = commands.index(["git", "push"])
     assert push_idx > commit_idx
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_skips_push_when_no_remote(mock_run, tmp_path):
+    """_commit skips git push silently when no remote is configured."""
+    no_remote_result = MagicMock()
+    no_remote_result.stdout = ""
+    mock_run.return_value = no_remote_result
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    assert ["git", "push"] not in commands
 
 
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))

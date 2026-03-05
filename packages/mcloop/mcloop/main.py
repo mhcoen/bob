@@ -384,6 +384,8 @@ def _commit(project_dir: Path, task_text: str) -> None:
             cwd=project_dir,
             capture_output=True,
         )
-        subprocess.run(["git", "push"], cwd=project_dir, capture_output=True)
+        result = subprocess.run(["git", "remote"], cwd=project_dir, capture_output=True, text=True)
+        if result.stdout.strip():
+            subprocess.run(["git", "push"], cwd=project_dir, capture_output=True)
     except Exception:
         pass
