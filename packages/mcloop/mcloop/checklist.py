@@ -134,6 +134,7 @@ def _auto_check_parents(path: Path) -> None:
                 visit(task.children)
                 if not task.checked and all(c.checked for c in task.children):
                     _check_line(lines, task.line_number)
+                    task.checked = True
                     changed = True
 
     visit(tasks)

@@ -189,3 +189,133 @@ def test_parse_description_empty(tmp_path):
     f.write_text(md)
 
     assert parse_description(f) == ""
+
+
+def test_parse_uppercase_x(tmp_path):
+    f = tmp_path / "tasks.md"
+    f.write_text("- [X] Done with uppercase\n- [ ] Not done\n")
+    tasks = parse(f)
+    assert tasks[0].checked
+    assert not tasks[1].checked
+
+
+def test_parse_empty_file(tmp_path):
+    f = tmp_path / "tasks.md"
+    f.write_text("")
+    tasks = parse(f)
+    assert tasks == []
+
+
+def test_parse_no_checkboxes(tmp_path):
+    f = tmp_path / "tasks.md"
+    f.write_text("# Project\n\nJust some text, no tasks.\n")
+    tasks = parse(f)
+    assert tasks == []
+
+
+def test_find_next_empty_list():
+    assert find_next([]) is None
+
+
+def test_deep_nesting(tmp_path):
+    md = """\
+- [ ] Level 0
+  - [ ] Level 1
+    - [ ] Level 2
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert len(tasks) == 1
+    assert len(tasks[0].children) == 1
+    assert len(tasks[0].children[0].children) == 1
+    assert tasks[0].children[0].children[0].text == "Level 2"
+
+    nxt = find_next(tasks)
+    assert nxt.text == "Level 2"
+
+
+def test_check_off_deep_auto_checks_all_parents(tmp_path):
+    md = """\
+- [ ] L0
+  - [ ] L1
+    - [ ] L2
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    leaf = tasks[0].children[0].children[0]
+    check_off(f, leaf)
+
+    tasks2 = parse(f)
+    assert tasks2[0].checked
+    assert tasks2[0].children[0].checked
+    assert tasks2[0].children[0].children[0].checked
+
+
+def test_mixed_checked_and_unchecked_children(tmp_path):
+    md = """\
+- [ ] Parent
+  - [x] Done child
+  - [ ] Undone child
+  - [!] Failed child
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    nxt = find_next(tasks)
+    assert nxt.text == "Undone child"
+
+
+def test_multiple_roots_mixed(tmp_path):
+    md = """\
+- [x] Root 1
+- [!] Root 2
+- [ ] Root 3
+  - [x] Child A
+  - [ ] Child B
+- [ ] Root 4
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert len(tasks) == 4
+    nxt = find_next(tasks)
+    assert nxt.text == "Child B"
+
+
+def test_mark_failed_preserves_other_tasks(tmp_path):
+    md = "- [ ] Task A\n- [ ] Task B\n- [ ] Task C\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    mark_failed(f, tasks[1])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].failed
+    assert tasks2[1].failed
+    assert not tasks2[2].failed
+    assert not tasks2[0].checked
+    assert not tasks2[2].checked
+
+
+def test_check_off_does_not_auto_check_parent_with_failed_child(tmp_path):
+    md = """\
+- [ ] Parent
+  - [!] Failed child
+  - [ ] Good child
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    good_child = tasks[0].children[1]
+    check_off(f, good_child)
+
+    tasks2 = parse(f)
+    assert not tasks2[0].checked  # parent should NOT auto-check
+    assert tasks2[0].children[1].checked

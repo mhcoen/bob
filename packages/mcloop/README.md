@@ -1,6 +1,6 @@
 # McLoop
 
-McLoop lets you run Claude Code (or Codex) for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it alerts you in real time via Telegram so you can approve from your phone and it keeps going.
+McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
 
 Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
@@ -28,11 +28,10 @@ A `PLAN.md` has two parts: a **project description**, then a **checklist**.
 ```markdown
 # McLoop
 
-A Python CLI that grinds through a markdown checklist using AI coding CLIs.
-Read PLAN.md, find the next unchecked task, launch a fresh CLI session to do
-it, run the project's tests and linter, commit if everything passes, check off
-the item, and repeat. Notify the user via Telegram and iMessage on completions,
-failures, and rate limits.
+McLoop lets you run Claude Code for hours at a time without babysitting it.
+You write a task list in PLAN.md. McLoop works through it continuously,
+launching a fresh CLI session per task, running your tests and linter,
+committing only if everything passes, and notifying you of progress.
 
 Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
@@ -61,6 +60,17 @@ Because each session starts fresh, the CLI can only work from what's in the
 repo at that moment. Keep your description, inline comments, and any other
 markdown docs current. They are the CLI's only memory of decisions made in
 previous sessions.
+
+PLAN.md is a task queue, not a complete record of how the project was built.
+Changes made outside McLoop, whether in an editor, an interactive Claude Code
+session, or by hand, are not reflected in the file. The codebase itself is the
+source of truth. PLAN.md drives what happens next, but it cannot reproduce what
+already happened.
+
+You can partially close this gap by asking Claude Code to review the codebase
+and update PLAN.md with any work that isn't already captured, adding checked
+items for features or fixes it finds in the code. This won't catch everything,
+but it makes the file a more accurate record of what has actually been built.
 
 **Tip:** You can use your favorite chat interface (e.g., Claude, ChatGPT) to
 help write the PLAN.md file. Feed it the README.md along with a description of
@@ -105,14 +115,19 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 ```
 while unchecked items remain:
     1. Find next unchecked item (depth-first)
-    2. Launch a fresh Claude Code (or Codex) session with a clean context.
+    2. Launch a fresh Claude Code session with a clean context.
        The CLI receives: project description + current task + your codebase.
-    3. Run project checks (tests, lint, auto-detected from project files)
-    4. If checks pass  -> commit, check the box, notify, continue
-    5. If checks fail  -> retry (up to --max-retries)
-    6. If retries exhausted -> mark [!], notify, stop
-    7. If rate-limited -> pause, wait for reset, resume
+    3. Verify the session produced meaningful file changes
+    4. Run project checks (tests, lint, auto-detected from project files)
+    5. If checks pass  -> commit, check the box, notify, continue
+    6. If checks fail  -> retry (up to --max-retries)
+    7. If retries exhausted -> mark [!], notify, stop
+    8. If rate-limited -> pause, wait for reset, resume
 ```
+
+McLoop streams Claude Code's output in real time, showing text, tool calls,
+and results as they happen. Each task is numbered (e.g., "Task 3.2)") to make
+it easy to track progress through the checklist.
 
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
@@ -132,11 +147,13 @@ catastrophic by accident.
 call Claude Code makes as a `PreToolUse` hook:
 
 - **Whitelisted commands** (in `permissions.allow`) pass through automatically.
-- **Everything else** sends you a Telegram message describing exactly what Claude
-  Code wants to do, then pauses and waits for your approval.
-
-To approve or deny from your phone, use the **Remote Control** feature in the
-Claude Code mobile app. McLoop resumes immediately once you respond.
+- **Everything else** sends you a Telegram message with **Approve**, **Deny**,
+  and **Allow All Session** buttons describing exactly what Claude Code wants to
+  do, then pauses and waits for your response. McLoop resumes immediately once
+  you tap a button. **Allow All Session** remembers the approved command pattern
+  for 24 hours, so identical commands pass through automatically for the rest of
+  the session. If no response is received within 10 minutes, the command is
+  denied automatically.
 
 ### Setup
 
@@ -162,8 +179,13 @@ merge it with your existing settings), then update the hook path:
 }
 ```
 
+Each shell command gets its own approval. McLoop instructs Claude Code to avoid
+chaining commands with `&&` or `;` so every operation is individually gated.
+
 Add any commands you always trust to `permissions.allow` so they pass through
-without a notification. See `settings.example.json` for a recommended baseline.
+without a notification. Safe read-only commands like `ls`, `cat`, `head`,
+`tail`, `which`, and `stat` are good candidates. See `settings.example.json`
+for a recommended baseline.
 
 ## Notifications
 
@@ -191,7 +213,12 @@ McLoop auto-detects what to run:
 | `pyproject.toml` with ruff config | `ruff check .` |
 | `pyproject.toml` with pytest config | `pytest` |
 | `package.json` with test script | `npm test` |
+| `Package.swift` | `swift build` |
 | `Makefile` | `make check` |
+
+McLoop also verifies that each task produces meaningful file changes beyond
+PLAN.md and logs. If a session completes without writing any code, the task
+is treated as failed and retried.
 
 ## Logging
 

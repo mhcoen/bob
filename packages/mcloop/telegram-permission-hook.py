@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: Telegram notification + Remote Control approval.
+"""PreToolUse hook: Telegram approval gate with session memory.
 
 Whitelisted commands (from settings.json permissions.allow) pass through.
-Everything else sends a Telegram notification and returns "ask" so Claude Code
-shows a permission prompt that the user can approve via Remote Control.
+Everything else sends a Telegram message with Approve/Deny/Allow All buttons
+and blocks until the user responds. "Allow All" remembers the tool pattern
+for the rest of the session.
 """
 
 import fnmatch
@@ -18,6 +19,10 @@ from pathlib import Path
 
 ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
+
+POLL_INTERVAL = 2  # seconds between Telegram polling
+POLL_TIMEOUT = 600  # max seconds to wait for a response
 
 
 def _load_env_file():
@@ -40,6 +45,64 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or _env.get("TELEGRAM_CHAT_ID", "")
 
 RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
 
+
+# --- Session memory ---
+
+def _tool_pattern(tool_name, tool_input):
+    """Create a pattern key for session memory. Uses the full command."""
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "").strip()
+        return f"Bash:{cmd}"
+    if tool_name in ("Edit", "Read", "Write"):
+        path = tool_input.get("file_path", "")
+        return f"{tool_name}:{path}"
+    return tool_name
+
+
+def _load_session():
+    """Load session-approved patterns from temp file."""
+    try:
+        data = json.loads(SESSION_FILE.read_text())
+        # Expire after 24 hours
+        if data.get("created", 0) < time.time() - 86400:
+            return set()
+        return set(data.get("patterns", []))
+    except (OSError, json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _save_session(patterns):
+    """Save session-approved patterns to temp file."""
+    try:
+        # Preserve creation time if file exists
+        try:
+            existing = json.loads(SESSION_FILE.read_text())
+            created = existing.get("created", time.time())
+        except (OSError, json.JSONDecodeError):
+            created = time.time()
+        SESSION_FILE.write_text(json.dumps({
+            "created": created,
+            "patterns": sorted(patterns),
+        }))
+        _dbg(f"saved session: {sorted(patterns)}")
+    except Exception as e:
+        _dbg(f"session save FAILED: {e}")
+
+
+def is_session_allowed(tool_name, tool_input):
+    """Check if this tool pattern was approved for the session."""
+    pattern = _tool_pattern(tool_name, tool_input)
+    return pattern in _load_session()
+
+
+def remember_session(tool_name, tool_input):
+    """Add this tool pattern to the session allow list."""
+    patterns = _load_session()
+    patterns.add(_tool_pattern(tool_name, tool_input))
+    _save_session(patterns)
+
+
+# --- Permission rules ---
 
 def _respond(decision, reason=""):
     """Write a properly formatted PreToolUse hook response to stdout."""
@@ -120,16 +183,94 @@ def is_allowed(tool_name, tool_input):
 
 # --- Telegram ---
 
-def telegram_api(method, **params):
+def telegram_api(method, data=None):
+    """Call a Telegram Bot API method. Use data dict for POST body (supports nested JSON)."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    data = urllib.parse.urlencode(params).encode()
-    req = urllib.request.Request(url, data=data)
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    if data is not None:
+        body = json.dumps(data).encode()
+        req = urllib.request.Request(url, data=body)
+        req.add_header("Content-Type", "application/json")
+    else:
+        req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
 
-def send_message(text):
-    return telegram_api("sendMessage", chat_id=CHAT_ID, text=text, parse_mode="Markdown")
+def send_approval_request(text):
+    """Send a message with inline Approve/Deny/Allow All buttons. Returns message_id."""
+    data = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": "Approve", "callback_data": "approve"},
+                    {"text": "Deny", "callback_data": "deny"},
+                ],
+                [
+                    {"text": "Allow All Session", "callback_data": "allow_session"},
+                ],
+            ]
+        },
+    }
+    result = telegram_api("sendMessage", data=data)
+    return result["result"]["message_id"]
+
+
+def update_message(message_id, text):
+    """Edit the approval message to show the decision (removes buttons)."""
+    data = {
+        "chat_id": CHAT_ID,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+    try:
+        telegram_api("editMessageText", data=data)
+    except Exception:
+        pass
+
+
+def poll_for_response(message_id):
+    """Poll getUpdates for a callback_query on our message."""
+    # Get the latest update_id to only look at new updates
+    initial = telegram_api("getUpdates", data={"limit": 1, "offset": -1})
+    offset = 0
+    if initial.get("result"):
+        offset = initial["result"][-1]["update_id"] + 1
+
+    deadline = time.time() + POLL_TIMEOUT
+    while time.time() < deadline:
+        try:
+            updates = telegram_api("getUpdates", data={
+                "offset": offset,
+                "timeout": POLL_INTERVAL,
+                "allowed_updates": ["callback_query"],
+            })
+        except Exception:
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        for update in updates.get("result", []):
+            offset = update["update_id"] + 1
+            cb = update.get("callback_query")
+            if not cb:
+                continue
+            if cb.get("message", {}).get("message_id") != message_id:
+                continue
+
+            # Answer the callback to dismiss the spinner
+            try:
+                telegram_api("answerCallbackQuery", data={
+                    "callback_query_id": cb["id"],
+                })
+            except Exception:
+                pass
+
+            return cb["data"]  # "approve", "deny", or "allow_session"
+
+    return None  # timed out
 
 
 def format_tool_description(tool_name, tool_input):
@@ -151,13 +292,16 @@ def format_tool_description(tool_name, tool_input):
         return f"`{json.dumps(tool_input)[:200]}`"
 
 
+_DBG_PATH = Path.home() / ".claude" / "telegram-hook-debug.log"
+
+
 def _dbg(msg):
-    with open("/tmp/telegram-hook-debug.log", "a") as f:
+    with open(_DBG_PATH, "a") as f:
         f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
 
 
 def main():
-    _dbg(f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)}")
+    _dbg(f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)}, TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}")
 
     if not BOT_TOKEN or not CHAT_ID:
         _dbg("EXIT: no credentials, no opinion")
@@ -168,7 +312,6 @@ def main():
     tool_name = hook_input.get("tool_name", "unknown")
     tool_input = hook_input.get("tool_input", {})
     cwd = hook_input.get("cwd", "")
-    # Derive "user/project" identifier matching Remote Control labels
     home = str(Path.home())
     user = Path(home).name
     project = Path(cwd).name if cwd else "?"
@@ -181,31 +324,53 @@ def main():
         _respond("allow")
         return
 
-    # Not whitelisted. In interactive sessions, return no opinion so
-    # autoAllowBashIfSandboxed handles it. In unattended sessions (LOOP_ASK=1),
-    # notify via Telegram and return "ask" to gate via Remote Control.
-    unattended = os.environ.get("LOOP_ASK") or _env.get("LOOP_ASK")
-
-    if not unattended:
-        _dbg("EXIT: returning no opinion (interactive)")
-        json.dump({}, sys.stdout)
+    # Session-approved patterns pass through
+    if is_session_allowed(tool_name, tool_input):
+        pattern = _tool_pattern(tool_name, tool_input)
+        _dbg(f"EXIT: allowed by session memory ({pattern})")
+        _respond("allow", f"Session-approved: {pattern}")
         return
 
+    # Not whitelisted. Send Telegram with buttons and wait.
     desc = format_tool_description(tool_name, tool_input)
+    pattern = _tool_pattern(tool_name, tool_input)
+    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
+    label_prefix = f"[{task_label}] " if task_label else ""
     msg = (
-        f"*Permission needed* [{session_label}]\n\n"
+        f"*{label_prefix}Permission needed* [{session_label}]\n\n"
         f"Tool: *{tool_name}*\n{desc}\n\n"
-        f"Approve via Remote Control"
+        f"Pattern: `{pattern}`"
     )
 
     try:
-        send_message(msg)
-        _dbg("EXIT: notified")
+        message_id = send_approval_request(msg)
+        _dbg(f"sent approval request, message_id={message_id}")
     except Exception as e:
-        _dbg(f"EXIT: telegram send failed ({e})")
+        _dbg(f"EXIT: telegram send failed ({e}), no opinion")
+        json.dump({}, sys.stdout)
+        return
 
-    _dbg("EXIT: returning ask (unattended)")
-    _respond("ask", "Awaiting approval via Remote Control")
+    # Block and poll for the button press
+    _dbg("polling for response...")
+    decision = poll_for_response(message_id)
+
+    if decision == "approve":
+        update_message(message_id, f"{label_prefix}Approved: *{tool_name}*\n{desc}")
+        _dbg("EXIT: approved via Telegram")
+        _respond("allow", "Approved via Telegram")
+    elif decision == "allow_session":
+        remember_session(tool_name, tool_input)
+        update_message(message_id, f"{label_prefix}Approved (session): *{tool_name}*\n{desc}\nPattern `{pattern}` remembered")
+        _dbg(f"EXIT: session-approved via Telegram ({pattern})")
+        _respond("allow", f"Session-approved via Telegram: {pattern}")
+    elif decision == "deny":
+        update_message(message_id, f"{label_prefix}Denied: *{tool_name}*\n{desc}")
+        _dbg("EXIT: denied via Telegram")
+        _respond("deny", "Denied via Telegram")
+    else:
+        update_message(message_id, f"{label_prefix}Timed out: *{tool_name}*\n{desc}")
+        _dbg("EXIT: timed out, denying")
+        _respond("deny", "Timed out waiting for Telegram approval")
 
 
 if __name__ == "__main__":
@@ -213,7 +378,8 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         _dbg(f"EXIT: exception {e}, no opinion")
-        with open("/tmp/telegram-hook-error.log", "a") as f:
+        err_path = str(Path.home() / ".claude" / "telegram-hook-error.log")
+        with open(err_path, "a") as f:
             import traceback
             f.write(f"--- {time.strftime('%H:%M:%S')} ---\n")
             traceback.print_exc(file=f)

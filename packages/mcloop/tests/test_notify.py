@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from mcloop.notify import _escape_applescript, notify
+from mcloop.notify import _escape_applescript, _load_env, notify
 
 
 def test_escape_applescript():
@@ -114,3 +114,25 @@ def test_telegram_skips_when_no_token(mock_urlopen):
 
     _send_telegram("hello")
     mock_urlopen.assert_not_called()
+
+
+def test_load_env_parses_key_values(tmp_path):
+    env_file = tmp_path / "test.env"
+    env_file.write_text("KEY1=value1\nKEY2=value2\n# comment\n\nKEY3=val=ue3\n")
+    with patch("mcloop.notify.ENV_FILE", env_file):
+        vals = _load_env()
+    assert vals == {"KEY1": "value1", "KEY2": "value2", "KEY3": "val=ue3"}
+
+
+def test_load_env_missing_file(tmp_path):
+    with patch("mcloop.notify.ENV_FILE", tmp_path / "nonexistent"):
+        vals = _load_env()
+    assert vals == {}
+
+
+def test_escape_applescript_empty():
+    assert _escape_applescript("") == ""
+
+
+def test_escape_applescript_no_special():
+    assert _escape_applescript("hello world") == "hello world"

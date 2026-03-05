@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import json as _json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +25,7 @@ def run_task(
     project_dir: str | Path,
     log_dir: str | Path,
     description: str = "",
+    task_label: str = "",
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -34,24 +37,26 @@ def run_task(
         parts.append(f"Project context:\n{description}")
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
+    parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     prompt = "\n\n".join(parts)
     cmd = _build_command(cli, prompt)
-    env_extra = {"LOOP_ASK": "1"}
-
+    env = dict(os.environ)
+    if task_label:
+        env["MCLOOP_TASK_LABEL"] = task_label
     process = subprocess.Popen(
         cmd,
         cwd=project_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env={**dict(__import__("os").environ), **env_extra},
+        env=env,
     )
 
     output_lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
-        print(line, end="", flush=True)
         output_lines.append(line)
+        _print_stream_event(line)
     process.wait()
 
     output = "".join(output_lines)
@@ -67,11 +72,60 @@ def run_task(
 
 def _build_command(cli: str, task_text: str) -> list[str]:
     if cli == "claude":
-        return ["claude", "-p", task_text, "--allowedTools", "Edit,Write,Bash,Read,Glob,Grep"]
+        return [
+            "claude", "-p", task_text,
+            "--allowedTools", "Edit,Write,Bash,Read,Glob,Grep",
+            "--permission-mode", "default",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+        ]
     elif cli == "codex":
         return ["codex", "-q", task_text]
     else:
         raise ValueError(f"Unknown CLI: {cli}")
+
+
+def _print_stream_event(line: str) -> None:
+    """Parse a stream-json line and print relevant info."""
+    line = line.strip()
+    if not line:
+        return
+    try:
+        event = _json.loads(line)
+    except _json.JSONDecodeError:
+        print(line, flush=True)
+        return
+
+    etype = event.get("type", "")
+
+    # Streaming text tokens
+    if etype == "stream_event":
+        delta = event.get("event", {}).get("delta", {})
+        if delta.get("type") == "text_delta":
+            print(delta.get("text", ""), end="", flush=True)
+        return
+
+    # Tool use summary
+    if etype == "assistant" and "message" in event:
+        for block in event["message"].get("content", []):
+            if block.get("type") == "tool_use":
+                name = block.get("name", "")
+                tool_input = block.get("input", {})
+                if name == "Bash":
+                    print(f"\n>>> Bash: {tool_input.get('command', '')[:120]}", flush=True)
+                elif name in ("Write", "Edit"):
+                    print(f"\n>>> {name}: {tool_input.get('file_path', '')}", flush=True)
+                elif name == "Read":
+                    print(f"\n>>> Read: {tool_input.get('file_path', '')}", flush=True)
+                else:
+                    print(f"\n>>> {name}", flush=True)
+
+    # Tool results
+    if etype == "result":
+        result = event.get("result", "")
+        if isinstance(result, str) and result:
+            print(f"\n{result[:200]}", flush=True)
 
 
 def _slugify(text: str) -> str:

@@ -67,14 +67,18 @@ def get_available_cli(
     return None
 
 
-def wait_for_reset(state: RateLimitState, notify_fn=None) -> str:
+def wait_for_reset(
+    state: RateLimitState,
+    notify_fn=None,
+    enabled_clis: tuple[str, ...] = ALL_CLIS,
+) -> str:
     """Block until a CLI becomes available. Returns the CLI name."""
     if notify_fn:
         secs = state.seconds_until_reset()
         notify_fn(f"All CLIs rate-limited. Pausing ~{int(secs or 0)}s.", level="warning")
 
     while True:
-        cli = get_available_cli(state)
+        cli = get_available_cli(state, enabled_clis=enabled_clis)
         if cli:
             if notify_fn:
                 notify_fn(f"Resuming with {cli}.", level="info")

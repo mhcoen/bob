@@ -24,14 +24,18 @@ def run_checks(project_dir: str | Path) -> CheckResult:
 
     all_output: list[str] = []
     for cmd in commands:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            all_output.append(f"$ {cmd}\nTIMEOUT after 300s")
+            return CheckResult(passed=False, output="\n".join(all_output), command=cmd)
         all_output.append(f"$ {cmd}\n{result.stdout}{result.stderr}")
         if result.returncode != 0:
             return CheckResult(
@@ -62,6 +66,9 @@ def _detect_commands(project_dir: Path) -> list[str]:
         pkg = (project_dir / "package.json").read_text()
         if '"test"' in pkg:
             commands.append("npm test")
+
+    if (project_dir / "Package.swift").exists():
+        commands.append("swift build")
 
     if (project_dir / "Makefile").exists():
         commands.append("make check")

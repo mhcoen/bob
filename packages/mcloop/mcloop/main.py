@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mcloop.checklist import check_off, find_next, mark_failed, parse, parse_description
+from mcloop.checklist import Task, check_off, find_next, mark_failed, parse, parse_description
 from mcloop.checks import run_checks
 from mcloop.notify import notify
 from mcloop.ratelimit import (
@@ -60,25 +60,36 @@ def run_loop(
 
         cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
         if cli is None:
-            cli = wait_for_reset(rate_state, notify)
+            cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
 
-        print(f"\n>>> Task: {task.text} (using {cli})")
+        label = _task_label(tasks, task)
+        print(f"\n>>> Task {label}) {task.text} (using {cli})")
 
         success = False
-        for attempt in range(1, max_retries + 1):
-            result = run_task(task.text, cli, project_dir, log_dir, description)
+        attempt = 0
+        while attempt < max_retries:
+            attempt += 1
+            result = run_task(task.text, cli, project_dir, log_dir, description, task_label=label)
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
                 notify(f"Rate-limited on {cli}.", level="warning")
                 cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
                 if cli is None:
-                    cli = wait_for_reset(rate_state, notify)
+                    cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+                attempt -= 1  # don't count rate-limit as a real attempt
                 continue
 
             if not result.success:
                 notify(
                     f"Task failed (attempt {attempt}/{max_retries}): {task.text}",
+                    level="error",
+                )
+                continue
+
+            if not _has_meaningful_changes(project_dir):
+                notify(
+                    f"No files changed (attempt {attempt}/{max_retries}): {task.text}",
                     level="error",
                 )
                 continue
@@ -129,6 +140,48 @@ def _dry_run(tasks) -> None:
         print(f"\nNext task: {next_task.text}")
     else:
         print("\nNo unchecked tasks remaining.")
+
+
+def _task_label(tasks: list[Task], target: Task) -> str:
+    """Return a label like '3' or '3.2' for a task's position in the tree."""
+
+    def _search(task_list: list[Task], prefix: str) -> str | None:
+        for i, task in enumerate(task_list, 1):
+            label = f"{prefix}{i}" if prefix else str(i)
+            if task is target:
+                return label
+            if task.children:
+                found = _search(task.children, f"{label}.")
+                if found:
+                    return found
+        return None
+
+    return _search(tasks, "") or "?"
+
+
+def _has_meaningful_changes(project_dir: Path) -> bool:
+    """Check if there are staged or unstaged changes beyond PLAN.md and logs/."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        all_files = (result.stdout + untracked.stdout).strip().splitlines()
+        meaningful = [
+            f for f in all_files
+            if f and not f.startswith("logs/") and f != "PLAN.md"
+        ]
+        return len(meaningful) > 0
+    except Exception:
+        return True  # if git fails, don't block
 
 
 def _commit(project_dir: Path, task_text: str) -> None:
