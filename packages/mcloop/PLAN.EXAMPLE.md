@@ -1,10 +1,11 @@
 # McLoop
 
-A Python CLI that grinds through a markdown checklist using AI coding CLIs.
-Read PLAN.md, find the next unchecked task, launch a fresh CLI session to do
-it, run the project's tests and linter, commit if everything passes, check off
-the item, and repeat. Notify the user via Telegram and iMessage on completions,
-failures, and rate limits.
+McLoop lets you run Claude Code for hours at a time without babysitting it.
+You write a task list in PLAN.md. McLoop works through it continuously,
+launching a fresh CLI session per task, running your tests and linter,
+committing only if everything passes, and notifying you of progress. When it
+needs authorization to run a command, it alerts you in real time via Telegram
+so you can approve from your phone and it keeps going.
 
 Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
