@@ -55,6 +55,10 @@ repo at that moment. Keep your description, inline comments, and any other
 markdown docs current. They are the CLI's only memory of decisions made in
 previous sessions.
 
+**Tip:** You can use your favorite chat interface (e.g., Claude, ChatGPT) to
+help write the PLAN.md file. Feed it the README.md along with a description of
+your project, have it ask any questions it has, and output the markdown file.
+
 The checklist is what McLoop executes. Each item should be a meaningful unit of
 work, such as a feature, a subsystem, or a named refactor, not a single function
 or line.
