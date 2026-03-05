@@ -16,30 +16,35 @@ class CheckResult:
     command: str
 
 
-def _load_config_commands(project_dir: Path) -> list[str] | None:
-    """Return checks from mcloop.json if present, else None."""
+def _load_config(project_dir: Path) -> dict:
+    """Return parsed mcloop.json if present, else empty dict."""
     config = project_dir / "mcloop.json"
     if not config.exists():
-        return None
+        return {}
     try:
-        data = json.loads(config.read_text())
+        return json.loads(config.read_text())
     except (json.JSONDecodeError, OSError):
-        return None
-    checks = data.get("checks")
-    if isinstance(checks, list):
-        return [str(c) for c in checks]
-    return None
+        return {}
 
 
 def run_checks(project_dir: str | Path) -> CheckResult:
-    """Auto-detect and run the project's checks. Returns a CheckResult."""
+    """Run the project's checks. Returns a CheckResult."""
     project_dir = Path(project_dir)
-    commands = _load_config_commands(project_dir)
-    if commands is None:
-        commands = _detect_commands(project_dir)
+    config = _load_config(project_dir)
+
+    # Explicit checks override everything
+    checks = config.get("checks")
+    if isinstance(checks, list) and checks:
+        commands = [str(c) for c in checks]
+    else:
+        commands = _detect_commands(project_dir, config)
 
     if not commands:
-        return CheckResult(passed=True, output="No check commands detected", command="(none)")
+        return CheckResult(
+            passed=True,
+            output="No check commands detected",
+            command="(none)",
+        )
 
     all_output: list[str] = []
     for cmd in commands:
@@ -53,9 +58,17 @@ def run_checks(project_dir: str | Path) -> CheckResult:
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
-            all_output.append(f"$ {cmd}\nTIMEOUT after 300s")
-            return CheckResult(passed=False, output="\n".join(all_output), command=cmd)
-        all_output.append(f"$ {cmd}\n{result.stdout}{result.stderr}")
+            all_output.append(
+                f"$ {cmd}\nTIMEOUT after 300s"
+            )
+            return CheckResult(
+                passed=False,
+                output="\n".join(all_output),
+                command=cmd,
+            )
+        all_output.append(
+            f"$ {cmd}\n{result.stdout}{result.stderr}"
+        )
         if result.returncode != 0:
             return CheckResult(
                 passed=False,
@@ -70,26 +83,37 @@ def run_checks(project_dir: str | Path) -> CheckResult:
     )
 
 
-def _detect_commands(project_dir: Path) -> list[str]:
-    """Detect which check commands to run based on project files."""
+def _detect_commands(
+    project_dir: Path,
+    config: dict,
+) -> list[str]:
+    """Detect checks from built-in rules and mcloop.json detect rules."""
     commands: list[str] = []
 
-    if (project_dir / "pyproject.toml").exists():
-        toml_text = (project_dir / "pyproject.toml").read_text()
+    # Built-in: Python (needs content inspection)
+    pyproject = project_dir / "pyproject.toml"
+    if pyproject.exists():
+        toml_text = pyproject.read_text()
         if "ruff" in toml_text:
             commands.append("ruff check .")
         if "pytest" in toml_text:
             commands.append("pytest")
 
-    if (project_dir / "package.json").exists():
-        pkg = (project_dir / "package.json").read_text()
+    # Built-in: Node (needs content inspection)
+    pkg_json = project_dir / "package.json"
+    if pkg_json.exists():
+        pkg = pkg_json.read_text()
         if '"test"' in pkg:
             commands.append("npm test")
 
-    if (project_dir / "Package.swift").exists():
-        commands.append("swift build")
-
-    if (project_dir / "Makefile").exists():
-        commands.append("make check")
+    # Marker-based rules from mcloop.json "detect" array
+    detect = config.get("detect", [])
+    for rule in detect:
+        marker = rule.get("marker", "")
+        cmds = rule.get("commands", [])
+        if not marker or not cmds:
+            continue
+        if (project_dir / marker).exists():
+            commands.extend(cmds)
 
     return commands

@@ -241,34 +241,45 @@ and only works on macOS. You can also set these as environment variables.
 
 ## Project checks
 
-McLoop auto-detects what to run:
+McLoop automatically detects how to check your project based on files
+it finds (like `pyproject.toml` or `package.json`). No configuration
+is needed for common setups. Use `mcloop.json` at the project root to
+override or extend the defaults.
 
-| File present | Command run |
-|---|---|
-| `pyproject.toml` with ruff config | `ruff check .` |
-| `pyproject.toml` with pytest config | `pytest` |
-| `package.json` with test script | `npm test` |
-| `Package.swift` | `swift build` |
-| `Makefile` | `make check` |
+### Explicit checks
 
-### mcloop.json
-
-To override auto-detection, add an `mcloop.json` file to your project root
-with a `checks` array:
+If `mcloop.json` has a `checks` array, McLoop runs those commands in
+order and skips auto-detection entirely:
 
 ```json
 {
-  "checks": [
-    "ruff check .",
-    "pytest",
-    "mypy src/"
+  "checks": ["ruff check .", "ruff format --check .", "pytest"]
+}
+```
+
+### Auto-detection rules
+
+If no `checks` array is present (or `mcloop.json` doesn't exist),
+McLoop auto-detects from built-in rules (Python via `pyproject.toml`,
+Node via `package.json`) and from marker-based rules in the `detect`
+array:
+
+```json
+{
+  "detect": [
+    {"marker": "Cargo.toml", "commands": ["cargo clippy -- -D warnings", "cargo test"]},
+    {"marker": "Package.swift", "commands": ["swift build"]},
+    {"marker": "go.mod", "commands": ["go vet ./...", "go test ./..."]},
+    {"marker": "Makefile", "commands": ["make check"]}
   ]
 }
 ```
 
-When `mcloop.json` is present with a `checks` array, McLoop runs those
-commands in order and skips auto-detection entirely. If the file is absent or
-malformed, McLoop falls back to auto-detection.
+Each rule maps a marker file to a list of commands. If the marker
+exists in the project directory, the commands are added to the check
+list. Add rules for any language by editing this file.
+
+See [CHECKS.md](CHECKS.md) for complete examples.
 
 McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task

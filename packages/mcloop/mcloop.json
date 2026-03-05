@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "ruff check .",
+    "ruff format --check .",
+    "pytest"
+  ],
+  "detect": [
+    {"marker": "Cargo.toml", "language": "Rust", "commands": ["cargo clippy -- -D warnings", "cargo test"]},
+    {"marker": "go.mod", "language": "Go", "commands": ["go vet ./...", "go test ./..."]},
+    {"marker": "build.gradle", "language": "Java (Gradle)", "commands": ["gradle check"]},
+    {"marker": "build.gradle.kts", "language": "Java (Gradle Kotlin)", "commands": ["gradle check"]},
+    {"marker": "CMakeLists.txt", "language": "C/C++ (CMake)", "commands": ["cmake --build build", "ctest --test-dir build"]},
+    {"marker": "Gemfile", "language": "Ruby", "commands": ["bundle exec rspec"]},
+    {"marker": "Package.swift", "language": "Swift", "commands": ["swift build"]},
+    {"marker": "Makefile", "language": "Make", "commands": ["make check"]}
+  ]
+}
