@@ -155,15 +155,13 @@ merge it with your existing settings), then update the hook path:
 }
 ```
 
-The timeout is 10 minutes, which is enough time to pick up your phone and
-respond. Add any commands you always trust to `permissions.allow` so they pass
-through without a notification. See `settings.example.json` for a recommended
-baseline.
+Add any commands you always trust to `permissions.allow` so they pass through
+without a notification. See `settings.example.json` for a recommended baseline.
 
 ## Notifications
 
-McLoop sends Telegram and iMessage notifications for task completions, failures,
-rate limits, and when all tasks are done.
+McLoop sends Telegram notifications for task completions, failures, rate limits,
+and when all tasks are done. Set `NOTIFY_VIA=imessage` to use iMessage instead.
 
 Create `~/.claude/telegram-hook.env`:
 

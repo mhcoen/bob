@@ -64,12 +64,13 @@ def _escape_applescript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def notify(message: str, level: str = "info") -> None:
-    """Send a notification via Telegram and iMessage.
+_backend = "imessage" if os.environ.get("MCLOOP_IMESSAGE") else "telegram"
 
-    Levels: info, warning, error
-    """
+
+def notify(message: str, level: str = "info") -> None:
+    """Send a notification. Default: Telegram. Set MCLOOP_IMESSAGE=1 for iMessage."""
     prefix = {"info": "", "warning": "Warning: ", "error": "ERROR: "}.get(level, "")
-    text = f"*Loop* {prefix}{message}"
-    _send_telegram(text)
-    _send_imessage(f"Loop: {prefix}{message}")
+    if _backend == "imessage":
+        _send_imessage(f"McLoop: {prefix}{message}")
+    else:
+        _send_telegram(f"*McLoop* {prefix}{message}")

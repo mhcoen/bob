@@ -1,4 +1,4 @@
-"""Tests for loop.notify."""
+"""Tests for mcloop.notify."""
 
 from unittest.mock import patch
 
@@ -11,19 +11,64 @@ def test_escape_applescript():
 
 
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._send_imessage")
-def test_notify_calls_both(mock_imsg, mock_tg):
+@patch("mcloop.notify._backend", "telegram")
+def test_notify_defaults_to_telegram(mock_tg):
     notify("test message")
     mock_tg.assert_called_once()
+
+
+@patch("mcloop.notify._send_imessage")
+@patch("mcloop.notify._backend", "imessage")
+def test_notify_imessage_when_configured(mock_imsg):
+    notify("test message")
     mock_imsg.assert_called_once()
+
+
+
+@patch("mcloop.notify._send_telegram")
+@patch("mcloop.notify._backend", "telegram")
+def test_notify_error_prefix(mock_tg):
+    notify("bad thing", level="error")
+    call_text = mock_tg.call_args[0][0]
+    assert "ERROR:" in call_text
+
+
+@patch("mcloop.notify._send_telegram")
+@patch("mcloop.notify._backend", "telegram")
+def test_notify_warning_prefix(mock_tg):
+    notify("low disk", level="warning")
+    tg_text = mock_tg.call_args[0][0]
+    assert "Warning:" in tg_text
+
+
+@patch("mcloop.notify._send_telegram")
+@patch("mcloop.notify._backend", "telegram")
+def test_notify_info_no_prefix(mock_tg):
+    notify("task done", level="info")
+    assert mock_tg.call_args[0][0] == "*McLoop* task done"
+
+
+@patch("mcloop.notify._send_imessage")
+@patch("mcloop.notify._backend", "imessage")
+def test_notify_imessage_info_no_prefix(mock_imsg):
+    notify("task done", level="info")
+    assert mock_imsg.call_args[0][0] == "McLoop: task done"
+
+
+@patch("mcloop.notify._send_imessage")
+@patch("mcloop.notify._send_telegram")
+@patch("mcloop.notify._backend", "telegram")
+def test_telegram_mode_does_not_send_imessage(mock_tg, mock_imsg):
+    notify("test")
+    mock_imsg.assert_not_called()
 
 
 @patch("mcloop.notify._send_telegram")
 @patch("mcloop.notify._send_imessage")
-def test_notify_error_prefix(mock_imsg, mock_tg):
-    notify("bad thing", level="error")
-    call_text = mock_tg.call_args[0][0]
-    assert "ERROR:" in call_text
+@patch("mcloop.notify._backend", "imessage")
+def test_imessage_mode_does_not_send_telegram(mock_imsg, mock_tg):
+    notify("test")
+    mock_tg.assert_not_called()
 
 
 @patch("mcloop.notify.subprocess.run")
@@ -69,23 +114,3 @@ def test_telegram_skips_when_no_token(mock_urlopen):
 
     _send_telegram("hello")
     mock_urlopen.assert_not_called()
-
-
-@patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._send_imessage")
-def test_notify_warning_prefix(mock_imsg, mock_tg):
-    notify("low disk", level="warning")
-    tg_text = mock_tg.call_args[0][0]
-    assert "Warning:" in tg_text
-    imsg_text = mock_imsg.call_args[0][0]
-    assert "Warning:" in imsg_text
-
-
-@patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._send_imessage")
-def test_notify_info_no_prefix(mock_imsg, mock_tg):
-    notify("task done", level="info")
-    tg_text = mock_tg.call_args[0][0]
-    assert "*Loop* task done" == tg_text
-    imsg_text = mock_imsg.call_args[0][0]
-    assert "Loop: task done" == imsg_text
