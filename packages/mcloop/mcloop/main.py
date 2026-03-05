@@ -67,6 +67,7 @@ def run_loop(
 
     _checkpoint(project_dir)
 
+    run_start = time.monotonic()
     completed: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
@@ -89,6 +90,7 @@ def run_loop(
         label = _task_label(tasks, task)
         print(f"\n>>> Task {label}) {task.text} (using {cli})")
 
+        task_start = time.monotonic()
         success = False
         attempt = 0
         last_error = ""
@@ -132,8 +134,15 @@ def run_loop(
             if not _has_meaningful_changes(project_dir):
                 print(f"\n>>> Working tree clean, skipping commit for: {task.text}", flush=True)
                 check_off(checklist_path, task)
+                elapsed = _format_elapsed(
+                    time.monotonic() - task_start
+                )
                 completed.append(
                     f"{label}) {task.text} (clean)"
+                )
+                print(
+                    f"    [{elapsed}]",
+                    flush=True,
                 )
                 notify(f"Skipped (clean): {task.text}")
                 success = True
@@ -143,7 +152,17 @@ def run_loop(
             if check_result.passed:
                 _commit(project_dir, task.text)
                 check_off(checklist_path, task)
-                completed.append(f"{label}) {task.text}")
+                elapsed = _format_elapsed(
+                    time.monotonic() - task_start
+                )
+                completed.append(
+                    f"{label}) {task.text}"
+                )
+                print(
+                    f"\n>>> Completed {label}) "
+                    f"[{elapsed}]",
+                    flush=True,
+                )
                 notify(f"Completed: {task.text}")
                 success = True
                 break
@@ -167,23 +186,29 @@ def run_loop(
                 )
 
         if not success:
+            elapsed = _format_elapsed(
+                time.monotonic() - task_start
+            )
             mark_failed(checklist_path, task)
-            failed_task = f"{label}) {task.text}"
+            failed_task = f"{label}) {task.text} [{elapsed}]"
             failed_reason = last_error
             notify(
                 f"Giving up on: {task.text}",
                 level="error",
             )
+            total = time.monotonic() - run_start
             _print_summary(
-                completed, failed_task, failed_reason,
-                parse(checklist_path),
+                completed, failed_task,
+                failed_reason,
+                parse(checklist_path), total,
             )
             return [task.text]
 
     if not no_audit:
         _run_audit_fix_cycle(project_dir, log_dir, model=model)
 
-    _print_summary(completed, None, "", [])
+    total = time.monotonic() - run_start
+    _print_summary(completed, None, "", [], total)
     notify("All tasks completed!")
     return []
 
@@ -309,11 +334,18 @@ def _print_summary(
     failed_task: str | None,
     failed_reason: str,
     remaining_tasks: list[Task],
+    total_seconds: float = 0,
 ) -> None:
     """Print a summary of what McLoop did."""
     print("\n" + "=" * 40, flush=True)
     print("McLoop Summary", flush=True)
     print("=" * 40, flush=True)
+    if total_seconds > 0:
+        print(
+            f"Total time: "
+            f"{_format_elapsed(total_seconds)}",
+            flush=True,
+        )
 
     if completed:
         print(
