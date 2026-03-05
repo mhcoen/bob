@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from mcloop.checks import CheckResult
-from mcloop.main import _checkpoint, run_loop
+from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
 
 
@@ -273,6 +273,42 @@ def test_skip_when_working_tree_clean(
     assert len(calls) == 2
     assert calls[0] == ("Skipped (clean): Already done task", "info")
     assert calls[1] == ("All tasks completed!", "info")
+
+
+# --- _commit unit tests ---
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_does_not_stage_untracked(mock_run, tmp_path):
+    """_commit uses git add -u (tracked only), never git add -A."""
+    mock_run.return_value = MagicMock()
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    assert ["git", "add", "-u"] in commands
+    assert ["git", "add", "-A"] not in commands
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_commits_with_task_message(mock_run, tmp_path):
+    """_commit creates a commit with the task text in the message."""
+    mock_run.return_value = MagicMock()
+
+    _commit(tmp_path, "my task description")
+
+    commit_calls = [
+        c for c in mock_run.call_args_list
+        if c.args[0][0:2] == ["git", "commit"]
+    ]
+    assert len(commit_calls) == 1
+    assert any("my task description" in arg for arg in commit_calls[0].args[0])
+
+
+@patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
+def test_commit_ignores_errors(mock_run, tmp_path):
+    """_commit swallows exceptions and does not propagate them."""
+    _commit(tmp_path, "task")  # should not raise
 
 
 @patch("mcloop.main.notify")

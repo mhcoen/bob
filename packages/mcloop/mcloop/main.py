@@ -327,7 +327,7 @@ def _checkpoint(project_dir: Path) -> None:
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes and commit."""
     try:
-        subprocess.run(["git", "add", "-A"], cwd=project_dir, capture_output=True)
+        subprocess.run(["git", "add", "-u"], cwd=project_dir, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", f"Complete: {task_text}"],
             cwd=project_dir,
