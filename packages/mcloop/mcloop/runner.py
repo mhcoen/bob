@@ -213,12 +213,8 @@ def gather_sync_context(project_dir: Path) -> dict[str, str]:
     return context
 
 
-def build_sync_prompt(context: dict[str, str]) -> str:
+def build_sync_prompt() -> str:
     """Build the prompt for the sync Claude session."""
-    parts = []
-    for name, content in context.items():
-        parts.append(f"=== {name} ===\n{content}")
-    context_block = "\n\n".join(parts)
 
     instructions = (
         "You are synchronizing PLAN.md with the actual codebase.\n\n"
@@ -261,9 +257,11 @@ def build_sync_prompt(context: dict[str, str]) -> str:
         "--- SYNC PROBLEMS ---\n"
         "No problems found.\n"
         "--- END PROBLEMS ---\n\n"
-        "Project context follows.\n\n"
+        "Read PLAN.md, README.md, CLAUDE.md, the git "
+        "log, and source files in the project to perform "
+        "this analysis."
     )
-    return instructions + context_block
+    return instructions
 
 
 def run_sync(
@@ -276,13 +274,12 @@ def run_sync(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    context = gather_sync_context(project_dir)
-    prompt = build_sync_prompt(context)
+    prompt = build_sync_prompt()
     cmd = _build_command(
-        "claude", model=model, use_stdin=True,
+        "claude", prompt=prompt, model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir, stdin_text=prompt,
+        cmd, project_dir,
     )
     log_path = _write_log(
         log_dir, "sync", cmd, output, returncode,
@@ -316,39 +313,41 @@ def gather_audit_context(project_dir: Path) -> dict[str, str]:
     return context
 
 
-def build_audit_prompt(context: dict[str, str]) -> str:
+def build_audit_prompt() -> str:
     """Build the prompt for the audit Claude session."""
-    parts = []
-    for name, content in context.items():
-        parts.append(f"=== {name} ===\n{content}")
-    context_block = "\n\n".join(parts)
-
-    instructions = (
-        "You are auditing a Python codebase for bugs.\n\n"
-        "Your task: read all source files provided and identify actual defects only.\n\n"
+    return (
+        "You are auditing this codebase for bugs.\n\n"
+        "Read all source files in the project and identify "
+        "actual defects only.\n\n"
         "Include ONLY:\n"
-        "- Crashes (unhandled exceptions, index errors, assertion failures, etc.)\n"
-        "- Incorrect behavior (logic errors, wrong output, off-by-one errors)\n"
-        "- Unhandled errors (missing error handling for operations that can fail, "
-        "unchecked return values that could cause silent failures)\n"
-        "- Security issues (command injection, path traversal, insecure defaults)\n\n"
+        "- Crashes (unhandled exceptions, index errors, "
+        "assertion failures, etc.)\n"
+        "- Incorrect behavior (logic errors, wrong output, "
+        "off-by-one errors)\n"
+        "- Unhandled errors (missing error handling for "
+        "operations that can fail, unchecked return values "
+        "that could cause silent failures)\n"
+        "- Security issues (command injection, path "
+        "traversal, insecure defaults)\n\n"
         "Do NOT include:\n"
         "- Style issues or formatting problems\n"
         "- Refactoring suggestions\n"
         "- Performance improvements\n"
         "- Missing documentation\n"
-        "- Hypothetical issues with no evidence in the code\n\n"
-        "Write your findings to BUGS.md in this exact format:\n"
+        "- Hypothetical issues with no evidence in the "
+        "code\n\n"
+        "Write your findings to BUGS.md in this exact "
+        "format:\n"
         "# Bugs\n\n"
-        "## <file>:<line> — <short title>\n"
+        "## <file>:<line> -- <short title>\n"
         "**Severity**: high|medium|low\n"
-        "<description of the defect and why it is a bug>\n\n"
-        "If no bugs are found, write BUGS.md containing only:\n"
+        "<description of the defect and why it is a bug>"
+        "\n\n"
+        "If no bugs are found, write BUGS.md containing "
+        "only:\n"
         "# Bugs\n\n"
-        "No bugs found.\n\n"
-        "Source code follows.\n\n"
+        "No bugs found.\n"
     )
-    return instructions + context_block
 
 
 def run_audit(
@@ -361,13 +360,12 @@ def run_audit(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    context = gather_audit_context(project_dir)
-    prompt = build_audit_prompt(context)
+    prompt = build_audit_prompt()
     cmd = _build_command(
-        "claude", model=model, use_stdin=True,
+        "claude", prompt=prompt, model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir, stdin_text=prompt,
+        cmd, project_dir,
     )
     log_path = _write_log(
         log_dir, "audit", cmd, output, returncode,
@@ -386,29 +384,23 @@ def bugs_md_has_bugs(content: str) -> bool:
     return "No bugs found." not in content
 
 
-def build_bug_fix_prompt(bugs_content: str, context: dict[str, str]) -> str:
+def build_bug_fix_prompt() -> str:
     """Build the prompt for the bug fix Claude session."""
-    parts = []
-    for name, content in context.items():
-        parts.append(f"=== {name} ===\n{content}")
-    context_block = "\n\n".join(parts)
 
-    instructions = (
-        "You are fixing bugs in a Python codebase.\n\n"
-        "Fix ONLY the bugs listed in BUGS.md below. Do not refactor, "
-        "reformat, or change anything else. Each bug entry includes a file, "
-        "line number, and description. Fix each bug with a minimal targeted change.\n\n"
-        "Do not delete BUGS.md — it will be deleted automatically after this session.\n\n"
-        f"=== BUGS.md ===\n{bugs_content}\n\n"
-        "Source code follows.\n\n"
+    return (
+        "Read BUGS.md in this project. Fix ONLY the bugs "
+        "listed there. Do not refactor, reformat, or "
+        "change anything else. Each bug entry includes a "
+        "file, line number, and description. Fix each bug "
+        "with a minimal targeted change.\n\n"
+        "Do not delete BUGS.md. It will be deleted "
+        "automatically after this session."
     )
-    return instructions + context_block
 
 
 def run_bug_fix(
     project_dir: str | Path,
     log_dir: str | Path,
-    bugs_content: str,
     model: str | None = None,
 ) -> RunResult:
     """Launch a Claude Code session to fix bugs listed in BUGS.md."""
@@ -416,13 +408,12 @@ def run_bug_fix(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    context = gather_audit_context(project_dir)
-    prompt = build_bug_fix_prompt(bugs_content, context)
+    prompt = build_bug_fix_prompt()
     cmd = _build_command(
-        "claude", model=model, use_stdin=True,
+        "claude", prompt=prompt, model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir, stdin_text=prompt,
+        cmd, project_dir,
     )
     log_path = _write_log(
         log_dir, "bug-fix", cmd, output, returncode,

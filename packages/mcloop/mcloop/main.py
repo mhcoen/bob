@@ -533,7 +533,9 @@ def _run_audit_fix_cycle(
         return
 
     print("\n>>> Bugs found, running fix session...", flush=True)
-    fix_result = run_bug_fix(project_dir, log_dir, bugs_content, model=model)
+    fix_result = run_bug_fix(
+        project_dir, log_dir, model=model,
+    )
     bugs_path.unlink(missing_ok=True)
 
     if not fix_result.success:
