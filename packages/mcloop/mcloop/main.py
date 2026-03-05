@@ -17,7 +17,7 @@ from mcloop.ratelimit import (
     is_rate_limited,
     wait_for_reset,
 )
-from mcloop.runner import run_task
+from mcloop.runner import run_sync, run_task
 
 
 def main() -> None:
@@ -185,9 +185,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _cmd_sync(checklist_path: Path) -> None:
-    """Sync PLAN.md with the codebase (not yet implemented)."""
-    print("sync: not yet implemented", file=sys.stderr)
-    sys.exit(1)
+    """Launch a Claude Code session with full project context for sync analysis."""
+    project_dir = checklist_path.parent
+    log_dir = project_dir / "logs"
+    result = run_sync(project_dir, log_dir)
+    if not result.success:
+        print(f"sync: session exited with code {result.exit_code}", file=sys.stderr)
+        sys.exit(result.exit_code)
 
 
 def _dry_run(tasks) -> None:
