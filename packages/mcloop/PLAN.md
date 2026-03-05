@@ -34,10 +34,10 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] If BUGS.md contains bugs, run a second session scoped to fixing only the bugs listed in BUGS.md, then delete BUGS.md
   - [x] Run this cycle once (no open-ended looping), then send the "All tasks completed" notification
   - [x] Add a --no-audit flag to skip the bug audit cycle
-- [ ] Integration tests
+- [x] Integration tests
   - [x] Add a tests/integration/ directory gated behind pytest -m integration
   - [x] Test a minimal run: temp git repo, simple PLAN.md, verify file created, task checked off, commit made
   - [x] Test no-op detection: task that produces no file changes is treated as failure
   - [x] Test subtask ordering: depth-first execution with parent auto-checking
   - [x] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
-  - [ ] Test failing task: verify retry behavior and [!] marking after max retries
+  - [x] Test failing task: verify retry behavior and [!] marking after max retries
