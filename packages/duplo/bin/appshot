@@ -1,0 +1,86 @@
+#!/bin/bash
+# appshot - Capture a screenshot of a macOS app window by name.
+#
+# Usage:
+#   appshot "AppName" output.png
+#   appshot "AppName" output.png --launch "path/to/binary"
+#   appshot "AppName" output.png --setup 'tell application "AppName" to activate'
+#
+# Requires Screen Recording permission (granted once via System Preferences).
+
+set -euo pipefail
+
+APP_NAME="${1:?Usage: appshot APP_NAME OUTPUT_PATH [--launch BINARY] [--setup APPLESCRIPT]}"
+OUTPUT="${2:?Usage: appshot APP_NAME OUTPUT_PATH [--launch BINARY] [--setup APPLESCRIPT]}"
+LAUNCH=""
+SETUP=""
+TIMEOUT=10
+WAIT_AFTER=1
+
+shift 2
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --launch) LAUNCH="$2"; shift 2 ;;
+        --setup) SETUP="$2"; shift 2 ;;
+        --timeout) TIMEOUT="$2"; shift 2 ;;
+        --wait) WAIT_AFTER="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# Launch the app if requested and not already running
+if [[ -n "$LAUNCH" ]]; then
+    if ! pgrep -xq "$APP_NAME"; then
+        open "$LAUNCH" &
+    fi
+fi
+
+# Wait for the window to appear
+ELAPSED=0
+WINDOW_ID=""
+while [[ $ELAPSED -lt $TIMEOUT ]]; do
+    WINDOW_ID=$(osascript -e "
+        tell application \"System Events\"
+            if exists process \"$APP_NAME\" then
+                set w to first window of process \"$APP_NAME\"
+                return id of w
+            end if
+        end tell
+    " 2>/dev/null || true)
+
+    if [[ -n "$WINDOW_ID" ]]; then
+        break
+    fi
+    sleep 0.5
+    ELAPSED=$((ELAPSED + 1))
+done
+
+if [[ -z "$WINDOW_ID" ]]; then
+    echo "Error: No window found for '$APP_NAME' after ${TIMEOUT}s" >&2
+    exit 1
+fi
+
+# Bring window to front
+osascript -e "
+    tell application \"System Events\"
+        set frontmost of process \"$APP_NAME\" to true
+    end tell
+" 2>/dev/null || true
+
+# Run optional setup script (e.g., navigate to a specific state)
+if [[ -n "$SETUP" ]]; then
+    osascript -e "$SETUP" 2>/dev/null || true
+fi
+
+# Wait for rendering
+sleep "$WAIT_AFTER"
+
+# Capture the window
+screencapture -l "$WINDOW_ID" -o "$OUTPUT"
+
+if [[ -f "$OUTPUT" ]]; then
+    echo "$OUTPUT"
+else
+    echo "Error: Screenshot failed" >&2
+    exit 1
+fi
