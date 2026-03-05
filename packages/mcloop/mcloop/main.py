@@ -490,6 +490,13 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
             capture_output=True,
             text=True,
         )
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+            )
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
             cwd=project_dir,

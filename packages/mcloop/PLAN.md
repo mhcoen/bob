@@ -12,8 +12,8 @@ per task. Write unit tests for new functionality. Keep modules short and avoid
 over-abstraction. This is a simple tool and should stay that way.
 
 - [x] Add a safety commit to the main loop before processing any tasks
-  - [!] In run_loop(), before the while loop, stage and commit all tracked modified files with a message like "mcloop: checkpoint before run"
-  - [!] Skip if the working tree is clean
+  - [x] In run_loop(), before the while loop, stage and commit all tracked modified files with a message like "mcloop: checkpoint before run"
+  - [x] Skip if the working tree is clean
   - [x] Do not stage untracked files
 - [x] Push to origin after each successful commit
   - [x] Add git push to _commit() after git commit

@@ -92,6 +92,15 @@ def find_next(tasks: list[Task]) -> Task | None:
     return None
 
 
+def _find_task_line(lines: list[str], task: Task) -> int:
+    """Find task line by text match, falling back to line_number."""
+    for i, line in enumerate(lines):
+        m = CHECKBOX_RE.match(line)
+        if m and m.group(2) == " " and m.group(3).strip() == task.text:
+            return i
+    return task.line_number
+
+
 def check_off(path: str | Path, task: Task) -> None:
     """Rewrite `- [ ]` to `- [x]` at the task's line number.
 
@@ -99,7 +108,7 @@ def check_off(path: str | Path, task: Task) -> None:
     """
     p = Path(path)
     lines = p.read_text().splitlines()
-    _check_line(lines, task.line_number)
+    _check_line(lines, _find_task_line(lines, task))
 
     # Re-parse to check for parent auto-completion
     p.write_text("\n".join(lines) + "\n")
@@ -110,8 +119,9 @@ def mark_failed(path: str | Path, task: Task) -> None:
     """Rewrite `- [ ]` to `- [!]` at the task's line number."""
     p = Path(path)
     lines = p.read_text().splitlines()
-    line = lines[task.line_number]
-    lines[task.line_number] = line.replace("- [ ]", "- [!]", 1)
+    idx = _find_task_line(lines, task)
+    line = lines[idx]
+    lines[idx] = line.replace("- [ ]", "- [!]", 1)
     p.write_text("\n".join(lines) + "\n")
 
 

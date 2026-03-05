@@ -119,7 +119,8 @@ def _run_session(
         process.stdin.close()
 
     output_lines: list[str] = []
-    assert process.stdout is not None
+    if process.stdout is None:
+        raise RuntimeError("subprocess stdout is None despite stdout=PIPE")
     for line in process.stdout:
         output_lines.append(line)
         _print_stream_event(line)
