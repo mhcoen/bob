@@ -88,6 +88,10 @@ def run_loop(
             cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
 
         label = _task_label(tasks, task)
+        _checkpoint(
+            project_dir,
+            next_task=f"{label}) {task.text}",
+        )
         print(f"\n>>> Task {label}) {task.text} (using {cli})")
 
         task_start = time.monotonic()
@@ -200,6 +204,7 @@ def run_loop(
                 completed, failed_task,
                 failed_reason,
                 parse(checklist_path), total,
+                project_dir,
             )
             return [task.text]
 
@@ -207,7 +212,10 @@ def run_loop(
         _run_audit_fix_cycle(project_dir, log_dir, model=model)
 
     total = time.monotonic() - run_start
-    _print_summary(completed, None, "", [], total)
+    _print_summary(
+        completed, None, "", [], total,
+        project_dir,
+    )
     notify("All tasks completed!")
     return []
 
@@ -334,6 +342,7 @@ def _print_summary(
     failed_reason: str,
     remaining_tasks: list[Task],
     total_seconds: float = 0,
+    project_dir: Path | None = None,
 ) -> None:
     """Print a summary of what McLoop did."""
     print("\n" + "=" * 40, flush=True)
@@ -403,6 +412,13 @@ def _print_summary(
         )
         for s in suggestions:
             print(f'  "{s}",', flush=True)
+
+    if project_dir and (project_dir / "NOTES.md").exists():
+        print(
+            "\nNOTES.md has observations worth"
+            " reviewing.",
+            flush=True,
+        )
 
     print("=" * 40, flush=True)
 
@@ -681,7 +697,10 @@ def _run_audit_fix_cycle(
 
 
 
-def _checkpoint(project_dir: Path) -> None:
+def _checkpoint(
+    project_dir: Path,
+    next_task: str = "",
+) -> None:
     """Stage and commit all tracked modified files as a checkpoint."""
     try:
         result = subprocess.run(
@@ -692,9 +711,16 @@ def _checkpoint(project_dir: Path) -> None:
         )
         if not result.stdout.strip():
             return
-        subprocess.run(["git", "add", "-u"], cwd=project_dir, capture_output=True)
+        msg = "mcloop: checkpoint"
+        if next_task:
+            msg += f" (next: {next_task})"
         subprocess.run(
-            ["git", "commit", "-m", "mcloop: checkpoint before run"],
+            ["git", "add", "-u"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", msg],
             cwd=project_dir,
             capture_output=True,
         )

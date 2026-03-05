@@ -67,6 +67,13 @@ included in every CLI invocation, so every session has context about what the
 project is, what technologies to use, and what constraints matter. **Without a
 description, the CLI has no context and will make worse decisions.**
 
+You don't need to duplicate your README or code comments in the description.
+Most of the context Claude Code needs is already in your codebase: the README,
+CLAUDE.md, inline comments, and the code itself. Claude reads these during
+each session. That said, a reasonably detailed description is fine and often
+helpful, especially for technology choices, constraints, conventions, or
+anything you want every session to keep in mind.
+
 Because each session starts fresh, the CLI can only work from what's in the
 repo at that moment. Keep your description, inline comments, and any other
 markdown docs current. They are the CLI's only memory of decisions made in
@@ -317,6 +324,18 @@ details, remaining task count, and total elapsed time.
 If you approved any commands via Telegram during the run, McLoop suggests
 adding them to your allowlist in the format used by `settings.json`. Dangerous
 commands (like `rm`, `sudo`, `chmod`) are never suggested even if approved.
+
+## Implementation notes
+
+During each task session, Claude Code may notice edge cases, design decisions,
+assumptions, potential issues, or anything worth revisiting later. When it
+does, it appends a note to `NOTES.md` with the current date and a reference
+to the task being worked on (e.g., "[3.2] Parse Markdown to HTML").
+
+McLoop does not act on NOTES.md. It is purely for you to review between runs.
+Notes accumulate chronologically across sessions, giving you a running log of
+things the agent thought were worth mentioning but weren't part of the task.
+When McLoop finishes, it reminds you if NOTES.md exists.
 
 ## Logging
 

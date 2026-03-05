@@ -43,6 +43,17 @@ def run_task(
         "Do not chain shell commands with && or ;."
         " Use separate Bash calls instead."
     )
+    notes_instruction = (
+        "If you notice edge cases, design decisions,"
+        " assumptions, potential issues, or anything"
+        " worth revisiting later, append a note to"
+        " NOTES.md. Each entry should include the"
+        " current date and reference the task:"
+        f" [{task_label}] {task_text}."
+        " Do not create NOTES.md if you have nothing"
+        " to note."
+    )
+    parts.append(notes_instruction)
     if prior_errors:
         parts.append(
             "IMPORTANT: A previous attempt at this task"
