@@ -335,6 +335,57 @@ def test_commit_skips_push_when_no_remote(mock_run, tmp_path):
     assert ["git", "push"] not in commands
 
 
+@patch("mcloop.main.subprocess.run")
+def test_commit_calls_gh_create_when_no_remote(mock_run, tmp_path):
+    """_commit calls gh repo create when no remote is configured."""
+    no_remote = MagicMock()
+    no_remote.stdout = ""
+    mock_run.return_value = no_remote
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    gh_calls = [c for c in commands if c and c[0] == "gh"]
+    assert len(gh_calls) == 1
+    assert gh_calls[0][:3] == ["gh", "repo", "create"]
+    assert "--private" in gh_calls[0]
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_pushes_after_gh_create_succeeds(mock_run, tmp_path):
+    """_commit pushes after gh repo create adds a remote."""
+    remote_call_count = {"n": 0}
+
+    def side_effect(cmd, **kwargs):
+        m = MagicMock()
+        if cmd == ["git", "remote"]:
+            remote_call_count["n"] += 1
+            m.stdout = "" if remote_call_count["n"] == 1 else "origin\n"
+        else:
+            m.stdout = ""
+        return m
+
+    mock_run.side_effect = side_effect
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    assert ["git", "push"] in commands
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_skips_push_when_gh_create_fails(mock_run, tmp_path):
+    """_commit skips push when gh repo create fails to add a remote."""
+    no_remote = MagicMock()
+    no_remote.stdout = ""
+    mock_run.return_value = no_remote
+
+    _commit(tmp_path, "some task")
+
+    commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+    assert ["git", "push"] not in commands
+
+
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
 def test_commit_ignores_errors(mock_run, tmp_path):
     """_commit swallows exceptions and does not propagate them."""

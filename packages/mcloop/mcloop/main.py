@@ -254,11 +254,24 @@ def _print_summary(
     suggestions = _whitelist_suggestions()
     if suggestions:
         print(
-            "\nWhitelist suggestions (approved this session):",
+            "\nWhitelist suggestions "
+            "(approved this session):",
+            flush=True,
+        )
+        print(
+            "  Add to permissions.allow in",
+            flush=True,
+        )
+        print(
+            "    ~/.claude/settings.json (global)",
+            flush=True,
+        )
+        print(
+            "    .claude/settings.json (project)",
             flush=True,
         )
         for s in suggestions:
-            print(f"  {s}", flush=True)
+            print(f'  "{s}",', flush=True)
 
     print("=" * 40, flush=True)
 
@@ -284,14 +297,22 @@ def _whitelist_suggestions() -> list[str]:
     except (OSError, _json.JSONDecodeError):
         allow = []
 
+    # Never suggest whitelisting dangerous commands
+    dangerous = {
+        "rm", "rmdir", "kill", "killall", "pkill",
+        "chmod", "chown", "sudo", "su", "dd",
+        "mkfs", "mv", "shutdown", "reboot",
+    }
+
     allow_set = set(allow)
     suggestions = []
     for pattern in sorted(patterns):
         # Convert "Bash:ruff check ." to "Bash(ruff check:*)"
         if ":" in pattern:
             tool, arg = pattern.split(":", 1)
-            # Suggest a prefix rule for the first word
             first_word = arg.split()[0] if arg.split() else arg
+            if first_word in dangerous:
+                continue
             rule = f"{tool}({first_word}:*)"
         else:
             rule = pattern
@@ -385,6 +406,18 @@ def _commit(project_dir: Path, task_text: str) -> None:
             capture_output=True,
         )
         result = subprocess.run(["git", "remote"], cwd=project_dir, capture_output=True, text=True)
+        if not result.stdout.strip():
+            subprocess.run(
+                [
+                    "gh", "repo", "create", project_dir.name,
+                    "--private", "--source=.", "--remote=origin",
+                ],
+                cwd=project_dir,
+                capture_output=True,
+            )
+            result = subprocess.run(
+                ["git", "remote"], cwd=project_dir, capture_output=True, text=True
+            )
         if result.stdout.strip():
             subprocess.run(["git", "push"], cwd=project_dir, capture_output=True)
     except Exception:

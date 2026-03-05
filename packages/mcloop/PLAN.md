@@ -17,8 +17,8 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Do not stage untracked files
 - [ ] Push to origin after each successful commit
   - [x] Add git push to _commit() after git commit
-  - [ ] If no remote exists, skip the push silently
-  - [ ] Create the remote repo with gh repo create if it does not exist
+  - [x] If no remote exists, skip the push silently
+  - [x] Create the remote repo with gh repo create if it does not exist
 - [ ] Support a mcloop.json config file for custom check commands
   - [ ] If mcloop.json exists with a "checks" array, run those commands instead of auto-detecting
   - [ ] Fall back to auto-detection when no config file is present
