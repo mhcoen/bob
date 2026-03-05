@@ -513,12 +513,73 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return True  # if git fails, don't block
 
 
+AUDIT_HASH_FILE = ".mcloop-last-audit"
+
+
+def _get_git_hash(project_dir: Path) -> str:
+    """Return current HEAD commit hash."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _should_skip_audit(project_dir: Path) -> bool:
+    """Skip audit if no source files changed since last audit."""
+    hash_file = project_dir / AUDIT_HASH_FILE
+    if not hash_file.exists():
+        return False
+    last_hash = hash_file.read_text().strip()
+    if not last_hash:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", last_hash, "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+        changed = [
+            f for f in result.stdout.strip().splitlines()
+            if f
+            and not f.startswith("logs/")
+            and f != "PLAN.md"
+            and f != AUDIT_HASH_FILE
+        ]
+        return len(changed) == 0
+    except Exception:
+        return False
+
+
+def _save_audit_hash(project_dir: Path) -> None:
+    """Write current HEAD hash to .mcloop-last-audit."""
+    h = _get_git_hash(project_dir)
+    if h:
+        (project_dir / AUDIT_HASH_FILE).write_text(h + "\n")
+
+
 def _run_audit_fix_cycle(
     project_dir: Path,
     log_dir: Path,
     model: str | None = None,
 ) -> None:
     """Run one audit session; if bugs are found, run a fix session then delete BUGS.md."""
+    if _should_skip_audit(project_dir):
+        print(
+            "\n>>> Audit skipped "
+            "(no changes since last audit)",
+            flush=True,
+        )
+        return
+
     print("\n>>> Running bug audit...", flush=True)
     audit_result = run_audit(project_dir, log_dir, model=model)
     if not audit_result.success:
@@ -537,6 +598,7 @@ def _run_audit_fix_cycle(
     if not bugs_md_has_bugs(bugs_content):
         print("audit: no bugs found", flush=True)
         bugs_path.unlink()
+        _save_audit_hash(project_dir)
         return
 
     max_fix_attempts = 3
@@ -569,6 +631,7 @@ def _run_audit_fix_cycle(
         if check_result.passed:
             _commit(project_dir, "Fix bugs from audit")
             bugs_path.unlink(missing_ok=True)
+            _save_audit_hash(project_dir)
             return
 
         error_ctx = (
