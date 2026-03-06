@@ -38,6 +38,7 @@ from duplo.test_generator import (
     save_test_file,
 )
 from duplo.validator import validate_product_url
+from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -199,6 +200,11 @@ def _first_run() -> None:
         if moved:
             print(f"Moved {len(moved)} reference file(s) to .duplo/references/.")
 
+    # Save initial file hash manifest.
+    hashes = compute_hashes(".")
+    save_hashes(hashes)
+    print(f"File hash manifest saved ({len(hashes)} file(s)).")
+
     if roadmap:
         print("\n" + format_roadmap(roadmap))
         answer = input("Approve this roadmap? [Y/n] ").strip().lower()
@@ -236,6 +242,20 @@ def _first_run() -> None:
 
 def _subsequent_run() -> None:
     """Resume an interrupted phase or advance to the next one."""
+    # Detect file changes since last run.
+    old_hashes = load_hashes(".")
+    new_hashes = compute_hashes(".")
+    diff = diff_hashes(old_hashes, new_hashes)
+    if diff.added or diff.changed or diff.removed:
+        print("File changes detected since last run:")
+        for name in diff.added:
+            print(f"  + {name}")
+        for name in diff.changed:
+            print(f"  ~ {name}")
+        for name in diff.removed:
+            print(f"  - {name}")
+    save_hashes(new_hashes)
+
     duplo_path = Path(_DUPLO_JSON)
     data = json.loads(duplo_path.read_text(encoding="utf-8"))
     app_name = data.get("app_name", "")
