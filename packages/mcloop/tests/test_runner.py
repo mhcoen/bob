@@ -11,9 +11,11 @@ from mcloop.runner import (
     bugs_md_has_bugs,
     build_audit_prompt,
     build_bug_fix_prompt,
+    build_post_fix_review_prompt,
     build_sync_prompt,
     gather_audit_context,
     gather_sync_context,
+    review_found_problems,
 )
 
 
@@ -303,3 +305,67 @@ def test_build_bug_fix_prompt_no_delete_instruction():
 def test_build_bug_fix_prompt_bugs_md_reference():
     prompt = build_bug_fix_prompt()
     assert "BUGS.md" in prompt
+
+
+# --- build_post_fix_review_prompt ---
+
+
+def test_build_post_fix_review_prompt_includes_bug_descriptions():
+    prompt = build_post_fix_review_prompt("bug in foo.py", "diff here")
+    assert "bug in foo.py" in prompt
+
+
+def test_build_post_fix_review_prompt_includes_diff():
+    prompt = build_post_fix_review_prompt("bugs", "+fixed line")
+    assert "+fixed line" in prompt
+
+
+def test_build_post_fix_review_prompt_read_only():
+    prompt = build_post_fix_review_prompt("bugs", "diff")
+    assert "read-only" in prompt.lower() or "Do not modify" in prompt
+
+
+def test_build_post_fix_review_prompt_lgtm_format():
+    prompt = build_post_fix_review_prompt("bugs", "diff")
+    assert "LGTM" in prompt
+    assert "PROBLEMS FOUND" in prompt
+    assert "--- REVIEW RESULT ---" in prompt
+    assert "--- END REVIEW ---" in prompt
+
+
+# --- review_found_problems ---
+
+
+def test_review_found_problems_lgtm():
+    output = "Some text\n--- REVIEW RESULT ---\nLGTM\n--- END REVIEW ---\n"
+    found, desc = review_found_problems(output)
+    assert found is False
+    assert desc == ""
+
+
+def test_review_found_problems_with_problems():
+    output = (
+        "Review output\n"
+        "--- REVIEW RESULT ---\n"
+        "PROBLEMS FOUND\n"
+        "The fix breaks error handling in foo.py\n"
+        "--- END REVIEW ---\n"
+    )
+    found, desc = review_found_problems(output)
+    assert found is True
+    assert "PROBLEMS FOUND" in desc
+    assert "error handling" in desc
+
+
+def test_review_found_problems_no_marker():
+    output = "Session crashed or produced no review output"
+    found, desc = review_found_problems(output)
+    assert found is False
+    assert desc == ""
+
+
+def test_review_found_problems_no_end_marker():
+    output = "--- REVIEW RESULT ---\nPROBLEMS FOUND\nSomething is wrong\n"
+    found, desc = review_found_problems(output)
+    assert found is True
+    assert "Something is wrong" in desc

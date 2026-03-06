@@ -529,6 +529,98 @@ def build_bug_fix_prompt() -> str:
     )
 
 
+def build_post_fix_review_prompt(
+    bug_descriptions: str,
+    diff: str,
+) -> str:
+    """Build the prompt for the post-fix review session."""
+    return (
+        "You are reviewing a bug fix for regressions.\n\n"
+        "## Original bug descriptions\n\n"
+        f"{bug_descriptions}\n\n"
+        "## Diff of changes made\n\n"
+        f"```diff\n{diff}\n```\n\n"
+        "Review ONLY the changed files listed in the diff. "
+        "Check whether the fix:\n"
+        "1. Actually addresses each original bug\n"
+        "2. Introduces any NEW bugs (crashes, logic errors, "
+        "unhandled exceptions, broken behavior)\n"
+        "3. Breaks any existing functionality in the "
+        "changed files\n\n"
+        "Read the full content of each changed file to "
+        "understand the surrounding context.\n\n"
+        "If the fix looks correct, print exactly:\n"
+        "--- REVIEW RESULT ---\n"
+        "LGTM\n"
+        "--- END REVIEW ---\n\n"
+        "If you find problems, print:\n"
+        "--- REVIEW RESULT ---\n"
+        "PROBLEMS FOUND\n"
+        "<description of each problem>\n"
+        "--- END REVIEW ---\n\n"
+        "Do not modify any files. This is a read-only "
+        "review."
+    )
+
+
+def review_found_problems(output: str) -> tuple[bool, str]:
+    """Parse review session output for problems.
+
+    Returns (found_problems, description).
+    """
+    marker = "--- REVIEW RESULT ---"
+    end_marker = "--- END REVIEW ---"
+    idx = output.find(marker)
+    if idx == -1:
+        return False, ""
+    after = output[idx + len(marker) :]
+    end_idx = after.find(end_marker)
+    if end_idx != -1:
+        after = after[:end_idx]
+    content = after.strip()
+    if content.startswith("PROBLEMS FOUND"):
+        return True, content
+    return False, ""
+
+
+def run_post_fix_review(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    bug_descriptions: str,
+    diff: str,
+    model: str | None = None,
+) -> RunResult:
+    """Launch a read-only review session on post-fix changes."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = build_post_fix_review_prompt(bug_descriptions, diff)
+    cmd = _build_command(
+        "claude",
+        prompt=prompt,
+        model=model,
+    )
+    output, returncode = _run_session(
+        cmd,
+        project_dir,
+    )
+    log_path = _write_log(
+        log_dir,
+        "post-fix-review",
+        cmd,
+        output,
+        returncode,
+    )
+
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
+
+
 def run_bug_fix(
     project_dir: str | Path,
     log_dir: str | Path,

@@ -35,7 +35,15 @@ from mcloop.ratelimit import (
     is_session_limited,
     wait_for_reset,
 )
-from mcloop.runner import bugs_md_has_bugs, run_audit, run_bug_fix, run_sync, run_task
+from mcloop.runner import (
+    bugs_md_has_bugs,
+    review_found_problems,
+    run_audit,
+    run_bug_fix,
+    run_post_fix_review,
+    run_sync,
+    run_task,
+)
 
 
 def main() -> None:
@@ -677,6 +685,29 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return True
 
 
+def _get_diff(project_dir: Path) -> str:
+    """Return the combined diff of staged and unstaged changes."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        # Fallback: unstaged diff only (no HEAD yet)
+        result = subprocess.run(
+            ["git", "diff"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 def _changed_files(project_dir: Path) -> list[str]:
     """Return list of files with uncommitted changes, excluding logs and metadata."""
     try:
@@ -987,6 +1018,39 @@ def _run_audit_fix_cycle(
 
         check_result = run_checks(project_dir)
         if check_result.passed:
+            # Post-fix review: verify changes don't introduce new bugs
+            diff = _get_diff(project_dir)
+            if diff:
+                print(
+                    "\n>>> Post-fix review...",
+                    flush=True,
+                )
+                review_result = run_post_fix_review(
+                    project_dir,
+                    log_dir,
+                    bugs_content,
+                    diff,
+                    model=model,
+                )
+                if review_result.success:
+                    found, desc = review_found_problems(
+                        review_result.output,
+                    )
+                    if found:
+                        print(
+                            "\n!!! Post-fix review found problems",
+                            flush=True,
+                        )
+                        for line in desc.splitlines()[:10]:
+                            print(f"    {line}", flush=True)
+                        bugs_content = bugs_content + "\n\n## Post-fix review problems\n" + desc
+                        bugs_path.write_text(bugs_content)
+                        continue
+                    print(
+                        ">>> Post-fix review: LGTM",
+                        flush=True,
+                    )
+
             _commit(project_dir, "Fix bugs from audit")
             bugs_path.unlink(missing_ok=True)
             _save_audit_hash(project_dir)
