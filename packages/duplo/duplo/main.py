@@ -30,6 +30,7 @@ from duplo.test_generator import (
     load_code_examples,
     save_test_file,
 )
+from duplo.validator import validate_product_url
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -106,6 +107,9 @@ def _first_run() -> None:
 
     if scan.urls:
         source_url = scan.urls[0]
+        source_url = _validate_url(source_url)
+        if not source_url:
+            return
         print(f"\nFetching {source_url} …")
         scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
             source_url
@@ -294,6 +298,40 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     match = re.search(r"#\s*(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
     phase_label = match.group(1).strip() if match else "Next Phase"
     _execute_phase(content, app_name, phase_label)
+
+
+def _validate_url(url: str) -> str:
+    """Validate that *url* points to a single product.
+
+    If the page appears to list multiple products, prompt the user
+    to provide a more specific URL. Returns the validated URL, or
+    an empty string if the user declines.
+    """
+    print(f"\nValidating {url} …")
+    try:
+        result = validate_product_url(url)
+    except Exception as exc:
+        print(f"Could not validate URL ({exc}). Proceeding anyway.")
+        return url
+
+    if result.single_product:
+        label = result.product_name or url
+        print(f"Identified product: {label}")
+        return url
+
+    print(f"This URL appears to list multiple products: {result.reason}")
+    if result.products:
+        print("Products found:")
+        for i, name in enumerate(result.products, 1):
+            print(f"  {i}. {name}")
+    print(
+        "\nPlease provide a URL that points to a single product,\n"
+        "or press Enter to proceed with the original URL anyway."
+    )
+    new_url = input("Product URL: ").strip()
+    if new_url:
+        return new_url
+    return url
 
 
 def _init_project(
