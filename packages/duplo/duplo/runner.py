@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def run_mcloop(target_dir: Path | str = ".") -> int:
-    """Run ``mcloop sync`` in *target_dir*.
+    """Run ``mcloop`` in *target_dir*.
 
     Output is streamed directly to the terminal (not captured).  Returns the
     exit code of the mcloop process.

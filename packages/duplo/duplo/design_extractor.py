@@ -161,7 +161,7 @@ def _parse_design(raw: str) -> DesignRequirements:
         fonts=fonts if isinstance(fonts, dict) else {},
         spacing=spacing if isinstance(spacing, dict) else {},
         layout=layout if isinstance(layout, dict) else {},
-        components=data.get("components", []),
+        components=comps if isinstance((comps := data.get("components", [])), list) else [],
     )
 
 
@@ -202,6 +202,8 @@ def format_design_section(design: DesignRequirements) -> str:
     if design.components:
         lines.append("### Component Styles")
         for comp in design.components:
+            if not isinstance(comp, dict):
+                continue
             name = comp.get("name", "unknown")
             style = comp.get("style", "")
             lines.append(f"- **{name}**: {style}")

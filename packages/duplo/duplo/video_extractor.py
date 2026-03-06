@@ -187,11 +187,12 @@ def deduplicate_frames(
             img = Image.open(frame)
             h = _dhash(img, hash_size)
         except Exception:
-            # Can't hash → keep the frame to be safe.
-            kept.append((frame, 0))
+            # Can't hash → keep the frame but use None so it never
+            # matches valid hashes during deduplication.
+            kept.append((frame, None))
             continue
 
-        is_dup = any(_hamming(h, kh) <= max_distance for _, kh in kept)
+        is_dup = any(kh is not None and _hamming(h, kh) <= max_distance for _, kh in kept)
         if is_dup:
             frame.unlink(missing_ok=True)
         else:

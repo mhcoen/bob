@@ -314,6 +314,8 @@ def advance_phase(
     """Increment current_phase in duplo.json. Returns new phase number."""
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
+    if not path.exists():
+        return 1
     data = json.loads(path.read_text(encoding="utf-8"))
     current = data.get("current_phase", 0)
     data["current_phase"] = current + 1
