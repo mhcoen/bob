@@ -22,11 +22,11 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Present features to the user and ask which to include
   - [x] Ask about platform, language, constraints, and preferences
   - [x] Save selections to duplo.json in the target project
-- [ ] Plan generation
+- [x] Plan generation
   - [x] Generate Phase 1 PLAN.md (smallest end-to-end working thing)
   - [x] Create target project directory with git init
   - [x] Write PLAN.md, README.md, and mcloop.json
-  - [ ] Include CLAUDE.md with appshot instructions
+  - [x] Include CLAUDE.md with appshot instructions
 - [ ] Phase execution
   - [ ] Run McLoop on the target project
   - [ ] Wait for completion, capture screenshots with appshot
