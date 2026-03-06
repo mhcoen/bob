@@ -105,9 +105,11 @@ def _first_run() -> None:
     page_records: list = []
     raw_pages: dict[str, str] = {}
 
+    product_name = ""
+
     if scan.urls:
         source_url = scan.urls[0]
-        source_url = _validate_url(source_url)
+        source_url, product_name = _validate_url(source_url)
         if not source_url:
             return
         print(f"\nFetching {source_url} …")
@@ -116,6 +118,10 @@ def _first_run() -> None:
         )
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
+
+    product_name = _confirm_product(product_name, source_url)
+    if not product_name:
+        return
 
     combined_text = scraped_text
     if text_content:
@@ -300,24 +306,24 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     _execute_phase(content, app_name, phase_label)
 
 
-def _validate_url(url: str) -> str:
+def _validate_url(url: str) -> tuple[str, str]:
     """Validate that *url* points to a single product.
 
     If the page appears to list multiple products, prompt the user
-    to provide a more specific URL. Returns the validated URL, or
-    an empty string if the user declines.
+    to provide a more specific URL. Returns ``(validated_url, product_name)``
+    where *product_name* may be empty if unknown.
     """
     print(f"\nValidating {url} …")
     try:
         result = validate_product_url(url)
     except Exception as exc:
         print(f"Could not validate URL ({exc}). Proceeding anyway.")
-        return url
+        return url, ""
 
     if result.single_product:
         label = result.product_name or url
         print(f"Identified product: {label}")
-        return url
+        return url, result.product_name
 
     print(f"This URL appears to list multiple products: {result.reason}")
     if result.products:
@@ -330,8 +336,8 @@ def _validate_url(url: str) -> str:
     )
     new_url = input("Product URL: ").strip()
     if new_url:
-        return new_url
-    return url
+        return new_url, ""
+    return url, ""
 
 
 def _init_project(
