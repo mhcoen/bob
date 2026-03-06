@@ -34,7 +34,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Generate visual issue list
   - [x] Notify user that phase is complete and ready for testing
 - [ ] Feedback and iteration
-  - [ ] Collect user feedback (text input or from a file)
+  - [x] Collect user feedback (text input or from a file)
   - [ ] Generate next phase PLAN.md incorporating feedback and visual issues
   - [ ] Append completed phases to duplo.json history
   - [ ] Run McLoop for the next phase
