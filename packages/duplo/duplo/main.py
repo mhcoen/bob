@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
+from duplo.collector import collect_feedback
 from duplo.comparator import compare_screenshots
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
@@ -31,7 +32,7 @@ def main() -> None:
     if args.command == "run":
         _cmd_run()
     elif args.command == "next":
-        print("duplo next: not yet implemented")
+        _cmd_next(feedback_file=args.feedback_file)
     elif args.command == "init":
         default_name = project_name_from_url(args.url)
         project_name = input(f"Project directory name [{default_name}]: ").strip() or default_name
@@ -78,6 +79,18 @@ def main() -> None:
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
         sys.exit(1)
+
+
+def _cmd_next(feedback_file: str | None = None) -> None:
+    """Collect user feedback in preparation for the next phase."""
+    try:
+        feedback = collect_feedback(feedback_file=feedback_file)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    print(f"\nFeedback recorded ({len(feedback)} chars).")
+    print("(Generating next phase plan is not yet implemented.)")
 
 
 def _cmd_run() -> None:
@@ -160,8 +173,14 @@ def _parse_args() -> argparse.Namespace:
         "run",
         help="Run the current phase",
     )
-    subparsers.add_parser(
+    next_parser = subparsers.add_parser(
         "next",
         help="Generate and run the next phase",
+    )
+    next_parser.add_argument(
+        "--feedback-file",
+        metavar="FILE",
+        default=None,
+        help="Path to a plain-text file containing feedback (default: interactive input)",
     )
     return parser.parse_args()
