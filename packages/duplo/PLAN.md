@@ -63,7 +63,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Create a .duplo/ directory in the target project for Duplo's working state between runs
   - [x] Save all reference URLs consulted during scraping, with timestamps and content hashes
   - [x] Save raw scraped content so re-runs can diff against what changed on the product site
-  - [ ] Save extracted examples separately from duplo.json so they can be reviewed and edited
+  - [x] Save extracted examples separately from duplo.json so they can be reviewed and edited
   - [ ] Add .duplo/ to the target project's .gitignore
 - [ ] Directory-based workflow redesign
   - [ ] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
