@@ -47,7 +47,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Follow documentation links even if they leave the main domain (docs are often hosted separately)
   - [x] Increase the page limit for documentation sites since doc pages are individually small but collectively important
   - [x] Extract code examples from documentation pages as input/expected_output pairs
-  - [ ] Extract feature tables, operation lists, unit lists, and function references
+  - [x] Extract feature tables, operation lists, unit lists, and function references
   - [ ] Store all extracted examples in duplo.json so they persist across runs
 - [ ] Test case generation from documentation
   - [ ] Every input/output example extracted from documentation becomes a unit test case
