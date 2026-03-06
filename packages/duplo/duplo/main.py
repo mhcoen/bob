@@ -39,6 +39,7 @@ from duplo.test_generator import (
     save_test_file,
 )
 from duplo.validator import validate_product_url
+from duplo.frame_describer import describe_frames
 from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
@@ -198,6 +199,11 @@ def _first_run() -> None:
             rejected = len(decisions) - kept
             if rejected:
                 print(f"  Kept {kept}, rejected {rejected} frame(s)")
+            if video_frames:
+                print("Describing UI states …")
+                frame_descs = describe_frames(video_frames)
+                for fd in frame_descs:
+                    print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
 
     # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
@@ -355,6 +361,11 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                 rejected = len(decisions) - kept
                 if rejected:
                     print(f"  Kept {kept}, rejected {rejected} frame(s)")
+                if video_frames:
+                    print("Describing UI states …")
+                    frame_descs = describe_frames(video_frames)
+                    for fd in frame_descs:
+                        print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
 
             summary.video_frames_extracted = len(video_frames)
 
