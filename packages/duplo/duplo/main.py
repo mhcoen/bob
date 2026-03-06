@@ -13,6 +13,7 @@ from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
+from duplo.runner import run_mcloop
 from duplo.saver import save_selections, write_claude_md
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
@@ -88,6 +89,13 @@ def _cmd_run() -> None:
     content = generate_phase_plan(source_url, features, preferences)
     saved = save_plan(content)
     print(f"Phase 1 plan saved to {saved}")
+
+    print("\nRunning McLoop …")
+    exit_code = run_mcloop(".")
+    if exit_code != 0:
+        print(f"McLoop exited with code {exit_code}")
+        sys.exit(exit_code)
+    print("McLoop complete.")
 
 
 def _parse_args() -> argparse.Namespace:
