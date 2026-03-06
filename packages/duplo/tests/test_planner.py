@@ -266,11 +266,30 @@ class TestSavePlan:
         path = save_plan("# Plan", target_dir=tmp_path)
         assert path.is_absolute()
 
-    def test_overwrites_existing_file(self, tmp_path: Path):
+    def test_appends_to_existing_file(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
-        plan_path.write_text("old content\n", encoding="utf-8")
-        save_plan("new content", target_dir=tmp_path)
-        assert plan_path.read_text(encoding="utf-8") == "new content\n"
+        plan_path.write_text("- [x] Done task\n- [ ] Open task\n", encoding="utf-8")
+        save_plan("- [ ] New task", target_dir=tmp_path)
+        text = plan_path.read_text(encoding="utf-8")
+        assert "- [x] Done task" in text
+        assert "- [ ] Open task" in text
+        assert "- [ ] New task" in text
+
+    def test_append_preserves_existing_content_exactly(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        original = "# Phase 1\n\n- [x] First\n- [ ] Second\n"
+        plan_path.write_text(original, encoding="utf-8")
+        save_plan("- [ ] Third", target_dir=tmp_path)
+        text = plan_path.read_text(encoding="utf-8")
+        assert text.startswith("# Phase 1\n\n- [x] First\n- [ ] Second")
+        assert text.endswith("- [ ] Third\n")
+
+    def test_append_separates_with_blank_line(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text("- [ ] Existing\n", encoding="utf-8")
+        save_plan("- [ ] New", target_dir=tmp_path)
+        text = plan_path.read_text(encoding="utf-8")
+        assert "\n\n- [ ] New\n" in text
 
     def test_default_target_dir_is_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)

@@ -258,7 +258,16 @@ def save_plan(
     *,
     target_dir: Path | str = ".",
 ) -> Path:
-    """Write *content* to ``PLAN.md`` in *target_dir*. Returns the path."""
+    """Write *content* to ``PLAN.md`` in *target_dir*.
+
+    If PLAN.md already exists, new content is appended after a blank
+    line so that existing checked and unchecked items are preserved.
+    Returns the path.
+    """
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
-    path.write_text(content + "\n", encoding="utf-8")
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        path.write_text(existing.rstrip("\n") + "\n\n" + content + "\n", encoding="utf-8")
+    else:
+        path.write_text(content + "\n", encoding="utf-8")
     return path
