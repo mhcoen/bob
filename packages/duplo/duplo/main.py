@@ -10,6 +10,7 @@ from pathlib import Path
 
 from duplo.appshot import capture_appshot
 from duplo.comparator import compare_screenshots
+from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
@@ -135,6 +136,13 @@ def _compare_with_references(current: Path) -> None:
     print(f"  {result.summary}")
     for detail in result.details:
         print(f"  - {detail}")
+
+    issues = generate_issue_list([result])
+    if issues:
+        issues_path = save_issue_list(issues)
+        print(f"\nVisual issues ({len(issues)}) saved to {issues_path}")
+    else:
+        print("\nNo visual issues detected.")
 
 
 def _parse_args() -> argparse.Namespace:
