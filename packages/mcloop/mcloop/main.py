@@ -367,7 +367,9 @@ def _cmd_audit(checklist_path: Path) -> None:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
     project_dir = checklist_path.parent
     log_dir = project_dir / "logs"
-    result = run_audit(project_dir, log_dir)
+    bugs_path = project_dir / "BUGS.md"
+    existing = bugs_path.read_text() if bugs_path.exists() else ""
+    result = run_audit(project_dir, log_dir, existing_bugs=existing)
     if not result.success:
         print(f"audit: session exited with code {result.exit_code}", file=sys.stderr)
         sys.exit(result.exit_code)
@@ -998,10 +1000,12 @@ def _run_single_audit_round(
             return False
     else:
         print("\n>>> Running bug audit...", flush=True)
+        existing = bugs_path.read_text() if bugs_path.exists() else ""
         audit_result = run_audit(
             project_dir,
             log_dir,
             model=model,
+            existing_bugs=existing,
         )
         if not audit_result.success:
             print(

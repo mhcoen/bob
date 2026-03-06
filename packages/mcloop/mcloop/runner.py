@@ -437,12 +437,16 @@ def gather_audit_context(project_dir: Path) -> dict[str, str]:
     return context
 
 
-def build_audit_prompt() -> str:
-    """Build the prompt for the audit Claude session."""
-    return (
-        "You are auditing this codebase for bugs.\n\n"
-        "Read all source files in the project and identify "
-        "actual defects only.\n\n"
+def build_audit_prompt(existing_bugs: str = "") -> str:
+    """Build the prompt for the audit Claude session.
+
+    If existing_bugs is provided, the prompt instructs the
+    session to preserve existing entries and only append new
+    findings.
+    """
+    parts = [
+        "You are auditing this codebase for bugs.\n",
+        "Read all source files in the project and identify actual defects only.\n",
         "Include ONLY:\n"
         "- Crashes (unhandled exceptions, index errors, "
         "assertion failures, etc.)\n"
@@ -452,39 +456,65 @@ def build_audit_prompt() -> str:
         "operations that can fail, unchecked return values "
         "that could cause silent failures)\n"
         "- Security issues (command injection, path "
-        "traversal, insecure defaults)\n\n"
+        "traversal, insecure defaults)\n",
         "Do NOT include:\n"
         "- Style issues or formatting problems\n"
         "- Refactoring suggestions\n"
         "- Performance improvements\n"
         "- Missing documentation\n"
         "- Hypothetical issues with no evidence in the "
-        "code\n\n"
+        "code\n",
+    ]
+
+    if existing_bugs:
+        parts.append(
+            "IMPORTANT: BUGS.md already exists with "
+            "previously reported bugs. Read it first. "
+            "Do NOT report any bug that is already "
+            "listed. Only add NEW findings that are not "
+            "already present. Append new entries to the "
+            "end of the existing file. Do not remove or "
+            "rewrite existing entries.\n"
+        )
+
+    parts.append(
         "Write your findings to BUGS.md in this exact "
         "format:\n"
         "# Bugs\n\n"
         "## <file>:<line> -- <short title>\n"
         "**Severity**: high|medium|low\n"
         "<description of the defect and why it is a bug>"
-        "\n\n"
-        "If no bugs are found, write BUGS.md containing "
-        "only:\n"
-        "# Bugs\n\n"
-        "No bugs found.\n"
+        "\n"
     )
+
+    if existing_bugs:
+        parts.append(
+            "Since BUGS.md already exists, keep its "
+            "existing content and append any new bugs "
+            "after the last entry. If you find no new "
+            "bugs beyond what is already listed, do not "
+            "modify BUGS.md.\n"
+        )
+    else:
+        parts.append(
+            "If no bugs are found, write BUGS.md containing only:\n# Bugs\n\nNo bugs found.\n"
+        )
+
+    return "\n".join(parts)
 
 
 def run_audit(
     project_dir: str | Path,
     log_dir: str | Path,
     model: str | None = None,
+    existing_bugs: str = "",
 ) -> RunResult:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
     project_dir = Path(project_dir)
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_audit_prompt()
+    prompt = build_audit_prompt(existing_bugs=existing_bugs)
     cmd = _build_command(
         "claude",
         prompt=prompt,

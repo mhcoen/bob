@@ -98,7 +98,7 @@ def test_run_audit_fix_cycle_no_bugs(tmp_path):
     """When audit writes 'No bugs found.', fix session is not run."""
     bugs_path = tmp_path / "BUGS.md"
 
-    def fake_audit(project_dir, log_dir, model=None):
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
         bugs_path.write_text("# Bugs\n\nNo bugs found.\n")
         return _make_result()
 
@@ -118,7 +118,7 @@ def test_run_audit_fix_cycle_with_bugs(tmp_path):
     bugs_path = tmp_path / "BUGS.md"
     bug_content = "# Bugs\n\n## foo.py:1 — crash\n**Severity**: high\nBad.\n"
 
-    def fake_audit(project_dir, log_dir, model=None):
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
         bugs_path.write_text(bug_content)
         return _make_result()
 
@@ -192,7 +192,7 @@ def test_single_audit_round_commits_when_checks_pass(tmp_path):
     """When fix session succeeds and checks pass, changes are committed."""
     bugs_path = tmp_path / "BUGS.md"
 
-    def fake_audit(project_dir, log_dir, model=None):
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
         bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
         return _make_result()
 
@@ -283,7 +283,7 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
     """_run_single_audit_round returns True when bugs are fixed."""
     bugs_path = tmp_path / "BUGS.md"
 
-    def fake_audit(project_dir, log_dir, model=None):
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
         bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
         return _make_result()
 
@@ -305,7 +305,7 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
 def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
     """_run_single_audit_round returns False when no bugs found."""
 
-    def fake_audit(project_dir, log_dir, model=None):
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
         (tmp_path / "BUGS.md").write_text("# Bugs\n\nNo bugs found.\n")
         return _make_result()
 

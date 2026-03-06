@@ -270,6 +270,34 @@ def test_build_audit_prompt_format_severity():
     assert "Severity" in prompt
 
 
+def test_build_audit_prompt_no_existing_bugs():
+    prompt = build_audit_prompt()
+    assert "No bugs found." in prompt
+    assert "already exists" not in prompt
+
+
+def test_build_audit_prompt_with_existing_bugs():
+    existing = "# Bugs\n\n## foo.py:10 -- Off-by-one\n**Severity**: low\nDetails.\n"
+    prompt = build_audit_prompt(existing_bugs=existing)
+    assert "already exists" in prompt
+    assert "Do NOT report any bug that is already" in prompt
+    assert "Append new entries" in prompt or "append any new bugs" in prompt
+
+
+def test_build_audit_prompt_existing_bugs_no_overwrite():
+    existing = "# Bugs\n\n## foo.py:10 -- Bug\nDesc.\n"
+    prompt = build_audit_prompt(existing_bugs=existing)
+    assert "Do not remove or rewrite existing entries" in prompt
+
+
+def test_build_audit_prompt_existing_bugs_no_new_instruction():
+    existing = "# Bugs\n\n## foo.py:10 -- Bug\nDesc.\n"
+    prompt = build_audit_prompt(existing_bugs=existing)
+    assert "no new bugs" in prompt.lower() or "no new" in prompt.lower()
+    # Should NOT contain the "No bugs found." file-creation instruction
+    assert "No bugs found." not in prompt
+
+
 # --- bugs_md_has_bugs ---
 
 
