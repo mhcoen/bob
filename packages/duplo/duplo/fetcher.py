@@ -99,17 +99,15 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     return links
 
 
-def _same_domain(url: str, base: str) -> bool:
-    return urlparse(url).netloc == urlparse(base).netloc
-
-
 def fetch_site(url: str, max_pages: int = 10) -> str:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
     are visited before neutral links. Low-priority links (marketing, blog,
     pricing, legal, login) are skipped entirely. Cross-domain documentation
-    links (detected by link text and URL path) are always followed.
+    links (detected by link text and URL path) are always followed, and once
+    a cross-domain docs site is reached, same-domain links within that docs
+    site are followed too (priority-scored like the seed domain).
 
     Returns concatenated text content from all visited pages, each prefixed
     with its URL as a section header.
@@ -117,7 +115,9 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
     visited: set[str] = set()
     queued: set[str] = set()
     results: list[str] = []
+    docs_domains: set[str] = set()
 
+    seed_domain = urlparse(url).netloc
     seed_norm = url.rstrip("/")
     queue: list[tuple[int, str]] = [(2, url)]  # seed at highest priority
     queued.add(seed_norm)
@@ -132,7 +132,12 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
         visited.add(norm)
 
         try:
-            resp = httpx.get(current_url, follow_redirects=True, timeout=_TIMEOUT)
+            resp = httpx.get(
+                current_url,
+                follow_redirects=True,
+                timeout=_TIMEOUT,
+                headers=_HEADERS,
+            )
             resp.raise_for_status()
             html = resp.text
         except Exception:
@@ -146,10 +151,13 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
             link_norm = link_url.rstrip("/")
             if link_norm in visited or link_norm in queued:
                 continue
+            link_domain = urlparse(link_url).netloc
             if is_docs_link(link_url, anchor):
+                if link_domain != seed_domain:
+                    docs_domains.add(link_domain)
                 queue.append((1, link_url))
                 queued.add(link_norm)
-            elif _same_domain(link_url, url):
+            elif link_domain == seed_domain or link_domain in docs_domains:
                 link_score = score_link(link_url, anchor)
                 if link_score >= 0:
                     queue.append((link_score, link_url))
@@ -160,7 +168,7 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
 
 def fetch_text(url: str) -> str:
     """Fetch *url* and return its visible text content."""
-    response = httpx.get(url, follow_redirects=True, timeout=_TIMEOUT)
+    response = httpx.get(url, follow_redirects=True, timeout=_TIMEOUT, headers=_HEADERS)
     response.raise_for_status()
     return extract_text(response.text)
 

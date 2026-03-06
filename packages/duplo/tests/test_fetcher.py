@@ -369,6 +369,41 @@ class TestFetchSite:
         assert "External docs content" in result
         assert "Wiki content" in result
 
+    def test_follows_links_within_docs_domain(self):
+        """Once a cross-domain docs site is reached, follow its internal links."""
+        seed_html = (
+            '<html><body><p>Home</p><a href="https://docs.other.com/guide">Guide</a></body></html>'
+        )
+        guide_html = (
+            "<html><body><p>Guide content</p>"
+            '<a href="https://docs.other.com/concepts">Concepts</a>'
+            '<a href="https://docs.other.com/advanced">Advanced</a>'
+            "</body></html>"
+        )
+        concepts_html = "<html><body><p>Concepts content</p></body></html>"
+        advanced_html = "<html><body><p>Advanced content</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://docs.other.com/guide": self._make_response(guide_html),
+            "https://docs.other.com/concepts": self._make_response(concepts_html),
+            "https://docs.other.com/advanced": self._make_response(advanced_html),
+        }
+
+        def fake_get(url, **kwargs):
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            result = fetch_site("https://example.com", max_pages=10)
+
+        assert "Guide content" in result
+        assert "Concepts content" in result
+        assert "Advanced content" in result
+
     def test_does_not_follow_non_docs_cross_domain(self):
         seed_html = (
             '<html><body><p>Home</p><a href="https://other.com/product">Product</a></body></html>'
@@ -440,9 +475,11 @@ class TestFetchText:
         html = "<html><body><h1>Product</h1><p>Description</p></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._mock_response(html)) as mock_get:
             result = fetch_text("https://example.com")
-        mock_get.assert_called_once_with(
-            "https://example.com", follow_redirects=True, timeout=30.0
-        )
+        args, kwargs = mock_get.call_args
+        assert args == ("https://example.com",)
+        assert kwargs["follow_redirects"] is True
+        assert kwargs["timeout"] == 30.0
+        assert "User-Agent" in kwargs["headers"]
         assert "Product" in result
         assert "Description" in result
 
