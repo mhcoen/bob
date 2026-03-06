@@ -15,6 +15,16 @@ RATE_LIMIT_PATTERNS = [
     "capacity",
 ]
 
+SESSION_LIMIT_PATTERNS = [
+    "credit balance is too low",
+    "session limit",
+    "billing_error",
+    "exceeded your plan",
+    "usage cap",
+    "you've hit your limit",
+    "hit your limit",
+]
+
 DEFAULT_COOLDOWN = 300  # 5 minutes
 
 
@@ -48,6 +58,14 @@ def is_rate_limited(output: str, exit_code: int) -> bool:
         return False
     lower = output.lower()
     return any(p in lower for p in RATE_LIMIT_PATTERNS)
+
+
+def is_session_limited(output: str, exit_code: int) -> bool:
+    """Detect session/billing limit from CLI output."""
+    if exit_code == 0:
+        return False
+    lower = output.lower()
+    return any(p in lower for p in SESSION_LIMIT_PATTERNS)
 
 
 ALL_CLIS = ("claude", "codex")

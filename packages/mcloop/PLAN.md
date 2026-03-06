@@ -99,3 +99,4 @@ over-abstraction. This is a simple tool and should stay that way.
 - [x] Debugging instruction in task prompt (read crash reports first)
 - [x] CLAUDE.md update instruction in task prompt
 - [x] Visual verification with bin/appshot
+- [ ] Retry on session limit: poll every 10 minutes instead of sleeping forever, resume the loop when the limit resets

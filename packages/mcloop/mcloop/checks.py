@@ -106,9 +106,9 @@ def _detect_commands(
         if '"test"' in pkg:
             commands.append("npm test")
 
-    # Swift
+    # Swift (--disable-sandbox needed for Claude Code's sandbox)
     if (project_dir / "Package.swift").exists():
-        commands.append("swift build")
+        commands.append("swift build --disable-sandbox")
 
     # Rust
     if (project_dir / "Cargo.toml").exists():
@@ -156,7 +156,7 @@ def detect_build(project_dir: str | Path) -> str | None:
         return str(override)
 
     if (project_dir / "Package.swift").exists():
-        return "swift build -c release"
+        return "swift build -c release --disable-sandbox"
     if (project_dir / "Cargo.toml").exists():
         return "cargo build --release"
     if (project_dir / "go.mod").exists():

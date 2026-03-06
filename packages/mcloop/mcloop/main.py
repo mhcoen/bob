@@ -6,7 +6,9 @@ import argparse
 import difflib
 import hashlib
 import json as _json
+import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -29,12 +31,29 @@ from mcloop.ratelimit import (
     RateLimitState,
     get_available_cli,
     is_rate_limited,
+    is_session_limited,
     wait_for_reset,
 )
 from mcloop.runner import bugs_md_has_bugs, run_audit, run_bug_fix, run_sync, run_task
 
 
 def main() -> None:
+    def _handle_sigint(sig, frame):
+        print("\nInterrupted.", flush=True)
+        from mcloop.runner import _active_process
+        if _active_process is not None:
+            try:
+                _active_process.kill()
+            except OSError:
+                pass
+        os._exit(130)
+
+    signal.signal(signal.SIGINT, _handle_sigint)
+    signal.signal(signal.SIGTSTP, _handle_sigint)
+    _main()
+
+
+def _main() -> None:
     args = _parse_args()
     checklist_path = Path(args.file).resolve()
 
@@ -136,6 +155,33 @@ def run_loop(
                 session_context=ctx.text(),
                 check_commands=project_checks,
             )
+
+            if is_session_limited(
+                result.output, result.exit_code,
+            ):
+                _checkpoint(project_dir)
+                total = time.monotonic() - run_start
+                _print_summary(
+                    completed, None, "",
+                    parse(checklist_path), total,
+                    project_dir, notes_snapshot,
+                )
+                notify(
+                    "Session limit reached.",
+                    level="warning",
+                )
+                print(
+                    "\n>>> Session limit reached."
+                    " Waiting for reset."
+                    " Press Ctrl-C to exit.",
+                    flush=True,
+                )
+                try:
+                    while True:
+                        time.sleep(60)
+                except KeyboardInterrupt:
+                    print("\nExiting.", flush=True)
+                return [task.text]
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
@@ -588,36 +634,35 @@ def _task_label(tasks: list[Task], target: Task) -> str:
 
 
 def _has_meaningful_changes(project_dir: Path) -> bool:
-    """Check if there are staged or unstaged changes beyond PLAN.md and logs/."""
+    """Check for file changes beyond PLAN.md and logs/.
+
+    Uses git status --porcelain which works even in repos
+    with no commits (no HEAD).
+    """
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
+            ["git", "status", "--porcelain"],
             cwd=project_dir,
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
-            result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-            )
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        all_files = (result.stdout + untracked.stdout).strip().splitlines()
+            return True
+        all_files = []
+        for line in result.stdout.strip().splitlines():
+            # porcelain format: XY filename
+            if len(line) > 3:
+                all_files.append(line[3:])
         meaningful = [
-            f
-            for f in all_files
-            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md"
+            f for f in all_files
+            if f
+            and not f.startswith("logs/")
+            and not f.startswith(".mcloop/")
+            and f != "PLAN.md"
         ]
         return len(meaningful) > 0
     except Exception:
-        return True  # if git fails, don't block
+        return True
 
 
 def _snapshot_notes(
@@ -920,10 +965,15 @@ def _checkpoint(
     project_dir: Path,
     next_task: str = "",
 ) -> None:
-    """Stage and commit all tracked modified files as a checkpoint."""
+    """Stage and commit all changes as a checkpoint.
+
+    Stages both tracked modifications and untracked files
+    (except logs/ and .mcloop/) so orphaned files from
+    failed runs get committed before the next task.
+    """
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only"],
+            ["git", "status", "--porcelain"],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -933,8 +983,16 @@ def _checkpoint(
         msg = "mcloop: checkpoint"
         if next_task:
             msg += f" (next: {next_task})"
+        # Stage tracked changes
         subprocess.run(
             ["git", "add", "-u"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        # Also stage untracked files (orphans from
+        # failed runs). git add -A respects .gitignore.
+        subprocess.run(
+            ["git", "add", "-A"],
             cwd=project_dir,
             capture_output=True,
         )

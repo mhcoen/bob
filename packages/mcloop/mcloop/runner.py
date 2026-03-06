@@ -149,6 +149,7 @@ def _build_command(
 
 SILENCE_TIMEOUT = 5  # seconds before checking pending
 _SENTINEL = object()
+_active_process = None  # type: subprocess.Popen | None
 
 
 def _run_session(
@@ -158,6 +159,11 @@ def _run_session(
     stdin_text: str | None = None,
 ) -> tuple[str, int]:
     """Run a CLI session, stream output, return (output, exit_code)."""
+    # Strip ANTHROPIC_API_KEY so claude -p uses the
+    # subscription instead of billing API credits.
+    session_env = dict(env or os.environ)
+    session_env.pop("ANTHROPIC_API_KEY", None)
+    global _active_process
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -165,8 +171,10 @@ def _run_session(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=env,
+        env=session_env,
+        start_new_session=True,
     )
+    _active_process = process
     if stdin_text and process.stdin:
         process.stdin.write(stdin_text)
         process.stdin.close()
@@ -190,36 +198,54 @@ def _run_session(
     output_lines: list[str] = []
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
-    while True:
-        try:
-            line = line_q.get(
-                timeout=SILENCE_TIMEOUT,
-            )
-        except queue.Empty:
-            # Silence. Check for pending approvals.
-            if not shown_waiting and pending_dir.exists():
-                try:
-                    pending = list(pending_dir.iterdir())
-                except OSError:
-                    pending = []
-                if pending:
-                    count = len(pending)
+    try:
+        while True:
+            try:
+                line = line_q.get(
+                    timeout=SILENCE_TIMEOUT,
+                )
+            except queue.Empty:
+                # Silence. Check for pending approvals.
+                if (
+                    not shown_waiting
+                    and pending_dir.exists()
+                ):
                     try:
-                        desc = pending[0].read_text()[:80]
+                        pending = list(
+                            pending_dir.iterdir()
+                        )
                     except OSError:
-                        desc = "unknown"
-                    extra = f" ({count} pending)" if count > 1 else ""
-                    print(
-                        f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
-                        flush=True,
-                    )
-                    shown_waiting = True
-            continue
-        if line is _SENTINEL:
-            break
-        output_lines.append(line)
-        _print_stream_event(line)
-        shown_waiting = False
+                        pending = []
+                    if pending:
+                        count = len(pending)
+                        try:
+                            desc = pending[0].read_text(
+                            )[:80]
+                        except OSError:
+                            desc = "unknown"
+                        extra = (
+                            f" ({count} pending)"
+                            if count > 1
+                            else ""
+                        )
+                        print(
+                            f"\n>>> Waiting for "
+                            f"Telegram approval"
+                            f"{extra}"
+                            f"\n    {desc}",
+                            flush=True,
+                        )
+                        shown_waiting = True
+                continue
+            if line is _SENTINEL:
+                break
+            output_lines.append(line)
+            _print_stream_event(line)
+            shown_waiting = False
+    except KeyboardInterrupt:
+        process.kill()
+        process.wait()
+        raise
 
     t.join(timeout=5)
     process.wait()

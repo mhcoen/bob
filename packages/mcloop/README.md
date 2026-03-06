@@ -147,6 +147,12 @@ while unchecked items remain:
 10. Print summary with elapsed time and whitelist suggestions
 ```
 
+Tasks within a single run share a rolling session context. After each task
+completes, McLoop summarizes what changed and feeds that summary into the
+next task's prompt. This gives later tasks awareness of what earlier tasks
+did without carrying over the full conversation history. The context resets
+when you restart McLoop.
+
 McLoop streams Claude Code's output in real time, showing text, tool calls,
 and results as they happen. Each task is numbered (e.g., "Task 3.2)") to make
 it easy to track progress through the checklist. Elapsed time is shown for
@@ -178,6 +184,8 @@ catastrophic by accident.
 call Claude Code makes as a `PreToolUse` hook:
 
 - **Whitelisted commands** (in `permissions.allow`) pass through automatically.
+- **MCP tools** are blocked entirely during McLoop sessions. Claude Code
+  sessions should only use local tools (Bash, Read, Edit, Write, etc.).
 - **Everything else** sends you a Telegram message with **Approve**, **Deny**,
   and **Allow All Session** buttons describing exactly what Claude Code wants to
   do, then pauses and waits for your response. McLoop resumes immediately once
