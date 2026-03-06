@@ -13,7 +13,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Create duplo package with __init__.py and main.py entry point
   - [x] Add CLI argument parser: duplo <url>, duplo run, duplo next
   - [x] Verify pip install -e . works and duplo command runs
-- [ ] Product scraping
+- [x] Product scraping
   - [x] Fetch the product URL and extract text content
   - [x] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
   - [x] Save reference screenshots from the product website
