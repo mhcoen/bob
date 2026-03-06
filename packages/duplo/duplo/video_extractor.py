@@ -192,6 +192,9 @@ def deduplicate_frames(
             kept.append((frame, None))
             continue
 
+        if h is None:
+            kept.append((frame, None))
+            continue
         is_dup = any(kh is not None and _hamming(h, kh) <= max_distance for _, kh in kept)
         if is_dup:
             frame.unlink(missing_ok=True)

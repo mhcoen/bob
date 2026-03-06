@@ -250,7 +250,18 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
     """
     if not test_tasks:
         return plan
-    return plan.rstrip() + "\n" + "\n".join(test_tasks) + "\n"
+    lines = plan.rstrip().split("\n")
+    # Find the last checklist item to insert before it.
+    last_check_idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].lstrip().startswith("- ["):
+            last_check_idx = i
+            break
+    if last_check_idx is not None:
+        before = lines[:last_check_idx]
+        after = lines[last_check_idx:]
+        return "\n".join(before + test_tasks + after) + "\n"
+    return "\n".join(lines) + "\n" + "\n".join(test_tasks) + "\n"
 
 
 def save_plan(

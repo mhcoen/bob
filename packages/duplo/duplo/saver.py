@@ -259,7 +259,10 @@ def clear_in_progress(*, target_dir: Path | str = ".") -> None:
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     if not path.exists():
         return
-    data: dict = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data: dict = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
     if "in_progress" not in data:
         return
     data.pop("in_progress")

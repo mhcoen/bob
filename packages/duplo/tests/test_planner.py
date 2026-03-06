@@ -247,8 +247,11 @@ class TestAppendTestTasks:
         plan = "# Phase 1\n- [ ] Build core"
         tasks = ["- [ ] Wire up tests", "  - [ ] Replace stub"]
         result = append_test_tasks(plan, tasks)
-        assert result.endswith("- [ ] Wire up tests\n  - [ ] Replace stub\n")
         assert "Build core" in result
+        # Test tasks are inserted before the final checklist item.
+        assert result == (
+            "# Phase 1\n- [ ] Wire up tests\n  - [ ] Replace stub\n- [ ] Build core\n"
+        )
 
     def test_returns_plan_unchanged_when_no_tasks(self):
         plan = "# Phase 1\n- [ ] Build core\n"

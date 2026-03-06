@@ -177,10 +177,6 @@ def fetch_site(
                 continue
 
         visited.add(norm)
-        if is_docs:
-            docs_visited += 1
-        else:
-            seed_visited += 1
 
         try:
             resp = httpx.get(
@@ -193,6 +189,11 @@ def fetch_site(
             html = resp.text
         except Exception:
             continue
+
+        if is_docs:
+            docs_visited += 1
+        else:
+            seed_visited += 1
 
         record = PageRecord(
             url=current_url,
