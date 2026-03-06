@@ -16,7 +16,7 @@ from duplo.extractor import Feature, extract_features
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
-from duplo.planner import generate_phase_plan, save_plan
+from duplo.planner import generate_next_phase_plan, generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.runner import run_mcloop
 from duplo.saver import save_selections, write_claude_md
@@ -82,7 +82,18 @@ def main() -> None:
 
 
 def _cmd_next(feedback_file: str | None = None) -> None:
-    """Collect user feedback in preparation for the next phase."""
+    """Collect feedback and generate the next phase PLAN.md."""
+    plan_path = Path("PLAN.md")
+    if not plan_path.exists():
+        print("Error: PLAN.md not found. Run 'duplo run' first.")
+        sys.exit(1)
+    current_plan = plan_path.read_text(encoding="utf-8")
+
+    issues_text = ""
+    issues_path = Path("ISSUES.md")
+    if issues_path.exists():
+        issues_text = issues_path.read_text(encoding="utf-8")
+
     try:
         feedback = collect_feedback(feedback_file=feedback_file)
     except (FileNotFoundError, ValueError) as exc:
@@ -90,7 +101,10 @@ def _cmd_next(feedback_file: str | None = None) -> None:
         sys.exit(1)
 
     print(f"\nFeedback recorded ({len(feedback)} chars).")
-    print("(Generating next phase plan is not yet implemented.)")
+    print("Generating next phase PLAN.md …")
+    content = generate_next_phase_plan(current_plan, feedback, issues_text)
+    saved = save_plan(content)
+    print(f"Next phase plan saved to {saved}")
 
 
 def _cmd_run() -> None:
