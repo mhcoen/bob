@@ -73,6 +73,8 @@ def save_selections(
     preferences: BuildPreferences,
     *,
     app_name: str = "",
+    code_examples: list[CodeExample] | None = None,
+    doc_structures: DocStructures | None = None,
     target_dir: Path | str = ".",
 ) -> Path:
     """Write selected features and build preferences to *duplo.json*.
@@ -85,15 +87,21 @@ def save_selections(
         features: Selected features to include in the build.
         preferences: Build platform and language preferences.
         app_name: macOS process name used by appshot for screenshot capture.
+        code_examples: Optional extracted code examples to persist.
+        doc_structures: Optional extracted doc structures to persist.
         target_dir: Directory in which to write ``duplo.json``.
     """
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data = {
+    data: dict = {
         "source_url": source_url,
         "app_name": app_name,
         "features": [dataclasses.asdict(f) for f in features],
         "preferences": dataclasses.asdict(preferences),
     }
+    if code_examples is not None:
+        data["code_examples"] = [dataclasses.asdict(ex) for ex in code_examples]
+    if doc_structures is not None:
+        data["doc_structures"] = _serialize_doc_structures(doc_structures)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -295,27 +303,9 @@ def save_code_examples(
     return path
 
 
-def save_doc_structures(
-    structures: DocStructures,
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Save extracted doc structures to *duplo.json*.
-
-    Writes ``{"doc_structures": {...}}`` into *duplo.json*, preserving
-    all existing keys.  The structures dict contains ``feature_tables``,
-    ``operation_lists``, ``unit_lists``, and ``function_refs``.
-
-    Args:
-        structures: :class:`DocStructures` to store.
-        target_dir: Directory containing ``duplo.json``.
-
-    Returns:
-        Path to the updated file.
-    """
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    data["doc_structures"] = {
+def _serialize_doc_structures(structures: DocStructures) -> dict:
+    """Convert a :class:`DocStructures` instance to a JSON-serialisable dict."""
+    return {
         "feature_tables": [
             {"heading": ft.heading, "rows": ft.rows, "source_url": ft.source_url}
             for ft in structures.feature_tables
@@ -338,6 +328,29 @@ def save_doc_structures(
             for fr in structures.function_refs
         ],
     }
+
+
+def save_doc_structures(
+    structures: DocStructures,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save extracted doc structures to *duplo.json*.
+
+    Writes ``{"doc_structures": {...}}`` into *duplo.json*, preserving
+    all existing keys.  The structures dict contains ``feature_tables``,
+    ``operation_lists``, ``unit_lists``, and ``function_refs``.
+
+    Args:
+        structures: :class:`DocStructures` to store.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["doc_structures"] = _serialize_doc_structures(structures)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

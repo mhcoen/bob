@@ -6,6 +6,14 @@ import json
 
 import pytest
 
+from duplo.doc_examples import CodeExample
+from duplo.doc_tables import (
+    DocStructures,
+    FeatureTable,
+    FunctionRef,
+    OperationList,
+    UnitList,
+)
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
 from duplo.saver import (
@@ -104,6 +112,106 @@ class TestSaveSelections:
             "https://example.com", sample_features, sample_prefs, target_dir=tmp_path
         )
         assert path.read_text().endswith("\n")
+
+    def test_code_examples_stored(self, tmp_path, sample_features, sample_prefs):
+        examples = [
+            CodeExample(
+                input="print(1+1)",
+                expected_output="2",
+                source_url="https://docs.example.com",
+                language="python",
+            ),
+        ]
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            code_examples=examples,
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["code_examples"]) == 1
+        assert data["code_examples"][0]["input"] == "print(1+1)"
+        assert data["code_examples"][0]["expected_output"] == "2"
+
+    def test_code_examples_omitted_when_none(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert "code_examples" not in data
+
+    def test_doc_structures_stored(self, tmp_path, sample_features, sample_prefs):
+        structures = DocStructures(
+            feature_tables=[
+                FeatureTable(heading="Ops", rows=[{"op": "add"}], source_url="https://docs.ex.com")
+            ],
+            operation_lists=[
+                OperationList(
+                    heading="Math", items=["add", "sub"], source_url="https://docs.ex.com"
+                )
+            ],
+            unit_lists=[
+                UnitList(heading="Units", items=["m", "kg"], source_url="https://docs.ex.com")
+            ],
+            function_refs=[
+                FunctionRef(
+                    name="sin",
+                    signature="sin(x)",
+                    description="Sine",
+                    source_url="https://docs.ex.com",
+                )
+            ],
+        )
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            doc_structures=structures,
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        ds = data["doc_structures"]
+        assert len(ds["feature_tables"]) == 1
+        assert ds["feature_tables"][0]["heading"] == "Ops"
+        assert len(ds["operation_lists"]) == 1
+        assert len(ds["unit_lists"]) == 1
+        assert len(ds["function_refs"]) == 1
+        assert ds["function_refs"][0]["name"] == "sin"
+
+    def test_doc_structures_omitted_when_none(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert "doc_structures" not in data
+
+    def test_all_extracted_data_in_single_write(self, tmp_path, sample_features, sample_prefs):
+        examples = [
+            CodeExample(
+                input="1+1",
+                expected_output="2",
+                source_url="https://docs.ex.com",
+                language="python",
+            ),
+        ]
+        structures = DocStructures(
+            feature_tables=[],
+            operation_lists=[],
+            unit_lists=[UnitList(heading="U", items=["m"], source_url="https://docs.ex.com")],
+            function_refs=[],
+        )
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            code_examples=examples,
+            doc_structures=structures,
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert "source_url" in data
+        assert "features" in data
+        assert "code_examples" in data
+        assert "doc_structures" in data
+        assert len(data["code_examples"]) == 1
+        assert len(data["doc_structures"]["unit_lists"]) == 1
 
 
 class TestAppendPhaseToHistory:

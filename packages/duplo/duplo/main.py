@@ -25,8 +25,6 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     get_current_phase,
-    save_code_examples,
-    save_doc_structures,
     save_feedback,
     save_roadmap,
     save_screenshot_feature_map,
@@ -94,16 +92,14 @@ def main() -> None:
             features,
             prefs,
             app_name=app_name,
+            code_examples=code_examples or None,
+            doc_structures=doc_structures or None,
             target_dir=project_dir,
         )
         print(f"\nSelections saved to {saved}")
-
         if code_examples:
-            save_code_examples(code_examples, target_dir=project_dir)
             print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
-
         if doc_structures:
-            save_doc_structures(doc_structures, target_dir=project_dir)
             print("Saved doc structures to duplo.json.")
 
         claude_md = write_claude_md(
