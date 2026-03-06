@@ -137,7 +137,10 @@ def _parse_descriptions(raw: str, frames: list[Path]) -> list[FrameDescription]:
     by_index: dict[int, dict] = {}
     for item in raw_descs:
         if isinstance(item, dict) and "index" in item:
-            by_index[int(item["index"])] = item
+            try:
+                by_index[int(item["index"])] = item
+            except (ValueError, TypeError):
+                continue
 
     results: list[FrameDescription] = []
     for i, frame in enumerate(frames):

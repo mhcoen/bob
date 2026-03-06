@@ -141,7 +141,10 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
     by_index: dict[int, dict] = {}
     for item in raw_decisions:
         if isinstance(item, dict) and "index" in item:
-            by_index[int(item["index"])] = item
+            try:
+                by_index[int(item["index"])] = item
+            except (ValueError, TypeError):
+                continue
 
     results: list[FilterDecision] = []
     for i, frame in enumerate(frames):

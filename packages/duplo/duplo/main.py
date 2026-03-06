@@ -678,6 +678,7 @@ def _subsequent_run() -> None:
             summary.pdfs_extracted = analysis.pdfs_extracted
             summary.text_files_read = analysis.text_files_read
             summary.urls_fetched = analysis.urls_fetched
+            summary.video_frames_extracted = analysis.video_frames_extracted
 
     # Re-scrape the product URL to pick up site changes.
     pages, examples = _rescrape_product_url()

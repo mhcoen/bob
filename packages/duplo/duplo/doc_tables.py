@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass, field
 
@@ -251,7 +252,7 @@ def _extract_dl(soup: BeautifulSoup, source_url: str, result: DocStructures) -> 
         if _FUNCTION_HEADING.search(heading) or any(
             _SIGNATURE_RE.search(t.get_text()) for t in terms
         ):
-            for dt, dd in zip(terms, defs):
+            for dt, dd in itertools.zip_longest(terms, defs):
                 name_text = dt.get_text(separator=" ").strip()
                 desc_text = dd.get_text(separator=" ").strip() if dd else ""
                 sig_match = _SIGNATURE_RE.search(name_text)
