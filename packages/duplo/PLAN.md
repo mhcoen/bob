@@ -105,5 +105,5 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Requires ffmpeg on PATH (document in README)
 - [ ] Product disambiguation
   - [x] When a URL points to a company with multiple products, present the products found and ask which one to duplicate
-  - [ ] When a URL is a landing page with unclear product boundaries, ask the user to describe what specific product they want
+  - [x] When a URL is a landing page with unclear product boundaries, ask the user to describe what specific product they want
   - [ ] Store the confirmed product identity in .duplo/product.json so subsequent runs don't re-ask
