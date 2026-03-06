@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
+from duplo.comparator import compare_screenshots
 from duplo.extractor import Feature, extract_features
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
@@ -114,8 +115,26 @@ def _cmd_run() -> None:
         shot_code = capture_appshot(app_name, output_path, launch=launch_cmd)
         if shot_code == 0:
             print(f"Screenshot saved to {output_path}")
+            _compare_with_references(output_path)
         else:
             print(f"appshot exited with code {shot_code} (screenshot skipped)")
+
+
+def _compare_with_references(current: Path) -> None:
+    """Compare *current* screenshot against any reference images and print results."""
+    ref_dir = Path("screenshots") / "reference"
+    references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []
+    if not references:
+        print("No reference screenshots found — skipping visual comparison.")
+        return
+
+    print(f"\nComparing screenshot against {len(references)} reference image(s) …")
+    result = compare_screenshots(current, references)
+    verdict = "SIMILAR" if result.similar else "DIFFERENT"
+    print(f"Visual comparison: {verdict}")
+    print(f"  {result.summary}")
+    for detail in result.details:
+        print(f"  - {detail}")
 
 
 def _parse_args() -> argparse.Namespace:
