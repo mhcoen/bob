@@ -59,12 +59,12 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Tests should call the app's core logic directly without requiring GUI interaction
   - [x] Include test generation tasks in the PLAN.md that Duplo generates for the target project
   - [x] Group tests by category so failures are easy to diagnose
-- [ ] Persistent state in .duplo/ directory
+- [x] Persistent state in .duplo/ directory
   - [x] Create a .duplo/ directory in the target project for Duplo's working state between runs
   - [x] Save all reference URLs consulted during scraping, with timestamps and content hashes
   - [x] Save raw scraped content so re-runs can diff against what changed on the product site
   - [x] Save extracted examples separately from duplo.json so they can be reviewed and edited
-  - [ ] Add .duplo/ to the target project's .gitignore
+  - [x] Add .duplo/ to the target project's .gitignore
 - [ ] Directory-based workflow redesign
   - [ ] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
   - [ ] On first run, scan the directory for reference materials: images (png, jpg, gif, webp), PDFs, text/markdown files, and any file containing URLs. Analyze each to determine relevance.
