@@ -11,7 +11,7 @@ short and focused. This is a thin orchestration layer, not a framework.
 
 - [ ] Project scaffolding
   - [x] Create duplo package with __init__.py and main.py entry point
-  - [ ] Add CLI argument parser: duplo <url>, duplo run, duplo next
+  - [x] Add CLI argument parser: duplo <url>, duplo run, duplo next
   - [ ] Verify pip install -e . works and duplo command runs
 - [ ] Product scraping
   - [ ] Fetch the product URL and extract text content
