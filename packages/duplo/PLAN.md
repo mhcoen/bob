@@ -51,7 +51,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Store all extracted examples in duplo.json so they persist across runs
 - [ ] Test case generation from documentation
   - [x] Every input/output example extracted from documentation becomes a unit test case
-  - [ ] Tests should call the app's core logic directly without requiring GUI interaction
+  - [x] Tests should call the app's core logic directly without requiring GUI interaction
   - [ ] Include test generation tasks in the PLAN.md that Duplo generates for the target project
   - [ ] Group tests by category so failures are easy to diagnose
 - [ ] Persistent state in .duplo/ directory
