@@ -37,6 +37,44 @@ def _sanitize_name(text: str) -> str:
     return name or "example"
 
 
+def _category_class_name(source_url: str) -> str:
+    """Derive a test class name from a documentation *source_url*.
+
+    ``https://docs.example.com/api/convert`` → ``TestDocsApiConvert``
+    """
+    if not source_url:
+        return "TestUncategorized"
+    # Strip scheme and trailing slash.
+    path = re.sub(r"^https?://", "", source_url).rstrip("/")
+    # Use host + path segments, drop common prefixes.
+    parts = re.split(r"[/.\-]+", path)
+    # Filter out empty, very short, and generic segments.
+    filtered = [
+        p for p in parts if len(p) > 1 and p not in {"www", "com", "org", "io", "html", "htm"}
+    ]
+    if not filtered:
+        return "TestUncategorized"
+    camel = "".join(word.capitalize() for word in filtered)
+    return f"Test{_sanitize_name(camel)}"
+
+
+def _group_by_source(
+    examples: list[CodeExample],
+) -> list[tuple[str, list[tuple[int, CodeExample]]]]:
+    """Group examples by source_url, preserving original indices.
+
+    Returns ``(class_name, [(original_index, example), ...])`` pairs
+    in the order the first example of each group was seen.
+    """
+    from collections import OrderedDict
+
+    groups: OrderedDict[str, list[tuple[int, CodeExample]]] = OrderedDict()
+    for idx, ex in enumerate(examples):
+        key = _category_class_name(ex.source_url)
+        groups.setdefault(key, []).append((idx, ex))
+    return list(groups.items())
+
+
 def _make_test_id(index: int, example: CodeExample) -> str:
     """Generate a test function name from an example."""
     first_line = example.input.split("\n", 1)[0].strip()
@@ -90,27 +128,32 @@ def generate_test_source(
         "",
         "",
         "# -- Tests ----------------------------------------------------------",
-        "",
     ]
 
-    for idx, ex in enumerate(examples):
-        func_name = _make_test_id(idx, ex)
-        source_comment = f"    # Source: {ex.source_url}" if ex.source_url else ""
-        lang_comment = f"    # Language: {ex.language}" if ex.language else ""
+    groups = _group_by_source(examples)
 
-        input_repr = repr(ex.input)
-        output_repr = repr(ex.expected_output)
-
+    for class_name, group in groups:
         lines.append("")
-        lines.append(f"def {func_name}():")
-        if source_comment:
-            lines.append(source_comment)
-        if lang_comment:
-            lines.append(lang_comment)
-        lines.append(f"    input_text = {input_repr}")
-        lines.append(f"    expected = {output_repr}")
-        lines.append("    result = run_example(input_text)")
-        lines.append("    assert result == expected")
+        lines.append("")
+        lines.append(f"class {class_name}:")
+        for idx, ex in group:
+            func_name = _make_test_id(idx, ex)
+            source_comment = f"        # Source: {ex.source_url}" if ex.source_url else ""
+            lang_comment = f"        # Language: {ex.language}" if ex.language else ""
+
+            input_repr = repr(ex.input)
+            output_repr = repr(ex.expected_output)
+
+            lines.append("")
+            lines.append(f"    def {func_name}(self):")
+            if source_comment:
+                lines.append(source_comment)
+            if lang_comment:
+                lines.append(lang_comment)
+            lines.append(f"        input_text = {input_repr}")
+            lines.append(f"        expected = {output_repr}")
+            lines.append("        result = run_example(input_text)")
+            lines.append("        assert result == expected")
 
     lines.append("")
     return "\n".join(lines)
@@ -158,30 +201,31 @@ def generate_parametrized_test_source(
         "    )",
         "",
         "",
-        "# -- Test data ------------------------------------------------------",
-        "",
-        "DOC_EXAMPLES = [",
+        "# -- Tests ----------------------------------------------------------",
     ]
 
-    for ex in examples:
-        lines.append("    (")
-        lines.append(f"        {repr(ex.input)},")
-        lines.append(f"        {repr(ex.expected_output)},")
-        lines.append("    ),")
+    groups = _group_by_source(examples)
 
-    lines.extend(
-        [
-            "]",
-            "",
-            "",
-            '@pytest.mark.parametrize("input_text, expected", DOC_EXAMPLES)',
-            "def test_doc_example(input_text: str, expected: str):",
-            "    result = run_example(input_text)",
-            "    assert result == expected",
-            "",
-        ]
-    )
+    for class_name, group in groups:
+        var_name = f"{class_name.upper()}_EXAMPLES"
+        lines.append("")
+        lines.append("")
+        lines.append(f"{var_name} = [")
+        for _idx, ex in group:
+            lines.append("    (")
+            lines.append(f"        {repr(ex.input)},")
+            lines.append(f"        {repr(ex.expected_output)},")
+            lines.append("    ),")
+        lines.append("]")
+        lines.append("")
+        lines.append("")
+        lines.append(f"class {class_name}:")
+        lines.append(f'    @pytest.mark.parametrize("input_text, expected", {var_name})')
+        lines.append("    def test_doc_example(self, input_text: str, expected: str):")
+        lines.append("        result = run_example(input_text)")
+        lines.append("        assert result == expected")
 
+    lines.append("")
     return "\n".join(lines)
 
 

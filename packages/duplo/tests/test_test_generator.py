@@ -6,6 +6,8 @@ import json
 
 from duplo.doc_examples import CodeExample
 from duplo.test_generator import (
+    _category_class_name,
+    _group_by_source,
     generate_parametrized_test_source,
     generate_plan_test_tasks,
     generate_test_source,
@@ -26,6 +28,63 @@ def _make_example(
         source_url=source_url,
         language=language,
     )
+
+
+class TestCategoryClassName:
+    def test_empty_url(self):
+        assert _category_class_name("") == "TestUncategorized"
+
+    def test_simple_url(self):
+        result = _category_class_name("https://docs.example.com/api/convert")
+        assert result.startswith("Test")
+        assert "Api" in result
+        assert "Convert" in result
+
+    def test_strips_scheme(self):
+        result = _category_class_name("http://example.com/guide")
+        assert "Http" not in result
+        assert "Guide" in result
+
+    def test_filters_generic_segments(self):
+        result = _category_class_name("https://www.example.com/docs")
+        assert "Www" not in result
+        assert "Com" not in result
+
+
+class TestGroupBySource:
+    def test_single_group(self):
+        examples = [_make_example(source_url="https://example.com/a")]
+        groups = _group_by_source(examples)
+        assert len(groups) == 1
+        assert len(groups[0][1]) == 1
+
+    def test_multiple_groups(self):
+        examples = [
+            _make_example(source_url="https://example.com/api"),
+            _make_example(source_url="https://example.com/guide"),
+            _make_example(source_url="https://example.com/api"),
+        ]
+        groups = _group_by_source(examples)
+        assert len(groups) == 2
+        # First group has 2 examples (indices 0 and 2).
+        assert len(groups[0][1]) == 2
+        assert len(groups[1][1]) == 1
+
+    def test_preserves_original_indices(self):
+        examples = [
+            _make_example(source_url="https://example.com/api"),
+            _make_example(source_url="https://example.com/guide"),
+            _make_example(source_url="https://example.com/api"),
+        ]
+        groups = _group_by_source(examples)
+        first_group_indices = [idx for idx, _ex in groups[0][1]]
+        assert first_group_indices == [0, 2]
+
+    def test_empty_source_url_grouped(self):
+        examples = [_make_example(source_url=""), _make_example(source_url="")]
+        groups = _group_by_source(examples)
+        assert len(groups) == 1
+        assert groups[0][0] == "TestUncategorized"
 
 
 class TestLoadCodeExamples:
@@ -78,9 +137,10 @@ class TestGenerateTestSource:
     def test_empty_returns_empty(self):
         assert generate_test_source([]) == ""
 
-    def test_single_example(self):
+    def test_single_example_in_class(self):
         ex = _make_example()
         source = generate_test_source([ex])
+        assert "class Test" in source
         assert "def test_doc_example_000_" in source
         assert "run_example(input_text)" in source
         assert repr(ex.input) in source
@@ -106,12 +166,23 @@ class TestGenerateTestSource:
         source = generate_test_source([ex], project_name="MyApp")
         assert "MyApp" in source
 
-    def test_multiple_examples(self):
-        examples = [_make_example(input=f"ex{i}") for i in range(3)]
+    def test_multiple_examples_same_source(self):
+        examples = [
+            _make_example(input=f"ex{i}", source_url="https://example.com/docs") for i in range(3)
+        ]
         source = generate_test_source(examples)
+        assert source.count("class Test") == 1
         assert "test_doc_example_000_" in source
         assert "test_doc_example_001_" in source
         assert "test_doc_example_002_" in source
+
+    def test_multiple_examples_different_sources(self):
+        examples = [
+            _make_example(input="a", source_url="https://example.com/api"),
+            _make_example(input="b", source_url="https://example.com/guide"),
+        ]
+        source = generate_test_source(examples)
+        assert source.count("class Test") == 2
 
     def test_valid_python_syntax(self):
         ex = _make_example(input='print("hello")', expected_output="hello")
@@ -128,21 +199,39 @@ class TestGenerateTestSource:
         source = generate_test_source([ex])
         compile(source, "<test>", "exec")
 
+    def test_methods_have_self(self):
+        ex = _make_example()
+        source = generate_test_source([ex])
+        assert "def test_doc_example_000_" in source
+        assert "(self):" in source
+
 
 class TestGenerateParametrizedSource:
     def test_empty_returns_empty(self):
         assert generate_parametrized_test_source([]) == ""
 
-    def test_contains_parametrize(self):
+    def test_contains_parametrize_in_class(self):
         ex = _make_example()
         source = generate_parametrized_test_source([ex])
         assert "@pytest.mark.parametrize" in source
         assert "import pytest" in source
+        assert "class Test" in source
 
-    def test_single_test_function(self):
-        examples = [_make_example(input=f"ex{i}") for i in range(3)]
+    def test_single_test_function_per_class(self):
+        examples = [
+            _make_example(input=f"ex{i}", source_url="https://example.com/docs") for i in range(3)
+        ]
         source = generate_parametrized_test_source(examples)
         assert source.count("def test_doc_example") == 1
+
+    def test_multiple_classes_for_different_sources(self):
+        examples = [
+            _make_example(input="a", source_url="https://example.com/api"),
+            _make_example(input="b", source_url="https://example.com/guide"),
+        ]
+        source = generate_parametrized_test_source(examples)
+        assert source.count("class Test") == 2
+        assert source.count("def test_doc_example") == 2
 
     def test_valid_python_syntax(self):
         ex = _make_example()
