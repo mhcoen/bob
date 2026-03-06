@@ -31,7 +31,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Run McLoop on the target project
   - [x] Wait for completion, capture screenshots with appshot
   - [x] Compare screenshots against reference images via Claude API
-  - [ ] Generate visual issue list
+  - [x] Generate visual issue list
   - [ ] Notify user that phase is complete and ready for testing
 - [ ] Feedback and iteration
   - [ ] Collect user feedback (text input or from a file)
