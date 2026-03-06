@@ -14,7 +14,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Add CLI argument parser: duplo <url>, duplo run, duplo next
   - [x] Verify pip install -e . works and duplo command runs
 - [ ] Product scraping
-  - [ ] Fetch the product URL and extract text content
+  - [x] Fetch the product URL and extract text content
   - [ ] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
   - [ ] Save reference screenshots from the product website
   - [ ] Extract a structured feature list from the scraped content
