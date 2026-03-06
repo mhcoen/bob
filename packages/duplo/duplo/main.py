@@ -23,11 +23,12 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     save_feedback,
+    save_screenshot_feature_map,
     save_selections,
     set_in_progress,
     write_claude_md,
 )
-from duplo.screenshotter import save_reference_screenshots
+from duplo.screenshotter import map_screenshots_to_features, save_reference_screenshots
 from duplo.selector import select_features
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
@@ -83,6 +84,11 @@ def main() -> None:
             print(f"\nSaving reference screenshots to {output_dir}/ …")
             saved = save_reference_screenshots(urls, output_dir)
             print(f"Saved {len(saved)} screenshot(s).")
+            feature_names = [f.name for f in features]
+            screenshot_map = map_screenshots_to_features(text, feature_names, output_dir)
+            if screenshot_map:
+                save_screenshot_feature_map(screenshot_map, target_dir=project_dir)
+                print(f"Screenshot→feature map saved ({len(screenshot_map)} entries).")
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
         sys.exit(1)
