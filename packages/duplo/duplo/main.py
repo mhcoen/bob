@@ -697,7 +697,11 @@ def _subsequent_run() -> None:
     _print_summary(summary)
 
     duplo_path = Path(_DUPLO_JSON)
-    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"Error: {duplo_path} contains invalid JSON. Delete or fix it.")
+        return
     app_name = data.get("app_name", "")
     in_progress = data.get("in_progress")
 

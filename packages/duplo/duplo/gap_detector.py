@@ -202,7 +202,8 @@ def detect_design_gaps(
     plan_lower = plan_content.lower()
     refinements: list[DesignRefinement] = []
 
-    for key, value in design.get("colors", {}).items():
+    colors = design.get("colors", {})
+    for key, value in colors.items() if isinstance(colors, dict) else ():
         if isinstance(value, str) and value.lower() not in plan_lower:
             refinements.append(
                 DesignRefinement(
@@ -212,7 +213,8 @@ def detect_design_gaps(
                 )
             )
 
-    for key, value in design.get("fonts", {}).items():
+    fonts = design.get("fonts", {})
+    for key, value in fonts.items() if isinstance(fonts, dict) else ():
         if isinstance(value, str) and value.lower() not in plan_lower:
             refinements.append(
                 DesignRefinement(

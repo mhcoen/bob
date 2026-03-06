@@ -65,7 +65,10 @@ def load_hashes(directory: Path | str = ".") -> dict[str, str]:
     path = Path(directory).resolve() / DUPLO_DIR / _HASH_FILE
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def save_hashes(

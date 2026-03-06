@@ -65,7 +65,10 @@ def load_product(
     path = (Path(target_dir) / PRODUCT_JSON).resolve()
     if not path.exists():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
     return data.get("product_name", ""), data.get("source_url", "")
 
 

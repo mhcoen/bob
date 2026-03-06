@@ -152,11 +152,15 @@ def _parse_design(raw: str) -> DesignRequirements:
     if not isinstance(data, dict):
         return DesignRequirements()
 
+    colors = data.get("colors", {})
+    fonts = data.get("fonts", {})
+    spacing = data.get("spacing", {})
+    layout = data.get("layout", {})
     return DesignRequirements(
-        colors=data.get("colors", {}),
-        fonts=data.get("fonts", {}),
-        spacing=data.get("spacing", {}),
-        layout=data.get("layout", {}),
+        colors=colors if isinstance(colors, dict) else {},
+        fonts=fonts if isinstance(fonts, dict) else {},
+        spacing=spacing if isinstance(spacing, dict) else {},
+        layout=layout if isinstance(layout, dict) else {},
         components=data.get("components", []),
     )
 
