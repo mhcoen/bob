@@ -12,6 +12,7 @@ build/
 logs/
 local
 .mcloop-last-audit
+.mcloop/
 *~
 \#*\#
 .#*

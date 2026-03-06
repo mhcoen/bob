@@ -28,17 +28,20 @@ def _load_config(project_dir: Path) -> dict:
         return {}
 
 
+def get_check_commands(project_dir: str | Path) -> list[str]:
+    """Return the check commands for this project without running them."""
+    project_dir = Path(project_dir)
+    config = _load_config(project_dir)
+    checks = config.get("checks")
+    if isinstance(checks, list) and checks:
+        return [str(c) for c in checks]
+    return _detect_commands(project_dir, config)
+
+
 def run_checks(project_dir: str | Path) -> CheckResult:
     """Run the project's checks. Returns a CheckResult."""
     project_dir = Path(project_dir)
-    config = _load_config(project_dir)
-
-    # Explicit checks override everything
-    checks = config.get("checks")
-    if isinstance(checks, list) and checks:
-        commands = [str(c) for c in checks]
-    else:
-        commands = _detect_commands(project_dir, config)
+    commands = get_check_commands(project_dir)
 
     if not commands:
         return CheckResult(
@@ -59,17 +62,13 @@ def run_checks(project_dir: str | Path) -> CheckResult:
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
-            all_output.append(
-                f"$ {cmd}\nTIMEOUT after 300s"
-            )
+            all_output.append(f"$ {cmd}\nTIMEOUT after 300s")
             return CheckResult(
                 passed=False,
                 output="\n".join(all_output),
                 command=cmd,
             )
-        all_output.append(
-            f"$ {cmd}\n{result.stdout}{result.stderr}"
-        )
+        all_output.append(f"$ {cmd}\n{result.stdout}{result.stderr}")
         if result.returncode != 0:
             return CheckResult(
                 passed=False,
@@ -122,9 +121,7 @@ def _detect_commands(
         commands.append("go test ./...")
 
     # Java/Kotlin (Gradle)
-    if (project_dir / "build.gradle").exists() or (
-        project_dir / "build.gradle.kts"
-    ).exists():
+    if (project_dir / "build.gradle").exists() or (project_dir / "build.gradle.kts").exists():
         commands.append("gradle check")
 
     # Ruby
@@ -168,9 +165,7 @@ def detect_build(project_dir: str | Path) -> str | None:
         pkg = (project_dir / "package.json").read_text()
         if '"build"' in pkg:
             return "npm run build"
-    if (project_dir / "build.gradle").exists() or (
-        project_dir / "build.gradle.kts"
-    ).exists():
+    if (project_dir / "build.gradle").exists() or (project_dir / "build.gradle.kts").exists():
         return "gradle build"
     if (project_dir / "Makefile").exists():
         return "make"

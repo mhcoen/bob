@@ -10,7 +10,6 @@ requires-python = ">=3.11"
 [tool.setuptools]
 packages = ["mcloop"]
 
-
 [project.scripts]
 mcloop = "mcloop.main:main"
 

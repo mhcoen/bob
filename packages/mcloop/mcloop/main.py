@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from mcloop.checklist import Task, check_off, find_next, mark_failed, parse, parse_description
-from mcloop.checks import detect_build, detect_run, run_checks
+from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
 from mcloop.notify import notify
 from mcloop.ratelimit import (
     RateLimitState,
@@ -67,9 +67,18 @@ def run_loop(
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
 
+    project_checks = get_check_commands(project_dir)
+
     _checkpoint(project_dir)
 
+    # Clean up stale pending files from previous runs
+    pending_dir = project_dir / ".mcloop" / "pending"
+    if pending_dir.exists():
+        for f in pending_dir.iterdir():
+            f.unlink(missing_ok=True)
+
     notes_snapshot = _snapshot_notes(project_dir)
+    ctx = SessionContext()
     run_start = time.monotonic()
     completed: list[str] = []
     failed_task: str | None = None
@@ -91,6 +100,8 @@ def run_loop(
             cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
 
         label = _task_label(tasks, task)
+        has_subtasks = "." in label
+        ctx.update_group(label, has_subtasks)
         _checkpoint(
             project_dir,
             next_task=f"{label}) {task.text}",
@@ -104,9 +115,16 @@ def run_loop(
         while attempt < max_retries:
             attempt += 1
             result = run_task(
-                task.text, cli, project_dir, log_dir,
-                description, task_label=label,
-                model=model, prior_errors=last_error,
+                task.text,
+                cli,
+                project_dir,
+                log_dir,
+                description,
+                task_label=label,
+                model=model,
+                prior_errors=last_error,
+                session_context=ctx.text(),
+                check_commands=project_checks,
             )
 
             if is_rate_limited(result.output, result.exit_code):
@@ -121,8 +139,7 @@ def run_loop(
             if not result.success:
                 last_error = _tail(result.output, 50)
                 print(
-                    f"\n!!! Task failed "
-                    f"(attempt {attempt}/{max_retries})",
+                    f"\n!!! Task failed (attempt {attempt}/{max_retries})",
                     flush=True,
                 )
                 print(
@@ -131,9 +148,7 @@ def run_loop(
                 )
                 _print_error_tail(result.output)
                 notify(
-                    f"Task failed "
-                    f"(attempt {attempt}/{max_retries}): "
-                    + task.text,
+                    f"Task failed (attempt {attempt}/{max_retries}): " + task.text,
                     level="error",
                 )
                 continue
@@ -141,15 +156,11 @@ def run_loop(
             if not _has_meaningful_changes(project_dir):
                 last_error = "Task produced no file changes"
                 print(
-                    f"\n!!! No-op task "
-                    f"(attempt {attempt}/{max_retries}): "
-                    f"{task.text}",
+                    f"\n!!! No-op task (attempt {attempt}/{max_retries}): {task.text}",
                     flush=True,
                 )
                 notify(
-                    f"No-op task "
-                    f"(attempt {attempt}/{max_retries}): "
-                    + task.text,
+                    f"No-op task (attempt {attempt}/{max_retries}): " + task.text,
                     level="error",
                 )
                 continue
@@ -158,25 +169,23 @@ def run_loop(
             if check_result.passed:
                 _commit(project_dir, task.text)
                 check_off(checklist_path, task)
-                elapsed = _format_elapsed(
-                    time.monotonic() - task_start
-                )
-                completed.append(
-                    f"{label}) {task.text}"
-                )
+                elapsed = _format_elapsed(time.monotonic() - task_start)
+                completed.append(f"{label}) {task.text}")
                 print(
-                    f"\n>>> Completed {label}) "
-                    f"[{elapsed}]",
+                    f"\n>>> Completed {label}) [{elapsed}]",
                     flush=True,
+                )
+                ctx.add(
+                    label,
+                    task.text,
+                    elapsed,
+                    result.output,
                 )
                 notify(f"Completed: {task.text}")
                 success = True
                 break
             else:
-                last_error = (
-                    f"Command: {check_result.command}\n"
-                    + _tail(check_result.output, 50)
-                )
+                last_error = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
                 print(
                     f"\n!!! Checks failed "
                     f"(attempt {attempt}/{max_retries}): "
@@ -185,16 +194,12 @@ def run_loop(
                 )
                 _print_error_tail(check_result.output)
                 notify(
-                    f"Checks failed "
-                    f"(attempt {attempt}/{max_retries}): "
-                    + task.text,
+                    f"Checks failed (attempt {attempt}/{max_retries}): " + task.text,
                     level="error",
                 )
 
         if not success:
-            elapsed = _format_elapsed(
-                time.monotonic() - task_start
-            )
+            elapsed = _format_elapsed(time.monotonic() - task_start)
             mark_failed(checklist_path, task)
             failed_task = f"{label}) {task.text} [{elapsed}]"
             failed_reason = last_error
@@ -204,10 +209,13 @@ def run_loop(
             )
             total = time.monotonic() - run_start
             _print_summary(
-                completed, failed_task,
+                completed,
+                failed_task,
                 failed_reason,
-                parse(checklist_path), total,
-                project_dir, notes_snapshot,
+                parse(checklist_path),
+                total,
+                project_dir,
+                notes_snapshot,
             )
             return [task.text]
 
@@ -218,8 +226,13 @@ def run_loop(
 
     total = time.monotonic() - run_start
     _print_summary(
-        completed, None, "", [], total,
-        project_dir, notes_snapshot,
+        completed,
+        None,
+        "",
+        [],
+        total,
+        project_dir,
+        notes_snapshot,
     )
     notify("All tasks completed!")
     return []
@@ -356,8 +369,7 @@ def _print_summary(
     print("=" * 40, flush=True)
     if total_seconds > 0:
         print(
-            f"Total time: "
-            f"{_format_elapsed(total_seconds)}",
+            f"Total time: {_format_elapsed(total_seconds)}",
             flush=True,
         )
 
@@ -400,8 +412,7 @@ def _print_summary(
     suggestions = _whitelist_suggestions()
     if suggestions:
         print(
-            "\nWhitelist suggestions "
-            "(approved this session):",
+            "\nWhitelist suggestions (approved this session):",
             flush=True,
         )
         print(
@@ -429,7 +440,8 @@ def _print_summary(
 
     if project_dir:
         _print_notes_update(
-            project_dir, notes_snapshot,
+            project_dir,
+            notes_snapshot,
         )
 
     print("=" * 40, flush=True)
@@ -458,9 +470,20 @@ def _whitelist_suggestions() -> list[str]:
 
     # Never suggest whitelisting dangerous commands
     dangerous = {
-        "rm", "rmdir", "kill", "killall", "pkill",
-        "chmod", "chown", "sudo", "su", "dd",
-        "mkfs", "mv", "shutdown", "reboot",
+        "rm",
+        "rmdir",
+        "kill",
+        "killall",
+        "pkill",
+        "chmod",
+        "chown",
+        "sudo",
+        "su",
+        "dd",
+        "mkfs",
+        "mv",
+        "shutdown",
+        "reboot",
     }
 
     allow_set = set(allow)
@@ -533,8 +556,9 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         )
         all_files = (result.stdout + untracked.stdout).strip().splitlines()
         meaningful = [
-            f for f in all_files
-            if f and not f.startswith("logs/") and f != "PLAN.md"
+            f
+            for f in all_files
+            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md"
         ]
         return len(meaningful) > 0
     except Exception:
@@ -562,9 +586,7 @@ def _print_notes_update(
     if not notes_path.exists():
         return
     content = notes_path.read_text()
-    current_hash = hashlib.md5(
-        content.encode()
-    ).hexdigest()
+    current_hash = hashlib.md5(content.encode()).hexdigest()
     lines = content.splitlines()
 
     old_hash, old_count = snapshot or ("", 0)
@@ -572,16 +594,14 @@ def _print_notes_update(
     if old_hash == "" and old_count == 0:
         # NOTES.md is new this run
         print(
-            f"\nNOTES.md created ({len(lines)} lines)."
-            " Review for observations.",
+            f"\nNOTES.md created ({len(lines)} lines). Review for observations.",
             flush=True,
         )
     elif current_hash != old_hash:
         new_count = len(lines) - old_count
         if new_count > 0:
             print(
-                f"\nNOTES.md updated "
-                f"({new_count} new lines).",
+                f"\nNOTES.md updated ({new_count} new lines).",
                 flush=True,
             )
         else:
@@ -624,11 +644,67 @@ def _run_build(project_dir: Path) -> None:
                 f"!!! Build failed (exit {result.returncode})",
                 flush=True,
             )
-            _print_error_tail(
-                result.stdout + result.stderr
-            )
+            _print_error_tail(result.stdout + result.stderr)
     except Exception as e:
         print(f"!!! Build error: {e}", flush=True)
+
+
+MAX_FLAT_CONTEXT_ENTRIES = 5
+
+
+class SessionContext:
+    """Rolling context shared between task sessions within a run.
+
+    Resets when moving to a new top-level task group.
+    For flat tasks (no subtasks), keeps the last N entries.
+    """
+
+    def __init__(self) -> None:
+        self._entries: list[str] = []
+        self._current_group: str = ""
+
+    def update_group(self, label: str, has_subtasks: bool) -> None:
+        """Reset context if we moved to a new top-level group."""
+        group = label.split(".")[0]
+        if group != self._current_group:
+            self._entries.clear()
+            self._current_group = group
+        if not has_subtasks:
+            # Flat tasks: trim to last N
+            if len(self._entries) > MAX_FLAT_CONTEXT_ENTRIES:
+                self._entries = self._entries[-MAX_FLAT_CONTEXT_ENTRIES:]
+
+    def add(
+        self,
+        label: str,
+        task_text: str,
+        elapsed: str,
+        output: str,
+    ) -> None:
+        """Append a brief summary of a completed task."""
+        # Extract the last few meaningful lines
+        lines = output.strip().splitlines()
+        summary_lines = []
+        for line in reversed(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Skip JSON blobs from stream output
+            if stripped.startswith("{"):
+                continue
+            summary_lines.append(stripped)
+            if len(summary_lines) >= 3:
+                break
+        summary_lines.reverse()
+        summary = "; ".join(summary_lines)[:200]
+        entry = f"[{label}] {task_text} ({elapsed})"
+        if summary:
+            entry += f": {summary}"
+        self._entries.append(entry)
+
+    def text(self) -> str:
+        """Return context string for inclusion in prompts."""
+        return "\n".join(self._entries)
 
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"
@@ -666,11 +742,9 @@ def _should_skip_audit(project_dir: Path) -> bool:
         if result.returncode != 0:
             return False
         changed = [
-            f for f in result.stdout.strip().splitlines()
-            if f
-            and not f.startswith("logs/")
-            and f != "PLAN.md"
-            and f != AUDIT_HASH_FILE
+            f
+            for f in result.stdout.strip().splitlines()
+            if f and not f.startswith("logs/") and f != "PLAN.md" and f != AUDIT_HASH_FILE
         ]
         return len(changed) == 0
     except Exception:
@@ -692,8 +766,7 @@ def _run_audit_fix_cycle(
     """Run one audit session; if bugs are found, run a fix session then delete BUGS.md."""
     if _should_skip_audit(project_dir):
         print(
-            "\n>>> Audit skipped "
-            "(no changes since last audit)",
+            "\n>>> Audit skipped (no changes since last audit)",
             flush=True,
         )
         return
@@ -705,8 +778,7 @@ def _run_audit_fix_cycle(
         bugs_content = bugs_path.read_text()
         if bugs_md_has_bugs(bugs_content):
             print(
-                "\n>>> Found existing BUGS.md, "
-                "resuming fix cycle...",
+                "\n>>> Found existing BUGS.md, resuming fix cycle...",
                 flush=True,
             )
         else:
@@ -720,21 +792,20 @@ def _run_audit_fix_cycle(
     else:
         print("\n>>> Running bug audit...", flush=True)
         audit_result = run_audit(
-            project_dir, log_dir, model=model,
+            project_dir,
+            log_dir,
+            model=model,
         )
         if not audit_result.success:
             print(
-                "audit: session exited with "
-                f"code {audit_result.exit_code}, "
-                "skipping fix",
+                f"audit: session exited with code {audit_result.exit_code}, skipping fix",
                 flush=True,
             )
             return
 
         if not bugs_path.exists():
             print(
-                "audit: BUGS.md not written, "
-                "skipping fix",
+                "audit: BUGS.md not written, skipping fix",
                 flush=True,
             )
             return
@@ -749,18 +820,18 @@ def _run_audit_fix_cycle(
     max_fix_attempts = 3
     for attempt in range(1, max_fix_attempts + 1):
         print(
-            f"\n>>> Fixing bugs "
-            f"(attempt {attempt}/{max_fix_attempts})...",
+            f"\n>>> Fixing bugs (attempt {attempt}/{max_fix_attempts})...",
             flush=True,
         )
         fix_result = run_bug_fix(
-            project_dir, log_dir, model=model,
+            project_dir,
+            log_dir,
+            model=model,
         )
 
         if not fix_result.success:
             print(
-                "bug-fix: session exited with "
-                f"code {fix_result.exit_code}",
+                f"bug-fix: session exited with code {fix_result.exit_code}",
                 flush=True,
             )
             break
@@ -779,24 +850,15 @@ def _run_audit_fix_cycle(
             _save_audit_hash(project_dir)
             return
 
-        error_ctx = (
-            f"Command: {check_result.command}\n"
-            + _tail(check_result.output, 50)
-        )
+        error_ctx = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
         print(
-            f"\n!!! Bug fix checks failed "
-            f"(attempt {attempt}/{max_fix_attempts})",
+            f"\n!!! Bug fix checks failed (attempt {attempt}/{max_fix_attempts})",
             flush=True,
         )
         _print_error_tail(check_result.output)
 
         # Append error to BUGS.md so next attempt sees it
-        bugs_path.write_text(
-            bugs_content
-            + "\n\n## Post-fix check failure\n"
-            + error_ctx
-        )
-
+        bugs_path.write_text(bugs_content + "\n\n## Post-fix check failure\n" + error_ctx)
 
 
 def _checkpoint(
@@ -839,8 +901,7 @@ def _commit(project_dir: Path, task_text: str) -> None:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "commit", "-m",
-             f"Complete: {task_text}"],
+            ["git", "commit", "-m", f"Complete: {task_text}"],
             cwd=project_dir,
             capture_output=True,
         )
@@ -853,9 +914,12 @@ def _commit(project_dir: Path, task_text: str) -> None:
         if not result.stdout.strip():
             subprocess.run(
                 [
-                    "gh", "repo", "create",
+                    "gh",
+                    "repo",
+                    "create",
                     project_dir.name,
-                    "--private", "--source=.",
+                    "--private",
+                    "--source=.",
                     "--remote=origin",
                 ],
                 cwd=project_dir,

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json as _json
 import os
+import queue
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,8 @@ def run_task(
     task_label: str = "",
     model: str | None = None,
     prior_errors: str = "",
+    session_context: str = "",
+    check_commands: list[str] | None = None,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -37,12 +41,20 @@ def run_task(
     parts = []
     if description:
         parts.append(f"Project context:\n{description}")
+    if session_context:
+        parts.append(f"Recent session history:\n{session_context}")
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
-    parts.append(
-        "Do not chain shell commands with && or ;."
-        " Use separate Bash calls instead."
-    )
+    parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
+    if check_commands:
+        cmds = ", ".join(check_commands)
+        parts.append(
+            "Before finishing, run these check commands"
+            f" and fix any failures: {cmds}."
+            " Run them, read the output, fix issues,"
+            " and re-run until they all pass."
+            " Do not finish with failing checks."
+        )
     parts.append(
         "When debugging crashes or unexpected"
         " behavior, always find and read the actual"
@@ -58,6 +70,11 @@ def run_task(
         " the same condition, and confirm it no longer"
         " crashes. Compiling is not enough."
     )
+    parts.append(
+        "If you add, rename, or significantly change"
+        " any source file, update the relevant entry"
+        " in CLAUDE.md before finishing."
+    )
     notes_instruction = (
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"
@@ -71,9 +88,7 @@ def run_task(
     parts.append(notes_instruction)
     if prior_errors:
         parts.append(
-            "IMPORTANT: A previous attempt at this task"
-            " failed. Fix these errors:\n"
-            + prior_errors
+            "IMPORTANT: A previous attempt at this task failed. Fix these errors:\n" + prior_errors
         )
     prompt = "\n\n".join(parts)
     cmd = _build_command(cli, prompt, model=model)
@@ -81,10 +96,16 @@ def run_task(
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
     output, returncode = _run_session(
-        cmd, project_dir, env=env,
+        cmd,
+        project_dir,
+        env=env,
     )
     log_path = _write_log(
-        log_dir, task_text, cmd, output, returncode,
+        log_dir,
+        task_text,
+        cmd,
+        output,
+        returncode,
     )
 
     return RunResult(
@@ -105,23 +126,29 @@ def _build_command(
         cmd = ["claude", "-p"]
         if not use_stdin and prompt:
             cmd.append(prompt)
-        cmd.extend([
-            "--allowedTools",
-            "Edit,Write,Bash,Read,Glob,Grep",
-            "--permission-mode", "default",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-        ])
+        cmd.extend(
+            [
+                "--allowedTools",
+                "Edit,Write,Bash,Read,Glob,Grep",
+                "--permission-mode",
+                "default",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+            ]
+        )
         if model:
             cmd.extend(["--model", model])
         return cmd
     elif cli == "codex":
-        return ["codex", "-q"] + (
-            [prompt] if prompt else []
-        )
+        return ["codex", "-q"] + ([prompt] if prompt else [])
     else:
         raise ValueError(f"Unknown CLI: {cli}")
+
+
+SILENCE_TIMEOUT = 5  # seconds before checking pending
+_SENTINEL = object()
 
 
 def _run_session(
@@ -144,12 +171,57 @@ def _run_session(
         process.stdin.write(stdin_text)
         process.stdin.close()
 
-    output_lines: list[str] = []
     if process.stdout is None:
-        raise RuntimeError("subprocess stdout is None despite stdout=PIPE")
-    for line in process.stdout:
+        raise RuntimeError("stdout is None despite stdout=PIPE")
+
+    # Read lines in a thread so the main thread
+    # can check for pending approval files.
+    line_q: queue.Queue = queue.Queue()
+
+    def _reader() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            line_q.put(line)
+        line_q.put(_SENTINEL)
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+
+    output_lines: list[str] = []
+    pending_dir = cwd / ".mcloop" / "pending"
+    shown_waiting = False
+    while True:
+        try:
+            line = line_q.get(
+                timeout=SILENCE_TIMEOUT,
+            )
+        except queue.Empty:
+            # Silence. Check for pending approvals.
+            if not shown_waiting and pending_dir.exists():
+                try:
+                    pending = list(pending_dir.iterdir())
+                except OSError:
+                    pending = []
+                if pending:
+                    count = len(pending)
+                    try:
+                        desc = pending[0].read_text()[:80]
+                    except OSError:
+                        desc = "unknown"
+                    extra = f" ({count} pending)" if count > 1 else ""
+                    print(
+                        f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
+                        flush=True,
+                    )
+                    shown_waiting = True
+            continue
+        if line is _SENTINEL:
+            break
         output_lines.append(line)
         _print_stream_event(line)
+        shown_waiting = False
+
+    t.join(timeout=5)
     process.wait()
     return "".join(output_lines), process.returncode
 
@@ -303,13 +375,20 @@ def run_sync(
 
     prompt = build_sync_prompt()
     cmd = _build_command(
-        "claude", prompt=prompt, model=model,
+        "claude",
+        prompt=prompt,
+        model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir,
+        cmd,
+        project_dir,
     )
     log_path = _write_log(
-        log_dir, "sync", cmd, output, returncode,
+        log_dir,
+        "sync",
+        cmd,
+        output,
+        returncode,
     )
 
     return RunResult(
@@ -389,13 +468,20 @@ def run_audit(
 
     prompt = build_audit_prompt()
     cmd = _build_command(
-        "claude", prompt=prompt, model=model,
+        "claude",
+        prompt=prompt,
+        model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir,
+        cmd,
+        project_dir,
     )
     log_path = _write_log(
-        log_dir, "audit", cmd, output, returncode,
+        log_dir,
+        "audit",
+        cmd,
+        output,
+        returncode,
     )
 
     return RunResult(
@@ -437,13 +523,20 @@ def run_bug_fix(
 
     prompt = build_bug_fix_prompt()
     cmd = _build_command(
-        "claude", prompt=prompt, model=model,
+        "claude",
+        prompt=prompt,
+        model=model,
     )
     output, returncode = _run_session(
-        cmd, project_dir,
+        cmd,
+        project_dir,
     )
     log_path = _write_log(
-        log_dir, "bug-fix", cmd, output, returncode,
+        log_dir,
+        "bug-fix",
+        cmd,
+        output,
+        returncode,
     )
 
     return RunResult(

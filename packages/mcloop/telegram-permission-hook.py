@@ -338,6 +338,15 @@ def main():
     session_label = f"{user}/{project}"
     _dbg(f"tool={tool_name} input={json.dumps(tool_input)[:100]}")
 
+    # Block MCP tools in McLoop sessions
+    if task_label and tool_name.startswith("mcp__"):
+        _dbg(
+            f"EXIT: blocked MCP tool {tool_name}"
+            " in mcloop session"
+        )
+        _respond("deny", "MCP tools blocked in mcloop")
+        return
+
     # Whitelisted commands pass through instantly
     if is_allowed(tool_name, tool_input):
         _dbg("EXIT: allowed by rules")
@@ -362,10 +371,24 @@ def main():
         f"Pattern: `{pattern}`"
     )
 
+    # Create pending file so McLoop can show waiting status
+    pending_dir = Path(cwd) / ".mcloop" / "pending"
+    pending_file = None
+    try:
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        pending_file = pending_dir / f"{os.getpid()}"
+        pending_file.write_text(
+            f"{tool_name}: {desc[:200]}"
+        )
+    except OSError:
+        pass
+
     try:
         message_id = send_approval_request(msg)
         _dbg(f"sent approval request, message_id={message_id}")
     except Exception as e:
+        if pending_file:
+            pending_file.unlink(missing_ok=True)
         _dbg(f"EXIT: telegram send failed ({e}), no opinion")
         json.dump({}, sys.stdout)
         return
@@ -373,6 +396,10 @@ def main():
     # Block and poll for the button press
     _dbg("polling for response...")
     decision = poll_for_response(message_id)
+
+    # Remove pending file
+    if pending_file:
+        pending_file.unlink(missing_ok=True)
 
     if decision == "approve":
         update_message(message_id, f"{label_prefix}Approved: *{tool_name}*\n{desc}")
