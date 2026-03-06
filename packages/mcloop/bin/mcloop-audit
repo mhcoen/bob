@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Audit mcloop token consumption across all project log directories.
+
+Usage:
+    python mcloop-audit.py ~/proj/mcloop/logs ~/proj/duplo/logs [...]
+    python mcloop-audit.py ~/proj/*/logs     # glob all projects
+
+Parses the stream-json result lines from mcloop logs and produces:
+  - Per-task cost breakdown (model, turns, tokens, cost, rtk usage)
+  - Per-project summary
+  - Grand total
+  - rtk adoption report (are commands being rewritten?)
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+def extract_result(log_path: Path) -> dict | None:
+    """Extract the final result JSON from a log file."""
+    lines = log_path.read_text(errors="replace").splitlines()
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            if d.get("type") == "result":
+                return d
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
+def extract_bash_commands(log_path: Path) -> list[str]:
+    """Extract all Bash tool commands from a log file."""
+    commands = []
+    text = log_path.read_text(errors="replace")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(d, dict) or d.get("type") != "assistant":
+            continue
+        msg = d.get("message", {})
+        for block in msg.get("content", []):
+            if block.get("type") == "tool_use" and block.get("name") == "Bash":
+                cmd = block.get("input", {}).get("command", "")
+                if cmd:
+                    commands.append(cmd)
+    return commands
+
+
+def analyze_rtk(commands: list[str]) -> dict:
+    """Check which commands used rtk and which didn't."""
+    rtk_used = []
+    rtk_missed = []
+    rewritable_prefixes = [
+        "git status", "git diff", "git log", "git add", "git commit",
+        "git push", "git pull", "git branch", "git fetch", "git stash",
+        "git show",
+        "cat ", "ls ", "ls\n", "tree ", "tree\n",
+        "grep ", "rg ",
+        "find ",
+        "pytest", "python -m pytest",
+        "ruff check", "ruff format",
+        "cargo test", "cargo build", "cargo clippy",
+        "npm test", "npm run",
+        "docker ps", "docker images", "docker logs",
+        "curl ", "wget ",
+    ]
+    for cmd in commands:
+        cmd_stripped = cmd.strip()
+        if cmd_stripped.startswith("rtk "):
+            rtk_used.append(cmd_stripped)
+            continue
+        for prefix in rewritable_prefixes:
+            if cmd_stripped.startswith(prefix):
+                rtk_missed.append(cmd_stripped[:120])
+                break
+    return {
+        "rtk_used": rtk_used,
+        "rtk_missed": rtk_missed,
+        "total_bash": len(commands),
+    }
+
+
+def format_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        args = ["logs"]
+
+    log_dirs = []
+    for arg in args:
+        p = Path(arg).expanduser()
+        if p.is_dir():
+            log_dirs.append(p)
+        else:
+            print(f"Warning: {arg} is not a directory, skipping")
+
+    if not log_dirs:
+        print("No valid log directories found.")
+        sys.exit(1)
+
+    grand_total = 0.0
+    grand_tasks = 0
+    grand_turns = 0
+    grand_input = 0
+    grand_output = 0
+    grand_cache_read = 0
+    grand_cache_create = 0
+    grand_rtk_used = 0
+    grand_rtk_missed = 0
+    grand_bash_total = 0
+    model_costs: dict[str, float] = {}
+    model_tasks: dict[str, int] = {}
+    failed_tasks = 0
+    rate_limited = 0
+
+    for log_dir in log_dirs:
+        project = log_dir.parent.name
+        logs = sorted(log_dir.glob("*.log"))
+        if not logs:
+            print(f"\n--- {project} ---")
+            print("  No log files found.")
+            continue
+
+        proj_cost = 0.0
+        proj_tasks = 0
+        proj_turns = 0
+        proj_rtk_used = 0
+        proj_rtk_missed = 0
+        proj_bash_total = 0
+
+        print(f"\n{'=' * 70}")
+        print(f" {project.upper()} ({len(logs)} log files)")
+        print(f"{'=' * 70}")
+        print(f"{'Task':<55} {'Model':<12} {'Turns':>5} {'Cost':>8} {'RTK':>5}")
+        print(f"{'-' * 55} {'-' * 12} {'-' * 5} {'-' * 8} {'-' * 5}")
+
+        for log_path in logs:
+            result = extract_result(log_path)
+            if result is None:
+                task_name = log_path.stem[16:]
+                print(f"{task_name[:55]:<55} {'???':<12} {'?':>5} {'???':>8} {'?':>5}")
+                continue
+
+            cost = result.get("total_cost_usd", 0)
+            turns = result.get("num_turns", 0)
+            usage = result.get("usage", {})
+            mu = result.get("modelUsage", {})
+            model = list(mu.keys())[0] if mu else "unknown"
+            model_short = model.replace("claude-", "").replace("-4-6", "4.6")
+
+            result_text = result.get("result", "")
+            if "hit your limit" in str(result_text).lower():
+                rate_limited += 1
+
+            if result.get("is_error"):
+                failed_tasks += 1
+
+            bash_cmds = extract_bash_commands(log_path)
+            rtk = analyze_rtk(bash_cmds)
+
+            task_name = log_path.stem[16:]
+            rtk_str = f"{len(rtk['rtk_used'])}/{len(rtk['rtk_missed'])}"
+
+            print(f"{task_name[:55]:<55} {model_short:<12} {turns:>5} ${cost:>7.2f} {rtk_str:>5}")
+
+            proj_cost += cost
+            proj_tasks += 1
+            proj_turns += turns
+            proj_rtk_used += len(rtk["rtk_used"])
+            proj_rtk_missed += len(rtk["rtk_missed"])
+            proj_bash_total += rtk["total_bash"]
+
+            input_t = usage.get("input_tokens", 0)
+            output_t = usage.get("output_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            cache_create = usage.get("cache_creation_input_tokens", 0)
+
+            grand_input += input_t
+            grand_output += output_t
+            grand_cache_read += cache_read
+            grand_cache_create += cache_create
+
+            model_costs[model] = model_costs.get(model, 0) + cost
+            model_tasks[model] = model_tasks.get(model, 0) + 1
+
+        print(f"{'-' * 55} {'-' * 12} {'-' * 5} {'-' * 8} {'-' * 5}")
+        print(f"{'SUBTOTAL':<55} {'':<12} {proj_turns:>5} ${proj_cost:>7.2f}")
+        if proj_rtk_missed > 0:
+            pct = proj_rtk_missed / (proj_rtk_used + proj_rtk_missed) * 100 if (proj_rtk_used + proj_rtk_missed) > 0 else 0
+            print(f"  RTK: {proj_rtk_used} rewritten, {proj_rtk_missed} missed ({pct:.0f}% raw)")
+
+        grand_total += proj_cost
+        grand_tasks += proj_tasks
+        grand_turns += proj_turns
+        grand_rtk_used += proj_rtk_used
+        grand_rtk_missed += proj_rtk_missed
+        grand_bash_total += proj_bash_total
+
+    print(f"\n{'=' * 70}")
+    print(" GRAND SUMMARY")
+    print(f"{'=' * 70}")
+    print(f"  Total cost:         ${grand_total:.2f}")
+    print(f"  Total tasks:        {grand_tasks}")
+    print(f"  Failed tasks:       {failed_tasks}")
+    print(f"  Rate limited:       {rate_limited}")
+    print(f"  Total turns:        {grand_turns}")
+    if grand_tasks:
+        print(f"  Avg cost/task:      ${grand_total / grand_tasks:.2f}")
+        print(f"  Avg turns/task:     {grand_turns / grand_tasks:.1f}")
+    print()
+    print("  Token breakdown:")
+    print(f"    Input:            {format_tokens(grand_input)}")
+    print(f"    Output:           {format_tokens(grand_output)}")
+    print(f"    Cache read:       {format_tokens(grand_cache_read)}")
+    print(f"    Cache creation:   {format_tokens(grand_cache_create)}")
+    print()
+    print("  Cost by model:")
+    for model, cost in sorted(model_costs.items(), key=lambda x: -x[1]):
+        count = model_tasks[model]
+        print(f"    {model}: ${cost:.2f} ({count} tasks, ${cost/count:.2f}/task)")
+    print()
+    print("  RTK adoption:")
+    total_rewritable = grand_rtk_used + grand_rtk_missed
+    if total_rewritable > 0:
+        print(f"    Rewritten by rtk: {grand_rtk_used}")
+        print(f"    Missed (raw):     {grand_rtk_missed}")
+        print(f"    Adoption rate:    {grand_rtk_used / total_rewritable * 100:.0f}%")
+    else:
+        print(f"    Total bash calls: {grand_bash_total}")
+        print(f"    Rewritable found: 0 (rtk hook may not be logging, or no rewritable commands)")
+
+
+if __name__ == "__main__":
+    main()

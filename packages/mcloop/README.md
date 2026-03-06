@@ -4,6 +4,21 @@ McLoop lets you run Claude Code for hours at a time without babysitting it. You 
 
 Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
+McLoop creates a few files in the project that serve as shared memory
+between sessions:
+
+- **CLAUDE.md**: A manifest describing every source file. Sessions read
+  it first to understand the codebase without searching, and update it
+  when they add or change files.
+- **NOTES.md**: Observations, edge cases, and design decisions that
+  sessions notice during tasks. Accumulates across sessions for you to
+  review.
+- **BUGS.md**: Written by the audit cycle, lists confirmed defects for
+  the fix session to act on. Deleted after bugs are fixed.
+
+These files live in the repo alongside your code and are the mechanism
+by which one session's knowledge reaches the next.
+
 McLoop is designed for the long haul. Start with a few tasks, let it run
 while you do something else, add more tasks when you think of them, re-run.
 It's a persistent task queue backed by a text file, not a one-shot build

@@ -46,6 +46,7 @@ def run_task(
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
+    parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     if check_commands:
         cmds = ", ".join(check_commands)
         parts.append(
@@ -71,9 +72,13 @@ def run_task(
         " crashes. Compiling is not enough."
     )
     parts.append(
-        "If you add, rename, or significantly change"
-        " any source file, update the relevant entry"
-        " in CLAUDE.md before finishing."
+        "CLAUDE.md contains a description of every"
+        " source file in the project. Read it first"
+        " to understand the codebase instead of"
+        " searching files. If you add, rename, or"
+        " significantly change any source file,"
+        " update the relevant entry in CLAUDE.md"
+        " before finishing."
     )
     notes_instruction = (
         "If you notice edge cases, design decisions,"

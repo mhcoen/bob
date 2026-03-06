@@ -223,6 +223,7 @@ def run_loop(
 
             check_result = run_checks(project_dir)
             if check_result.passed:
+                changed_files = _changed_files(project_dir)
                 _commit(project_dir, task.text)
                 check_off(checklist_path, task)
                 elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -236,6 +237,7 @@ def run_loop(
                     task.text,
                     elapsed,
                     result.output,
+                    changed_files=changed_files,
                 )
                 notify(f"Completed: {task.text}")
                 success = True
@@ -665,6 +667,33 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
         return True
 
 
+def _changed_files(project_dir: Path) -> list[str]:
+    """Return list of files with uncommitted changes, excluding logs and metadata."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return []
+        files = []
+        for line in result.stdout.strip().splitlines():
+            if len(line) > 3:
+                f = line[3:]
+                if (
+                    f
+                    and not f.startswith("logs/")
+                    and not f.startswith(".mcloop/")
+                    and f != "PLAN.md"
+                ):
+                    files.append(f)
+        return files
+    except Exception:
+        return []
+
+
 def _snapshot_notes(
     project_dir: Path,
 ) -> tuple[str, int]:
@@ -780,6 +809,7 @@ class SessionContext:
         task_text: str,
         elapsed: str,
         output: str,
+        changed_files: list[str] | None = None,
     ) -> None:
         """Append a brief summary of a completed task."""
         # Extract the last few meaningful lines
@@ -800,6 +830,8 @@ class SessionContext:
         entry = f"[{label}] {task_text} ({elapsed})"
         if summary:
             entry += f": {summary}"
+        if changed_files:
+            entry += f"\n  Files: {', '.join(changed_files)}"
         self._entries.append(entry)
 
     def text(self) -> str:
