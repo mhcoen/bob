@@ -36,7 +36,7 @@ short and focused. This is a thin orchestration layer, not a framework.
 - [ ] Feedback and iteration
   - [x] Collect user feedback (text input or from a file)
   - [x] Generate next phase PLAN.md incorporating feedback and visual issues
-  - [ ] Append completed phases to duplo.json history
+  - [x] Append completed phases to duplo.json history
   - [ ] Run McLoop for the next phase
 - [ ] State management
   - [ ] Store all state in duplo.json: source URL, features, phases, feedback
