@@ -297,6 +297,25 @@ optional.
 
 See [CHECKS.md](CHECKS.md) for complete examples.
 
+### Stages
+
+PLAN.md can be divided into stages using `## Stage N:` headers.
+McLoop completes all tasks in the current stage, then stops. Run
+`mcloop` again to start the next stage. This lets you test between
+stages and give feedback before continuing.
+
+```markdown
+## Stage 1: Scaffold
+- [ ] Create project structure
+- [ ] Add empty window
+
+## Stage 2: Core feature
+- [ ] Add audio recording
+- [ ] Add playback
+```
+
+Without stage headers, McLoop runs all tasks in one go as before.
+
 McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task
 is treated as failed and retried.

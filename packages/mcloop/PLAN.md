@@ -76,3 +76,26 @@ over-abstraction. This is a simple tool and should stay that way.
   - [x] Test subtask ordering: depth-first execution with parent auto-checking
   - [x] Test resume after kill: run partway, kill, restart, verify it picks up where it left off
   - [x] Test failing task: verify retry behavior and [!] marking after max retries
+- [x] Stage support in PLAN.md
+  - [x] Parse `## Stage N:` headers and assign each task a stage
+  - [x] `find_next()` only returns tasks from the first incomplete stage
+  - [x] Stop at stage boundary, print stage completion in summary
+  - [x] Audit only runs when all stages are complete
+  - [x] `--dry-run` shows stage labels and which stage the next task is in
+  - [x] Backward compatible with plans that have no stage headers
+- [x] Elapsed time tracking per task and total run
+- [x] Session context: rolling summary shared between task sessions within a run
+- [x] Check commands passed in task prompt so Claude Code self-checks before finishing
+- [x] Whitelist suggestions from Telegram session approvals
+- [x] NOTES.md: Claude Code appends observations during tasks, summary tracks changes
+- [x] Hash-based audit skipping (no changes since last audit)
+- [x] BUGS.md resume: skip audit if BUGS.md already exists
+- [x] Checkpoint commits include next task label
+- [x] Multi-language check detection (Swift, Rust, Go, Java, Ruby, Make)
+- [x] Auto-detect build and run commands
+- [x] RTK proxy unwrapping in permission hook
+- [x] MCP tool blocking in McLoop sessions via permission hook
+- [x] Telegram approval waiting indicator in console output
+- [x] Debugging instruction in task prompt (read crash reports first)
+- [x] CLAUDE.md update instruction in task prompt
+- [x] Visual verification with bin/appshot

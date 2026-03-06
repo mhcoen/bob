@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
+STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
 
 
 @dataclass
@@ -16,6 +17,7 @@ class Task:
     failed: bool
     line_number: int
     indent_level: int
+    stage: str = ""
     children: list[Task] = field(default_factory=list)
 
 
@@ -31,12 +33,23 @@ def parse_description(path: str | Path) -> str:
 
 
 def parse(path: str | Path) -> list[Task]:
-    """Read a markdown file and return a tree of Task objects."""
+    """Read a markdown file and return a tree of Task objects.
+
+    Tasks under ``## Stage N: ...`` headers are tagged with the
+    stage name.  Tasks before any stage header have stage ``""``.
+    """
     lines = Path(path).read_text().splitlines()
     root_tasks: list[Task] = []
-    stack: list[Task] = []  # (task, indent_level) ancestry
+    stack: list[Task] = []
+    current_stage = ""
 
     for i, line in enumerate(lines):
+        # Detect stage headers
+        if STAGE_RE.match(line):
+            current_stage = line.lstrip("#").strip()
+            stack.clear()
+            continue
+
         m = CHECKBOX_RE.match(line)
         if not m:
             continue
@@ -52,9 +65,9 @@ def parse(path: str | Path) -> list[Task]:
             failed=failed,
             line_number=i,
             indent_level=indent,
+            stage=current_stage,
         )
 
-        # Find parent: walk stack back to find a task with smaller indent
         while stack and stack[-1].indent_level >= indent:
             stack.pop()
 
@@ -68,28 +81,110 @@ def parse(path: str | Path) -> list[Task]:
     return root_tasks
 
 
-def find_next(tasks: list[Task]) -> Task | None:
-    """Depth-first search for the first unchecked leaf task.
+def get_stages(tasks: list[Task]) -> list[str]:
+    """Return ordered list of unique stage names found in tasks.
 
-    Subtasks before parents: if a task has unchecked children, recurse into
-    children first. A parent with all children done is itself a candidate.
+    Returns ``[]`` if no tasks have stage labels (flat plan).
     """
-    for task in tasks:
-        if task.checked or task.failed:
-            continue
+    seen: set[str] = set()
+    stages: list[str] = []
 
-        if task.children:
-            # Try to find an unchecked child first
-            child = find_next(task.children)
-            if child:
-                return child
-            # All children are done, parent is the next candidate
-            # (it will be auto-checked by the main loop)
-            return task
+    def _collect(task_list: list[Task]) -> None:
+        for task in task_list:
+            if task.stage and task.stage not in seen:
+                seen.add(task.stage)
+                stages.append(task.stage)
+            _collect(task.children)
 
-        return task
+    _collect(tasks)
+    return stages
 
+
+def _stage_complete(tasks: list[Task], stage: str) -> bool:
+    """Return True if all tasks in the given stage are checked."""
+
+    def _check(task_list: list[Task]) -> bool:
+        for task in task_list:
+            if task.stage == stage:
+                if not task.checked and not task.failed:
+                    return False
+            if not _check(task.children):
+                return False
+        return True
+
+    return _check(tasks)
+
+
+def current_stage(tasks: list[Task]) -> str | None:
+    """Return the name of the first incomplete stage.
+
+    Returns ``None`` if all stages are complete or there are no
+    stages.
+    """
+    stages = get_stages(tasks)
+    if not stages:
+        return None
+    for stage in stages:
+        if not _stage_complete(tasks, stage):
+            return stage
     return None
+
+
+def stage_status(tasks: list[Task]) -> str:
+    """Return a status string for the summary.
+
+    Possible values:
+    - ``"no_stages"``: plan has no stage headers
+    - ``"stage_complete:<name>"``: a stage just finished,
+      more stages remain
+    - ``"all_complete"``: all stages are done
+    """
+    stages = get_stages(tasks)
+    if not stages:
+        return "no_stages"
+
+    last_complete = None
+    for stage in stages:
+        if _stage_complete(tasks, stage):
+            last_complete = stage
+        else:
+            if last_complete:
+                return f"stage_complete:{last_complete}"
+            return "no_stages"
+
+    return "all_complete"
+
+
+def find_next(tasks: list[Task]) -> Task | None:
+    """Depth-first search for the next unchecked leaf task.
+
+    If the plan uses stages (``## Stage N:`` headers), only
+    returns tasks from the first incomplete stage.  Returns
+    ``None`` when the current stage is fully complete, even if
+    later stages have unchecked tasks.
+    """
+    active_stage = current_stage(tasks)
+    has_stages = len(get_stages(tasks)) > 0
+
+    def _search(task_list: list[Task]) -> Task | None:
+        for task in task_list:
+            if task.checked or task.failed:
+                continue
+
+            # Skip tasks not in the active stage
+            if has_stages and task.stage != active_stage:
+                continue
+
+            if task.children:
+                child = _search(task.children)
+                if child:
+                    return child
+                return task
+
+            return task
+        return None
+
+    return _search(tasks)
 
 
 def _find_task_line(lines: list[str], task: Task) -> int:
@@ -114,7 +209,6 @@ def check_off(path: str | Path, task: Task) -> None:
     lines = p.read_text().splitlines()
     _check_line(lines, _find_task_line(lines, task))
 
-    # Re-parse to check for parent auto-completion
     p.write_text("\n".join(lines) + "\n")
     _auto_check_parents(p)
 

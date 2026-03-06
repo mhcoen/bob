@@ -12,7 +12,17 @@ import sys
 import time
 from pathlib import Path
 
-from mcloop.checklist import Task, check_off, find_next, mark_failed, parse, parse_description
+from mcloop.checklist import (
+    Task,
+    check_off,
+    current_stage,
+    find_next,
+    get_stages,
+    mark_failed,
+    parse,
+    parse_description,
+    stage_status,
+)
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
 from mcloop.notify import notify
 from mcloop.ratelimit import (
@@ -219,8 +229,37 @@ def run_loop(
             )
             return [task.text]
 
+    # Check if we stopped at a stage boundary
+    final_tasks = parse(checklist_path)
+    status = stage_status(final_tasks)
+
+    if status.startswith("stage_complete:"):
+        done_stage = status.split(":", 1)[1]
+        next_stg = current_stage(parse(checklist_path))
+        _run_build(project_dir)
+        total = time.monotonic() - run_start
+        _print_summary(
+            completed,
+            None,
+            "",
+            final_tasks,
+            total,
+            project_dir,
+            notes_snapshot,
+            completed_stage=done_stage,
+        )
+        msg = f"{done_stage} complete."
+        if next_stg:
+            msg += f" Run mcloop again to start {next_stg}."
+        notify(msg)
+        return []
+
     if not no_audit:
-        _run_audit_fix_cycle(project_dir, log_dir, model=model)
+        _run_audit_fix_cycle(
+            project_dir,
+            log_dir,
+            model=model,
+        )
 
     _run_build(project_dir)
 
@@ -317,18 +356,28 @@ def _confirm_sync_changes(
 
 def _dry_run(tasks) -> None:
     """Print the task tree without executing anything."""
+    stages = get_stages(tasks)
+    last_stage = ""
 
     def _print(task_list, depth=0):
+        nonlocal last_stage
         for t in task_list:
+            if stages and t.stage != last_stage:
+                last_stage = t.stage
+                print(f"\n  [{t.stage}]")
             marker = "[x]" if t.checked else "[ ]"
             print(f"{'  ' * depth}- {marker} {t.text}")
             if t.children:
                 _print(t.children, depth + 1)
 
     _print(tasks)
+    active = current_stage(tasks)
     next_task = find_next(tasks)
     if next_task:
-        print(f"\nNext task: {next_task.text}")
+        label = f" (in {active})" if active else ""
+        print(f"\nNext task{label}: {next_task.text}")
+    elif active is None and stages:
+        print("\nAll stages complete.")
     else:
         print("\nNo unchecked tasks remaining.")
 
@@ -362,6 +411,7 @@ def _print_summary(
     total_seconds: float = 0,
     project_dir: Path | None = None,
     notes_snapshot: tuple[str, int] | None = None,
+    completed_stage: str = "",
 ) -> None:
     """Print a summary of what McLoop did."""
     print("\n" + "=" * 40, flush=True)
@@ -403,7 +453,12 @@ def _print_summary(
             flush=True,
         )
 
-    if not completed and not failed_task:
+    if completed_stage:
+        print(
+            f"\n>>> {completed_stage} complete. Run mcloop again for the next stage.",
+            flush=True,
+        )
+    elif not completed and not failed_task:
         print(
             "All tasks were already complete.",
             flush=True,
