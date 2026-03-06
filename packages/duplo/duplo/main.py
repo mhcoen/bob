@@ -10,6 +10,7 @@ from pathlib import Path
 from duplo.extractor import extract_features
 from duplo.fetcher import fetch_site
 from duplo.questioner import ask_preferences
+from duplo.saver import save_selections
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
 
@@ -34,7 +35,10 @@ def main() -> None:
         else:
             print("No features extracted.")
 
-        ask_preferences()
+        prefs = ask_preferences()
+
+        saved = save_selections(args.url, features, prefs)
+        print(f"\nSelections saved to {saved}")
 
         urls = _SECTION_URL_RE.findall(text)
         if urls:
