@@ -45,7 +45,7 @@ short and focused. This is a thin orchestration layer, not a framework.
 - [ ] Deep documentation extraction
   - [x] When scraping a product site, identify links to documentation pages by reading the page content and link text, not by matching a hardcoded list of platforms
   - [x] Follow documentation links even if they leave the main domain (docs are often hosted separately)
-  - [ ] Increase the page limit for documentation sites since doc pages are individually small but collectively important
+  - [x] Increase the page limit for documentation sites since doc pages are individually small but collectively important
   - [ ] Extract code examples from documentation pages as input/expected_output pairs
   - [ ] Extract feature tables, operation lists, unit lists, and function references
   - [ ] Store all extracted examples in duplo.json so they persist across runs
