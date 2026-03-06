@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from duplo.doc_examples import CodeExample
+from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
 
@@ -290,6 +291,53 @@ def save_code_examples(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["code_examples"] = [dataclasses.asdict(ex) for ex in examples]
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def save_doc_structures(
+    structures: DocStructures,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save extracted doc structures to *duplo.json*.
+
+    Writes ``{"doc_structures": {...}}`` into *duplo.json*, preserving
+    all existing keys.  The structures dict contains ``feature_tables``,
+    ``operation_lists``, ``unit_lists``, and ``function_refs``.
+
+    Args:
+        structures: :class:`DocStructures` to store.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["doc_structures"] = {
+        "feature_tables": [
+            {"heading": ft.heading, "rows": ft.rows, "source_url": ft.source_url}
+            for ft in structures.feature_tables
+        ],
+        "operation_lists": [
+            {"heading": ol.heading, "items": ol.items, "source_url": ol.source_url}
+            for ol in structures.operation_lists
+        ],
+        "unit_lists": [
+            {"heading": ul.heading, "items": ul.items, "source_url": ul.source_url}
+            for ul in structures.unit_lists
+        ],
+        "function_refs": [
+            {
+                "name": fr.name,
+                "signature": fr.signature,
+                "description": fr.description,
+                "source_url": fr.source_url,
+            }
+            for fr in structures.function_refs
+        ],
+    }
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

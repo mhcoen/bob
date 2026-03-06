@@ -9,6 +9,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from duplo.doc_examples import CodeExample, extract_code_examples
+from duplo.doc_tables import DocStructures, extract_doc_structures
 
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _TIMEOUT = 30.0
@@ -103,7 +104,7 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
 
 def fetch_site(
     url: str, max_pages: int = 10, max_docs_pages: int = 50
-) -> tuple[str, list[CodeExample]]:
+) -> tuple[str, list[CodeExample], DocStructures]:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
@@ -118,15 +119,17 @@ def fetch_site(
     (cross-domain docs sites). Doc pages are individually small but
     collectively important, so this defaults higher than *max_pages*.
 
-    Returns a tuple of (text, code_examples) where *text* is concatenated
-    text content from all visited pages (each prefixed with its URL as a
-    section header) and *code_examples* is a list of :class:`CodeExample`
-    objects extracted from documentation pages.
+    Returns a tuple of ``(text, code_examples, doc_structures)`` where
+    *text* is concatenated text content from all visited pages,
+    *code_examples* is a list of :class:`CodeExample` objects, and
+    *doc_structures* is a :class:`DocStructures` with feature tables,
+    operation lists, unit lists, and function references.
     """
     visited: set[str] = set()
     queued: set[str] = set()
     results: list[str] = []
     all_examples: list[CodeExample] = []
+    all_structures = DocStructures()
     docs_domains: set[str] = set()
     seed_visited = 0
     docs_visited = 0
@@ -178,6 +181,9 @@ def fetch_site(
         page_examples = extract_code_examples(html, current_url)
         all_examples.extend(page_examples)
 
+        page_structures = extract_doc_structures(html, current_url)
+        all_structures.merge(page_structures)
+
         for link_url, anchor in extract_links(html, current_url):
             link_norm = link_url.rstrip("/")
             if link_norm in visited or link_norm in queued:
@@ -194,7 +200,7 @@ def fetch_site(
                     queue.append((link_score, link_url))
                     queued.add(link_norm)
 
-    return "\n\n".join(results), all_examples
+    return "\n\n".join(results), all_examples, all_structures
 
 
 def fetch_text(url: str) -> str:

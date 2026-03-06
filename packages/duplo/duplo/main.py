@@ -26,6 +26,7 @@ from duplo.saver import (
     clear_in_progress,
     get_current_phase,
     save_code_examples,
+    save_doc_structures,
     save_feedback,
     save_roadmap,
     save_screenshot_feature_map,
@@ -57,10 +58,21 @@ def main() -> None:
         print(f"Created project directory: {project_dir}")
 
         print(f"\nFetching {args.url} …")
-        text, code_examples = fetch_site(args.url)
+        text, code_examples, doc_structures = fetch_site(args.url)
         print(text)
         if code_examples:
             print(f"\nExtracted {len(code_examples)} code example(s) from docs.")
+        if doc_structures:
+            counts = []
+            if doc_structures.feature_tables:
+                counts.append(f"{len(doc_structures.feature_tables)} feature table(s)")
+            if doc_structures.operation_lists:
+                counts.append(f"{len(doc_structures.operation_lists)} operation list(s)")
+            if doc_structures.unit_lists:
+                counts.append(f"{len(doc_structures.unit_lists)} unit list(s)")
+            if doc_structures.function_refs:
+                counts.append(f"{len(doc_structures.function_refs)} function ref(s)")
+            print(f"Extracted {', '.join(counts)} from docs.")
         print("\nExtracting features …")
         features = extract_features(text)
         if features:
@@ -89,6 +101,10 @@ def main() -> None:
         if code_examples:
             save_code_examples(code_examples, target_dir=project_dir)
             print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
+
+        if doc_structures:
+            save_doc_structures(doc_structures, target_dir=project_dir)
+            print("Saved doc structures to duplo.json.")
 
         claude_md = write_claude_md(
             target_dir=project_dir,

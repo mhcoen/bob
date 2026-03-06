@@ -254,7 +254,7 @@ class TestFetchSite:
     def test_fetches_seed_url(self):
         html = "<html><body><h1>Product</h1></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            text, _examples = fetch_site("https://example.com", max_pages=1)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=1)
         assert "Product" in text
         assert "https://example.com" in text
 
@@ -275,7 +275,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples = fetch_site("https://example.com", max_pages=5)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=5)
 
         assert "Home" in text
         assert "API docs here" in text
@@ -364,7 +364,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples = fetch_site("https://example.com", max_pages=5)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=5)
 
         assert "External docs content" in text
         assert "Wiki content" in text
@@ -398,7 +398,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples = fetch_site("https://example.com", max_pages=10)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=10)
 
         assert "Guide content" in text
         assert "Concepts content" in text
@@ -446,7 +446,7 @@ class TestFetchSite:
     def test_section_headers_in_output(self):
         html = "<html><body><p>Content</p></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            text, _examples = fetch_site("https://example.com", max_pages=1)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=1)
         assert "=== https://example.com ===" in text
 
     def test_respects_max_docs_pages(self):
@@ -551,7 +551,7 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples = fetch_site("https://example.com", max_pages=5)
+            text, _examples, _structs = fetch_site("https://example.com", max_pages=5)
 
         assert "Home" in text  # seed page still returned
 
