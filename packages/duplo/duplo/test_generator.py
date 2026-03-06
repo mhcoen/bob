@@ -2,32 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
 from duplo.doc_examples import CodeExample
+from duplo.saver import load_examples
 
 
 def load_code_examples(target_dir: Path | str = ".") -> list[CodeExample]:
-    """Load code examples from ``duplo.json`` in *target_dir*.
+    """Load code examples from ``.duplo/examples/`` (or ``duplo.json`` fallback).
 
-    Returns an empty list if the file or key is missing.
+    Returns an empty list if neither source has examples.
     """
-    path = (Path(target_dir) / ".duplo/duplo.json").resolve()
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    raw = data.get("code_examples", [])
-    return [
-        CodeExample(
-            input=ex["input"],
-            expected_output=ex["expected_output"],
-            source_url=ex.get("source_url", ""),
-            language=ex.get("language", ""),
-        )
-        for ex in raw
-    ]
+    return load_examples(target_dir=target_dir)
 
 
 def _sanitize_name(text: str) -> str:

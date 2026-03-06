@@ -20,9 +20,12 @@ from duplo.questioner import BuildPreferences
 from duplo.saver import (
     CLAUDE_MD,
     DUPLO_JSON,
+    EXAMPLES_DIR,
     RAW_PAGES_DIR,
     append_phase_to_history,
     clear_in_progress,
+    load_examples,
+    save_examples,
     save_feedback,
     save_raw_content,
     save_reference_urls,
@@ -570,6 +573,128 @@ class TestSaveReferenceUrls:
     def test_file_ends_with_newline(self, tmp_path):
         save_reference_urls(self._RECORDS, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestSaveExamples:
+    _EXAMPLES = [
+        CodeExample(
+            input="print(1+1)",
+            expected_output="2",
+            source_url="https://docs.example.com",
+            language="python",
+        ),
+        CodeExample(
+            input="echo hello",
+            expected_output="hello",
+            source_url="https://docs.example.com/shell",
+            language="shell",
+        ),
+    ]
+
+    def test_creates_examples_dir(self, tmp_path):
+        result = save_examples(self._EXAMPLES, target_dir=tmp_path)
+        assert result == tmp_path / EXAMPLES_DIR
+        assert result.is_dir()
+
+    def test_creates_one_file_per_example(self, tmp_path):
+        save_examples(self._EXAMPLES, target_dir=tmp_path)
+        files = sorted((tmp_path / EXAMPLES_DIR).glob("*.json"))
+        assert len(files) == 2
+
+    def test_filenames_include_index_and_slug(self, tmp_path):
+        save_examples(self._EXAMPLES, target_dir=tmp_path)
+        files = sorted(f.name for f in (tmp_path / EXAMPLES_DIR).glob("*.json"))
+        assert files[0].startswith("000_")
+        assert files[1].startswith("001_")
+
+    def test_file_content_is_valid_json(self, tmp_path):
+        save_examples(self._EXAMPLES, target_dir=tmp_path)
+        files = sorted((tmp_path / EXAMPLES_DIR).glob("*.json"))
+        data = json.loads(files[0].read_text(encoding="utf-8"))
+        assert data["input"] == "print(1+1)"
+        assert data["expected_output"] == "2"
+        assert data["source_url"] == "https://docs.example.com"
+        assert data["language"] == "python"
+
+    def test_files_end_with_newline(self, tmp_path):
+        save_examples(self._EXAMPLES, target_dir=tmp_path)
+        for filepath in (tmp_path / EXAMPLES_DIR).glob("*.json"):
+            assert filepath.read_text(encoding="utf-8").endswith("\n")
+
+    def test_empty_examples_creates_empty_dir(self, tmp_path):
+        save_examples([], target_dir=tmp_path)
+        assert (tmp_path / EXAMPLES_DIR).is_dir()
+        assert list((tmp_path / EXAMPLES_DIR).glob("*.json")) == []
+
+    def test_clears_old_files_on_rewrite(self, tmp_path):
+        save_examples(self._EXAMPLES, target_dir=tmp_path)
+        save_examples(self._EXAMPLES[:1], target_dir=tmp_path)
+        files = list((tmp_path / EXAMPLES_DIR).glob("*.json"))
+        assert len(files) == 1
+
+
+class TestLoadExamples:
+    def test_loads_from_examples_dir(self, tmp_path):
+        examples = [
+            CodeExample(
+                input="print(1)",
+                expected_output="1",
+                source_url="https://example.com",
+                language="python",
+            ),
+        ]
+        save_examples(examples, target_dir=tmp_path)
+        loaded = load_examples(target_dir=tmp_path)
+        assert len(loaded) == 1
+        assert loaded[0].input == "print(1)"
+        assert loaded[0].expected_output == "1"
+
+    def test_falls_back_to_duplo_json(self, tmp_path):
+        data = {
+            "code_examples": [
+                {
+                    "input": "old",
+                    "expected_output": "data",
+                    "source_url": "",
+                    "language": "",
+                }
+            ]
+        }
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data))
+        loaded = load_examples(target_dir=tmp_path)
+        assert len(loaded) == 1
+        assert loaded[0].input == "old"
+
+    def test_prefers_examples_dir_over_duplo_json(self, tmp_path):
+        data = {"code_examples": [{"input": "old", "expected_output": "data"}]}
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data))
+        examples = [
+            CodeExample(
+                input="new",
+                expected_output="data",
+                source_url="",
+                language="",
+            ),
+        ]
+        save_examples(examples, target_dir=tmp_path)
+        loaded = load_examples(target_dir=tmp_path)
+        assert len(loaded) == 1
+        assert loaded[0].input == "new"
+
+    def test_returns_empty_when_nothing_exists(self, tmp_path):
+        assert load_examples(target_dir=tmp_path) == []
+
+    def test_sorted_by_filename(self, tmp_path):
+        examples = [
+            CodeExample(input="first", expected_output="1", source_url="", language=""),
+            CodeExample(input="second", expected_output="2", source_url="", language=""),
+        ]
+        save_examples(examples, target_dir=tmp_path)
+        loaded = load_examples(target_dir=tmp_path)
+        assert loaded[0].input == "first"
+        assert loaded[1].input == "second"
 
 
 class TestSaveRawContent:

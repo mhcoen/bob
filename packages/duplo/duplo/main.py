@@ -36,6 +36,7 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     get_current_phase,
+    save_examples,
     save_feedback,
     save_raw_content,
     save_reference_urls,
@@ -169,7 +170,8 @@ def _init_project(
             save_raw_content(raw_pages, page_records, target_dir=project_dir)
             print(f"Saved raw content for {len(raw_pages)} page(s).")
     if code_examples:
-        print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
+        save_examples(code_examples, target_dir=project_dir)
+        print(f"Saved {len(code_examples)} code example(s) to .duplo/examples/.")
         test_source = generate_test_source(code_examples, project_name=project_name)
         if test_source:
             tests_dir = project_dir / "tests"

@@ -321,6 +321,88 @@ def save_code_examples(
     return path
 
 
+def _example_filename(index: int, example: CodeExample) -> str:
+    """Generate a filename for a code example: ``000_slug.json``."""
+    first_line = example.input.split("\n", 1)[0].strip()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", first_line).strip("_")[:40].rstrip("_")
+    return f"{index:03d}_{slug or 'example'}.json"
+
+
+def save_examples(
+    examples: list[CodeExample],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save each code example as a separate JSON file in ``.duplo/examples/``.
+
+    Each file contains ``input``, ``expected_output``, ``source_url``, and
+    ``language`` keys.  Files are named ``000_slug.json`` where the slug is
+    derived from the first line of the input.  Any existing files in the
+    directory are removed first so the directory always reflects the current
+    set of examples.
+
+    Args:
+        examples: List of :class:`CodeExample` objects to store.
+        target_dir: Directory containing ``.duplo/``.
+
+    Returns:
+        Path to the ``examples`` directory.
+    """
+    examples_dir = Path(target_dir) / EXAMPLES_DIR
+    if examples_dir.exists():
+        for existing in examples_dir.iterdir():
+            if existing.suffix == ".json":
+                existing.unlink()
+    else:
+        examples_dir.mkdir(parents=True, exist_ok=True)
+    for idx, ex in enumerate(examples):
+        filename = _example_filename(idx, ex)
+        filepath = examples_dir / filename
+        data = dataclasses.asdict(ex)
+        filepath.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return examples_dir
+
+
+def load_examples(
+    *,
+    target_dir: Path | str = ".",
+) -> list[CodeExample]:
+    """Load code examples from ``.duplo/examples/`` directory.
+
+    Falls back to reading from ``duplo.json`` if the examples directory
+    does not exist (backward compatibility).  Returns an empty list if
+    neither source has examples.
+    """
+    examples_dir = Path(target_dir) / EXAMPLES_DIR
+    if examples_dir.is_dir():
+        examples: list[CodeExample] = []
+        for filepath in sorted(examples_dir.glob("*.json")):
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+            examples.append(
+                CodeExample(
+                    input=data["input"],
+                    expected_output=data["expected_output"],
+                    source_url=data.get("source_url", ""),
+                    language=data.get("language", ""),
+                )
+            )
+        return examples
+    # Fallback: read from duplo.json for backward compatibility.
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    if not path.exists():
+        return []
+    raw = json.loads(path.read_text(encoding="utf-8")).get("code_examples", [])
+    return [
+        CodeExample(
+            input=ex["input"],
+            expected_output=ex["expected_output"],
+            source_url=ex.get("source_url", ""),
+            language=ex.get("language", ""),
+        )
+        for ex in raw
+    ]
+
+
 def _serialize_doc_structures(structures: DocStructures) -> dict:
     """Convert a :class:`DocStructures` instance to a JSON-serialisable dict."""
     return {
@@ -400,6 +482,7 @@ def save_reference_urls(
     return path
 
 
+EXAMPLES_DIR = ".duplo/examples"
 RAW_PAGES_DIR = ".duplo/raw_pages"
 
 
