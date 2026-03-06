@@ -10,7 +10,7 @@ code generation. Ruff for linting, pytest for tests. Keep modules
 short and focused. This is a thin orchestration layer, not a framework.
 
 - [ ] Project scaffolding
-  - [ ] Create duplo package with __init__.py and main.py entry point
+  - [x] Create duplo package with __init__.py and main.py entry point
   - [ ] Add CLI argument parser: duplo <url>, duplo run, duplo next
   - [ ] Verify pip install -e . works and duplo command runs
 - [ ] Product scraping
