@@ -484,6 +484,7 @@ def save_reference_urls(
 
 EXAMPLES_DIR = ".duplo/examples"
 RAW_PAGES_DIR = ".duplo/raw_pages"
+REFERENCES_DIR = ".duplo/references"
 
 
 def save_raw_content(
@@ -551,3 +552,29 @@ def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     path = (Path(target_dir) / CLAUDE_MD).resolve()
     path.write_text(_CLAUDE_MD_CONTENT, encoding="utf-8")
     return path
+
+
+def move_references(
+    paths: list[Path],
+    *,
+    target_dir: Path | str = ".",
+) -> list[Path]:
+    """Move processed reference files into ``.duplo/references/``.
+
+    Each file in *paths* is moved (renamed) into the references
+    directory, preserving the original filename.  If a file with the
+    same name already exists, it is overwritten.  Files that no longer
+    exist are silently skipped.
+
+    Returns the list of destination paths for files that were moved.
+    """
+    refs_dir = Path(target_dir) / REFERENCES_DIR
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    moved: list[Path] = []
+    for src in paths:
+        if not src.exists():
+            continue
+        dest = refs_dir / src.name
+        src.rename(dest)
+        moved.append(dest)
+    return moved

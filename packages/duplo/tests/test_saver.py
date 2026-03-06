@@ -22,9 +22,11 @@ from duplo.saver import (
     DUPLO_JSON,
     EXAMPLES_DIR,
     RAW_PAGES_DIR,
+    REFERENCES_DIR,
     append_phase_to_history,
     clear_in_progress,
     load_examples,
+    move_references,
     save_examples,
     save_feedback,
     save_raw_content,
@@ -754,3 +756,56 @@ class TestSaveRawContent:
         save_raw_content({"https://example.com": new_html}, self._RECORDS[:1], target_dir=tmp_path)
         pages_dir = tmp_path / RAW_PAGES_DIR
         assert (pages_dir / "aaa111.html").read_text(encoding="utf-8") == new_html
+
+
+class TestMoveReferences:
+    def test_moves_files(self, tmp_path):
+        img = tmp_path / "screenshot.png"
+        img.write_bytes(b"PNG" * 100)
+        pdf = tmp_path / "spec.pdf"
+        pdf.write_bytes(b"%PDF" * 100)
+
+        moved = move_references([img, pdf], target_dir=tmp_path)
+
+        assert len(moved) == 2
+        refs_dir = tmp_path / REFERENCES_DIR
+        assert (refs_dir / "screenshot.png").exists()
+        assert (refs_dir / "spec.pdf").exists()
+        assert not img.exists()
+        assert not pdf.exists()
+
+    def test_creates_references_dir(self, tmp_path):
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG" * 100)
+
+        move_references([img], target_dir=tmp_path)
+
+        assert (tmp_path / REFERENCES_DIR).is_dir()
+
+    def test_skips_missing_files(self, tmp_path):
+        missing = tmp_path / "gone.png"
+        existing = tmp_path / "here.png"
+        existing.write_bytes(b"PNG" * 100)
+
+        moved = move_references([missing, existing], target_dir=tmp_path)
+
+        assert len(moved) == 1
+        assert moved[0].name == "here.png"
+
+    def test_empty_list(self, tmp_path):
+        moved = move_references([], target_dir=tmp_path)
+        assert moved == []
+
+    def test_overwrites_existing_destination(self, tmp_path):
+        refs_dir = tmp_path / REFERENCES_DIR
+        refs_dir.mkdir(parents=True)
+        (refs_dir / "dup.png").write_bytes(b"old")
+
+        src = tmp_path / "dup.png"
+        src.write_bytes(b"new")
+
+        moved = move_references([src], target_dir=tmp_path)
+
+        assert len(moved) == 1
+        assert (refs_dir / "dup.png").read_bytes() == b"new"
+        assert not src.exists()

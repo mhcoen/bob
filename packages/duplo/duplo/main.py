@@ -43,6 +43,7 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     get_current_phase,
+    move_references,
     save_design_requirements,
     save_examples,
     save_feedback,
@@ -190,6 +191,13 @@ def _first_run() -> None:
         raw_pages=raw_pages,
         design=design,
     )
+
+    # Move processed reference files into .duplo/references/.
+    ref_files = list(scan.images) + list(scan.pdfs) + list(scan.text_files)
+    if ref_files:
+        moved = move_references(ref_files)
+        if moved:
+            print(f"Moved {len(moved)} reference file(s) to .duplo/references/.")
 
     if roadmap:
         print("\n" + format_roadmap(roadmap))
