@@ -663,10 +663,35 @@ def store_accepted_frames(
 def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     """Write ``CLAUDE.md`` with appshot instructions to *target_dir*.
 
-    The file is created or overwritten.  Returns the path to the written file.
+    If the file already exists, only sections whose headings are not
+    already present are appended.  Existing content is never removed
+    or replaced.  Returns the path to the written file.
     """
     path = (Path(target_dir) / CLAUDE_MD).resolve()
-    path.write_text(_CLAUDE_MD_CONTENT, encoding="utf-8")
+    if not path.exists():
+        path.write_text(_CLAUDE_MD_CONTENT, encoding="utf-8")
+        return path
+
+    existing = path.read_text(encoding="utf-8")
+    # Split template into sections by top-level headings (# ...).
+    section_re = re.compile(r"(?=^# )", re.MULTILINE)
+    template_sections = [s for s in section_re.split(_CLAUDE_MD_CONTENT) if s.strip()]
+
+    new_sections: list[str] = []
+    for section in template_sections:
+        heading_match = re.match(r"^# (.+)", section)
+        if not heading_match:
+            continue
+        heading = heading_match.group(1).strip()
+        # Check if this heading already appears in the existing file.
+        if re.search(rf"^# {re.escape(heading)}\s*$", existing, re.MULTILINE):
+            continue
+        new_sections.append(section)
+
+    if new_sections:
+        appended = "\n" + "".join(new_sections)
+        path.write_text(existing.rstrip("\n") + "\n" + appended, encoding="utf-8")
+
     return path
 
 

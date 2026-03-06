@@ -460,12 +460,29 @@ class TestWriteClaudeMd:
         path = write_claude_md(target_dir=tmp_path)
         assert "screenshots/current/" in path.read_text()
 
-    def test_overwrites_existing_file(self, tmp_path):
+    def test_preserves_existing_content(self, tmp_path):
         existing = tmp_path / CLAUDE_MD
-        existing.write_text("old content")
-        path = write_claude_md(target_dir=tmp_path)
-        assert "appshot" in path.read_text()
-        assert "old content" not in path.read_text()
+        existing.write_text("# My custom section\n\nold content\n")
+        write_claude_md(target_dir=tmp_path)
+        content = existing.read_text()
+        assert "old content" in content
+        assert "appshot" in content
+
+    def test_does_not_duplicate_existing_sections(self, tmp_path):
+        write_claude_md(target_dir=tmp_path)
+        first = (tmp_path / CLAUDE_MD).read_text()
+        write_claude_md(target_dir=tmp_path)
+        second = (tmp_path / CLAUDE_MD).read_text()
+        assert second == first
+
+    def test_appends_missing_sections(self, tmp_path):
+        existing = tmp_path / CLAUDE_MD
+        existing.write_text("# Visual verification\n\nCustom appshot notes\n")
+        write_claude_md(target_dir=tmp_path)
+        content = existing.read_text()
+        assert "Custom appshot notes" in content
+        assert "# Debugging" in content
+        assert content.count("# Visual verification") == 1
 
     def test_default_target_dir_is_cwd(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
