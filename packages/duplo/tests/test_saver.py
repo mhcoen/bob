@@ -22,15 +22,18 @@ from duplo.saver import (
     CLAUDE_MD,
     DUPLO_JSON,
     EXAMPLES_DIR,
+    PRODUCT_JSON,
     RAW_PAGES_DIR,
     REFERENCES_DIR,
     append_phase_to_history,
     clear_in_progress,
     load_examples,
+    load_product,
     move_references,
     save_examples,
     save_feedback,
     save_frame_descriptions,
+    save_product,
     save_raw_content,
     save_reference_urls,
     save_screenshot_feature_map,
@@ -934,3 +937,58 @@ class TestStoreAcceptedFrames:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert len(data["frame_descriptions"]) == 1
         assert data["frame_descriptions"][0]["filename"] == "frame_002.png"
+
+
+class TestSaveProduct:
+    def test_creates_file(self, tmp_path):
+        path = save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        assert path.exists()
+        assert path.name == "product.json"
+
+    def test_returns_correct_path(self, tmp_path):
+        path = save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        assert path == tmp_path / PRODUCT_JSON
+
+    def test_stores_product_name(self, tmp_path):
+        save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == "Acme App"
+
+    def test_stores_source_url(self, tmp_path):
+        save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["source_url"] == "https://acme.com"
+
+    def test_empty_url(self, tmp_path):
+        save_product("Acme App", "", target_dir=tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["source_url"] == ""
+
+    def test_overwrites_existing(self, tmp_path):
+        save_product("Old", "https://old.com", target_dir=tmp_path)
+        save_product("New", "https://new.com", target_dir=tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == "New"
+
+    def test_file_ends_with_newline(self, tmp_path):
+        save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        assert (tmp_path / PRODUCT_JSON).read_text().endswith("\n")
+
+    def test_creates_duplo_dir(self, tmp_path):
+        save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        assert (tmp_path / ".duplo").is_dir()
+
+
+class TestLoadProduct:
+    def test_loads_saved_product(self, tmp_path):
+        save_product("Acme App", "https://acme.com", target_dir=tmp_path)
+        result = load_product(target_dir=tmp_path)
+        assert result == ("Acme App", "https://acme.com")
+
+    def test_returns_none_when_missing(self, tmp_path):
+        assert load_product(target_dir=tmp_path) is None
+
+    def test_empty_fields(self, tmp_path):
+        save_product("", "", target_dir=tmp_path)
+        result = load_product(target_dir=tmp_path)
+        assert result == ("", "")

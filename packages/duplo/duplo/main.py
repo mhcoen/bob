@@ -48,10 +48,12 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     get_current_phase,
+    load_product,
     move_references,
     save_design_requirements,
     save_examples,
     save_feedback,
+    save_product,
     save_raw_content,
     save_reference_urls,
     save_roadmap,
@@ -162,11 +164,21 @@ def _first_run() -> None:
 
     product_name = ""
 
-    if scan.urls:
+    # Check for a previously confirmed product identity.
+    saved_product = load_product()
+    if saved_product:
+        product_name, source_url = saved_product
+        print(f"\nUsing saved product: {product_name}")
+        if source_url:
+            print(f"  Source: {source_url}")
+
+    if scan.urls and not source_url:
         source_url = scan.urls[0]
         source_url, product_name = _validate_url(source_url)
         if not source_url:
             return
+
+    if source_url:
         print(f"\nFetching {source_url} …")
         scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
             source_url
@@ -174,9 +186,12 @@ def _first_run() -> None:
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
-    product_name = _confirm_product(product_name, source_url)
-    if not product_name:
-        return
+    if not saved_product:
+        product_name = _confirm_product(product_name, source_url)
+        if not product_name:
+            return
+        save_product(product_name, source_url)
+        print("Product identity saved to .duplo/product.json.")
 
     # Extract frames from video files at scene change points.
     video_frames: list[Path] = []

@@ -16,6 +16,7 @@ from duplo.questioner import BuildPreferences
 
 DUPLO_DIR = ".duplo"
 DUPLO_JSON = ".duplo/duplo.json"
+PRODUCT_JSON = ".duplo/product.json"
 CLAUDE_MD = "CLAUDE.md"
 
 
@@ -24,6 +25,48 @@ def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
     duplo_dir = Path(target_dir) / DUPLO_DIR
     duplo_dir.mkdir(parents=True, exist_ok=True)
     return duplo_dir
+
+
+def save_product(
+    product_name: str,
+    source_url: str,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save the confirmed product identity to ``.duplo/product.json``.
+
+    Stores the product name and source URL so subsequent runs skip
+    re-validation and re-confirmation.
+
+    Args:
+        product_name: Confirmed product name.
+        source_url: Validated product URL (may be empty).
+        target_dir: Directory containing ``.duplo/``.
+
+    Returns:
+        Path to the written file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / PRODUCT_JSON).resolve()
+    data = {"product_name": product_name, "source_url": source_url}
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def load_product(
+    *,
+    target_dir: Path | str = ".",
+) -> tuple[str, str] | None:
+    """Load the confirmed product identity from ``.duplo/product.json``.
+
+    Returns ``(product_name, source_url)`` if the file exists,
+    or ``None`` if not found.
+    """
+    path = (Path(target_dir) / PRODUCT_JSON).resolve()
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("product_name", ""), data.get("source_url", "")
 
 
 _CLAUDE_MD_CONTENT = """\

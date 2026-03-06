@@ -178,6 +178,78 @@ class TestMainFirstRun:
                                                                     ):
                                                                         main()
 
+    def test_skips_validation_when_product_json_exists(self, tmp_path, monkeypatch):
+        """When .duplo/product.json exists, skip URL validation and product confirmation."""
+        (tmp_path / "links.txt").write_text("https://example.com")
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "product.json").write_text(
+            json.dumps({"product_name": "Saved Product", "source_url": "https://saved.com"})
+        )
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main._validate_url") as mock_validate:
+            with patch("duplo.main._confirm_product") as mock_confirm:
+                with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})):
+                    with patch("duplo.main.extract_features", return_value=[]):
+                        with patch(
+                            "duplo.main.ask_preferences",
+                            return_value=BuildPreferences(platform="web", language="Python"),
+                        ):
+                            with patch("builtins.input", return_value=""):
+                                with patch(
+                                    "duplo.main.save_selections",
+                                    return_value=tmp_path / _DUPLO_JSON,
+                                ):
+                                    with patch(
+                                        "duplo.main.write_claude_md",
+                                        return_value=tmp_path / "CLAUDE.md",
+                                    ):
+                                        with patch(
+                                            "duplo.main.generate_roadmap",
+                                            return_value=None,
+                                        ):
+                                            main()
+
+        mock_validate.assert_not_called()
+        mock_confirm.assert_not_called()
+
+    def test_saves_product_json_after_confirmation(self, tmp_path, monkeypatch):
+        """First run without product.json saves it after confirmation."""
+        (tmp_path / "links.txt").write_text("https://example.com")
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "duplo.main._validate_url",
+            return_value=("https://example.com", "Example"),
+        ):
+            with patch("duplo.main._confirm_product", return_value="Example"):
+                with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})):
+                    with patch("duplo.main.extract_features", return_value=[]):
+                        with patch(
+                            "duplo.main.ask_preferences",
+                            return_value=BuildPreferences(platform="web", language="Python"),
+                        ):
+                            with patch("builtins.input", return_value=""):
+                                with patch(
+                                    "duplo.main.save_selections",
+                                    return_value=tmp_path / _DUPLO_JSON,
+                                ):
+                                    with patch(
+                                        "duplo.main.write_claude_md",
+                                        return_value=tmp_path / "CLAUDE.md",
+                                    ):
+                                        with patch(
+                                            "duplo.main.generate_roadmap",
+                                            return_value=None,
+                                        ):
+                                            main()
+
+        product_path = tmp_path / ".duplo" / "product.json"
+        assert product_path.exists()
+        data = json.loads(product_path.read_text())
+        assert data["product_name"] == "Example"
+        assert data["source_url"] == "https://example.com"
+
 
 class TestMainSubsequentRun:
     """Subsequent runs: .duplo/duplo.json exists."""
