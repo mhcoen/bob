@@ -13,7 +13,7 @@ from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
-from duplo.saver import save_selections
+from duplo.saver import save_selections, write_claude_md
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
 
@@ -52,6 +52,9 @@ def main() -> None:
 
         saved = save_selections(args.url, features, prefs, target_dir=project_dir)
         print(f"\nSelections saved to {saved}")
+
+        claude_md = write_claude_md(target_dir=project_dir)
+        print(f"Appshot instructions written to {claude_md}")
 
         urls = _SECTION_URL_RE.findall(text)
         if urls:
