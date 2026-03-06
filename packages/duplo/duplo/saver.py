@@ -39,6 +39,22 @@ After capturing, examine the screenshot to confirm:
 Do not delete `screenshots/reference/` -- those are the
 target images duplo uses for visual comparison.
 
+# Swift SPM + SwiftUI
+
+SPM executables using SwiftUI do not automatically show windows.
+Every SwiftUI app built with SPM must include this in the App
+struct init:
+
+```swift
+init() {
+    NSApplication.shared.setActivationPolicy(.regular)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+}
+```
+
+Use `swift build --disable-sandbox` and `swift test --disable-sandbox`
+inside Claude Code's sandbox.
+
 # Debugging
 
 When something crashes or behaves unexpectedly, find and read
