@@ -94,7 +94,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Append new unchecked tasks for missing features, uncovered examples, and design refinements
   - [x] Never modify or remove existing tasks (checked or unchecked)
   - [x] Print a summary of what was found and what was added
-- [ ] Video reference extraction
+- [x] Video reference extraction
   - [x] Detect video files in the project directory (mp4, mov, webm, avi)
   - [x] Use ffmpeg scene change detection to extract frames at visual transition points
   - [x] Deduplicate similar frames using perceptual image hashing
@@ -102,7 +102,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] For each accepted frame, ask Claude Vision to describe what UI state it shows (main view, settings panel, dialog, menu, etc.)
   - [x] Store accepted frames in .duplo/references/ with their UI state descriptions
   - [x] Include extracted frames in the same analysis pipeline as user-provided screenshots
-  - [ ] Requires ffmpeg on PATH (document in README)
+  - [x] Requires ffmpeg on PATH (document in README)
 - [ ] Product disambiguation
   - [ ] When a URL points to a company with multiple products, present the products found and ask which one to duplicate
   - [ ] When a URL is a landing page with unclear product boundaries, ask the user to describe what specific product they want
