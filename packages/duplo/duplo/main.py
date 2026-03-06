@@ -12,6 +12,7 @@ from duplo.appshot import capture_appshot
 from duplo.comparator import compare_screenshots
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
+from duplo.notifier import notify_phase_complete
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_phase_plan, save_plan
@@ -119,6 +120,8 @@ def _cmd_run() -> None:
             _compare_with_references(output_path)
         else:
             print(f"appshot exited with code {shot_code} (screenshot skipped)")
+
+    notify_phase_complete("Phase 1")
 
 
 def _compare_with_references(current: Path) -> None:
