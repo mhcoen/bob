@@ -28,7 +28,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Write PLAN.md, README.md, and mcloop.json
   - [x] Include CLAUDE.md with appshot instructions
 - [ ] Phase execution
-  - [ ] Run McLoop on the target project
+  - [x] Run McLoop on the target project
   - [ ] Wait for completion, capture screenshots with appshot
   - [ ] Compare screenshots against reference images via Claude API
   - [ ] Generate visual issue list
