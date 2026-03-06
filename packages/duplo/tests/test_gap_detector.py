@@ -386,3 +386,43 @@ class TestFormatGapTasksDesign:
         text = format_gap_tasks(result)
         assert "Implement Export" in text
         assert "Update design: body: Roboto" in text
+
+
+# ---------------------------------------------------------------------------
+# format_gap_tasks append-only invariant
+# ---------------------------------------------------------------------------
+
+
+class TestFormatGapTasksAppendOnly:
+    """Verify that gap tasks can be appended without altering existing content."""
+
+    def test_appending_preserves_original_plan(self):
+        """Simulates the append operation and checks original content survives."""
+        original = "# Phase 1\n- [x] Completed task\n- [ ] Pending task\n"
+        result = GapResult(
+            missing_features=[MissingFeature(name="Search", reason="Missing")],
+            missing_examples=[],
+        )
+        gap_text = format_gap_tasks(result)
+        updated = original.rstrip() + "\n" + gap_text
+
+        # Every original line preserved.
+        for line in original.strip().splitlines():
+            assert line in updated
+        # New task present.
+        assert "- [ ] Implement Search" in updated
+        # Original is a prefix.
+        assert updated.startswith(original.rstrip())
+
+    def test_gap_tasks_only_contain_unchecked_items(self):
+        """Gap tasks must never contain checked items that could mask originals."""
+        result = GapResult(
+            missing_features=[MissingFeature(name="A", reason="r")],
+            missing_examples=[MissingExample(index=0, summary="ex", reason="r")],
+            design_refinements=[DesignRefinement(category="color", detail="x", reason="r")],
+        )
+        text = format_gap_tasks(result)
+        # All task lines are unchecked.
+        for line in text.splitlines():
+            if line.startswith("- "):
+                assert line.startswith("- [ ]"), f"Non-unchecked task: {line!r}"

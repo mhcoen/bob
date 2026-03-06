@@ -1107,6 +1107,140 @@ class TestDetectAndAppendGaps:
 
         mock_detect.assert_not_called()
 
+    def test_preserves_existing_checked_tasks(self, tmp_path, monkeypatch):
+        """Existing checked tasks must survive gap appending unchanged."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "Auth", "description": "Login.", "category": "core"}],
+            },
+        )
+        plan = (
+            "# Phase 0: Core\n"
+            "- [x] Set up project scaffold\n"
+            "- [x] Implement basic routing\n"
+            "- [ ] Add error handling\n"
+        )
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[MissingFeature(name="Auth", reason="Not covered")],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        # Every original line must appear in the updated content.
+        for line in plan.strip().splitlines():
+            assert line in updated, f"Original line lost: {line!r}"
+        # New task appended.
+        assert "- [ ] Implement Auth" in updated
+
+    def test_preserves_existing_unchecked_tasks(self, tmp_path, monkeypatch):
+        """Existing unchecked tasks must not be removed or altered."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "Export", "description": "CSV export.", "category": "core"}],
+            },
+        )
+        plan = (
+            "# Phase 1: Features\n"
+            "- [ ] Build search bar\n"
+            "- [ ] Implement pagination\n"
+            "- [ ] Add dark mode toggle\n"
+        )
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[MissingFeature(name="Export", reason="Missing")],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        for line in plan.strip().splitlines():
+            assert line in updated, f"Original line lost: {line!r}"
+        assert "- [ ] Implement Export" in updated
+
+    def test_preserves_mixed_checked_and_unchecked(self, tmp_path, monkeypatch):
+        """A plan with both checked and unchecked tasks must be fully preserved."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Websocket", "description": "Real-time.", "category": "core"}
+                ],
+                "design_requirements": {
+                    "colors": {"accent": "#00ff00"},
+                    "fonts": {},
+                    "components": [],
+                },
+            },
+        )
+        plan = (
+            "# Phase 2: Polish\n"
+            "- [x] Set up CI pipeline\n"
+            "- [ ] Write integration tests\n"
+            "- [x] Deploy staging environment\n"
+            "- [ ] Performance audit\n"
+        )
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[MissingFeature(name="Websocket", reason="Not covered")],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        # The original plan content must appear as a prefix (modulo trailing ws).
+        assert updated.startswith(plan.rstrip())
+        # New tasks appended after existing content.
+        assert "- [ ] Implement Websocket" in updated
+        assert "Update design: accent: #00ff00" in updated
+
+    def test_original_content_is_prefix_of_updated(self, tmp_path, monkeypatch):
+        """Updated PLAN.md must start with the original content (append-only)."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "API", "description": "REST API.", "category": "core"}],
+            },
+        )
+        plan = "# Phase 0\n- [x] Done task\n- [ ] Pending task\n"
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[MissingFeature(name="API", reason="Missing")],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        # The original content (stripped) must be a prefix of the updated file.
+        assert updated.startswith(plan.rstrip("\n"))
+
     def test_subsequent_run_calls_detect_gaps(self, tmp_path, monkeypatch):
         """Integration: _subsequent_run calls _detect_and_append_gaps."""
         _write_duplo_json(
