@@ -8,6 +8,7 @@ import re
 import sys
 from pathlib import Path
 
+from duplo.appshot import capture_appshot
 from duplo.extractor import Feature, extract_features
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
@@ -51,7 +52,15 @@ def main() -> None:
 
         prefs = ask_preferences()
 
-        saved = save_selections(args.url, features, prefs, target_dir=project_dir)
+        default_app_name = project_name.replace("-", " ").title()
+        app_name = (
+            input(f"macOS app name for appshot screenshots [{default_app_name}]: ").strip()
+            or default_app_name
+        )
+
+        saved = save_selections(
+            args.url, features, prefs, app_name=app_name, target_dir=project_dir
+        )
         print(f"\nSelections saved to {saved}")
 
         claude_md = write_claude_md(target_dir=project_dir)
@@ -96,6 +105,17 @@ def _cmd_run() -> None:
         print(f"McLoop exited with code {exit_code}")
         sys.exit(exit_code)
     print("McLoop complete.")
+
+    app_name = data.get("app_name", "")
+    if app_name:
+        output_path = Path("screenshots") / "current" / "main.png"
+        launch_cmd = "./run.sh" if Path("run.sh").exists() else None
+        print(f"\nCapturing screenshots with appshot ({app_name}) …")
+        shot_code = capture_appshot(app_name, output_path, launch=launch_cmd)
+        if shot_code == 0:
+            print(f"Screenshot saved to {output_path}")
+        else:
+            print(f"appshot exited with code {shot_code} (screenshot skipped)")
 
 
 def _parse_args() -> argparse.Namespace:
