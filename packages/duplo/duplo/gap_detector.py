@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import anthropic
 
@@ -53,9 +53,17 @@ class MissingExample:
 
 
 @dataclass
+class DesignRefinement:
+    category: str
+    detail: str
+    reason: str
+
+
+@dataclass
 class GapResult:
     missing_features: list[MissingFeature]
     missing_examples: list[MissingExample]
+    design_refinements: list[DesignRefinement] = field(default_factory=list)
 
 
 def _format_features(features: list[Feature]) -> str:
@@ -170,9 +178,74 @@ def _parse_result(
     )
 
 
+def detect_design_gaps(
+    plan_content: str,
+    design: dict,
+) -> list[DesignRefinement]:
+    """Compare *design* requirements against *plan_content*.
+
+    Checks whether specific colors, fonts, layout details, and components
+    from the design requirements are mentioned in the plan. Returns a list
+    of :class:`DesignRefinement` for items not found.
+
+    Args:
+        plan_content: Current PLAN.md content.
+        design: Design requirements dict with colors, fonts, spacing,
+            layout, and components keys.
+
+    Returns:
+        List of design refinements not yet reflected in the plan.
+    """
+    if not design:
+        return []
+
+    plan_lower = plan_content.lower()
+    refinements: list[DesignRefinement] = []
+
+    for key, value in design.get("colors", {}).items():
+        if isinstance(value, str) and value.lower() not in plan_lower:
+            refinements.append(
+                DesignRefinement(
+                    category="color",
+                    detail=f"{key}: {value}",
+                    reason=f"Color {value} ({key}) not mentioned in plan",
+                )
+            )
+
+    for key, value in design.get("fonts", {}).items():
+        if isinstance(value, str) and value.lower() not in plan_lower:
+            refinements.append(
+                DesignRefinement(
+                    category="font",
+                    detail=f"{key}: {value}",
+                    reason=f"Font {value} ({key}) not mentioned in plan",
+                )
+            )
+
+    for comp in design.get("components", []):
+        if not isinstance(comp, dict):
+            continue
+        name = comp.get("name", "")
+        if name and name.lower() not in plan_lower:
+            style = comp.get("style", "")
+            refinements.append(
+                DesignRefinement(
+                    category="component",
+                    detail=f"{name}: {style}" if style else name,
+                    reason=f"Component '{name}' not mentioned in plan",
+                )
+            )
+
+    return refinements
+
+
 def format_gap_tasks(result: GapResult) -> str:
     """Format gap results as PLAN.md checklist items to append."""
-    if not result.missing_features and not result.missing_examples:
+    if (
+        not result.missing_features
+        and not result.missing_examples
+        and not result.design_refinements
+    ):
         return ""
 
     lines: list[str] = []
@@ -188,6 +261,9 @@ def format_gap_tasks(result: GapResult) -> str:
         desc = ex.summary or f"example #{ex.index}"
         reason_suffix = f" ({ex.reason})" if ex.reason else ""
         lines.append(f"- [ ] Add test/implementation for {desc}{reason_suffix}")
+
+    for dr in result.design_refinements:
+        lines.append(f"- [ ] Update design: {dr.detail} ({dr.reason})")
 
     lines.append("")
     return "\n".join(lines)

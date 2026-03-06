@@ -10,7 +10,13 @@ import pytest
 
 from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
-from duplo.main import _analyze_new_files, _init_project, _rescrape_product_url, main
+from duplo.main import (
+    _analyze_new_files,
+    _detect_and_append_gaps,
+    _init_project,
+    _rescrape_product_url,
+    main,
+)
 from duplo.questioner import BuildPreferences
 
 _DUPLO_JSON = ".duplo/duplo.json"
@@ -998,3 +1004,132 @@ class TestRescrapeProductUrl:
                         main()
 
         mock_rescrape.assert_called_once()
+
+
+class TestDetectAndAppendGaps:
+    """Tests for _detect_and_append_gaps()."""
+
+    def test_appends_missing_features(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Search", "description": "Full-text search.", "category": "core"}
+                ],
+            },
+        )
+        plan = "# Phase 0: Core\n- [ ] Build UI\n"
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[MissingFeature(name="Search", reason="Not in plan")],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "- [ ] Implement Search" in updated
+        out = capsys.readouterr().out
+        assert "1 gap task" in out
+
+    def test_appends_design_refinements(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "UI", "description": "User interface.", "category": "core"}],
+                "design_requirements": {
+                    "colors": {"primary": "#ff0000"},
+                    "fonts": {},
+                    "components": [],
+                },
+            },
+        )
+        plan = "# Phase 0: Core\n- [ ] Build UI\n"
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+
+        from duplo.gap_detector import GapResult
+
+        gap_result = GapResult(missing_features=[], missing_examples=[])
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Update design: primary: #ff0000" in updated
+        out = capsys.readouterr().out
+        assert "1 gap task" in out
+
+    def test_no_gaps_prints_covered(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "Search", "description": "search", "category": "core"}],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Plan\n", encoding="utf-8")
+
+        from duplo.gap_detector import GapResult
+
+        gap_result = GapResult(missing_features=[], missing_examples=[])
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            _detect_and_append_gaps()
+
+        out = capsys.readouterr().out
+        assert "covered" in out.lower()
+
+    def test_skips_when_no_features(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        (tmp_path / "PLAN.md").write_text("# Plan\n", encoding="utf-8")
+
+        with patch("duplo.main.detect_gaps") as mock_detect:
+            _detect_and_append_gaps()
+
+        mock_detect.assert_not_called()
+
+    def test_skips_when_no_plan(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {"source_url": "", "features": [{"name": "X", "description": "x", "category": "c"}]},
+        )
+
+        with patch("duplo.main.detect_gaps") as mock_detect:
+            _detect_and_append_gaps()
+
+        mock_detect.assert_not_called()
+
+    def test_subsequent_run_calls_detect_gaps(self, tmp_path, monkeypatch):
+        """Integration: _subsequent_run calls _detect_and_append_gaps."""
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "Search", "description": "search", "category": "core"}],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main._detect_and_append_gaps") as mock_gaps:
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                    with patch("duplo.main.run_mcloop", return_value=0):
+                        main()
+
+        mock_gaps.assert_called_once()

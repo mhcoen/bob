@@ -18,7 +18,7 @@ from duplo.design_extractor import (
 )
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
-from duplo.gap_detector import detect_gaps, format_gap_tasks
+from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import fetch_site
 from duplo.pdf_extractor import extract_pdf_text
@@ -389,15 +389,29 @@ def _detect_and_append_gaps() -> None:
     print("\nComparing features and examples against PLAN.md …")
     result = detect_gaps(plan_content, features, examples or None)
 
-    if not result.missing_features and not result.missing_examples:
-        print("  All features and examples are covered by the current plan.")
+    # Check for design refinements not yet in the plan.
+    design_data = data.get("design_requirements", {})
+    if design_data:
+        design_gaps = detect_design_gaps(plan_content, design_data)
+        result.design_refinements = design_gaps
+
+    if (
+        not result.missing_features
+        and not result.missing_examples
+        and not result.design_refinements
+    ):
+        print("  All features, examples, and design details are covered by the plan.")
         return
 
     gap_tasks = format_gap_tasks(result)
     if gap_tasks:
         updated = plan_content.rstrip() + "\n" + gap_tasks
         plan_path.write_text(updated, encoding="utf-8")
-        count = len(result.missing_features) + len(result.missing_examples)
+        count = (
+            len(result.missing_features)
+            + len(result.missing_examples)
+            + len(result.design_refinements)
+        )
         print(f"  Appended {count} gap task(s) to PLAN.md.")
 
 

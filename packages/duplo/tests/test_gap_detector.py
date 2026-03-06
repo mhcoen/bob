@@ -8,12 +8,14 @@ from unittest.mock import MagicMock, patch
 from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
 from duplo.gap_detector import (
+    DesignRefinement,
     GapResult,
     MissingExample,
     MissingFeature,
     _format_examples,
     _format_features,
     _parse_result,
+    detect_design_gaps,
     detect_gaps,
     format_gap_tasks,
 )
@@ -255,3 +257,132 @@ class TestDetectGaps:
         with patch("duplo.gap_detector.anthropic.Anthropic", return_value=mock_client):
             result = detect_gaps("# Plan", [_feat("X")])
         assert result.missing_features == []
+
+
+# ---------------------------------------------------------------------------
+# detect_design_gaps
+# ---------------------------------------------------------------------------
+
+
+class TestDetectDesignGaps:
+    def test_returns_empty_for_empty_design(self):
+        assert detect_design_gaps("# Plan", {}) == []
+
+    def test_detects_missing_color(self):
+        design = {"colors": {"primary": "#1a73e8"}}
+        gaps = detect_design_gaps("# Plan\n- [ ] Build UI", design)
+        assert len(gaps) == 1
+        assert gaps[0].category == "color"
+        assert "#1a73e8" in gaps[0].detail
+
+    def test_skips_color_already_in_plan(self):
+        design = {"colors": {"primary": "#1a73e8"}}
+        plan = "# Plan\nUse primary color #1a73e8 for buttons."
+        gaps = detect_design_gaps(plan, design)
+        assert len(gaps) == 0
+
+    def test_case_insensitive_matching(self):
+        design = {"colors": {"primary": "#AABBCC"}}
+        plan = "Use color #aabbcc for the header."
+        gaps = detect_design_gaps(plan, design)
+        assert len(gaps) == 0
+
+    def test_detects_missing_font(self):
+        design = {"fonts": {"body": "Inter, sans-serif"}}
+        gaps = detect_design_gaps("# Plan\n- [ ] Style text", design)
+        assert len(gaps) == 1
+        assert gaps[0].category == "font"
+        assert "Inter, sans-serif" in gaps[0].detail
+
+    def test_skips_font_already_in_plan(self):
+        design = {"fonts": {"body": "Inter"}}
+        plan = "Use Inter for body text."
+        gaps = detect_design_gaps(plan, design)
+        assert len(gaps) == 0
+
+    def test_detects_missing_component(self):
+        design = {"components": [{"name": "card", "style": "rounded corners, shadow"}]}
+        gaps = detect_design_gaps("# Plan\n- [ ] Build UI", design)
+        assert len(gaps) == 1
+        assert gaps[0].category == "component"
+        assert "card" in gaps[0].detail
+
+    def test_skips_component_already_in_plan(self):
+        design = {"components": [{"name": "card", "style": "rounded"}]}
+        plan = "# Plan\n- [ ] Implement card component with rounded corners."
+        gaps = detect_design_gaps(plan, design)
+        assert len(gaps) == 0
+
+    def test_skips_non_dict_components(self):
+        design = {"components": ["not a dict", 42]}
+        gaps = detect_design_gaps("# Plan", design)
+        assert len(gaps) == 0
+
+    def test_skips_component_without_name(self):
+        design = {"components": [{"style": "rounded"}]}
+        gaps = detect_design_gaps("# Plan", design)
+        assert len(gaps) == 0
+
+    def test_multiple_categories(self):
+        design = {
+            "colors": {"primary": "#ff0000"},
+            "fonts": {"body": "Roboto"},
+            "components": [{"name": "button", "style": "pill shape"}],
+        }
+        gaps = detect_design_gaps("# Plan\nEmpty plan", design)
+        assert len(gaps) == 3
+        categories = {g.category for g in gaps}
+        assert categories == {"color", "font", "component"}
+
+    def test_component_without_style(self):
+        design = {"components": [{"name": "modal"}]}
+        gaps = detect_design_gaps("# Plan", design)
+        assert len(gaps) == 1
+        assert gaps[0].detail == "modal"
+
+
+# ---------------------------------------------------------------------------
+# format_gap_tasks with design refinements
+# ---------------------------------------------------------------------------
+
+
+class TestFormatGapTasksDesign:
+    def test_includes_design_refinements(self):
+        result = GapResult(
+            missing_features=[],
+            missing_examples=[],
+            design_refinements=[
+                DesignRefinement(
+                    category="color",
+                    detail="primary: #ff0000",
+                    reason="Color #ff0000 not in plan",
+                )
+            ],
+        )
+        text = format_gap_tasks(result)
+        assert "- [ ] Update design: primary: #ff0000" in text
+        assert "## Gaps detected" in text
+
+    def test_empty_when_no_gaps_at_all(self):
+        result = GapResult(
+            missing_features=[],
+            missing_examples=[],
+            design_refinements=[],
+        )
+        assert format_gap_tasks(result) == ""
+
+    def test_mixed_features_and_design(self):
+        result = GapResult(
+            missing_features=[MissingFeature(name="Export", reason="Not in plan")],
+            missing_examples=[],
+            design_refinements=[
+                DesignRefinement(
+                    category="font",
+                    detail="body: Roboto",
+                    reason="Font not in plan",
+                )
+            ],
+        )
+        text = format_gap_tasks(result)
+        assert "Implement Export" in text
+        assert "Update design: body: Roboto" in text
