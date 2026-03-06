@@ -98,37 +98,18 @@ def main() -> None:
             or default_app_name
         )
 
-        saved = save_selections(
-            args.url,
-            features,
-            prefs,
+        roadmap = _init_project(
+            url=args.url,
+            project_name=project_name,
+            project_dir=project_dir,
+            features=features,
+            prefs=prefs,
             app_name=app_name,
-            code_examples=code_examples or None,
-            doc_structures=doc_structures or None,
-            target_dir=project_dir,
+            text=text,
+            code_examples=code_examples,
+            doc_structures=doc_structures,
         )
-        print(f"\nSelections saved to {saved}")
-        if code_examples:
-            print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
-            test_source = generate_test_source(code_examples, project_name=project_name)
-            if test_source:
-                tests_dir = project_dir / "tests"
-                test_path = save_test_file(test_source, target_dir=tests_dir)
-                print(f"Generated {len(code_examples)} test case(s) in {test_path}")
-        if doc_structures:
-            print("Saved doc structures to duplo.json.")
 
-        claude_md = write_claude_md(
-            target_dir=project_dir,
-        )
-        print(f"CLAUDE.md written to {claude_md}")
-
-        print("\nGenerating build roadmap ...")
-        roadmap = generate_roadmap(
-            args.url,
-            features,
-            prefs,
-        )
         if roadmap:
             print("\n" + format_roadmap(roadmap))
             answer = input("Approve this roadmap? [Y/n] ").strip().lower()
@@ -142,21 +123,74 @@ def main() -> None:
                 print("Roadmap saved to duplo.json.")
         else:
             print("Failed to generate roadmap.")
-
-        urls = _SECTION_URL_RE.findall(text)
-        if urls:
-            output_dir = project_dir / "screenshots"
-            print(f"\nSaving reference screenshots to {output_dir}/ …")
-            saved = save_reference_screenshots(urls, output_dir)
-            print(f"Saved {len(saved)} screenshot(s).")
-            feature_names = [f.name for f in features]
-            screenshot_map = map_screenshots_to_features(text, feature_names, output_dir)
-            if screenshot_map:
-                save_screenshot_feature_map(screenshot_map, target_dir=project_dir)
-                print(f"Screenshot→feature map saved ({len(screenshot_map)} entries).")
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
         sys.exit(1)
+
+
+def _init_project(
+    *,
+    url: str,
+    project_name: str,
+    project_dir: Path,
+    features: list[Feature],
+    prefs: BuildPreferences,
+    app_name: str,
+    text: str,
+    code_examples: list | None,
+    doc_structures=None,
+) -> list | None:
+    """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
+
+    Returns the generated roadmap (list of phase dicts) or ``None``.
+    All interactive prompts happen in the caller — this function is testable
+    without any GUI interaction.
+    """
+    saved = save_selections(
+        url,
+        features,
+        prefs,
+        app_name=app_name,
+        code_examples=code_examples or None,
+        doc_structures=doc_structures or None,
+        target_dir=project_dir,
+    )
+    print(f"\nSelections saved to {saved}")
+    if code_examples:
+        print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
+        test_source = generate_test_source(code_examples, project_name=project_name)
+        if test_source:
+            tests_dir = project_dir / "tests"
+            test_path = save_test_file(test_source, target_dir=tests_dir)
+            print(f"Generated {len(code_examples)} test case(s) in {test_path}")
+    if doc_structures:
+        print("Saved doc structures to duplo.json.")
+
+    claude_md = write_claude_md(
+        target_dir=project_dir,
+    )
+    print(f"CLAUDE.md written to {claude_md}")
+
+    print("\nGenerating build roadmap ...")
+    roadmap = generate_roadmap(
+        url,
+        features,
+        prefs,
+    )
+
+    urls = _SECTION_URL_RE.findall(text)
+    if urls:
+        output_dir = project_dir / "screenshots"
+        print(f"\nSaving reference screenshots to {output_dir}/ …")
+        saved_shots = save_reference_screenshots(urls, output_dir)
+        print(f"Saved {len(saved_shots)} screenshot(s).")
+        feature_names = [f.name for f in features]
+        screenshot_map = map_screenshots_to_features(text, feature_names, output_dir)
+        if screenshot_map:
+            save_screenshot_feature_map(screenshot_map, target_dir=project_dir)
+            print(f"Screenshot→feature map saved ({len(screenshot_map)} entries).")
+
+    return roadmap
 
 
 def _cmd_next(feedback_file: str | None = None) -> None:

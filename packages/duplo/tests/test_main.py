@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
-from duplo.main import _parse_args, main
+from duplo.extractor import Feature
+from duplo.main import _init_project, _parse_args, main
+from duplo.questioner import BuildPreferences
 
 
 class TestParseArgs:
@@ -708,3 +710,148 @@ class TestCmdNextResume:
 
         out = capsys.readouterr().out
         assert "Resuming" in out
+
+
+class TestInitProject:
+    """Test _init_project directly — no builtins.input mocking needed."""
+
+    _FEATURES = [Feature(name="Search", description="Full-text search.", category="core")]
+    _PREFS = BuildPreferences(platform="web", language="Python")
+
+    def test_saves_selections(self, tmp_path):
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json") as m:
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    _init_project(
+                        url="https://example.com",
+                        project_name="example",
+                        project_dir=tmp_path,
+                        features=self._FEATURES,
+                        prefs=self._PREFS,
+                        app_name="Example",
+                        text="page text",
+                        code_examples=None,
+                        doc_structures=None,
+                    )
+        m.assert_called_once()
+        assert m.call_args.args[0] == "https://example.com"
+
+    def test_returns_roadmap(self, tmp_path):
+        roadmap = [{"phase": 1, "title": "Core"}]
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=roadmap):
+                    result = _init_project(
+                        url="https://example.com",
+                        project_name="example",
+                        project_dir=tmp_path,
+                        features=self._FEATURES,
+                        prefs=self._PREFS,
+                        app_name="Example",
+                        text="page text",
+                        code_examples=None,
+                        doc_structures=None,
+                    )
+        assert result == roadmap
+
+    def test_returns_none_when_no_roadmap(self, tmp_path):
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    result = _init_project(
+                        url="https://example.com",
+                        project_name="example",
+                        project_dir=tmp_path,
+                        features=[],
+                        prefs=self._PREFS,
+                        app_name="Example",
+                        text="page text",
+                        code_examples=None,
+                        doc_structures=None,
+                    )
+        assert result is None
+
+    def test_generates_tests_when_code_examples_present(self, tmp_path):
+        examples = [{"input": "1+1", "expected_output": "2"}]
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    with patch(
+                        "duplo.main.generate_test_source", return_value="test code"
+                    ) as m_gen:
+                        with patch(
+                            "duplo.main.save_test_file",
+                            return_value=tmp_path / "tests" / "test_doc.py",
+                        ) as m_save:
+                            _init_project(
+                                url="https://example.com",
+                                project_name="example",
+                                project_dir=tmp_path,
+                                features=[],
+                                prefs=self._PREFS,
+                                app_name="Example",
+                                text="page text",
+                                code_examples=examples,
+                                doc_structures=None,
+                            )
+        m_gen.assert_called_once_with(examples, project_name="example")
+        m_save.assert_called_once()
+
+    def test_writes_claude_md(self, tmp_path):
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md") as m:
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    _init_project(
+                        url="https://example.com",
+                        project_name="example",
+                        project_dir=tmp_path,
+                        features=[],
+                        prefs=self._PREFS,
+                        app_name="Example",
+                        text="page text",
+                        code_examples=None,
+                        doc_structures=None,
+                    )
+        m.assert_called_once_with(target_dir=tmp_path)
+
+    def test_captures_screenshots_from_section_urls(self, tmp_path):
+        text = "=== https://example.com/page ===\nContent here."
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    with patch(
+                        "duplo.main.save_reference_screenshots",
+                        return_value=["shot.png"],
+                    ) as m_shot:
+                        with patch("duplo.main.map_screenshots_to_features", return_value={}):
+                            _init_project(
+                                url="https://example.com",
+                                project_name="example",
+                                project_dir=tmp_path,
+                                features=[],
+                                prefs=self._PREFS,
+                                app_name="Example",
+                                text=text,
+                                code_examples=None,
+                                doc_structures=None,
+                            )
+        m_shot.assert_called_once()
+        assert m_shot.call_args.args[0] == ["https://example.com/page"]
+
+    def test_skips_screenshots_when_no_section_urls(self, tmp_path):
+        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+            with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
+                with patch("duplo.main.generate_roadmap", return_value=None):
+                    with patch("duplo.main.save_reference_screenshots") as m_shot:
+                        _init_project(
+                            url="https://example.com",
+                            project_name="example",
+                            project_dir=tmp_path,
+                            features=[],
+                            prefs=self._PREFS,
+                            app_name="Example",
+                            text="no section urls here",
+                            code_examples=None,
+                            doc_structures=None,
+                        )
+        m_shot.assert_not_called()

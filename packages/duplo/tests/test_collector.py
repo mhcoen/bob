@@ -3,11 +3,29 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from duplo.collector import collect_feedback, _read_interactive
+
+
+def make_input(*answers: str):
+    """Return an input_fn that yields *answers* in order."""
+    it = iter(answers)
+    return lambda _prompt: next(it)
+
+
+def make_input_with_eof(*answers):
+    """Return an input_fn that yields *answers*, raising EOFError for None."""
+    it = iter(answers)
+
+    def _input_fn(_prompt):
+        val = next(it)
+        if val is None:
+            raise EOFError
+        return val
+
+    return _input_fn
 
 
 class TestCollectFeedbackFromFile:
@@ -42,41 +60,36 @@ class TestCollectFeedbackFromFile:
 
 class TestCollectFeedbackInteractive:
     def test_returns_typed_lines(self):
-        inputs = iter(["line one", "line two", ""])
-        with patch("builtins.input", side_effect=inputs):
-            result = collect_feedback()
+        result = collect_feedback(input_fn=make_input("line one", "line two", ""))
         assert result == "line one\nline two"
 
     def test_eof_terminates_input(self):
-        inputs = iter(["only line", EOFError()])
-        with patch("builtins.input", side_effect=inputs):
-            result = collect_feedback()
+        result = collect_feedback(input_fn=make_input_with_eof("only line", None))
         assert result == "only line"
 
     def test_raises_if_no_input(self):
-        with patch("builtins.input", side_effect=[""]):
-            with pytest.raises(ValueError, match="No feedback"):
-                collect_feedback()
+        with pytest.raises(ValueError, match="No feedback"):
+            collect_feedback(input_fn=make_input(""))
 
     def test_raises_on_immediate_eof(self):
-        with patch("builtins.input", side_effect=EOFError()):
-            with pytest.raises(ValueError, match="No feedback"):
-                collect_feedback()
+        with pytest.raises(ValueError, match="No feedback"):
+            collect_feedback(input_fn=make_input_with_eof(None))
 
-    def test_prints_prompt(self, capsys):
-        with patch("builtins.input", side_effect=["hello", ""]):
-            collect_feedback()
-        out = capsys.readouterr().out
-        assert "feedback" in out.lower()
+    def test_prints_prompt(self):
+        lines: list[str] = []
+        collect_feedback(
+            input_fn=make_input("hello", ""),
+            print_fn=lines.append,
+        )
+        combined = "\n".join(lines)
+        assert "feedback" in combined.lower()
 
 
 class TestReadInteractive:
     def test_multi_line_input(self):
-        with patch("builtins.input", side_effect=["a", "b", "c", ""]):
-            result = _read_interactive()
+        result = _read_interactive(input_fn=make_input("a", "b", "c", ""))
         assert result == "a\nb\nc"
 
     def test_strips_result(self):
-        with patch("builtins.input", side_effect=["  spaced  ", ""]):
-            result = _read_interactive()
+        result = _read_interactive(input_fn=make_input("  spaced  ", ""))
         assert result == "spaced"

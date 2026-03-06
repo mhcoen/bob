@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 
-def collect_feedback(feedback_file: Path | str | None = None) -> str:
+def collect_feedback(
+    feedback_file: Path | str | None = None,
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> str:
     """Return user feedback as a string.
 
     If *feedback_file* is given, read the feedback from that path.
@@ -14,6 +20,8 @@ def collect_feedback(feedback_file: Path | str | None = None) -> str:
 
     Args:
         feedback_file: Optional path to a plain-text feedback file.
+        input_fn: Callable used to read user input (default ``input``).
+        print_fn: Callable used to print prompts (default ``print``).
 
     Returns:
         Feedback text, stripped of leading/trailing whitespace.
@@ -28,16 +36,20 @@ def collect_feedback(feedback_file: Path | str | None = None) -> str:
             raise ValueError(f"Feedback file is empty: {feedback_file}")
         return text
 
-    return _read_interactive()
+    return _read_interactive(input_fn=input_fn, print_fn=print_fn)
 
 
-def _read_interactive() -> str:
+def _read_interactive(
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> str:
     """Prompt the user to type multi-line feedback, ending with a blank line."""
-    print("Enter feedback (blank line or Ctrl-D to finish):")
+    print_fn("Enter feedback (blank line or Ctrl-D to finish):")
     lines: list[str] = []
     try:
         while True:
-            line = input()
+            line = input_fn("")
             if line == "":
                 break
             lines.append(line)
