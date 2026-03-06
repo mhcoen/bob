@@ -58,6 +58,7 @@ from duplo.saver import (
     save_screenshot_feature_map,
     save_selections,
     set_in_progress,
+    store_accepted_frames,
     write_claude_md,
 )
 from duplo.screenshotter import map_screenshots_to_features, save_reference_screenshots
@@ -204,6 +205,19 @@ def _first_run() -> None:
                 frame_descs = describe_frames(video_frames)
                 for fd in frame_descs:
                     print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                # Store accepted frames in .duplo/references/.
+                frame_entries = [
+                    {
+                        "path": fd.path,
+                        "filename": fd.path.name,
+                        "state": fd.state,
+                        "detail": fd.detail,
+                    }
+                    for fd in frame_descs
+                ]
+                stored = store_accepted_frames(frame_entries)
+                if stored:
+                    print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
 
     # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
@@ -366,6 +380,19 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                     frame_descs = describe_frames(video_frames)
                     for fd in frame_descs:
                         print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                    # Store accepted frames in .duplo/references/.
+                    frame_entries = [
+                        {
+                            "path": fd.path,
+                            "filename": fd.path.name,
+                            "state": fd.state,
+                            "detail": fd.detail,
+                        }
+                        for fd in frame_descs
+                    ]
+                    stored = store_accepted_frames(frame_entries)
+                    if stored:
+                        print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
 
             summary.video_frames_extracted = len(video_frames)
 

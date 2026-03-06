@@ -544,6 +544,79 @@ def save_design_requirements(
     return path
 
 
+def save_frame_descriptions(
+    descriptions: list[dict],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save frame UI state descriptions to *duplo.json*.
+
+    Writes ``{"frame_descriptions": [...]}`` into *duplo.json*, preserving
+    all existing keys.  Each entry has ``filename``, ``state``, and ``detail``.
+
+    Args:
+        descriptions: List of dicts with ``filename``, ``state``, ``detail``.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["frame_descriptions"] = descriptions
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def store_accepted_frames(
+    frame_descriptions: list[dict],
+    *,
+    target_dir: Path | str = ".",
+) -> list[Path]:
+    """Copy accepted frames to ``.duplo/references/`` and save descriptions.
+
+    Each entry in *frame_descriptions* must have ``path`` (a :class:`Path`
+    or string to the frame file), ``filename``, ``state``, and ``detail``.
+    The frame file is copied (not moved) into ``.duplo/references/``.
+    Descriptions are saved to ``duplo.json``.
+
+    Args:
+        frame_descriptions: List of dicts with ``path``, ``filename``,
+            ``state``, ``detail`` keys.
+        target_dir: Directory containing ``.duplo/``.
+
+    Returns:
+        List of destination paths for copied frames.
+    """
+    import shutil
+
+    refs_dir = Path(target_dir) / REFERENCES_DIR
+    refs_dir.mkdir(parents=True, exist_ok=True)
+
+    copied: list[Path] = []
+    json_entries: list[dict] = []
+    for entry in frame_descriptions:
+        src = Path(entry["path"])
+        if not src.exists():
+            continue
+        dest = refs_dir / entry["filename"]
+        shutil.copy2(src, dest)
+        copied.append(dest)
+        json_entries.append(
+            {
+                "filename": entry["filename"],
+                "state": entry["state"],
+                "detail": entry["detail"],
+            }
+        )
+
+    if json_entries:
+        save_frame_descriptions(json_entries, target_dir=target_dir)
+
+    return copied
+
+
 def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     """Write ``CLAUDE.md`` with appshot instructions to *target_dir*.
 

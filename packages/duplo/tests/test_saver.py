@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -29,11 +30,13 @@ from duplo.saver import (
     move_references,
     save_examples,
     save_feedback,
+    save_frame_descriptions,
     save_raw_content,
     save_reference_urls,
     save_screenshot_feature_map,
     save_selections,
     set_in_progress,
+    store_accepted_frames,
     write_claude_md,
 )
 
@@ -809,3 +812,125 @@ class TestMoveReferences:
         assert len(moved) == 1
         assert (refs_dir / "dup.png").read_bytes() == b"new"
         assert not src.exists()
+
+
+class TestSaveFrameDescriptions:
+    _DESCS = [
+        {"filename": "frame_001.png", "state": "Settings panel", "detail": "Theme toggle"},
+        {"filename": "frame_002.png", "state": "Main dashboard", "detail": "Grid layout"},
+    ]
+
+    def test_creates_file(self, tmp_path):
+        path = save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        assert path.exists()
+        assert path.name == "duplo.json"
+
+    def test_returns_correct_path(self, tmp_path):
+        path = save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        assert path == tmp_path / DUPLO_JSON
+
+    def test_descriptions_stored(self, tmp_path):
+        save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["frame_descriptions"]) == 2
+        assert data["frame_descriptions"][0]["state"] == "Settings panel"
+        assert data["frame_descriptions"][1]["filename"] == "frame_002.png"
+
+    def test_preserves_existing_fields(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["source_url"] == "https://example.com"
+
+    def test_empty_descriptions(self, tmp_path):
+        save_frame_descriptions([], target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["frame_descriptions"] == []
+
+    def test_overwrites_existing_descriptions(self, tmp_path):
+        save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        new = [{"filename": "new.png", "state": "Login", "detail": "Form"}]
+        save_frame_descriptions(new, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["frame_descriptions"]) == 1
+        assert data["frame_descriptions"][0]["filename"] == "new.png"
+
+    def test_file_ends_with_newline(self, tmp_path):
+        save_frame_descriptions(self._DESCS, target_dir=tmp_path)
+        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestStoreAcceptedFrames:
+    def _make_frames(self, tmp_path):
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True)
+        f1 = frames_dir / "frame_001.png"
+        f1.write_bytes(b"PNG1" * 100)
+        f2 = frames_dir / "frame_002.png"
+        f2.write_bytes(b"PNG2" * 100)
+        return [
+            {
+                "path": f1,
+                "filename": "frame_001.png",
+                "state": "Settings panel",
+                "detail": "Theme toggle",
+            },
+            {
+                "path": f2,
+                "filename": "frame_002.png",
+                "state": "Main dashboard",
+                "detail": "Grid layout",
+            },
+        ]
+
+    def test_copies_frames_to_references(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        copied = store_accepted_frames(entries, target_dir=tmp_path)
+
+        refs_dir = tmp_path / REFERENCES_DIR
+        assert len(copied) == 2
+        assert (refs_dir / "frame_001.png").exists()
+        assert (refs_dir / "frame_002.png").exists()
+
+    def test_source_frames_preserved(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        store_accepted_frames(entries, target_dir=tmp_path)
+
+        # Source frames should still exist (copy, not move).
+        for entry in entries:
+            assert Path(entry["path"]).exists()
+
+    def test_saves_descriptions_to_duplo_json(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        store_accepted_frames(entries, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["frame_descriptions"]) == 2
+        assert data["frame_descriptions"][0]["state"] == "Settings panel"
+        assert data["frame_descriptions"][1]["detail"] == "Grid layout"
+
+    def test_skips_missing_frames(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        Path(entries[0]["path"]).unlink()
+        copied = store_accepted_frames(entries, target_dir=tmp_path)
+
+        assert len(copied) == 1
+        assert copied[0].name == "frame_002.png"
+
+    def test_empty_list(self, tmp_path):
+        copied = store_accepted_frames([], target_dir=tmp_path)
+        assert copied == []
+
+    def test_creates_references_dir(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        store_accepted_frames(entries, target_dir=tmp_path)
+        assert (tmp_path / REFERENCES_DIR).is_dir()
+
+    def test_descriptions_exclude_missing_frames(self, tmp_path):
+        entries = self._make_frames(tmp_path)
+        Path(entries[0]["path"]).unlink()
+        store_accepted_frames(entries, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["frame_descriptions"]) == 1
+        assert data["frame_descriptions"][0]["filename"] == "frame_002.png"
