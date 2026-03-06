@@ -14,6 +14,18 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all
 code generation. Ruff for linting, pytest for tests. Keep modules
 short and focused. This is a thin orchestration layer, not a framework.
 
+**ARCHITECTURE CHANGE**: The old subcommand model (duplo init, duplo
+run, duplo next) is being replaced. The new model is a single `duplo`
+command with no required arguments. It runs from the current directory
+and auto-detects whether this is a first run or an update based on
+whether .duplo/ exists. The old main.py with its _cmd_init, _cmd_run,
+_cmd_next functions should be rewritten. The old modules (selector.py,
+questioner.py, collector.py, initializer.py, runner.py, planner.py,
+roadmap.py, notifier.py, comparator.py, issuer.py, appshot.py) can
+be reused where they still apply, but the orchestration in main.py
+must change to match the new directory-based workflow. Do not preserve
+the old subcommand parsing or the old init/run/next flow.
+
 - [x] Project scaffolding
   - [x] Create duplo package with __init__.py and main.py entry point
   - [x] Add CLI argument parser: duplo <url>, duplo run, duplo next
