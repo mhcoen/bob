@@ -22,6 +22,7 @@ from duplo.runner import run_mcloop
 from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
+    save_feedback,
     save_selections,
     set_in_progress,
     write_claude_md,
@@ -128,6 +129,13 @@ def _cmd_next(feedback_file: str | None = None) -> None:
         sys.exit(1)
 
     print(f"\nFeedback recorded ({len(feedback)} chars).")
+
+    current_phase_match = re.search(
+        r"#\s*(Phase\s+\d+[^\n]*)", current_plan, re.IGNORECASE | re.MULTILINE
+    )
+    current_phase_label = current_phase_match.group(1).strip() if current_phase_match else ""
+    save_feedback(feedback, after_phase=current_phase_label)
+
     print("Generating next phase PLAN.md …")
     content = generate_next_phase_plan(current_plan, feedback, issues_text)
     saved = save_plan(content)
