@@ -15,6 +15,7 @@ from duplo.doc_tables import (
     UnitList,
 )
 from duplo.extractor import Feature
+from duplo.fetcher import PageRecord
 from duplo.questioner import BuildPreferences
 from duplo.saver import (
     CLAUDE_MD,
@@ -22,6 +23,7 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     save_feedback,
+    save_reference_urls,
     save_screenshot_feature_map,
     save_selections,
     set_in_progress,
@@ -503,4 +505,66 @@ class TestSaveScreenshotFeatureMap:
 
     def test_file_ends_with_newline(self, tmp_path):
         save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
+        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestSaveReferenceUrls:
+    _RECORDS = [
+        PageRecord(
+            url="https://example.com",
+            fetched_at="2026-03-06T12:00:00+00:00",
+            content_hash="abc123",
+        ),
+        PageRecord(
+            url="https://example.com/docs",
+            fetched_at="2026-03-06T12:00:01+00:00",
+            content_hash="def456",
+        ),
+    ]
+
+    def test_creates_file(self, tmp_path):
+        path = save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        assert path.exists()
+        assert path.name == "duplo.json"
+
+    def test_returns_correct_path(self, tmp_path):
+        path = save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        assert path == tmp_path / DUPLO_JSON
+
+    def test_records_stored(self, tmp_path):
+        save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["reference_urls"]) == 2
+        assert data["reference_urls"][0]["url"] == "https://example.com"
+        assert data["reference_urls"][0]["fetched_at"] == "2026-03-06T12:00:00+00:00"
+        assert data["reference_urls"][0]["content_hash"] == "abc123"
+        assert data["reference_urls"][1]["url"] == "https://example.com/docs"
+
+    def test_preserves_existing_fields(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["source_url"] == "https://example.com"
+
+    def test_empty_records(self, tmp_path):
+        save_reference_urls([], target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["reference_urls"] == []
+
+    def test_overwrites_existing_records(self, tmp_path):
+        old = [
+            PageRecord(
+                url="https://old.com",
+                fetched_at="2026-01-01T00:00:00+00:00",
+                content_hash="old",
+            )
+        ]
+        save_reference_urls(old, target_dir=tmp_path)
+        save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["reference_urls"]) == 2
+        assert data["reference_urls"][0]["url"] == "https://example.com"
+
+    def test_file_ends_with_newline(self, tmp_path):
+        save_reference_urls(self._RECORDS, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")

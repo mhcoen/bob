@@ -1,9 +1,14 @@
 # Duplo
 
-Duplo duplicates apps by scraping product websites, generating phased
-build plans, and orchestrating McLoop to build each phase autonomously.
-Between phases it captures screenshots for visual QA, collects user
-feedback, and revises the plan for the next round.
+Duplo duplicates apps. The user creates a project directory and drops
+in whatever reference material they have: screenshots, PDFs, text files,
+URLs. Running `duplo` from that directory analyzes the materials,
+identifies the product to duplicate, extracts features and visual
+design details, generates a build plan, and uses McLoop to build it.
+Running `duplo` again detects new files the user has added, re-scrapes
+the product docs, and appends new tasks for anything that was missed.
+The cycle is: add reference material, run duplo, let McLoop build,
+test, add more reference material if needed, run duplo again.
 
 Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all
 code generation. Ruff for linting, pytest for tests. Keep modules
@@ -60,11 +65,24 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [ ] Save raw scraped content so re-runs can diff against what changed on the product site
   - [ ] Save extracted examples separately from duplo.json so they can be reviewed and edited
   - [ ] Add .duplo/ to the target project's .gitignore
-- [ ] Re-run mode (duplo update)
-  - [ ] Add "update" subcommand that works on an existing project
-  - [ ] Re-scrape the product URL and extract features and examples with the improved extractor
-  - [ ] Use .duplo/ state to identify what is new vs what was already seen
-  - [ ] Compare against what is already in duplo.json and PLAN.md
-  - [ ] Append new unchecked tasks to PLAN.md for any missing features or uncovered examples
+- [ ] Directory-based workflow redesign
+  - [ ] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
+  - [ ] On first run, scan the directory for reference materials: images (png, jpg, gif, webp), PDFs, text/markdown files, and any file containing URLs. Analyze each to determine relevance.
+  - [ ] If a URL is found, validate it points to a single clear product, not a company portfolio or homepage with multiple products. Ask the user to clarify if ambiguous.
+  - [ ] Clearly state what product Duplo thinks it is duplicating and get confirmation before proceeding. No ambiguity.
+  - [ ] Send images to Claude Vision to extract visual design details: colors, fonts, spacing, layout, component styles. These become design requirements in PLAN.md.
+  - [ ] Extract text content from PDFs and include in feature analysis.
+  - [ ] Move processed reference materials to .duplo/references/ to keep the project directory clean.
+  - [ ] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
+- [ ] Incremental update mode
+  - [ ] On subsequent runs, detect new or changed files in the project directory by comparing against .duplo/file_hashes.json
+  - [ ] Analyze any new files the same way as first run (images to Vision, PDFs to text, URLs to scraper)
+  - [ ] Re-scrape the product URL with the improved deep extractor if the URL was already known
+  - [ ] Compare newly extracted features and examples against existing PLAN.md
+  - [ ] Append new unchecked tasks for missing features, uncovered examples, and design refinements
   - [ ] Never modify or remove existing tasks (checked or unchecked)
-  - [ ] Print a summary of what was added
+  - [ ] Print a summary of what was found and what was added
+- [ ] Product disambiguation
+  - [ ] When a URL points to a company with multiple products, present the products found and ask which one to duplicate
+  - [ ] When a URL is a landing page with unclear product boundaries, ask the user to describe what specific product they want
+  - [ ] Store the confirmed product identity in .duplo/product.json so subsequent runs don't re-ask

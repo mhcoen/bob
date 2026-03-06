@@ -11,6 +11,7 @@ from pathlib import Path
 from duplo.doc_examples import CodeExample
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
+from duplo.fetcher import PageRecord
 from duplo.questioner import BuildPreferences
 
 DUPLO_DIR = ".duplo"
@@ -369,6 +370,32 @@ def save_doc_structures(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["doc_structures"] = _serialize_doc_structures(structures)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def save_reference_urls(
+    records: list[PageRecord],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save reference URL records to *duplo.json*.
+
+    Writes ``{"reference_urls": [...]}`` into *duplo.json*, preserving
+    all existing keys.  Each record stores the URL, an ISO 8601 fetch
+    timestamp, and a SHA-256 content hash.
+
+    Args:
+        records: List of :class:`PageRecord` objects from scraping.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["reference_urls"] = [dataclasses.asdict(r) for r in records]
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -10,6 +13,16 @@ from bs4 import BeautifulSoup
 
 from duplo.doc_examples import CodeExample, extract_code_examples
 from duplo.doc_tables import DocStructures, extract_doc_structures
+
+
+@dataclass
+class PageRecord:
+    """Record of a single URL consulted during scraping."""
+
+    url: str
+    fetched_at: str  # ISO 8601 UTC timestamp
+    content_hash: str  # SHA-256 hex digest of response body
+
 
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _TIMEOUT = 30.0
@@ -104,7 +117,7 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
 
 def fetch_site(
     url: str, max_pages: int = 10, max_docs_pages: int = 50
-) -> tuple[str, list[CodeExample], DocStructures]:
+) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord]]:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
@@ -119,17 +132,20 @@ def fetch_site(
     (cross-domain docs sites). Doc pages are individually small but
     collectively important, so this defaults higher than *max_pages*.
 
-    Returns a tuple of ``(text, code_examples, doc_structures)`` where
-    *text* is concatenated text content from all visited pages,
-    *code_examples* is a list of :class:`CodeExample` objects, and
+    Returns a tuple of ``(text, code_examples, doc_structures, page_records)``
+    where *text* is concatenated text content from all visited pages,
+    *code_examples* is a list of :class:`CodeExample` objects,
     *doc_structures* is a :class:`DocStructures` with feature tables,
-    operation lists, unit lists, and function references.
+    operation lists, unit lists, and function references, and
+    *page_records* is a list of :class:`PageRecord` with URL, timestamp,
+    and content hash for every successfully fetched page.
     """
     visited: set[str] = set()
     queued: set[str] = set()
     results: list[str] = []
     all_examples: list[CodeExample] = []
     all_structures = DocStructures()
+    all_records: list[PageRecord] = []
     docs_domains: set[str] = set()
     seed_visited = 0
     docs_visited = 0
@@ -174,6 +190,13 @@ def fetch_site(
         except Exception:
             continue
 
+        record = PageRecord(
+            url=current_url,
+            fetched_at=datetime.now(tz=timezone.utc).isoformat(),
+            content_hash=hashlib.sha256(html.encode()).hexdigest(),
+        )
+        all_records.append(record)
+
         text = extract_text(html)
         if text:
             results.append(f"=== {current_url} ===\n{text}")
@@ -200,7 +223,7 @@ def fetch_site(
                     queue.append((link_score, link_url))
                     queued.add(link_norm)
 
-    return "\n\n".join(results), all_examples, all_structures
+    return "\n\n".join(results), all_examples, all_structures, all_records
 
 
 def fetch_text(url: str) -> str:

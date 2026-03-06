@@ -452,7 +452,7 @@ class TestMain:
             with patch("builtins.input", return_value=""):
                 with patch("duplo.main.create_project_dir", return_value=tmp_path):
                     with patch(
-                        "duplo.main.fetch_site", return_value=("product page text", [], None)
+                        "duplo.main.fetch_site", return_value=("product page text", [], None, [])
                     ):
                         with patch("duplo.main.extract_features", return_value=features):
                             with patch("duplo.main.select_features", return_value=features):
@@ -481,7 +481,7 @@ class TestMain:
         with patch("sys.argv", ["duplo", "init", "https://example.com"]):
             with patch("builtins.input", return_value=""):
                 with patch("duplo.main.create_project_dir", return_value=tmp_path):
-                    with patch("duplo.main.fetch_site", return_value=("text", [], None)):
+                    with patch("duplo.main.fetch_site", return_value=("text", [], None, [])):
                         with patch("duplo.main.extract_features", return_value=features):
                             with patch("duplo.main.select_features", return_value=features):
                                 with patch("duplo.main.ask_preferences"):

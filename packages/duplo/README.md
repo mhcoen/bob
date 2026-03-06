@@ -1,40 +1,35 @@
 # Duplo
 
-Duplo duplicates apps, customized however you want. Give it a URL,
-tell it what matters to you, and it builds a working version using
+Duplo duplicates apps, customized however you want. Give it reference
+material and it builds a working version using
 [McLoop](https://github.com/mhcoen/mcloop).
 
-```bash
-duplo init https://superwhisper.com
-```
+## How it works
 
-Duplo scrapes the product page and docs, asks you which features matter
-and what platform to target, then generates a phased build plan. Each
-phase produces something runnable. You test it, give feedback, and Duplo
-revises the plan for the next round. McLoop handles all the building.
-
-## Workflow
-
-1. You provide a product URL.
-2. Duplo scrapes features, docs, and screenshots.
-3. You pick what to include and set constraints.
-4. Duplo generates Phase 1: the smallest thing that works end to end.
-5. McLoop builds it.
-6. You test. You give feedback.
-7. Duplo generates Phase 2, incorporating your feedback.
-8. Repeat until done.
-
-All state lives in `.duplo/duplo.json` in the target project: source URL,
-selected features, phase history, and your feedback. If interrupted,
-`duplo run` picks up where it left off.
-
-## Commands
+Create a project directory. Drop in whatever you have: screenshots of
+the app, PDFs of the docs, text files with notes, a file containing
+the product URL. Run `duplo` from that directory.
 
 ```bash
-duplo init <url>   # Scrape URL, select features, save .duplo/duplo.json + screenshots
-duplo run          # Generate Phase 1 PLAN.md from .duplo/duplo.json (run inside project dir)
-duplo next         # Generate and run the next phase (coming soon)
+mkdir ~/proj/my-app
+cd ~/proj/my-app
+# Drop in reference material: screenshots, PDFs, URLs...
+echo "https://example.com/product" > url.txt
+duplo
 ```
+
+Duplo scans the directory, analyzes everything it finds, identifies
+the product, extracts features and visual design details, asks which
+features you want, and generates a build plan. McLoop then builds it.
+
+When you test the result and find things missing or wrong, drop more
+reference material into the directory (a screenshot showing the right
+colors, a PDF of the full docs, notes about what to fix) and run
+`duplo` again. It detects the new files, re-analyzes, and appends
+tasks to the plan for anything that was missed.
+
+The cycle is: add reference material, run duplo, let McLoop build,
+test, add more if needed, run duplo again.
 
 ## Install
 
@@ -43,12 +38,11 @@ git clone https://github.com/mhcoen/duplo.git
 cd duplo
 python -m venv .venv
 source .venv/bin/activate
-pip install setuptools
-pip install --no-build-isolation -e .
+pip install -e .
 ```
 
 Requires McLoop (`pip install -e ~/proj/mcloop`), Python 3.11+,
-`claude` CLI on PATH, and an `ANTHROPIC_API_KEY` environment variable.
+`claude` CLI on PATH, and macOS for native app building.
 
 ## Author
 
