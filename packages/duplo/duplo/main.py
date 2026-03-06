@@ -306,6 +306,38 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     _execute_phase(content, app_name, phase_label)
 
 
+def _confirm_product(product_name: str, source_url: str) -> str:
+    """Clearly state which product Duplo will duplicate and get confirmation.
+
+    Returns the confirmed product name, or empty string if the user cancels.
+    """
+    if product_name:
+        print(f"\n>>> Duplo will duplicate: {product_name}")
+        if source_url:
+            print(f"    Source: {source_url}")
+    elif source_url:
+        print(f"\n>>> Duplo will duplicate the product at: {source_url}")
+    else:
+        print("\n>>> No product URL found.")
+
+    if product_name:
+        answer = input("Is this correct? [Y/n] ").strip().lower()
+        if answer and answer != "y":
+            new_name = input("Enter the product name (or 'q' to quit): ").strip()
+            if not new_name or new_name.lower() == "q":
+                print("Cancelled.")
+                return ""
+            return new_name
+        return product_name
+
+    # No product name identified — ask the user.
+    name = input("What product should Duplo duplicate? ").strip()
+    if not name:
+        print("No product specified. Cancelled.")
+        return ""
+    return name
+
+
 def _validate_url(url: str) -> tuple[str, str]:
     """Validate that *url* points to a single product.
 

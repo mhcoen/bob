@@ -210,9 +210,10 @@ class TestValidateUrlInMain:
             reason="Single product page.",
         )
         with patch("duplo.main.validate_product_url", return_value=result):
-            url = _validate_url("https://example.com")
+            url, name = _validate_url("https://example.com")
 
         assert url == "https://example.com"
+        assert name == "TestApp"
         out = capsys.readouterr().out
         assert "TestApp" in out
 
@@ -227,9 +228,10 @@ class TestValidateUrlInMain:
         )
         with patch("duplo.main.validate_product_url", return_value=result):
             with patch("builtins.input", return_value="https://alpha.example.com"):
-                url = _validate_url("https://company.com")
+                url, name = _validate_url("https://company.com")
 
         assert url == "https://alpha.example.com"
+        assert name == ""
         out = capsys.readouterr().out
         assert "Alpha" in out
         assert "Beta" in out
@@ -245,9 +247,10 @@ class TestValidateUrlInMain:
         )
         with patch("duplo.main.validate_product_url", return_value=result):
             with patch("builtins.input", return_value=""):
-                url = _validate_url("https://company.com")
+                url, name = _validate_url("https://company.com")
 
         assert url == "https://company.com"
+        assert name == ""
 
     def test_validation_error_proceeds(self, capsys):
         from duplo.main import _validate_url
@@ -256,8 +259,84 @@ class TestValidateUrlInMain:
             "duplo.main.validate_product_url",
             side_effect=RuntimeError("network error"),
         ):
-            url = _validate_url("https://example.com")
+            url, name = _validate_url("https://example.com")
 
         assert url == "https://example.com"
+        assert name == ""
         out = capsys.readouterr().out
         assert "network error" in out
+
+
+class TestConfirmProduct:
+    """Test _confirm_product product confirmation."""
+
+    def test_confirms_known_product(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", return_value=""):
+            result = _confirm_product("Acme Widget", "https://acme.com")
+
+        assert result == "Acme Widget"
+        out = capsys.readouterr().out
+        assert "Acme Widget" in out
+        assert "https://acme.com" in out
+
+    def test_confirms_with_yes(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", return_value="y"):
+            result = _confirm_product("Acme Widget", "https://acme.com")
+
+        assert result == "Acme Widget"
+
+    def test_user_corrects_product_name(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", side_effect=["n", "Better Name"]):
+            result = _confirm_product("Wrong Name", "https://example.com")
+
+        assert result == "Better Name"
+
+    def test_user_cancels_correction(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", side_effect=["n", "q"]):
+            result = _confirm_product("SomeProd", "https://example.com")
+
+        assert result == ""
+
+    def test_user_cancels_with_empty(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", side_effect=["n", ""]):
+            result = _confirm_product("SomeProd", "https://example.com")
+
+        assert result == ""
+
+    def test_no_product_name_prompts(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", return_value="My Product"):
+            result = _confirm_product("", "https://example.com")
+
+        assert result == "My Product"
+        out = capsys.readouterr().out
+        assert "https://example.com" in out
+
+    def test_no_product_name_empty_cancels(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", return_value=""):
+            result = _confirm_product("", "https://example.com")
+
+        assert result == ""
+
+    def test_no_url_no_name(self, capsys):
+        from duplo.main import _confirm_product
+
+        with patch("builtins.input", return_value="Something"):
+            result = _confirm_product("", "")
+
+        assert result == "Something"
+        out = capsys.readouterr().out
+        assert "No product URL" in out

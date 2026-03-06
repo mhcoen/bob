@@ -40,32 +40,64 @@ class TestMainFirstRun:
         (tmp_path / "links.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.fetch_site", return_value=("page text", [], None, [], {})):
-            with patch("duplo.main.extract_features", return_value=[]):
-                with patch(
-                    "duplo.main.ask_preferences",
-                    return_value=BuildPreferences(platform="web", language="Python"),
-                ):
-                    with patch("builtins.input", return_value=""):
+        with patch("duplo.main._validate_url", return_value=("https://example.com", "Example")):
+            with patch("duplo.main._confirm_product", return_value="Example"):
+                with patch("duplo.main.fetch_site", return_value=("page text", [], None, [], {})):
+                    with patch("duplo.main.extract_features", return_value=[]):
                         with patch(
-                            "duplo.main.save_selections",
-                            return_value=tmp_path / _DUPLO_JSON,
+                            "duplo.main.ask_preferences",
+                            return_value=BuildPreferences(platform="web", language="Python"),
                         ):
-                            with patch(
-                                "duplo.main.write_claude_md",
-                                return_value=tmp_path / "CLAUDE.md",
-                            ):
+                            with patch("builtins.input", return_value=""):
                                 with patch(
-                                    "duplo.main.generate_roadmap",
-                                    return_value=None,
+                                    "duplo.main.save_selections",
+                                    return_value=tmp_path / _DUPLO_JSON,
                                 ):
-                                    main()
+                                    with patch(
+                                        "duplo.main.write_claude_md",
+                                        return_value=tmp_path / "CLAUDE.md",
+                                    ):
+                                        with patch(
+                                            "duplo.main.generate_roadmap",
+                                            return_value=None,
+                                        ):
+                                            main()
 
     def test_uses_first_url_as_source(self, tmp_path, monkeypatch, capsys):
         (tmp_path / "urls.txt").write_text("https://first.com\nhttps://second.com")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})) as mock_fetch:
+        with patch("duplo.main._validate_url", return_value=("https://first.com", "First")):
+            with patch("duplo.main._confirm_product", return_value="First"):
+                with patch(
+                    "duplo.main.fetch_site", return_value=("text", [], None, [], {})
+                ) as mock_fetch:
+                    with patch("duplo.main.extract_features", return_value=[]):
+                        with patch(
+                            "duplo.main.ask_preferences",
+                            return_value=BuildPreferences(platform="web", language="Python"),
+                        ):
+                            with patch("builtins.input", return_value=""):
+                                with patch(
+                                    "duplo.main.save_selections",
+                                    return_value=tmp_path / _DUPLO_JSON,
+                                ):
+                                    with patch(
+                                        "duplo.main.write_claude_md",
+                                        return_value=tmp_path / "CLAUDE.md",
+                                    ):
+                                        with patch(
+                                            "duplo.main.generate_roadmap", return_value=None
+                                        ):
+                                            main()
+
+        mock_fetch.assert_called_once_with("https://first.com")
+
+    def test_first_run_with_images_only(self, tmp_path, monkeypatch):
+        (tmp_path / "screenshot.png").write_bytes(b"PNG")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main._confirm_product", return_value="SomeApp"):
             with patch("duplo.main.extract_features", return_value=[]):
                 with patch(
                     "duplo.main.ask_preferences",
@@ -83,29 +115,6 @@ class TestMainFirstRun:
                                 with patch("duplo.main.generate_roadmap", return_value=None):
                                     main()
 
-        mock_fetch.assert_called_once_with("https://first.com")
-
-    def test_first_run_with_images_only(self, tmp_path, monkeypatch):
-        (tmp_path / "screenshot.png").write_bytes(b"PNG")
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.extract_features", return_value=[]):
-            with patch(
-                "duplo.main.ask_preferences",
-                return_value=BuildPreferences(platform="web", language="Python"),
-            ):
-                with patch("builtins.input", return_value=""):
-                    with patch(
-                        "duplo.main.save_selections",
-                        return_value=tmp_path / _DUPLO_JSON,
-                    ):
-                        with patch(
-                            "duplo.main.write_claude_md",
-                            return_value=tmp_path / "CLAUDE.md",
-                        ):
-                            with patch("duplo.main.generate_roadmap", return_value=None):
-                                main()
-
     def test_generates_roadmap_and_executes_phase(self, tmp_path, monkeypatch):
         (tmp_path / "notes.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
@@ -113,50 +122,52 @@ class TestMainFirstRun:
         roadmap = [
             {"phase": 0, "title": "Core", "goal": "MVP", "test": "it works"},
         ]
-        with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})):
-            with patch("duplo.main.extract_features", return_value=[]):
-                with patch(
-                    "duplo.main.ask_preferences",
-                    return_value=BuildPreferences(platform="web", language="Python"),
-                ):
-                    with patch("builtins.input", return_value=""):
+        with patch("duplo.main._validate_url", return_value=("https://example.com", "Example")):
+            with patch("duplo.main._confirm_product", return_value="Example"):
+                with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})):
+                    with patch("duplo.main.extract_features", return_value=[]):
                         with patch(
-                            "duplo.main.save_selections",
-                            return_value=tmp_path / _DUPLO_JSON,
+                            "duplo.main.ask_preferences",
+                            return_value=BuildPreferences(platform="web", language="Python"),
                         ):
-                            with patch(
-                                "duplo.main.write_claude_md",
-                                return_value=tmp_path / "CLAUDE.md",
-                            ):
+                            with patch("builtins.input", return_value=""):
                                 with patch(
-                                    "duplo.main.generate_roadmap",
-                                    return_value=roadmap,
+                                    "duplo.main.save_selections",
+                                    return_value=tmp_path / _DUPLO_JSON,
                                 ):
-                                    with patch("duplo.main.save_roadmap"):
+                                    with patch(
+                                        "duplo.main.write_claude_md",
+                                        return_value=tmp_path / "CLAUDE.md",
+                                    ):
                                         with patch(
-                                            "duplo.main.get_current_phase",
-                                            return_value=(0, {"title": "Core"}),
+                                            "duplo.main.generate_roadmap",
+                                            return_value=roadmap,
                                         ):
-                                            with patch(
-                                                "duplo.main.generate_phase_plan",
-                                                return_value="# Phase 0: Core\n",
-                                            ):
+                                            with patch("duplo.main.save_roadmap"):
                                                 with patch(
-                                                    "duplo.main.save_plan",
-                                                    return_value=tmp_path / "PLAN.md",
+                                                    "duplo.main.get_current_phase",
+                                                    return_value=(0, {"title": "Core"}),
                                                 ):
                                                     with patch(
-                                                        "duplo.main.run_mcloop",
-                                                        return_value=0,
+                                                        "duplo.main.generate_phase_plan",
+                                                        return_value="# Phase 0: Core\n",
                                                     ):
                                                         with patch(
-                                                            "duplo.main.capture_appshot",
-                                                            return_value=0,
+                                                            "duplo.main.save_plan",
+                                                            return_value=tmp_path / "PLAN.md",
                                                         ):
                                                             with patch(
-                                                                "duplo.main.notify_phase_complete"
+                                                                "duplo.main.run_mcloop",
+                                                                return_value=0,
                                                             ):
-                                                                main()
+                                                                with patch(
+                                                                    "duplo.main.capture_appshot",
+                                                                    return_value=0,
+                                                                ):
+                                                                    with patch(
+                                                                        "duplo.main.notify_phase_complete"
+                                                                    ):
+                                                                        main()
 
 
 class TestMainSubsequentRun:
