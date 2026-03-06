@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from duplo.fetcher import fetch_text
+from duplo.fetcher import fetch_site
 
 
 def main() -> None:
@@ -16,7 +16,7 @@ def main() -> None:
         print("duplo next: not yet implemented")
     elif args.command == "init":
         print(f"Fetching {args.url} …")
-        text = fetch_text(args.url)
+        text = fetch_site(args.url)
         print(text)
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
