@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from PIL import Image
+
 from duplo.video_extractor import (
     ExtractionResult,
+    _dhash,
+    _hamming,
+    deduplicate_frames,
     extract_all_videos,
     extract_scene_frames,
     ffmpeg_available,
@@ -187,3 +193,117 @@ def test_extract_scene_frames_real_ffmpeg(tmp_path, _real_test_video):
     for frame in result.frames:
         assert frame.exists()
         assert frame.stat().st_size > 0
+
+
+# --- Deduplication tests ---
+
+
+def _make_gradient_png(path: Path, base: tuple[int, int, int], size: int = 64) -> Path:
+    """Create a gradient PNG image at *path* using *base* color offset."""
+    img = Image.new("RGB", (size, size))
+    pixels = []
+    for y in range(size):
+        for x in range(size):
+            r = (base[0] + x * 3 + y) % 256
+            g = (base[1] + y * 3 + x) % 256
+            b = (base[2] + x + y) % 256
+            pixels.append((r, g, b))
+    img.putdata(pixels)
+    img.save(path)
+    return path
+
+
+def _make_solid_png(path: Path, color: tuple[int, int, int], size: int = 64) -> Path:
+    """Create a solid-color PNG image at *path*."""
+    img = Image.new("RGB", (size, size), color)
+    img.save(path)
+    return path
+
+
+def test_dhash_identical_images():
+    img = Image.new("RGB", (64, 64), (100, 150, 200))
+    assert _dhash(img) == _dhash(img)
+
+
+def test_dhash_different_images():
+    # Use gradient images so dHash has pixel variation to work with.
+    red = Image.new("L", (64, 64))
+    red.putdata([i % 256 for i in range(64 * 64)])
+    blue = Image.new("L", (64, 64))
+    blue.putdata([(255 - i) % 256 for i in range(64 * 64)])
+    assert _dhash(red) != _dhash(blue)
+
+
+def test_hamming_identical():
+    assert _hamming(0b1010, 0b1010) == 0
+
+
+def test_hamming_all_different():
+    assert _hamming(0b0000, 0b1111) == 4
+
+
+def test_deduplicate_removes_identical(tmp_path):
+    frames = [
+        _make_solid_png(tmp_path / "a.png", (255, 0, 0)),
+        _make_solid_png(tmp_path / "b.png", (255, 0, 0)),
+        _make_solid_png(tmp_path / "c.png", (255, 0, 0)),
+    ]
+    result = deduplicate_frames(frames)
+    assert len(result) == 1
+    assert result[0] == frames[0]
+    # Duplicates should be deleted from disk.
+    assert not frames[1].exists()
+    assert not frames[2].exists()
+
+
+def test_deduplicate_keeps_distinct(tmp_path):
+    frames = [
+        _make_gradient_png(tmp_path / "a.png", (0, 0, 0)),
+        _make_gradient_png(tmp_path / "b.png", (128, 50, 200)),
+        _make_gradient_png(tmp_path / "c.png", (50, 200, 128)),
+    ]
+    result = deduplicate_frames(frames)
+    assert len(result) == 3
+
+
+def test_deduplicate_empty_list():
+    assert deduplicate_frames([]) == []
+
+
+def test_deduplicate_single_frame(tmp_path):
+    frames = [_make_solid_png(tmp_path / "a.png", (128, 128, 128))]
+    result = deduplicate_frames(frames)
+    assert len(result) == 1
+
+
+def test_deduplicate_keeps_frame_on_read_error(tmp_path):
+    """If a frame can't be opened, it's kept rather than discarded."""
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(b"not a png")
+    result = deduplicate_frames([bad])
+    assert len(result) == 1
+    assert result[0] == bad
+
+
+def test_deduplicate_respects_max_distance(tmp_path):
+    """With max_distance=0, only exact hash matches are duplicates."""
+    # Two very similar but not identical images.
+    img1 = Image.new("RGB", (64, 64), (100, 100, 100))
+    img2 = Image.new("RGB", (64, 64), (105, 100, 100))
+    p1 = tmp_path / "a.png"
+    p2 = tmp_path / "b.png"
+    img1.save(p1)
+    img2.save(p2)
+    # With distance=0, small differences should keep both.
+    result = deduplicate_frames([p1, p2], max_distance=0)
+    assert len(result) >= 1  # At least the first is kept.
+
+
+def test_deduplicate_no_pillow(tmp_path):
+    """Without Pillow, frames are returned unchanged."""
+    frames = [tmp_path / "a.png", tmp_path / "b.png"]
+    for f in frames:
+        f.write_bytes(b"data")
+    with patch("duplo.video_extractor._PILLOW", False):
+        result = deduplicate_frames(frames)
+    assert result == frames

@@ -7,6 +7,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from PIL import Image
+
+    _PILLOW = True
+except ImportError:  # pragma: no cover
+    _PILLOW = False
+
 
 @dataclass
 class ExtractionResult:
@@ -74,6 +81,12 @@ def extract_scene_frames(
                     old.unlink()
             frames = retry
 
+    before = len(frames)
+    frames = deduplicate_frames(frames)
+    if before > len(frames):
+        # Informational — caller sees the deduplicated list.
+        pass
+
     return ExtractionResult(source=video, frames=frames)
 
 
@@ -114,6 +127,77 @@ def _run_ffmpeg_scene_detect(
     # Collect extracted frames in order.
     frames = sorted(output_dir.glob(f"{stem}_scene_*.png"))
     return frames
+
+
+def _dhash(image: Image.Image, size: int = 8) -> int:
+    """Compute a difference hash (dHash) for an image.
+
+    The image is resized to (*size* + 1) x *size* and converted to grayscale.
+    Each bit in the returned integer indicates whether a pixel is brighter than
+    the one to its right.
+    """
+    resized = image.convert("L").resize((size + 1, size), Image.LANCZOS)
+    pixels = list(resized.tobytes())
+    width = size + 1
+    bits = 0
+    for row in range(size):
+        for col in range(size):
+            idx = row * width + col
+            if pixels[idx] > pixels[idx + 1]:
+                bits |= 1 << (row * size + col)
+    return bits
+
+
+def _hamming(a: int, b: int) -> int:
+    """Return the Hamming distance between two integers."""
+    return bin(a ^ b).count("1")
+
+
+def deduplicate_frames(
+    frames: list[Path],
+    *,
+    max_distance: int = 6,
+    hash_size: int = 8,
+) -> list[Path]:
+    """Remove near-duplicate frames using perceptual difference hashing.
+
+    Compares each frame against all previously kept frames. If the minimum
+    Hamming distance to any kept frame is <= *max_distance*, the frame is
+    considered a duplicate and its file is deleted.
+
+    Args:
+        frames: Sorted list of frame paths.
+        max_distance: Maximum Hamming distance to consider two frames
+            as duplicates. Default 6 (out of 64 bits).
+        hash_size: Size parameter for dHash. Produces *hash_size*^2 bit
+            hashes (default 8 → 64-bit hashes).
+
+    Returns:
+        The deduplicated list of frame paths (subset of *frames*).
+    """
+    if not _PILLOW:
+        return frames
+
+    if not frames:
+        return frames
+
+    kept: list[tuple[Path, int]] = []
+    for frame in frames:
+        try:
+            img = Image.open(frame)
+            h = _dhash(img, hash_size)
+        except Exception:
+            # Can't hash → keep the frame to be safe.
+            kept.append((frame, 0))
+            continue
+
+        is_dup = any(_hamming(h, kh) <= max_distance for _, kh in kept)
+        if is_dup:
+            frame.unlink(missing_ok=True)
+        else:
+            kept.append((frame, h))
+
+    return [p for p, _ in kept]
 
 
 def extract_all_videos(
