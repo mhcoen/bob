@@ -358,15 +358,14 @@ def test_noop_with_max_retries_one(
 
 
 @patch("mcloop.main.subprocess.run")
-def test_commit_does_not_stage_untracked(mock_run, tmp_path):
-    """_commit uses git add -u (tracked only), never git add -A."""
+def test_commit_stages_all_files(mock_run, tmp_path):
+    """_commit uses git add -A to include new and tracked files."""
     mock_run.return_value = MagicMock()
 
     _commit(tmp_path, "some task")
 
     commands = [call_args.args[0] for call_args in mock_run.call_args_list]
-    assert ["git", "add", "-u"] in commands
-    assert ["git", "add", "-A"] not in commands
+    assert ["git", "add", "-A"] in commands
 
 
 @patch("mcloop.main.subprocess.run")

@@ -336,6 +336,7 @@ def main():
     user = Path(home).name
     project = Path(cwd).name if cwd else "?"
     session_label = f"{user}/{project}"
+    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
     _dbg(f"tool={tool_name} input={json.dumps(tool_input)[:100]}")
 
     # Block MCP tools in McLoop sessions
@@ -363,7 +364,6 @@ def main():
     # Not whitelisted. Send Telegram with buttons and wait.
     desc = format_tool_description(tool_name, tool_input)
     pattern = _tool_pattern(tool_name, tool_input)
-    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
     label_prefix = f"[{task_label}] " if task_label else ""
     msg = (
         f"*{label_prefix}Permission needed* [{session_label}]\n\n"

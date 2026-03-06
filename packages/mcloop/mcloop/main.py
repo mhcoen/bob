@@ -1200,7 +1200,7 @@ def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     try:
         subprocess.run(
-            ["git", "add", "-u"],
+            ["git", "add", "-A"],
             cwd=project_dir,
             capture_output=True,
         )
