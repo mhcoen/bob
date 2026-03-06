@@ -77,7 +77,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Save raw scraped content so re-runs can diff against what changed on the product site
   - [x] Save extracted examples separately from duplo.json so they can be reviewed and edited
   - [x] Add .duplo/ to the target project's .gitignore
-- [ ] Directory-based workflow redesign
+- [x] Directory-based workflow redesign
   - [x] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
   - [x] On first run, scan the directory for reference materials: images (png, jpg, gif, webp), PDFs, text/markdown files, and any file containing URLs. Analyze each to determine relevance.
   - [x] If a URL is found, validate it points to a single clear product, not a company portfolio or homepage with multiple products. Ask the user to clarify if ambiguous.
@@ -85,7 +85,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Send images to Claude Vision to extract visual design details: colors, fonts, spacing, layout, component styles. These become design requirements in PLAN.md.
   - [x] Extract text content from PDFs and include in feature analysis.
   - [x] Move processed reference materials to .duplo/references/ to keep the project directory clean.
-  - [ ] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
+  - [x] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
 - [ ] Incremental update mode
   - [ ] On subsequent runs, detect new or changed files in the project directory by comparing against .duplo/file_hashes.json
   - [ ] Analyze any new files the same way as first run (images to Vision, PDFs to text, URLs to scraper)
