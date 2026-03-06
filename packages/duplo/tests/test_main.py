@@ -11,9 +11,11 @@ import pytest
 from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
 from duplo.main import (
+    UpdateSummary,
     _analyze_new_files,
     _detect_and_append_gaps,
     _init_project,
+    _print_summary,
     _rescrape_product_url,
     main,
 )
@@ -997,7 +999,7 @@ class TestRescrapeProductUrl:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._rescrape_product_url") as mock_rescrape:
+        with patch("duplo.main._rescrape_product_url", return_value=(0, 0)) as mock_rescrape:
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
                     with patch("duplo.main.run_mcloop", return_value=0):
@@ -1260,10 +1262,209 @@ class TestDetectAndAppendGaps:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._detect_and_append_gaps") as mock_gaps:
+        with patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)) as mock_gaps:
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
                     with patch("duplo.main.run_mcloop", return_value=0):
                         main()
 
         mock_gaps.assert_called_once()
+
+
+class TestPrintSummary:
+    """Tests for _print_summary()."""
+
+    def test_no_changes(self, capsys):
+        _print_summary(UpdateSummary())
+        out = capsys.readouterr().out
+        assert "No changes detected" in out
+
+    def test_files_only(self, capsys):
+        summary = UpdateSummary(files_added=2, files_changed=1, files_removed=0)
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "Update summary" in out
+        assert "2 added" in out
+        assert "1 changed" in out
+        assert "No new tasks added" in out
+
+    def test_full_summary(self, capsys):
+        summary = UpdateSummary(
+            files_added=1,
+            images_analyzed=1,
+            pages_rescraped=5,
+            examples_rescraped=3,
+            missing_features=2,
+            design_refinements=1,
+            tasks_appended=3,
+        )
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "Update summary" in out
+        assert "Images analyzed: 1" in out
+        assert "Pages re-scraped: 5" in out
+        assert "Code examples updated: 3" in out
+        assert "Missing features: 2" in out
+        assert "Design refinements: 1" in out
+        assert "Tasks appended to PLAN.md: 3" in out
+
+    def test_rescrape_only(self, capsys):
+        summary = UpdateSummary(pages_rescraped=10)
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "Pages re-scraped: 10" in out
+        assert "No new tasks added" in out
+
+    def test_gaps_without_files(self, capsys):
+        summary = UpdateSummary(
+            missing_features=1,
+            missing_examples=2,
+            tasks_appended=3,
+        )
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "Missing features: 1" in out
+        assert "Missing examples: 2" in out
+        assert "Tasks appended to PLAN.md: 3" in out
+
+    def test_removed_files_shown(self, capsys):
+        summary = UpdateSummary(files_removed=3)
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "3 removed" in out
+
+
+class TestAnalyzeNewFilesReturnsSummary:
+    """Tests that _analyze_new_files returns an UpdateSummary."""
+
+    def test_returns_empty_for_nonexistent_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = _analyze_new_files(["nonexistent.png"])
+        assert isinstance(result, UpdateSummary)
+        assert result.images_analyzed == 0
+
+    def test_returns_image_count(self, tmp_path, monkeypatch):
+        (tmp_path / "shot.png").write_bytes(b"PNG" * 500)
+        monkeypatch.chdir(tmp_path)
+        design = DesignRequirements(colors={"primary": "#abc"}, source_images=["shot.png"])
+        with patch("duplo.main.extract_design", return_value=design):
+            result = _analyze_new_files(["shot.png"])
+        assert result.images_analyzed == 1
+
+
+class TestRescrapeReturnsCounts:
+    """Tests that _rescrape_product_url returns page/example counts."""
+
+    def test_returns_zeros_when_no_url(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        pages, examples = _rescrape_product_url()
+        assert pages == 0
+        assert examples == 0
+
+    def test_returns_counts(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        examples = [{"input": "1+1", "expected_output": "2", "source_url": "", "language": "py"}]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", examples, None, records, {"https://example.com": "<html/>"}),
+        ):
+            with patch("duplo.main.save_reference_urls"):
+                with patch("duplo.main.save_raw_content"):
+                    with patch("duplo.main.save_examples"):
+                        pages, ex = _rescrape_product_url()
+        assert pages == 1
+        assert ex == 1
+
+
+class TestDetectGapsReturnsCounts:
+    """Tests that _detect_and_append_gaps returns counts."""
+
+    def test_returns_zeros_when_no_plan(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {"features": [{"name": "X", "description": "x", "category": "c"}]},
+        )
+        result = _detect_and_append_gaps()
+        assert result == (0, 0, 0, 0)
+
+    def test_returns_gap_counts(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Auth", "description": "Login.", "category": "core"},
+                    {"name": "Search", "description": "Find.", "category": "core"},
+                ],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Build UI\n", encoding="utf-8")
+
+        from duplo.gap_detector import GapResult, MissingFeature
+
+        gap_result = GapResult(
+            missing_features=[
+                MissingFeature(name="Auth", reason="Not covered"),
+                MissingFeature(name="Search", reason="Not covered"),
+            ],
+            missing_examples=[],
+        )
+        with patch("duplo.main.detect_gaps", return_value=gap_result):
+            mf, me, dr, ta = _detect_and_append_gaps()
+        assert mf == 2
+        assert me == 0
+        assert dr == 0
+        assert ta == 2
+
+
+class TestSubsequentRunSummary:
+    """Integration: _subsequent_run prints a summary at the end."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    def test_prints_summary_with_file_changes(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "notes.txt").write_text("some notes")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "Update summary" in out
+
+    def test_prints_no_changes_summary(self, capsys, tmp_path, monkeypatch):
+        data = {**self._BASE_DATA, "source_url": ""}
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.hasher import compute_hashes, save_hashes
+
+        hashes = compute_hashes(tmp_path)
+        save_hashes(hashes, directory=tmp_path)
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "No changes detected" in out

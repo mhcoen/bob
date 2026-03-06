@@ -66,6 +66,25 @@ _DUPLO_JSON = ".duplo/duplo.json"
 _PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md"}
 
 
+@dataclasses.dataclass
+class UpdateSummary:
+    """Accumulates what was found and added during a subsequent run."""
+
+    files_added: int = 0
+    files_changed: int = 0
+    files_removed: int = 0
+    images_analyzed: int = 0
+    pdfs_extracted: int = 0
+    text_files_read: int = 0
+    urls_fetched: int = 0
+    pages_rescraped: int = 0
+    examples_rescraped: int = 0
+    missing_features: int = 0
+    missing_examples: int = 0
+    design_refinements: int = 0
+    tasks_appended: int = 0
+
+
 def main() -> None:
     """Run duplo from the current directory.
 
@@ -243,17 +262,20 @@ def _first_run() -> None:
         print("Failed to generate roadmap.")
 
 
-def _analyze_new_files(file_names: list[str]) -> None:
+def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     """Analyze new or changed files the same way as first run.
 
     Images are sent to Vision for design extraction, PDFs are
     converted to text, and URLs found in text files are scraped.
     Results are saved to duplo.json.
+
+    Returns an :class:`UpdateSummary` with counts of what was analyzed.
     """
+    summary = UpdateSummary()
     paths = [Path(name) for name in file_names]
     paths = [p for p in paths if p.exists()]
     if not paths:
-        return
+        return summary
 
     scan = scan_files(paths)
     analyzed_anything = False
@@ -266,6 +288,7 @@ def _analyze_new_files(file_names: list[str]) -> None:
         if design.colors or design.fonts or design.layout:
             save_design_requirements(dataclasses.asdict(design))
             print(f"  Updated design requirements from {len(design.source_images)} image(s).")
+            summary.images_analyzed = len(design.source_images)
             analyzed_anything = True
         else:
             print("  Could not extract design details from new images.")
@@ -277,6 +300,7 @@ def _analyze_new_files(file_names: list[str]) -> None:
         pdf_text = extract_pdf_text(relevant_pdfs)
         if pdf_text:
             print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
+            summary.pdfs_extracted = len(relevant_pdfs)
             analyzed_anything = True
 
     # Collect text from new text files.
@@ -289,6 +313,7 @@ def _analyze_new_files(file_names: list[str]) -> None:
                 pass
         if text_content.strip():
             print(f"\nRead {len(scan.text_files)} new text file(s).")
+            summary.text_files_read = len(scan.text_files)
             analyzed_anything = True
 
     # Fetch new URLs.
@@ -297,6 +322,7 @@ def _analyze_new_files(file_names: list[str]) -> None:
         new_urls = [u for u in scan.urls if u not in existing_urls]
         if new_urls:
             print(f"\nFetching {len(new_urls)} new URL(s) …")
+            fetched = 0
             for url in new_urls:
                 print(f"  Fetching {url} …")
                 try:
@@ -305,9 +331,11 @@ def _analyze_new_files(file_names: list[str]) -> None:
                         save_reference_urls(page_records)
                         if raw_pages:
                             save_raw_content(raw_pages, page_records)
+                    fetched += 1
                     analyzed_anything = True
                 except Exception as exc:
                     print(f"  Failed to fetch {url}: {exc}")
+            summary.urls_fetched = fetched
 
     # Move processed reference files into .duplo/references/.
     ref_files = list(scan.images) + list(scan.pdfs) + list(scan.text_files)
@@ -318,6 +346,8 @@ def _analyze_new_files(file_names: list[str]) -> None:
 
     if not analyzed_anything:
         print("No analyzable reference materials in new files.")
+
+    return summary
 
 
 def _load_existing_urls() -> set[str]:
@@ -330,20 +360,22 @@ def _load_existing_urls() -> set[str]:
     return {r["url"] for r in records if "url" in r}
 
 
-def _rescrape_product_url() -> None:
+def _rescrape_product_url() -> tuple[int, int]:
     """Re-scrape the product URL stored in duplo.json with the deep extractor.
 
     If ``source_url`` is set, fetches it again via :func:`fetch_site` and
     updates the reference URLs and raw page content in duplo.json.  This
     picks up any changes on the product site since the last run.
+
+    Returns ``(pages_updated, examples_updated)`` counts.
     """
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
-        return
+        return 0, 0
     data = json.loads(duplo_path.read_text(encoding="utf-8"))
     source_url = data.get("source_url", "")
     if not source_url:
-        return
+        return 0, 0
 
     print(f"\nRe-scraping {source_url} …")
     try:
@@ -352,35 +384,45 @@ def _rescrape_product_url() -> None:
         )
     except Exception as exc:
         print(f"  Failed to re-scrape {source_url}: {exc}")
-        return
+        return 0, 0
+
+    pages_updated = 0
+    examples_updated = 0
 
     if page_records:
         save_reference_urls(page_records)
         if raw_pages:
             save_raw_content(raw_pages, page_records)
-        print(f"  Updated {len(page_records)} page record(s).")
+        pages_updated = len(page_records)
+        print(f"  Updated {pages_updated} page record(s).")
     if code_examples:
         save_examples(code_examples)
-        print(f"  Updated {len(code_examples)} code example(s).")
+        examples_updated = len(code_examples)
+        print(f"  Updated {examples_updated} code example(s).")
+
+    return pages_updated, examples_updated
 
 
-def _detect_and_append_gaps() -> None:
+def _detect_and_append_gaps() -> tuple[int, int, int, int]:
     """Compare features and examples from duplo.json against PLAN.md.
 
     If gaps are found, appends new checklist tasks to PLAN.md for
     features or examples not yet covered by the current plan.
+
+    Returns ``(missing_features, missing_examples, design_refinements,
+    tasks_appended)`` counts.
     """
     plan_path = Path("PLAN.md")
     duplo_path = Path(_DUPLO_JSON)
     if not plan_path.exists() or not duplo_path.exists():
-        return
+        return 0, 0, 0, 0
 
     plan_content = plan_path.read_text(encoding="utf-8")
     data = json.loads(duplo_path.read_text(encoding="utf-8"))
 
     features = [Feature(**f) for f in data.get("features", [])]
     if not features:
-        return
+        return 0, 0, 0, 0
 
     from duplo.saver import load_examples
 
@@ -401,27 +443,93 @@ def _detect_and_append_gaps() -> None:
         and not result.design_refinements
     ):
         print("  All features, examples, and design details are covered by the plan.")
-        return
+        return 0, 0, 0, 0
 
+    tasks_appended = 0
     gap_tasks = format_gap_tasks(result)
     if gap_tasks:
         updated = plan_content.rstrip() + "\n" + gap_tasks
         plan_path.write_text(updated, encoding="utf-8")
-        count = (
+        tasks_appended = (
             len(result.missing_features)
             + len(result.missing_examples)
             + len(result.design_refinements)
         )
-        print(f"  Appended {count} gap task(s) to PLAN.md.")
+        print(f"  Appended {tasks_appended} gap task(s) to PLAN.md.")
+
+    return (
+        len(result.missing_features),
+        len(result.missing_examples),
+        len(result.design_refinements),
+        tasks_appended,
+    )
+
+
+def _print_summary(summary: UpdateSummary) -> None:
+    """Print a consolidated summary of what was found and added."""
+    found_lines: list[str] = []
+    if summary.files_added or summary.files_changed or summary.files_removed:
+        parts = []
+        if summary.files_added:
+            parts.append(f"{summary.files_added} added")
+        if summary.files_changed:
+            parts.append(f"{summary.files_changed} changed")
+        if summary.files_removed:
+            parts.append(f"{summary.files_removed} removed")
+        found_lines.append(f"  Files: {', '.join(parts)}")
+    if summary.images_analyzed:
+        found_lines.append(f"  Images analyzed: {summary.images_analyzed}")
+    if summary.pdfs_extracted:
+        found_lines.append(f"  PDFs extracted: {summary.pdfs_extracted}")
+    if summary.text_files_read:
+        found_lines.append(f"  Text files read: {summary.text_files_read}")
+    if summary.urls_fetched:
+        found_lines.append(f"  URLs fetched: {summary.urls_fetched}")
+    if summary.pages_rescraped:
+        found_lines.append(f"  Pages re-scraped: {summary.pages_rescraped}")
+    if summary.examples_rescraped:
+        found_lines.append(f"  Code examples updated: {summary.examples_rescraped}")
+
+    added_lines: list[str] = []
+    if summary.missing_features:
+        added_lines.append(f"  Missing features: {summary.missing_features}")
+    if summary.missing_examples:
+        added_lines.append(f"  Missing examples: {summary.missing_examples}")
+    if summary.design_refinements:
+        added_lines.append(f"  Design refinements: {summary.design_refinements}")
+    if summary.tasks_appended:
+        added_lines.append(f"  Tasks appended to PLAN.md: {summary.tasks_appended}")
+
+    if not found_lines and not added_lines:
+        print("\nSummary: No changes detected, nothing added.")
+        return
+
+    print("\n--- Update summary ---")
+    if found_lines:
+        print("Found:")
+        for line in found_lines:
+            print(line)
+    if added_lines:
+        print("Added:")
+        for line in added_lines:
+            print(line)
+    if not added_lines:
+        print("No new tasks added.")
+    print("---------------------")
 
 
 def _subsequent_run() -> None:
     """Resume an interrupted phase or advance to the next one."""
+    summary = UpdateSummary()
+
     # Detect file changes since last run.
     old_hashes = load_hashes(".")
     new_hashes = compute_hashes(".")
     diff = diff_hashes(old_hashes, new_hashes)
     if diff.added or diff.changed or diff.removed:
+        summary.files_added = len(diff.added)
+        summary.files_changed = len(diff.changed)
+        summary.files_removed = len(diff.removed)
         print("File changes detected since last run:")
         for name in diff.added:
             print(f"  + {name}")
@@ -437,15 +545,27 @@ def _subsequent_run() -> None:
             f for f in diff.added + diff.changed if "/" not in f and f not in _PROJECT_FILES
         ]
         if changed_files:
-            _analyze_new_files(changed_files)
+            analysis = _analyze_new_files(changed_files)
+            summary.images_analyzed = analysis.images_analyzed
+            summary.pdfs_extracted = analysis.pdfs_extracted
+            summary.text_files_read = analysis.text_files_read
+            summary.urls_fetched = analysis.urls_fetched
 
     # Re-scrape the product URL to pick up site changes.
-    _rescrape_product_url()
+    pages, examples = _rescrape_product_url()
+    summary.pages_rescraped = pages
+    summary.examples_rescraped = examples
 
     save_hashes(new_hashes)
 
     # Compare features/examples against current plan and append gap tasks.
-    _detect_and_append_gaps()
+    mf, me, dr, ta = _detect_and_append_gaps()
+    summary.missing_features = mf
+    summary.missing_examples = me
+    summary.design_refinements = dr
+    summary.tasks_appended = ta
+
+    _print_summary(summary)
 
     duplo_path = Path(_DUPLO_JSON)
     data = json.loads(duplo_path.read_text(encoding="utf-8"))
