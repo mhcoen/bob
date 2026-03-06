@@ -19,7 +19,13 @@ from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_next_phase_plan, generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.runner import run_mcloop
-from duplo.saver import append_phase_to_history, save_selections, write_claude_md
+from duplo.saver import (
+    append_phase_to_history,
+    clear_in_progress,
+    save_selections,
+    set_in_progress,
+    write_claude_md,
+)
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
 
@@ -84,15 +90,30 @@ def main() -> None:
 def _cmd_next(feedback_file: str | None = None) -> None:
     """Collect feedback, generate the next phase PLAN.md, and run McLoop."""
     app_name = ""
+    in_progress = None
     duplo_path = Path(_DUPLO_JSON)
     if duplo_path.exists():
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
         app_name = data.get("app_name", "")
+        in_progress = data.get("in_progress")
 
     plan_path = Path("PLAN.md")
     if not plan_path.exists():
         print("Error: PLAN.md not found. Run 'duplo run' first.")
         sys.exit(1)
+
+    # Resume an interrupted phase — skip feedback collection and plan generation.
+    if in_progress:
+        phase_label = in_progress["label"]
+        content = plan_path.read_text(encoding="utf-8")
+        if in_progress.get("mcloop_done"):
+            print(f"Resuming {phase_label}: McLoop already done, completing phase …")
+            _execute_phase(content, app_name, phase_label, skip_mcloop=True)
+        else:
+            print(f"Resuming {phase_label}: re-running McLoop …")
+            _execute_phase(content, app_name, phase_label)
+        return
+
     current_plan = plan_path.read_text(encoding="utf-8")
 
     issues_text = ""
@@ -124,6 +145,31 @@ def _cmd_run() -> None:
         sys.exit(1)
 
     data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    app_name = data.get("app_name", "")
+    in_progress = data.get("in_progress")
+
+    # If Phase 1 is already recorded in history it is complete.
+    history = data.get("history", [])
+    if any(re.search(r"^Phase\s+1\b", h.get("phase", ""), re.IGNORECASE) for h in history):
+        print("Phase 1 already complete. Run 'duplo next' to continue.")
+        return
+
+    plan_path = Path("PLAN.md")
+
+    # McLoop finished but post-processing was interrupted.
+    if in_progress and in_progress.get("mcloop_done"):
+        print(f"Resuming {in_progress['label']}: McLoop already done, completing phase …")
+        content = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+        _execute_phase(content, app_name, in_progress["label"], skip_mcloop=True)
+        return
+
+    # PLAN.md exists from a prior interrupted run — skip plan generation.
+    if plan_path.exists():
+        print("Resuming Phase 1: PLAN.md found, re-running McLoop …")
+        content = plan_path.read_text(encoding="utf-8")
+        _execute_phase(content, app_name, "Phase 1")
+        return
+
     source_url = data["source_url"]
     features = [Feature(**f) for f in data["features"]]
     prefs_data = data["preferences"]
@@ -138,21 +184,33 @@ def _cmd_run() -> None:
     content = generate_phase_plan(source_url, features, preferences)
     saved = save_plan(content)
     print(f"Phase 1 plan saved to {saved}")
-
-    app_name = data.get("app_name", "")
     _execute_phase(content, app_name, "Phase 1")
 
 
-def _execute_phase(plan_content: str, app_name: str, phase_label: str) -> None:
-    """Run McLoop, capture screenshots, compare, notify, and record history."""
-    print("\nRunning McLoop …")
-    exit_code = run_mcloop(".")
-    if exit_code != 0:
-        print(f"McLoop exited with code {exit_code}")
-        sys.exit(exit_code)
-    print("McLoop complete.")
+def _execute_phase(
+    plan_content: str,
+    app_name: str,
+    phase_label: str,
+    *,
+    skip_mcloop: bool = False,
+) -> None:
+    """Run McLoop, capture screenshots, compare, notify, and record history.
+
+    When *skip_mcloop* is ``True`` McLoop is not invoked (used when resuming
+    after an interruption that occurred after McLoop already completed).
+    """
+    if not skip_mcloop:
+        set_in_progress(phase_label, mcloop_done=False)
+        print("\nRunning McLoop …")
+        exit_code = run_mcloop(".")
+        if exit_code != 0:
+            print(f"McLoop exited with code {exit_code}")
+            sys.exit(exit_code)
+        print("McLoop complete.")
+        set_in_progress(phase_label, mcloop_done=True)
 
     append_phase_to_history(plan_content)
+    clear_in_progress()
     print("Phase appended to duplo.json history.")
 
     if app_name:
