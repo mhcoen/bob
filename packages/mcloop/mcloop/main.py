@@ -939,7 +939,7 @@ def _run_audit_fix_cycle(
     log_dir: Path,
     model: str | None = None,
 ) -> None:
-    """Run one audit session; if bugs are found, run a fix session then delete BUGS.md."""
+    """Run two rounds of audit/verify/fix to catch bugs introduced by fixes."""
     if _should_skip_audit(project_dir):
         print(
             "\n>>> Audit skipped (no changes since last audit)",
@@ -947,6 +947,38 @@ def _run_audit_fix_cycle(
         )
         return
 
+    max_rounds = 2
+    for round_num in range(1, max_rounds + 1):
+        print(
+            f"\n{'=' * 40}",
+            flush=True,
+        )
+        print(
+            f">>> Audit round {round_num}/{max_rounds}",
+            flush=True,
+        )
+        print(
+            f"{'=' * 40}",
+            flush=True,
+        )
+        fixed = _run_single_audit_round(
+            project_dir,
+            log_dir,
+            model=model,
+        )
+        if not fixed:
+            # No bugs found or fixed — no need for another round
+            break
+
+    _save_audit_hash(project_dir)
+
+
+def _run_single_audit_round(
+    project_dir: Path,
+    log_dir: Path,
+    model: str | None = None,
+) -> bool:
+    """Run one audit/verify/fix cycle. Returns True if bugs were fixed."""
     bugs_path = project_dir / "BUGS.md"
 
     # Resume from existing BUGS.md if present
@@ -963,8 +995,7 @@ def _run_audit_fix_cycle(
                 flush=True,
             )
             bugs_path.unlink()
-            _save_audit_hash(project_dir)
-            return
+            return False
     else:
         print("\n>>> Running bug audit...", flush=True)
         audit_result = run_audit(
@@ -977,21 +1008,20 @@ def _run_audit_fix_cycle(
                 f"audit: session exited with code {audit_result.exit_code}, skipping fix",
                 flush=True,
             )
-            return
+            return False
 
         if not bugs_path.exists():
             print(
                 "audit: BUGS.md not written, skipping fix",
                 flush=True,
             )
-            return
+            return False
 
         bugs_content = bugs_path.read_text()
         if not bugs_md_has_bugs(bugs_content):
             print("audit: no bugs found", flush=True)
             bugs_path.unlink()
-            _save_audit_hash(project_dir)
-            return
+            return False
 
     # Pre-fix verification: check each bug against source code
     bugs_content = bugs_path.read_text()
@@ -1039,8 +1069,7 @@ def _run_audit_fix_cycle(
                         flush=True,
                     )
                     bugs_path.unlink(missing_ok=True)
-                    _save_audit_hash(project_dir)
-                    return
+                    return False
                 if len(confirmed_bugs) < len(parsed_bugs):
                     new_content = "# Bugs\n\n"
                     for bug in confirmed_bugs:
@@ -1111,8 +1140,7 @@ def _run_audit_fix_cycle(
 
             _commit(project_dir, "Fix bugs from audit")
             bugs_path.unlink(missing_ok=True)
-            _save_audit_hash(project_dir)
-            return
+            return True
 
         error_ctx = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
         print(
@@ -1122,7 +1150,11 @@ def _run_audit_fix_cycle(
         _print_error_tail(check_result.output)
 
         # Append error to BUGS.md so next attempt sees it
-        bugs_path.write_text(bugs_content + "\n\n## Post-fix check failure\n" + error_ctx)
+        bugs_path.write_text(
+            bugs_content + "\n\n## Post-fix check failure\n" + error_ctx,
+        )
+
+    return False
 
 
 def _checkpoint(

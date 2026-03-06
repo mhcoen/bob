@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcloop.main import _parse_args, _run_audit_fix_cycle, run_loop
+from mcloop.main import (
+    _parse_args,
+    _run_audit_fix_cycle,
+    _run_single_audit_round,
+    run_loop,
+)
 
 
 def _parse(*argv):
@@ -183,7 +188,7 @@ def test_run_loop_audit_called_by_default(tmp_path):
     mock_audit.assert_called_once()
 
 
-def test_run_audit_fix_cycle_commits_when_checks_pass(tmp_path):
+def test_single_audit_round_commits_when_checks_pass(tmp_path):
     """When fix session succeeds and checks pass, changes are committed."""
     bugs_path = tmp_path / "BUGS.md"
 
@@ -201,6 +206,110 @@ def test_run_audit_fix_cycle_commits_when_checks_pass(tmp_path):
         patch("mcloop.main.run_checks", return_value=check_result),
         patch("mcloop.main._commit") as mock_commit,
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        _run_single_audit_round(tmp_path, tmp_path / "logs")
 
     mock_commit.assert_called_once_with(tmp_path, "Fix bugs from audit")
+
+
+def test_audit_cycle_runs_two_rounds_when_first_fixes(tmp_path):
+    """When the first round fixes bugs, a second round runs."""
+    call_count = 0
+
+    def fake_round(project_dir, log_dir, model=None):
+        nonlocal call_count
+        call_count += 1
+        # First round finds and fixes bugs, second round finds nothing
+        return call_count == 1
+
+    with (
+        patch("mcloop.main._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.main._run_single_audit_round",
+            side_effect=fake_round,
+        ),
+        patch("mcloop.main._save_audit_hash"),
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    assert call_count == 2
+
+
+def test_audit_cycle_stops_after_one_round_when_no_fixes(tmp_path):
+    """When the first round finds no bugs, second round is skipped."""
+    with (
+        patch("mcloop.main._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.main._run_single_audit_round",
+            return_value=False,
+        ) as mock_round,
+        patch("mcloop.main._save_audit_hash"),
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_round.assert_called_once()
+
+
+def test_audit_cycle_caps_at_two_rounds(tmp_path):
+    """Even if both rounds fix bugs, it stops at two."""
+    with (
+        patch("mcloop.main._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.main._run_single_audit_round",
+            return_value=True,
+        ) as mock_round,
+        patch("mcloop.main._save_audit_hash"),
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    assert mock_round.call_count == 2
+
+
+def test_audit_cycle_saves_hash_after_completion(tmp_path):
+    """Audit hash is saved after both rounds complete."""
+    with (
+        patch("mcloop.main._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.main._run_single_audit_round",
+            return_value=False,
+        ),
+        patch("mcloop.main._save_audit_hash") as mock_save,
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    mock_save.assert_called_once_with(tmp_path)
+
+
+def test_single_audit_round_returns_true_on_fix(tmp_path):
+    """_run_single_audit_round returns True when bugs are fixed."""
+    bugs_path = tmp_path / "BUGS.md"
+
+    def fake_audit(project_dir, log_dir, model=None):
+        bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
+        return _make_result()
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_audit", side_effect=fake_audit),
+        patch("mcloop.main.run_bug_fix", return_value=_make_result()),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+    ):
+        result = _run_single_audit_round(tmp_path, tmp_path / "logs")
+
+    assert result is True
+
+
+def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
+    """_run_single_audit_round returns False when no bugs found."""
+
+    def fake_audit(project_dir, log_dir, model=None):
+        (tmp_path / "BUGS.md").write_text("# Bugs\n\nNo bugs found.\n")
+        return _make_result()
+
+    with patch("mcloop.main.run_audit", side_effect=fake_audit):
+        result = _run_single_audit_round(tmp_path, tmp_path / "logs")
+
+    assert result is False

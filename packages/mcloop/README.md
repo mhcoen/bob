@@ -28,6 +28,50 @@ killed, or hits a rate limit, just run `mcloop` again. It finds the next
 unchecked task and picks up exactly where it left off. No session files, no
 databases, nothing to reset.
 
+## Design first, then execute
+
+A longstanding rule of thumb in software engineering is to spend
+two-thirds of your time on design before starting any significant
+coding effort. Many developers cut this short. Among those doing
+AI-assisted "vibe coding," where you sit down at a prompt and start
+building immediately, the percentage is likely much higher.
+
+McLoop turns this on its head by making the design phase directly
+executable. The PLAN.md is your design document: the decomposition,
+the ordering, the constraints, the desired behavior. But instead of
+handing it to a developer to interpret, McLoop hands it to Claude
+Code to execute literally. This restores the incentive to design
+carefully, because the quality of the output is a direct function of
+the quality of the plan. A vague task produces vague code. A
+well-decomposed task with clear constraints produces exactly what you
+described.
+
+The plan doesn't need to come from you alone. There are several ways
+to create one:
+
+- **AI-assisted design.** Use one or more AIs to help write the plan.
+  Bounce it between Claude, ChatGPT, Gemini, whatever. Each brings
+  different perspectives. Iterate on the design until you're
+  satisfied.
+- **Human-directed design.** You write the plan yourself, or take an
+  AI-generated plan and reshape it. You decide the decomposition, the
+  ordering, the constraints. The AI coding tool is purely an executor
+  of your design decisions.
+- **Hybrid.** Start with AI-generated plans, edit them, add your own
+  tasks, remove what you don't want, reorder priorities. The plan is a
+  living text file you own completely.
+
+In all three cases, the human controls the design. McLoop separates
+design from execution cleanly enough that you can use whatever process
+works for you on the design side, and the execution is mechanical.
+
+McLoop is also not limited to building code from scratch. Any sequence
+of well-defined steps that Claude Code can execute is a valid plan:
+refactoring a module, migrating a database schema, setting up CI/CD,
+auditing dependencies, generating documentation, running a series of
+analyses, or performing scheduled maintenance. If you can describe it
+clearly enough for a person to follow, McLoop can execute it.
+
 ## Install
 
 ```bash
