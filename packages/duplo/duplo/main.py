@@ -19,7 +19,7 @@ from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_next_phase_plan, generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.runner import run_mcloop
-from duplo.saver import save_selections, write_claude_md
+from duplo.saver import append_phase_to_history, save_selections, write_claude_md
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
 
@@ -135,6 +135,9 @@ def _cmd_run() -> None:
         print(f"McLoop exited with code {exit_code}")
         sys.exit(exit_code)
     print("McLoop complete.")
+
+    append_phase_to_history(content)
+    print("Phase appended to duplo.json history.")
 
     app_name = data.get("app_name", "")
     if app_name:
