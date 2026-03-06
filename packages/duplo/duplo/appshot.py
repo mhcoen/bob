@@ -34,5 +34,9 @@ def capture_appshot(
     if launch is not None:
         cmd += ["--launch", launch]
 
-    result = subprocess.run(cmd)
+    try:
+        result = subprocess.run(cmd)
+    except FileNotFoundError:
+        print("appshot not found, skipping screenshot.")
+        return 1
     return result.returncode

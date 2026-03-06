@@ -103,7 +103,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Store accepted frames in .duplo/references/ with their UI state descriptions
   - [x] Include extracted frames in the same analysis pipeline as user-provided screenshots
   - [x] Requires ffmpeg on PATH (document in README)
-- [ ] Product disambiguation
+- [x] Product disambiguation
   - [x] When a URL points to a company with multiple products, present the products found and ask which one to duplicate
   - [x] When a URL is a landing page with unclear product boundaries, ask the user to describe what specific product they want
-  - [ ] Store the confirmed product identity in .duplo/product.json so subsequent runs don't re-ask
+  - [x] Store the confirmed product identity in .duplo/product.json so subsequent runs don't re-ask

@@ -684,7 +684,7 @@ def _subsequent_run() -> None:
     summary.pages_rescraped = pages
     summary.examples_rescraped = examples
 
-    save_hashes(new_hashes)
+    save_hashes(compute_hashes("."))
 
     # Compare features/examples against current plan and append gap tasks.
     mf, me, dr, ta = _detect_and_append_gaps()

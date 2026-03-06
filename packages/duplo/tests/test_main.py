@@ -707,11 +707,11 @@ class TestSubsequentRunFileChanges:
                 with patch("duplo.main.run_mcloop", return_value=0):
                     main()
 
-        # Verify hashes were updated.
+        # Verify hashes reflect post-move state (new.txt moved to .duplo/references/).
         from duplo.hasher import load_hashes
 
         saved = load_hashes(tmp_path)
-        assert "new.txt" in saved
+        assert "new.txt" not in saved
 
 
 class TestInitProject:

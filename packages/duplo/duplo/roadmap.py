@@ -100,7 +100,11 @@ def _parse_roadmap(raw: str) -> list[dict]:
     # Strip markdown fences if present
     if text.startswith("```"):
         lines = text.splitlines()
-        lines = [line for line in lines if not line.strip().startswith("```")]
+        # strip opening fence
+        lines = lines[1:]
+        # strip closing fence
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
         text = "\n".join(lines)
 
     try:

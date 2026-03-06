@@ -19,8 +19,12 @@ def run_mcloop(target_dir: Path | str = ".") -> int:
         Exit code (0 on success, non-zero on failure).
     """
     cwd = Path(target_dir).resolve()
-    result = subprocess.run(
-        ["mcloop"],
-        cwd=str(cwd),
-    )
+    try:
+        result = subprocess.run(
+            ["mcloop"],
+            cwd=str(cwd),
+        )
+    except FileNotFoundError:
+        print("Error: mcloop is not installed or not on PATH.")
+        return 1
     return result.returncode
