@@ -13,8 +13,17 @@ from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
 
-DUPLO_JSON = "duplo.json"
+DUPLO_DIR = ".duplo"
+DUPLO_JSON = ".duplo/duplo.json"
 CLAUDE_MD = "CLAUDE.md"
+
+
+def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
+    """Create the ``.duplo/`` directory inside *target_dir* if it does not exist."""
+    duplo_dir = Path(target_dir) / DUPLO_DIR
+    duplo_dir.mkdir(parents=True, exist_ok=True)
+    return duplo_dir
+
 
 _CLAUDE_MD_CONTENT = """\
 # Visual verification
@@ -91,6 +100,7 @@ def save_selections(
         doc_structures: Optional extracted doc structures to persist.
         target_dir: Directory in which to write ``duplo.json``.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = {
         "source_url": source_url,
@@ -121,6 +131,7 @@ def append_phase_to_history(
         plan_content: Markdown content of the completed PLAN.md.
         target_dir: Directory containing ``duplo.json``.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -154,6 +165,7 @@ def save_feedback(
         after_phase: Label of the phase this feedback follows (e.g. ``"Phase 1"``).
         target_dir: Directory containing ``duplo.json``.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -184,6 +196,7 @@ def set_in_progress(
         mcloop_done: ``True`` once McLoop has completed successfully.
         target_dir: Directory containing ``duplo.json``.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["in_progress"] = {"label": label, "mcloop_done": mcloop_done}
@@ -224,6 +237,7 @@ def save_screenshot_feature_map(
     Returns:
         Path to the updated file.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["screenshot_features"] = mapping
@@ -237,6 +251,7 @@ def save_roadmap(
     target_dir: Path | str = ".",
 ) -> Path:
     """Save the roadmap to duplo.json."""
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["roadmap"] = roadmap
@@ -250,6 +265,7 @@ def advance_phase(
     target_dir: Path | str = ".",
 ) -> int:
     """Increment current_phase in duplo.json. Returns new phase number."""
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data = json.loads(path.read_text(encoding="utf-8"))
     current = data.get("current_phase", 0)
@@ -296,6 +312,7 @@ def save_code_examples(
     Returns:
         Path to the updated file.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["code_examples"] = [dataclasses.asdict(ex) for ex in examples]
@@ -348,6 +365,7 @@ def save_doc_structures(
     Returns:
         Path to the updated file.
     """
+    _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data["doc_structures"] = _serialize_doc_structures(structures)

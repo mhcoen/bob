@@ -37,6 +37,14 @@ class TestCreateProjectDir:
         assert target.is_dir()
         assert result == target
 
+    def test_creates_duplo_dir(self, tmp_path):
+        target = tmp_path / "my-project"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            create_project_dir(target)
+        assert (target / ".duplo").exists()
+        assert (target / ".duplo").is_dir()
+
     def test_returns_resolved_path(self, tmp_path):
         target = tmp_path / "my-project"
         with patch("subprocess.run") as mock_run:

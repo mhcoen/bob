@@ -99,7 +99,8 @@ class TestLoadCodeExamples:
                 }
             ]
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data))
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data))
         examples = load_code_examples(tmp_path)
         assert len(examples) == 1
         assert examples[0].input == "print(1)"
@@ -111,7 +112,8 @@ class TestLoadCodeExamples:
         assert load_code_examples(tmp_path) == []
 
     def test_returns_empty_when_no_key(self, tmp_path):
-        (tmp_path / "duplo.json").write_text(json.dumps({"features": []}))
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps({"features": []}))
         assert load_code_examples(tmp_path) == []
 
     def test_multiple_examples(self, tmp_path):
@@ -121,13 +123,15 @@ class TestLoadCodeExamples:
                 {"input": "c", "expected_output": "d"},
             ]
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data))
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data))
         examples = load_code_examples(tmp_path)
         assert len(examples) == 2
 
     def test_missing_optional_fields(self, tmp_path):
         data = {"code_examples": [{"input": "x", "expected_output": "y"}]}
-        (tmp_path / "duplo.json").write_text(json.dumps(data))
+        (tmp_path / ".duplo").mkdir(exist_ok=True)
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data))
         examples = load_code_examples(tmp_path)
         assert examples[0].source_url == ""
         assert examples[0].language == ""

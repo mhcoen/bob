@@ -47,7 +47,7 @@ from duplo.screenshotter import map_screenshots_to_features, save_reference_scre
 from duplo.selector import select_features
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
-_DUPLO_JSON = "duplo.json"
+_DUPLO_JSON = ".duplo/duplo.json"
 
 
 def main() -> None:

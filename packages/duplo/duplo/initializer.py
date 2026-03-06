@@ -30,6 +30,7 @@ def create_project_dir(project_dir: Path | str) -> Path:
     if path.exists():
         raise FileExistsError(f"Directory already exists: {path}")
     path.mkdir(parents=True)
+    (path / ".duplo").mkdir()
     result = subprocess.run(
         ["git", "init", str(path)],
         capture_output=True,

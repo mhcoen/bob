@@ -14,7 +14,7 @@ def load_code_examples(target_dir: Path | str = ".") -> list[CodeExample]:
 
     Returns an empty list if the file or key is missing.
     """
-    path = (Path(target_dir) / "duplo.json").resolve()
+    path = (Path(target_dir) / ".duplo/duplo.json").resolve()
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))

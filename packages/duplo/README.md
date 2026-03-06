@@ -24,15 +24,15 @@ revises the plan for the next round. McLoop handles all the building.
 7. Duplo generates Phase 2, incorporating your feedback.
 8. Repeat until done.
 
-All state lives in `duplo.json` in the target project: source URL,
+All state lives in `.duplo/duplo.json` in the target project: source URL,
 selected features, phase history, and your feedback. If interrupted,
 `duplo run` picks up where it left off.
 
 ## Commands
 
 ```bash
-duplo init <url>   # Scrape URL, select features, save duplo.json + screenshots
-duplo run          # Generate Phase 1 PLAN.md from duplo.json (run inside project dir)
+duplo init <url>   # Scrape URL, select features, save .duplo/duplo.json + screenshots
+duplo run          # Generate Phase 1 PLAN.md from .duplo/duplo.json (run inside project dir)
 duplo next         # Generate and run the next phase (coming soon)
 ```
 

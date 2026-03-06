@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +11,20 @@ import pytest
 from duplo.extractor import Feature
 from duplo.main import _init_project, _parse_args, main
 from duplo.questioner import BuildPreferences
+
+_DUPLO_JSON = ".duplo/duplo.json"
+
+
+def _write_duplo_json(tmp_path: Path, data: dict) -> None:
+    """Write duplo.json into the .duplo/ subdirectory of *tmp_path*."""
+    duplo_dir = tmp_path / ".duplo"
+    duplo_dir.mkdir(exist_ok=True)
+    (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _read_duplo_json(tmp_path: Path) -> dict:
+    """Read duplo.json from the .duplo/ subdirectory of *tmp_path*."""
+    return json.loads((tmp_path / _DUPLO_JSON).read_text())
 
 
 class TestParseArgs:
@@ -36,8 +52,6 @@ class TestParseArgs:
 
 class TestMain:
     def test_run_command(self, capsys, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [
@@ -50,7 +64,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         monkeypatch.chdir(tmp_path)
 
         with patch("sys.argv", ["duplo", "run"]):
@@ -64,8 +78,6 @@ class TestMain:
         mock_save.assert_called_once()
 
     def test_run_command_captures_appshot_when_app_name_set(self, capsys, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "app_name": "MyApp",
@@ -77,7 +89,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         monkeypatch.chdir(tmp_path)
 
         with patch("sys.argv", ["duplo", "run"]):
@@ -94,8 +106,6 @@ class TestMain:
         assert "MyApp" in out
 
     def test_run_command_skips_appshot_when_no_app_name(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -106,7 +116,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         monkeypatch.chdir(tmp_path)
 
         with patch("sys.argv", ["duplo", "run"]):
@@ -119,8 +129,6 @@ class TestMain:
         mock_shot.assert_not_called()
 
     def test_run_command_uses_run_sh_as_launch_when_present(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "app_name": "MyApp",
@@ -132,7 +140,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "run.sh").write_text("#!/bin/sh\n")
         monkeypatch.chdir(tmp_path)
 
@@ -147,8 +155,6 @@ class TestMain:
         assert kwargs.get("launch") == "./run.sh"
 
     def test_run_command_appends_phase_history(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -159,7 +165,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         monkeypatch.chdir(tmp_path)
 
         with patch("sys.argv", ["duplo", "run"]):
@@ -168,7 +174,7 @@ class TestMain:
                     with patch("duplo.main.run_mcloop", return_value=0):
                         main()
 
-        data = json.loads((tmp_path / "duplo.json").read_text())
+        data = _read_duplo_json(tmp_path)
         assert len(data["phases"]) == 1
         assert data["phases"][0]["phase"] == "Phase 1: Core"
 
@@ -180,8 +186,6 @@ class TestMain:
         assert exc_info.value.code == 1
 
     def test_next_command(self, capsys, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -192,7 +196,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -212,8 +216,6 @@ class TestMain:
         mock_save.assert_called_once()
 
     def test_next_command_runs_mcloop(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -224,7 +226,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -237,8 +239,6 @@ class TestMain:
         mock_run.assert_called_once_with(".")
 
     def test_next_command_appends_phase_history(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -249,7 +249,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -261,13 +261,11 @@ class TestMain:
                         with patch("duplo.main.run_mcloop", return_value=0):
                             with patch("duplo.main.notify_phase_complete"):
                                 main()
-        data = json.loads((tmp_path / "duplo.json").read_text())
+        data = _read_duplo_json(tmp_path)
         assert len(data["phases"]) == 1
         assert data["phases"][0]["phase"] == "Phase 2: Next"
 
     def test_next_command_captures_appshot_when_app_name_set(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "app_name": "MyApp",
@@ -279,7 +277,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -294,8 +292,6 @@ class TestMain:
         assert mock_shot.call_args.args[0] == "MyApp"
 
     def test_next_command_skips_appshot_when_no_app_name(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -306,7 +302,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -320,8 +316,6 @@ class TestMain:
         mock_shot.assert_not_called()
 
     def test_next_command_exits_on_mcloop_failure(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -332,7 +326,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -356,8 +350,6 @@ class TestMain:
                                 main()  # should not raise
 
     def test_next_command_notifies_with_phase_label(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -368,7 +360,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -384,8 +376,6 @@ class TestMain:
         mock_notify.assert_called_once_with("Phase 2: Enhancements")
 
     def test_next_command_loads_issues_when_present(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -396,7 +386,7 @@ class TestMain:
                 "preferences": [],
             },
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         (tmp_path / "ISSUES.md").write_text("# Visual Issues\n- Layout broken\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -416,8 +406,6 @@ class TestMain:
         assert "Layout broken" in issues_text
 
     def test_next_command_appends_test_tasks(self, tmp_path, monkeypatch):
-        import json
-
         duplo_data = {
             "source_url": "https://example.com",
             "features": [],
@@ -431,7 +419,7 @@ class TestMain:
                 {"input": "1+1", "expected_output": "2", "source_url": "", "language": "python"}
             ],
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        _write_duplo_json(tmp_path, duplo_data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
@@ -457,8 +445,6 @@ class TestMain:
         assert exc_info.value.code == 1
 
     def test_init_command(self, capsys, tmp_path):
-        from pathlib import Path
-
         from duplo.extractor import Feature
 
         features = [Feature(name="Search", description="Full-text search.", category="core")]
@@ -473,7 +459,7 @@ class TestMain:
                                 with patch("duplo.main.ask_preferences"):
                                     with patch(
                                         "duplo.main.save_selections",
-                                        return_value=Path("duplo.json"),
+                                        return_value=Path(_DUPLO_JSON),
                                     ):
                                         with patch(
                                             "duplo.main.write_claude_md",
@@ -489,8 +475,6 @@ class TestMain:
         assert "product page text" in out
 
     def test_init_command_writes_claude_md(self, tmp_path):
-        from pathlib import Path
-
         from duplo.extractor import Feature
 
         features = [Feature(name="Search", description="Full-text search.", category="core")]
@@ -503,7 +487,7 @@ class TestMain:
                                 with patch("duplo.main.ask_preferences"):
                                     with patch(
                                         "duplo.main.save_selections",
-                                        return_value=Path("duplo.json"),
+                                        return_value=Path(_DUPLO_JSON),
                                     ):
                                         with patch(
                                             "duplo.main.write_claude_md",
@@ -538,9 +522,7 @@ class TestCmdRunResume:
     }
 
     def test_skips_plan_generation_when_plan_exists(self, tmp_path, monkeypatch):
-        import json
-
-        (tmp_path / "duplo.json").write_text(json.dumps(self._BASE_DATA), encoding="utf-8")
+        _write_duplo_json(tmp_path, self._BASE_DATA)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -553,13 +535,11 @@ class TestCmdRunResume:
         mock_gen.assert_not_called()
 
     def test_skips_mcloop_when_mcloop_done(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 1", "mcloop_done": True},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -571,8 +551,6 @@ class TestCmdRunResume:
         mock_run.assert_not_called()
 
     def test_exits_gracefully_when_phase1_complete(self, capsys, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "phases": [
@@ -583,7 +561,7 @@ class TestCmdRunResume:
                 }
             ],
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         monkeypatch.chdir(tmp_path)
 
         with patch("sys.argv", ["duplo", "run"]):
@@ -601,13 +579,11 @@ class TestCmdRunResume:
         assert "already complete" in out.lower()
 
     def test_in_progress_cleared_after_success(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 1", "mcloop_done": False},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -616,13 +592,11 @@ class TestCmdRunResume:
                 with patch("duplo.main.notify_phase_complete"):
                     main()
 
-        result = json.loads((tmp_path / "duplo.json").read_text())
+        result = _read_duplo_json(tmp_path)
         assert "in_progress" not in result
 
     def test_resumes_print_message(self, capsys, tmp_path, monkeypatch):
-        import json
-
-        (tmp_path / "duplo.json").write_text(json.dumps(self._BASE_DATA), encoding="utf-8")
+        _write_duplo_json(tmp_path, self._BASE_DATA)
         (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -651,13 +625,11 @@ class TestCmdNextResume:
     }
 
     def test_skips_feedback_and_plan_when_in_progress(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 2", "mcloop_done": False},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 2: Features\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -672,13 +644,11 @@ class TestCmdNextResume:
         mock_gen.assert_not_called()
 
     def test_skips_mcloop_when_mcloop_done(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 2", "mcloop_done": True},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 2: Features\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -690,13 +660,11 @@ class TestCmdNextResume:
         mock_run.assert_not_called()
 
     def test_resumes_with_mcloop_when_not_done(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 2", "mcloop_done": False},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 2: Features\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -708,13 +676,11 @@ class TestCmdNextResume:
         mock_run.assert_called_once_with(".")
 
     def test_in_progress_cleared_after_resume(self, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 2", "mcloop_done": False},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 2: Features\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -723,17 +689,15 @@ class TestCmdNextResume:
                 with patch("duplo.main.notify_phase_complete"):
                     main()
 
-        result = json.loads((tmp_path / "duplo.json").read_text())
+        result = _read_duplo_json(tmp_path)
         assert "in_progress" not in result
 
     def test_resume_print_message(self, capsys, tmp_path, monkeypatch):
-        import json
-
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 2", "mcloop_done": False},
         }
-        (tmp_path / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        _write_duplo_json(tmp_path, data)
         (tmp_path / "PLAN.md").write_text("# Phase 2: Features\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
@@ -753,7 +717,7 @@ class TestInitProject:
     _PREFS = BuildPreferences(platform="web", language="Python")
 
     def test_saves_selections(self, tmp_path):
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json") as m:
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON) as m:
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     _init_project(
@@ -772,7 +736,7 @@ class TestInitProject:
 
     def test_returns_roadmap(self, tmp_path):
         roadmap = [{"phase": 1, "title": "Core"}]
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=roadmap):
                     result = _init_project(
@@ -789,7 +753,7 @@ class TestInitProject:
         assert result == roadmap
 
     def test_returns_none_when_no_roadmap(self, tmp_path):
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     result = _init_project(
@@ -807,7 +771,7 @@ class TestInitProject:
 
     def test_generates_tests_when_code_examples_present(self, tmp_path):
         examples = [{"input": "1+1", "expected_output": "2"}]
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     with patch(
@@ -832,7 +796,7 @@ class TestInitProject:
         m_save.assert_called_once()
 
     def test_writes_claude_md(self, tmp_path):
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md") as m:
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     _init_project(
@@ -850,7 +814,7 @@ class TestInitProject:
 
     def test_captures_screenshots_from_section_urls(self, tmp_path):
         text = "=== https://example.com/page ===\nContent here."
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     with patch(
@@ -873,7 +837,7 @@ class TestInitProject:
         assert m_shot.call_args.args[0] == ["https://example.com/page"]
 
     def test_skips_screenshots_when_no_section_urls(self, tmp_path):
-        with patch("duplo.main.save_selections", return_value=tmp_path / "duplo.json"):
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                 with patch("duplo.main.generate_roadmap", return_value=None):
                     with patch("duplo.main.save_reference_screenshots") as m_shot:

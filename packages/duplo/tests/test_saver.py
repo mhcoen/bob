@@ -53,7 +53,7 @@ class TestSaveSelections:
             "https://example.com", sample_features, sample_prefs, target_dir=tmp_path
         )
         assert path.exists()
-        assert path.name == DUPLO_JSON
+        assert path.name == "duplo.json"
 
     def test_returns_correct_path(self, tmp_path, sample_features, sample_prefs):
         path = save_selections(
@@ -96,6 +96,7 @@ class TestSaveSelections:
 
     def test_overwrites_existing_file(self, tmp_path, sample_features, sample_prefs):
         path = tmp_path / DUPLO_JSON
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('{"old": "data"}')
         save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
         data = json.loads(path.read_text())
@@ -466,7 +467,7 @@ class TestSaveScreenshotFeatureMap:
     def test_creates_file(self, tmp_path):
         path = save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
         assert path.exists()
-        assert path.name == DUPLO_JSON
+        assert path.name == "duplo.json"
 
     def test_returns_correct_path(self, tmp_path):
         path = save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
