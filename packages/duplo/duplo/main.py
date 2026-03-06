@@ -446,18 +446,29 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         if new_urls:
             print(f"\nFetching {len(new_urls)} new URL(s) …")
             fetched = 0
+            all_page_records = []
+            all_raw_pages: dict[str, str] = {}
+            all_code_examples = []
             for url in new_urls:
                 print(f"  Fetching {url} …")
                 try:
                     _, code_examples, doc_structures, page_records, raw_pages = fetch_site(url)
                     if page_records:
-                        save_reference_urls(page_records)
+                        all_page_records.extend(page_records)
                         if raw_pages:
-                            save_raw_content(raw_pages, page_records)
+                            all_raw_pages.update(raw_pages)
+                    if code_examples:
+                        all_code_examples.extend(code_examples)
                     fetched += 1
                     analyzed_anything = True
                 except Exception as exc:
                     print(f"  Failed to fetch {url}: {exc}")
+            if all_page_records:
+                save_reference_urls(all_page_records)
+                if all_raw_pages:
+                    save_raw_content(all_raw_pages, all_page_records)
+            if all_code_examples:
+                save_examples(all_code_examples)
             summary.urls_fetched = fetched
 
     # Move processed reference files into .duplo/references/.
@@ -478,7 +489,10 @@ def _load_existing_urls() -> set[str]:
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
         return set()
-    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return set()
     records = data.get("reference_urls", [])
     return {r["url"] for r in records if "url" in r}
 
@@ -495,7 +509,10 @@ def _rescrape_product_url() -> tuple[int, int]:
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
         return 0, 0
-    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return 0, 0
     source_url = data.get("source_url", "")
     if not source_url:
         return 0, 0
@@ -541,7 +558,10 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
         return 0, 0, 0, 0
 
     plan_content = plan_path.read_text(encoding="utf-8")
-    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return 0, 0, 0, 0
 
     features = [Feature(**f) for f in data.get("features", [])]
     if not features:
@@ -725,7 +745,10 @@ def _subsequent_run() -> None:
 
     # Check if current phase is already in history.
     history = data.get("phases", [])
-    if any(h.get("phase", "").startswith(phase_label) for h in history):
+    if any(
+        h.get("phase", "") == phase_label or h.get("phase", "").startswith(phase_label + ":")
+        for h in history
+    ):
         # Current phase is done — advance to next.
         _advance_to_next(data, app_name)
         return

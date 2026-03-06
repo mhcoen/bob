@@ -319,7 +319,10 @@ def advance_phase(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     if not path.exists():
         return 1
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return 1
     current = data.get("current_phase", 0)
     data["current_phase"] = current + 1
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -337,7 +340,10 @@ def get_current_phase(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     if not path.exists():
         return (0, None)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return (0, None)
     roadmap = data.get("roadmap", [])
     current = data.get("current_phase", 0)
     for phase in roadmap:
@@ -428,25 +434,31 @@ def load_examples(
     if examples_dir.is_dir():
         examples: list[CodeExample] = []
         for filepath in sorted(examples_dir.glob("*.json")):
-            data = json.loads(filepath.read_text(encoding="utf-8"))
-            examples.append(
-                CodeExample(
-                    input=data["input"],
-                    expected_output=data["expected_output"],
-                    source_url=data.get("source_url", ""),
-                    language=data.get("language", ""),
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+                examples.append(
+                    CodeExample(
+                        input=data.get("input", ""),
+                        expected_output=data.get("expected_output", ""),
+                        source_url=data.get("source_url", ""),
+                        language=data.get("language", ""),
+                    )
                 )
-            )
+            except (json.JSONDecodeError, KeyError):
+                continue
         return examples
     # Fallback: read from duplo.json for backward compatibility.
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     if not path.exists():
         return []
-    raw = json.loads(path.read_text(encoding="utf-8")).get("code_examples", [])
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")).get("code_examples", [])
+    except json.JSONDecodeError:
+        return []
     return [
         CodeExample(
-            input=ex["input"],
-            expected_output=ex["expected_output"],
+            input=ex.get("input", ""),
+            expected_output=ex.get("expected_output", ""),
             source_url=ex.get("source_url", ""),
             language=ex.get("language", ""),
         )

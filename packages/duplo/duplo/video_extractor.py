@@ -125,7 +125,10 @@ def _run_ffmpeg_scene_detect(
         return f"ffmpeg failed (exit {proc.returncode}): {proc.stderr.strip()}"
 
     # Collect extracted frames in order.
-    frames = sorted(output_dir.glob(f"{stem}_scene_*.png"))
+    prefix = f"{stem}_scene_"
+    frames = sorted(
+        p for p in output_dir.iterdir() if p.name.startswith(prefix) and p.name.endswith(".png")
+    )
     return frames
 
 
