@@ -78,7 +78,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Save extracted examples separately from duplo.json so they can be reviewed and edited
   - [x] Add .duplo/ to the target project's .gitignore
 - [ ] Directory-based workflow redesign
-  - [ ] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
+  - [x] Duplo runs from the current directory with no required arguments. The user creates the project directory, puts whatever reference material they want inside (images, PDFs, text files, URLs in a file), and runs duplo.
   - [ ] On first run, scan the directory for reference materials: images (png, jpg, gif, webp), PDFs, text/markdown files, and any file containing URLs. Analyze each to determine relevance.
   - [ ] If a URL is found, validate it points to a single clear product, not a company portfolio or homepage with multiple products. Ask the user to clarify if ambiguous.
   - [ ] Clearly state what product Duplo thinks it is duplicating and get confirmation before proceeding. No ambiguity.

@@ -42,7 +42,10 @@ class TestMainFirstRun:
 
         with patch("duplo.main.fetch_site", return_value=("page text", [], None, [], {})):
             with patch("duplo.main.extract_features", return_value=[]):
-                with patch("duplo.main.ask_preferences", return_value=BuildPreferences()):
+                with patch(
+                    "duplo.main.ask_preferences",
+                    return_value=BuildPreferences(platform="web", language="Python"),
+                ):
                     with patch("builtins.input", return_value=""):
                         with patch(
                             "duplo.main.save_selections",
@@ -64,7 +67,10 @@ class TestMainFirstRun:
 
         with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})) as mock_fetch:
             with patch("duplo.main.extract_features", return_value=[]):
-                with patch("duplo.main.ask_preferences", return_value=BuildPreferences()):
+                with patch(
+                    "duplo.main.ask_preferences",
+                    return_value=BuildPreferences(platform="web", language="Python"),
+                ):
                     with patch("builtins.input", return_value=""):
                         with patch(
                             "duplo.main.save_selections",
@@ -84,7 +90,10 @@ class TestMainFirstRun:
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.extract_features", return_value=[]):
-            with patch("duplo.main.ask_preferences", return_value=BuildPreferences()):
+            with patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ):
                 with patch("builtins.input", return_value=""):
                     with patch(
                         "duplo.main.save_selections",
@@ -101,10 +110,15 @@ class TestMainFirstRun:
         (tmp_path / "notes.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
-        roadmap = [{"phase": 0, "title": "Core"}]
+        roadmap = [
+            {"phase": 0, "title": "Core", "goal": "MVP", "test": "it works"},
+        ]
         with patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})):
             with patch("duplo.main.extract_features", return_value=[]):
-                with patch("duplo.main.ask_preferences", return_value=BuildPreferences()):
+                with patch(
+                    "duplo.main.ask_preferences",
+                    return_value=BuildPreferences(platform="web", language="Python"),
+                ):
                     with patch("builtins.input", return_value=""):
                         with patch(
                             "duplo.main.save_selections",
@@ -136,9 +150,13 @@ class TestMainFirstRun:
                                                         return_value=0,
                                                     ):
                                                         with patch(
-                                                            "duplo.main.notify_phase_complete"
+                                                            "duplo.main.capture_appshot",
+                                                            return_value=0,
                                                         ):
-                                                            main()
+                                                            with patch(
+                                                                "duplo.main.notify_phase_complete"
+                                                            ):
+                                                                main()
 
 
 class TestMainSubsequentRun:
