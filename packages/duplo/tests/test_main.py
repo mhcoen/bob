@@ -1351,6 +1351,92 @@ class TestAnalyzeNewFilesReturnsSummary:
             result = _analyze_new_files(["shot.png"])
         assert result.images_analyzed == 1
 
+    def test_combines_images_and_video_frames(self, tmp_path, monkeypatch):
+        """Video frames and user images go through a single extract_design call."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG" * 500)
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"MP4" * 500)
+
+        from duplo.frame_describer import FrameDescription
+        from duplo.frame_filter import FilterDecision
+        from duplo.video_extractor import ExtractionResult
+
+        frame = tmp_path / ".duplo" / "video_frames" / "frame001.png"
+        frame.parent.mkdir(parents=True, exist_ok=True)
+        frame.write_bytes(b"PNG" * 100)
+
+        vid_result = ExtractionResult(source=vid, frames=[frame])
+        decision = FilterDecision(path=frame, keep=True, reason="clear UI")
+        desc = FrameDescription(path=frame, state="main view", detail="dashboard")
+
+        design = DesignRequirements(
+            colors={"primary": "#abc"},
+            source_images=["shot.png", "frame001.png"],
+        )
+
+        with (
+            patch("duplo.main.extract_all_videos", return_value=[vid_result]),
+            patch("duplo.main.filter_frames", return_value=[decision]),
+            patch("duplo.main.apply_filter", return_value=[frame]),
+            patch("duplo.main.describe_frames", return_value=[desc]),
+            patch("duplo.main.store_accepted_frames", return_value=["frame001.png"]),
+            patch("duplo.main.extract_design", return_value=design) as mock_design,
+        ):
+            result = _analyze_new_files(["shot.png", "demo.mp4"])
+
+        # Single call with both image and frame combined.
+        mock_design.assert_called_once()
+        call_args = mock_design.call_args[0][0]
+        assert len(call_args) == 2
+        assert call_args[0].name == "shot.png"
+        assert call_args[1] == frame
+        assert result.images_analyzed == 2
+        assert result.video_frames_extracted == 1
+
+    def test_video_only_goes_through_design_extraction(self, tmp_path, monkeypatch):
+        """Video frames alone trigger design extraction (no user images)."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"MP4" * 500)
+
+        from duplo.frame_describer import FrameDescription
+        from duplo.frame_filter import FilterDecision
+        from duplo.video_extractor import ExtractionResult
+
+        frame = tmp_path / ".duplo" / "video_frames" / "frame001.png"
+        frame.parent.mkdir(parents=True, exist_ok=True)
+        frame.write_bytes(b"PNG" * 100)
+
+        vid_result = ExtractionResult(source=vid, frames=[frame])
+        decision = FilterDecision(path=frame, keep=True, reason="clear UI")
+        desc = FrameDescription(path=frame, state="settings", detail="panel")
+
+        design = DesignRequirements(
+            colors={"bg": "#fff"},
+            source_images=["frame001.png"],
+        )
+
+        with (
+            patch("duplo.main.extract_all_videos", return_value=[vid_result]),
+            patch("duplo.main.filter_frames", return_value=[decision]),
+            patch("duplo.main.apply_filter", return_value=[frame]),
+            patch("duplo.main.describe_frames", return_value=[desc]),
+            patch("duplo.main.store_accepted_frames", return_value=["frame001.png"]),
+            patch("duplo.main.extract_design", return_value=design) as mock_design,
+        ):
+            result = _analyze_new_files(["demo.mp4"])
+
+        mock_design.assert_called_once()
+        call_args = mock_design.call_args[0][0]
+        assert len(call_args) == 1
+        assert call_args[0] == frame
+        assert result.images_analyzed == 1
+        assert result.videos_found == 1
+
 
 class TestRescrapeReturnsCounts:
     """Tests that _rescrape_product_url returns page/example counts."""

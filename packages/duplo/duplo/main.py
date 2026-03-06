@@ -336,27 +336,17 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     scan = scan_files(paths)
     analyzed_anything = False
 
-    # Extract visual design from new images.
+    # Collect user-provided images.
     relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
-    if relevant_images:
-        print(f"\nAnalyzing {len(relevant_images)} new image(s) with Vision …")
-        design = extract_design(relevant_images)
-        if design.colors or design.fonts or design.layout:
-            save_design_requirements(dataclasses.asdict(design))
-            print(f"  Updated design requirements from {len(design.source_images)} image(s).")
-            summary.images_analyzed = len(design.source_images)
-            analyzed_anything = True
-        else:
-            print("  Could not extract design details from new images.")
 
     # Extract frames from new video files at scene change points.
+    video_frames: list[Path] = []
     if scan.videos:
         relevant_vids = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
         if relevant_vids:
             print(f"\nExtracting frames from {len(relevant_vids)} new video(s) …")
             frames_dir = Path(".duplo") / "video_frames"
             vid_results = extract_all_videos(relevant_vids, frames_dir)
-            video_frames: list[Path] = []
             for vr in vid_results:
                 if vr.error:
                     print(f"  {vr.source.name}: {vr.error}")
@@ -395,16 +385,21 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                         print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
 
             summary.video_frames_extracted = len(video_frames)
-
-            # Send extracted video frames through design extraction.
-            if video_frames:
-                print(f"Analyzing {len(video_frames)} video frame(s) with Vision …")
-                design = extract_design(video_frames)
-                if design.colors or design.fonts or design.layout:
-                    save_design_requirements(dataclasses.asdict(design))
-                    summary.images_analyzed += len(video_frames)
         else:
             summary.videos_found = len(scan.videos)
+
+    # Combine user images and accepted video frames for design extraction.
+    all_images = relevant_images + video_frames
+    if all_images:
+        print(f"\nAnalyzing {len(all_images)} image(s) with Vision …")
+        design = extract_design(all_images)
+        if design.colors or design.fonts or design.layout:
+            save_design_requirements(dataclasses.asdict(design))
+            print(f"  Updated design requirements from {len(design.source_images)} image(s).")
+            summary.images_analyzed = len(design.source_images)
+            analyzed_anything = True
+        else:
+            print("  Could not extract design details from images.")
 
     # Extract text from new PDFs.
     relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
