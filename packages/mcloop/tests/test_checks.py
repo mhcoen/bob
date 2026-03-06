@@ -47,7 +47,7 @@ def test_detect_commands_makefile(tmp_path):
 def test_detect_commands_swift(tmp_path):
     (tmp_path / "Package.swift").write_text("// swift package\n")
     cmds = _detect_commands(tmp_path, {})
-    assert "swift build" in cmds
+    assert "swift build --disable-sandbox" in cmds
 
 
 def test_detect_commands_empty(tmp_path):

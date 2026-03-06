@@ -28,6 +28,7 @@ from mcloop.checklist import (
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
 from mcloop.notify import notify
 from mcloop.ratelimit import (
+    SESSION_LIMIT_POLL,
     RateLimitState,
     get_available_cli,
     is_rate_limited,
@@ -41,6 +42,7 @@ def main() -> None:
     def _handle_sigint(sig, frame):
         print("\nInterrupted.", flush=True)
         from mcloop.runner import _active_process
+
         if _active_process is not None:
             try:
                 _active_process.kill()
@@ -157,31 +159,41 @@ def run_loop(
             )
 
             if is_session_limited(
-                result.output, result.exit_code,
+                result.output,
+                result.exit_code,
             ):
                 _checkpoint(project_dir)
-                total = time.monotonic() - run_start
-                _print_summary(
-                    completed, None, "",
-                    parse(checklist_path), total,
-                    project_dir, notes_snapshot,
-                )
                 notify(
-                    "Session limit reached.",
+                    "Session limit reached. Polling every 10m.",
                     level="warning",
                 )
                 print(
                     "\n>>> Session limit reached."
-                    " Waiting for reset."
+                    f" Polling every {SESSION_LIMIT_POLL // 60}m."
                     " Press Ctrl-C to exit.",
                     flush=True,
                 )
                 try:
-                    while True:
-                        time.sleep(60)
+                    time.sleep(SESSION_LIMIT_POLL)
                 except KeyboardInterrupt:
+                    total = time.monotonic() - run_start
+                    _print_summary(
+                        completed,
+                        None,
+                        "",
+                        parse(checklist_path),
+                        total,
+                        project_dir,
+                        notes_snapshot,
+                    )
                     print("\nExiting.", flush=True)
-                return [task.text]
+                    return [task.text]
+                notify(
+                    "Retrying after session limit pause.",
+                    level="info",
+                )
+                attempt -= 1  # don't count as a real attempt
+                continue
 
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
@@ -656,11 +668,9 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
             if len(line) > 3:
                 all_files.append(line[3:])
         meaningful = [
-            f for f in all_files
-            if f
-            and not f.startswith("logs/")
-            and not f.startswith(".mcloop/")
-            and f != "PLAN.md"
+            f
+            for f in all_files
+            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md"
         ]
         return len(meaningful) > 0
     except Exception:

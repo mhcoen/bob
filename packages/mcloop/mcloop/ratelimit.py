@@ -26,6 +26,7 @@ SESSION_LIMIT_PATTERNS = [
 ]
 
 DEFAULT_COOLDOWN = 300  # 5 minutes
+SESSION_LIMIT_POLL = 600  # 10 minutes
 
 
 @dataclass

@@ -4,9 +4,11 @@ import time
 from unittest.mock import patch
 
 from mcloop.ratelimit import (
+    SESSION_LIMIT_POLL,
     RateLimitState,
     get_available_cli,
     is_rate_limited,
+    is_session_limited,
     wait_for_reset,
 )
 
@@ -104,6 +106,25 @@ def test_wait_for_reset_respects_enabled_clis():
     with patch("mcloop.ratelimit.time.sleep"):
         cli = wait_for_reset(state, enabled_clis=("claude",))
     assert cli == "claude"
+
+
+def test_session_limit_poll_constant():
+    assert SESSION_LIMIT_POLL == 600
+
+
+def test_is_session_limited_detects_patterns():
+    assert is_session_limited("credit balance is too low", 1)
+    assert is_session_limited("you've hit your limit", 1)
+    assert is_session_limited("exceeded your plan limits", 1)
+    assert is_session_limited("usage cap reached", 1)
+
+
+def test_is_session_limited_ignores_success():
+    assert not is_session_limited("credit balance is too low", 0)
+
+
+def test_is_session_limited_no_match():
+    assert not is_session_limited("some other error", 1)
 
 
 def test_wait_for_reset_calls_notify():

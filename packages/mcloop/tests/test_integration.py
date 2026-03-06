@@ -222,6 +222,42 @@ def test_rate_limit_notifies(
     assert calls[2] == ("All tasks completed!", "info")
 
 
+@patch("mcloop.main.time.sleep")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_session_limit_polls_then_retries(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    mock_sleep,
+    tmp_path,
+):
+    """Session limit triggers a 10-minute poll, then retries successfully."""
+    md = _make_project(tmp_path, "- [ ] Task\n")
+    mock_run.side_effect = [
+        _fail_run_result(output="credit balance is too low", exit_code=1),
+        _ok_run_result(),
+    ]
+
+    stuck = run_loop(md, max_retries=3)
+
+    assert stuck == []
+    assert mock_run.call_count == 2
+    mock_sleep.assert_called_once_with(600)
+
+    calls = _notify_calls(mock_notify)
+    assert any("Polling every 10m" in msg for msg, _ in calls)
+    assert any("Retrying" in msg for msg, _ in calls)
+    assert calls[-1] == ("All tasks completed!", "info")
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
@@ -478,9 +514,9 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
 
     _checkpoint(tmp_path)
 
-    assert mock_run.call_count == 3
+    assert mock_run.call_count == 4
     assert mock_run.call_args_list[0] == call(
-        ["git", "diff", "--name-only"],
+        ["git", "status", "--porcelain"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -491,6 +527,11 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
         capture_output=True,
     )
     assert mock_run.call_args_list[2] == call(
+        ["git", "add", "-A"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    assert mock_run.call_args_list[3] == call(
         ["git", "commit", "-m", "mcloop: checkpoint"],
         cwd=tmp_path,
         capture_output=True,
@@ -506,7 +547,7 @@ def test_checkpoint_skips_when_clean(mock_run, tmp_path):
 
     _checkpoint(tmp_path)
 
-    assert mock_run.call_count == 1  # only the git diff check
+    assert mock_run.call_count == 1  # only the git status check
 
 
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))

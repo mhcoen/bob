@@ -211,33 +211,20 @@ def _run_session(
                 )
             except queue.Empty:
                 # Silence. Check for pending approvals.
-                if (
-                    not shown_waiting
-                    and pending_dir.exists()
-                ):
+                if not shown_waiting and pending_dir.exists():
                     try:
-                        pending = list(
-                            pending_dir.iterdir()
-                        )
+                        pending = list(pending_dir.iterdir())
                     except OSError:
                         pending = []
                     if pending:
                         count = len(pending)
                         try:
-                            desc = pending[0].read_text(
-                            )[:80]
+                            desc = pending[0].read_text()[:80]
                         except OSError:
                             desc = "unknown"
-                        extra = (
-                            f" ({count} pending)"
-                            if count > 1
-                            else ""
-                        )
+                        extra = f" ({count} pending)" if count > 1 else ""
                         print(
-                            f"\n>>> Waiting for "
-                            f"Telegram approval"
-                            f"{extra}"
-                            f"\n    {desc}",
+                            f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
                             flush=True,
                         )
                         shown_waiting = True
