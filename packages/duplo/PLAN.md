@@ -18,10 +18,10 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
   - [x] Save reference screenshots from the product website
   - [x] Extract a structured feature list from the scraped content
-- [ ] Interactive feature selection
+- [x] Interactive feature selection
   - [x] Present features to the user and ask which to include
   - [x] Ask about platform, language, constraints, and preferences
-  - [ ] Save selections to duplo.json in the target project
+  - [x] Save selections to duplo.json in the target project
 - [ ] Plan generation
   - [ ] Generate Phase 1 PLAN.md (smallest end-to-end working thing)
   - [ ] Create target project directory with git init
