@@ -45,6 +45,15 @@ class TestCreateProjectDir:
         assert (target / ".duplo").exists()
         assert (target / ".duplo").is_dir()
 
+    def test_creates_gitignore_with_duplo(self, tmp_path):
+        target = tmp_path / "my-project"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            create_project_dir(target)
+        gitignore = target / ".gitignore"
+        assert gitignore.exists()
+        assert ".duplo/" in gitignore.read_text()
+
     def test_returns_resolved_path(self, tmp_path):
         target = tmp_path / "my-project"
         with patch("subprocess.run") as mock_run:
