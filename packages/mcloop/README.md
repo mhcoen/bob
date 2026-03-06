@@ -159,9 +159,9 @@ the problem rather than repeating the same mistake.
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
 
-After each successful commit, McLoop pushes to the remote. If no remote
-exists, it creates a private GitHub repo using `gh repo create` and sets up
-the origin automatically.
+After each successful commit, McLoop pushes to the remote. If no
+remote exists, it creates a private GitHub repo with `gh repo create`
+and sets up the origin automatically.
 
 ## Unattended operation
 
@@ -391,7 +391,7 @@ Each log captures the full CLI output and exit code.
 
 - Python >= 3.11
 - `claude` CLI on PATH
-- `gh` CLI on PATH (for automatic GitHub repo creation and push)
+- `gh` CLI on PATH (for automatic GitHub repo creation)
 - macOS for iMessage notifications (Telegram works anywhere)
 
 ## Development

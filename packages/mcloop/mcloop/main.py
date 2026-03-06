@@ -833,26 +833,45 @@ def _checkpoint(
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     try:
-        subprocess.run(["git", "add", "-u"], cwd=project_dir, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", f"Complete: {task_text}"],
+            ["git", "add", "-u"],
             cwd=project_dir,
             capture_output=True,
         )
-        result = subprocess.run(["git", "remote"], cwd=project_dir, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "commit", "-m",
+             f"Complete: {task_text}"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            ["git", "remote"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
         if not result.stdout.strip():
             subprocess.run(
                 [
-                    "gh", "repo", "create", project_dir.name,
-                    "--private", "--source=.", "--remote=origin",
+                    "gh", "repo", "create",
+                    project_dir.name,
+                    "--private", "--source=.",
+                    "--remote=origin",
                 ],
                 cwd=project_dir,
                 capture_output=True,
             )
             result = subprocess.run(
-                ["git", "remote"], cwd=project_dir, capture_output=True, text=True
+                ["git", "remote"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
             )
         if result.stdout.strip():
-            subprocess.run(["git", "push"], cwd=project_dir, capture_output=True)
+            subprocess.run(
+                ["git", "push"],
+                cwd=project_dir,
+                capture_output=True,
+            )
     except Exception:
         pass
