@@ -92,7 +92,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Re-scrape the product URL with the improved deep extractor if the URL was already known
   - [x] Compare newly extracted features and examples against existing PLAN.md
   - [x] Append new unchecked tasks for missing features, uncovered examples, and design refinements
-  - [ ] Never modify or remove existing tasks (checked or unchecked)
+  - [x] Never modify or remove existing tasks (checked or unchecked)
   - [ ] Print a summary of what was found and what was added
 - [ ] Video reference extraction
   - [ ] Detect video files in the project directory (mp4, mov, webm, avi)
