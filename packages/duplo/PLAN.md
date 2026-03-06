@@ -90,7 +90,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] On subsequent runs, detect new or changed files in the project directory by comparing against .duplo/file_hashes.json
   - [x] Analyze any new files the same way as first run (images to Vision, PDFs to text, URLs to scraper)
   - [x] Re-scrape the product URL with the improved deep extractor if the URL was already known
-  - [ ] Compare newly extracted features and examples against existing PLAN.md
+  - [x] Compare newly extracted features and examples against existing PLAN.md
   - [ ] Append new unchecked tasks for missing features, uncovered examples, and design refinements
   - [ ] Never modify or remove existing tasks (checked or unchecked)
   - [ ] Print a summary of what was found and what was added
