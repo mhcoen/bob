@@ -109,5 +109,5 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Store the confirmed product identity in .duplo/product.json so subsequent runs don't re-ask
 - [ ] Non-destructive plan updates
   - [x] save_plan() must never overwrite an existing PLAN.md. If PLAN.md already exists, append new tasks to the end of the file instead of replacing it. Existing checked and unchecked items must be preserved exactly as they are.
-  - [ ] All other files duplo writes (CLAUDE.md, mcloop.json, README.md) must also be non-destructive on subsequent runs. Merge or append, never replace.
+  - [x] All other files duplo writes (CLAUDE.md, mcloop.json, README.md) must also be non-destructive on subsequent runs. Merge or append, never replace.
   - [ ] Update README.md to document that duplo's update cycle is non-destructive: existing code, plans, and configuration are never removed or overwritten.
