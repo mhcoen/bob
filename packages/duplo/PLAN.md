@@ -101,7 +101,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Send candidate frames to Claude Vision to filter: keep only clear, stable screenshots of the application showing a distinct UI state. Discard transitions, blur, marketing overlays, loading screens.
   - [x] For each accepted frame, ask Claude Vision to describe what UI state it shows (main view, settings panel, dialog, menu, etc.)
   - [x] Store accepted frames in .duplo/references/ with their UI state descriptions
-  - [ ] Include extracted frames in the same analysis pipeline as user-provided screenshots
+  - [x] Include extracted frames in the same analysis pipeline as user-provided screenshots
   - [ ] Requires ffmpeg on PATH (document in README)
 - [ ] Product disambiguation
   - [ ] When a URL points to a company with multiple products, present the products found and ask which one to duplicate
