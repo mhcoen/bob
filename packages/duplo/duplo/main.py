@@ -74,6 +74,7 @@ class UpdateSummary:
     files_changed: int = 0
     files_removed: int = 0
     images_analyzed: int = 0
+    videos_found: int = 0
     pdfs_extracted: int = 0
     text_files_read: int = 0
     urls_fetched: int = 0
@@ -103,7 +104,13 @@ def main() -> None:
 def _first_run() -> None:
     """Scan reference materials in the current directory and bootstrap the project."""
     scan = scan_directory(".")
-    if not scan.images and not scan.pdfs and not scan.text_files and not scan.urls:
+    if (
+        not scan.images
+        and not scan.videos
+        and not scan.pdfs
+        and not scan.text_files
+        and not scan.urls
+    ):
         print(
             "No reference materials found.\n"
             "Drop images, PDFs, text files, or a file containing URLs\n"
@@ -114,6 +121,8 @@ def _first_run() -> None:
     print("Scanning reference materials …")
     if scan.images:
         print(f"  Images: {len(scan.images)}")
+    if scan.videos:
+        print(f"  Videos: {len(scan.videos)}")
     if scan.pdfs:
         print(f"  PDFs:   {len(scan.pdfs)}")
     if scan.text_files:
@@ -216,7 +225,7 @@ def _first_run() -> None:
     )
 
     # Move processed reference files into .duplo/references/.
-    ref_files = list(scan.images) + list(scan.pdfs) + list(scan.text_files)
+    ref_files = list(scan.images) + list(scan.videos) + list(scan.pdfs) + list(scan.text_files)
     if ref_files:
         moved = move_references(ref_files)
         if moved:
@@ -293,6 +302,12 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         else:
             print("  Could not extract design details from new images.")
 
+    # Track new video files (not analyzed, but noted as reference material).
+    if scan.videos:
+        print(f"\nFound {len(scan.videos)} new video file(s).")
+        summary.videos_found = len(scan.videos)
+        analyzed_anything = True
+
     # Extract text from new PDFs.
     relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
     if relevant_pdfs:
@@ -338,7 +353,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
             summary.urls_fetched = fetched
 
     # Move processed reference files into .duplo/references/.
-    ref_files = list(scan.images) + list(scan.pdfs) + list(scan.text_files)
+    ref_files = list(scan.images) + list(scan.videos) + list(scan.pdfs) + list(scan.text_files)
     if ref_files:
         moved = move_references(ref_files)
         if moved:
@@ -479,6 +494,8 @@ def _print_summary(summary: UpdateSummary) -> None:
         found_lines.append(f"  Files: {', '.join(parts)}")
     if summary.images_analyzed:
         found_lines.append(f"  Images analyzed: {summary.images_analyzed}")
+    if summary.videos_found:
+        found_lines.append(f"  Videos found: {summary.videos_found}")
     if summary.pdfs_extracted:
         found_lines.append(f"  PDFs extracted: {summary.pdfs_extracted}")
     if summary.text_files_read:
@@ -547,6 +564,7 @@ def _subsequent_run() -> None:
         if changed_files:
             analysis = _analyze_new_files(changed_files)
             summary.images_analyzed = analysis.images_analyzed
+            summary.videos_found = analysis.videos_found
             summary.pdfs_extracted = analysis.pdfs_extracted
             summary.text_files_read = analysis.text_files_read
             summary.urls_fetched = analysis.urls_fetched

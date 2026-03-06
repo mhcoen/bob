@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
 _PDF_EXTS = {".pdf"}
 _TEXT_EXTS = {".txt", ".md", ".markdown", ".rst", ".text"}
 
@@ -45,7 +46,7 @@ class FileRelevance:
     """Relevance assessment for a single file."""
 
     path: Path
-    category: str  # "image", "pdf", "text", "url_source"
+    category: str  # "image", "video", "pdf", "text", "url_source"
     relevant: bool = True
     reason: str = ""
 
@@ -55,6 +56,7 @@ class ScanResult:
     """Results of scanning a project directory for reference materials."""
 
     images: list[Path] = field(default_factory=list)
+    videos: list[Path] = field(default_factory=list)
     pdfs: list[Path] = field(default_factory=list)
     text_files: list[Path] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
@@ -123,6 +125,11 @@ def _classify_file(
         _assess_image(path, result)
         return
 
+    if suffix in _VIDEO_EXTS:
+        result.videos.append(path)
+        _assess_video(path, result)
+        return
+
     if suffix in _PDF_EXTS:
         result.pdfs.append(path)
         _assess_pdf(path, result)
@@ -155,6 +162,25 @@ def _assess_image(path: Path, result: ScanResult) -> None:
         )
     else:
         result.relevance.append(FileRelevance(path=path, category="image", relevant=True))
+
+
+def _assess_video(path: Path, result: ScanResult) -> None:
+    """Assess relevance of a video file."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size == 0:
+        result.relevance.append(
+            FileRelevance(
+                path=path,
+                category="video",
+                relevant=False,
+                reason="empty file",
+            )
+        )
+    else:
+        result.relevance.append(FileRelevance(path=path, category="video", relevant=True))
 
 
 def _assess_pdf(path: Path, result: ScanResult) -> None:

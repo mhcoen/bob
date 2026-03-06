@@ -20,6 +20,14 @@ class TestScanDirectory:
         result = scan_directory(tmp_path)
         assert len(result.pdfs) == 1
 
+    def test_finds_videos(self, tmp_path: Path):
+        (tmp_path / "demo.mp4").write_bytes(b"\x00" * 5000)
+        (tmp_path / "recording.mov").write_bytes(b"\x00" * 5000)
+        (tmp_path / "clip.webm").write_bytes(b"\x00" * 5000)
+        (tmp_path / "sample.avi").write_bytes(b"\x00" * 5000)
+        result = scan_directory(tmp_path)
+        assert len(result.videos) == 4
+
     def test_finds_text_files(self, tmp_path: Path):
         (tmp_path / "notes.txt").write_text("some notes about the product")
         (tmp_path / "readme.md").write_text("# readme with useful content")
@@ -168,6 +176,21 @@ class TestRelevance:
         assert rel[0].relevant
         assert "URLs" in rel[0].reason
 
+    def test_empty_video_flagged_irrelevant(self, tmp_path: Path):
+        (tmp_path / "empty.mp4").write_bytes(b"")
+        result = scan_directory(tmp_path)
+        rel = [r for r in result.relevance if r.category == "video"]
+        assert len(rel) == 1
+        assert not rel[0].relevant
+        assert "empty" in rel[0].reason
+
+    def test_nonempty_video_is_relevant(self, tmp_path: Path):
+        (tmp_path / "demo.mp4").write_bytes(b"\x00" * 5000)
+        result = scan_directory(tmp_path)
+        rel = [r for r in result.relevance if r.category == "video"]
+        assert len(rel) == 1
+        assert rel[0].relevant
+
     def test_dedup_urls_across_text_and_non_text(self, tmp_path: Path):
         (tmp_path / "notes.txt").write_text("Visit https://example.com for more info")
         (tmp_path / "config.yaml").write_text("url: https://example.com")
@@ -181,6 +204,12 @@ class TestScanFiles:
         img.write_bytes(b"PNG" * 500)
         result = scan_files([img])
         assert len(result.images) == 1
+
+    def test_classifies_video(self, tmp_path: Path):
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"\x00" * 5000)
+        result = scan_files([vid])
+        assert len(result.videos) == 1
 
     def test_classifies_pdf(self, tmp_path: Path):
         pdf = tmp_path / "doc.pdf"
