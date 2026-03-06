@@ -30,7 +30,7 @@ from duplo.planner import (
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 from duplo.runner import run_mcloop
-from duplo.scanner import scan_directory
+from duplo.scanner import scan_directory, scan_files
 from duplo.test_generator import (
     generate_plan_test_tasks,
     generate_test_source,
@@ -61,6 +61,8 @@ from duplo.selector import select_features
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 _DUPLO_JSON = ".duplo/duplo.json"
+# Files that are project artifacts, not user-provided reference materials.
+_PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md"}
 
 
 def main() -> None:
@@ -240,6 +242,93 @@ def _first_run() -> None:
         print("Failed to generate roadmap.")
 
 
+def _analyze_new_files(file_names: list[str]) -> None:
+    """Analyze new or changed files the same way as first run.
+
+    Images are sent to Vision for design extraction, PDFs are
+    converted to text, and URLs found in text files are scraped.
+    Results are saved to duplo.json.
+    """
+    paths = [Path(name) for name in file_names]
+    paths = [p for p in paths if p.exists()]
+    if not paths:
+        return
+
+    scan = scan_files(paths)
+    analyzed_anything = False
+
+    # Extract visual design from new images.
+    relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
+    if relevant_images:
+        print(f"\nAnalyzing {len(relevant_images)} new image(s) with Vision …")
+        design = extract_design(relevant_images)
+        if design.colors or design.fonts or design.layout:
+            save_design_requirements(dataclasses.asdict(design))
+            print(f"  Updated design requirements from {len(design.source_images)} image(s).")
+            analyzed_anything = True
+        else:
+            print("  Could not extract design details from new images.")
+
+    # Extract text from new PDFs.
+    relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
+    if relevant_pdfs:
+        print(f"\nExtracting text from {len(relevant_pdfs)} new PDF(s) …")
+        pdf_text = extract_pdf_text(relevant_pdfs)
+        if pdf_text:
+            print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
+            analyzed_anything = True
+
+    # Collect text from new text files.
+    if scan.text_files:
+        text_content = ""
+        for tf in scan.text_files:
+            try:
+                text_content += tf.read_text(encoding="utf-8", errors="ignore") + "\n"
+            except OSError:
+                pass
+        if text_content.strip():
+            print(f"\nRead {len(scan.text_files)} new text file(s).")
+            analyzed_anything = True
+
+    # Fetch new URLs.
+    if scan.urls:
+        existing_urls = _load_existing_urls()
+        new_urls = [u for u in scan.urls if u not in existing_urls]
+        if new_urls:
+            print(f"\nFetching {len(new_urls)} new URL(s) …")
+            for url in new_urls:
+                print(f"  Fetching {url} …")
+                try:
+                    _, code_examples, doc_structures, page_records, raw_pages = fetch_site(url)
+                    if page_records:
+                        save_reference_urls(page_records)
+                        if raw_pages:
+                            save_raw_content(raw_pages, page_records)
+                    analyzed_anything = True
+                except Exception as exc:
+                    print(f"  Failed to fetch {url}: {exc}")
+
+    # Move processed reference files into .duplo/references/.
+    ref_files = list(scan.images) + list(scan.pdfs) + list(scan.text_files)
+    if ref_files:
+        moved = move_references(ref_files)
+        if moved:
+            print(f"Moved {len(moved)} new reference file(s) to .duplo/references/.")
+
+    if not analyzed_anything:
+        print("No analyzable reference materials in new files.")
+
+
+def _load_existing_urls() -> set[str]:
+    """Load previously scraped URLs from duplo.json."""
+    duplo_path = Path(_DUPLO_JSON)
+    if not duplo_path.exists():
+        return set()
+    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    records = data.get("reference_urls", [])
+    return {r["url"] for r in records if "url" in r}
+
+
 def _subsequent_run() -> None:
     """Resume an interrupted phase or advance to the next one."""
     # Detect file changes since last run.
@@ -254,6 +343,16 @@ def _subsequent_run() -> None:
             print(f"  ~ {name}")
         for name in diff.removed:
             print(f"  - {name}")
+
+        # Analyze new/changed top-level files like first run.
+        # Only top-level files are reference materials (matching scan_directory).
+        # Exclude known project artifacts.
+        changed_files = [
+            f for f in diff.added + diff.changed if "/" not in f and f not in _PROJECT_FILES
+        ]
+        if changed_files:
+            _analyze_new_files(changed_files)
+
     save_hashes(new_hashes)
 
     duplo_path = Path(_DUPLO_JSON)

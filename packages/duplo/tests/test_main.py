@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
+from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
-from duplo.main import _init_project, main
+from duplo.main import _analyze_new_files, _init_project, main
 from duplo.questioner import BuildPreferences
 
 _DUPLO_JSON = ".duplo/duplo.json"
@@ -777,3 +778,127 @@ class TestInitProject:
                             doc_structures=None,
                         )
         m_shot.assert_not_called()
+
+
+class TestAnalyzeNewFiles:
+    """Tests for _analyze_new_files()."""
+
+    def test_extracts_design_from_new_images(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # Create duplo.json so save_design_requirements can update it.
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "new_screen.png"
+        img.write_bytes(b"PNG" * 500)
+
+        design = DesignRequirements(
+            colors={"primary": "#fff"},
+            fonts={"body": "Arial"},
+            source_images=["new_screen.png"],
+        )
+        with patch("duplo.main.extract_design", return_value=design) as mock_design:
+            _analyze_new_files(["new_screen.png"])
+
+        mock_design.assert_called_once()
+        data = _read_duplo_json(tmp_path)
+        assert data["design_requirements"]["colors"] == {"primary": "#fff"}
+
+    def test_extracts_text_from_new_pdfs(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        pdf = tmp_path / "spec.pdf"
+        pdf.write_bytes(b"%PDF" * 100)
+
+        with patch("duplo.main.extract_pdf_text", return_value="PDF content") as mock_pdf:
+            _analyze_new_files(["spec.pdf"])
+
+        mock_pdf.assert_called_once()
+        out = capsys.readouterr().out
+        assert "PDF" in out
+
+    def test_fetches_new_urls(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        txt = tmp_path / "urls.txt"
+        txt.write_text("Check https://newsite.com for the product details")
+
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, [], {}),
+        ) as mock_fetch:
+            with patch("duplo.main._load_existing_urls", return_value=set()):
+                _analyze_new_files(["urls.txt"])
+
+        mock_fetch.assert_called_once_with("https://newsite.com")
+        out = capsys.readouterr().out
+        assert "Fetching" in out
+
+    def test_skips_already_fetched_urls(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        txt = tmp_path / "urls.txt"
+        txt.write_text("Check https://already.com for the product details")
+
+        with patch("duplo.main.fetch_site") as mock_fetch:
+            with patch(
+                "duplo.main._load_existing_urls",
+                return_value={"https://already.com"},
+            ):
+                _analyze_new_files(["urls.txt"])
+
+        mock_fetch.assert_not_called()
+
+    def test_skips_nonexistent_files(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _analyze_new_files(["nonexistent.png"])
+        out = capsys.readouterr().out
+        assert out == ""
+
+    def test_moves_references(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "ref.png"
+        img.write_bytes(b"PNG" * 500)
+
+        design = DesignRequirements(
+            colors={"primary": "#000"},
+            source_images=["ref.png"],
+        )
+        with patch("duplo.main.extract_design", return_value=design):
+            _analyze_new_files(["ref.png"])
+
+        assert not img.exists()
+        assert (tmp_path / ".duplo" / "references" / "ref.png").exists()
+
+    def test_subsequent_run_analyzes_new_images(self, capsys, tmp_path, monkeypatch):
+        """Integration: _subsequent_run triggers analysis of new image files."""
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        # Save empty hash manifest.
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        # Add a new image.
+        (tmp_path / "new.png").write_bytes(b"PNG" * 500)
+        monkeypatch.chdir(tmp_path)
+
+        design = DesignRequirements(colors={"primary": "#abc"}, source_images=["new.png"])
+        with patch("duplo.main.extract_design", return_value=design):
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                    with patch("duplo.main.run_mcloop", return_value=0):
+                        main()
+
+        out = capsys.readouterr().out
+        assert "new image" in out.lower() or "Vision" in out
+        data = _read_duplo_json(tmp_path)
+        assert data["design_requirements"]["colors"] == {"primary": "#abc"}

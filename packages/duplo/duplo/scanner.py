@@ -61,6 +61,22 @@ class ScanResult:
     relevance: list[FileRelevance] = field(default_factory=list)
 
 
+def scan_files(paths: list[Path]) -> ScanResult:
+    """Classify specific files into a :class:`ScanResult`.
+
+    Works like :func:`scan_directory` but operates on an explicit list
+    of file paths instead of walking a directory.  Used by subsequent
+    runs to analyze only new or changed files.
+    """
+    result = ScanResult()
+    seen_urls: set[str] = set()
+    for path in paths:
+        if not path.is_file():
+            continue
+        _classify_file(path, result, seen_urls)
+    return result
+
+
 def scan_directory(directory: Path | str = ".") -> ScanResult:
     """Scan *directory* for reference materials.
 

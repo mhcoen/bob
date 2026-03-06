@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from duplo.scanner import ScanResult, scan_directory
+from duplo.scanner import ScanResult, scan_directory, scan_files
 
 
 class TestScanDirectory:
@@ -173,3 +173,47 @@ class TestRelevance:
         (tmp_path / "config.yaml").write_text("url: https://example.com")
         result = scan_directory(tmp_path)
         assert result.urls.count("https://example.com") == 1
+
+
+class TestScanFiles:
+    def test_classifies_image(self, tmp_path: Path):
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG" * 500)
+        result = scan_files([img])
+        assert len(result.images) == 1
+
+    def test_classifies_pdf(self, tmp_path: Path):
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(b"%PDF" * 100)
+        result = scan_files([pdf])
+        assert len(result.pdfs) == 1
+
+    def test_classifies_text_and_extracts_urls(self, tmp_path: Path):
+        txt = tmp_path / "notes.txt"
+        txt.write_text("See https://example.com for details about the product")
+        result = scan_files([txt])
+        assert len(result.text_files) == 1
+        assert "https://example.com" in result.urls
+
+    def test_skips_nonexistent(self, tmp_path: Path):
+        result = scan_files([tmp_path / "gone.png"])
+        assert result == ScanResult()
+
+    def test_multiple_file_types(self, tmp_path: Path):
+        img = tmp_path / "a.png"
+        img.write_bytes(b"PNG" * 500)
+        pdf = tmp_path / "b.pdf"
+        pdf.write_bytes(b"%PDF" * 100)
+        txt = tmp_path / "c.txt"
+        txt.write_text("Some useful reference content for the product")
+        result = scan_files([img, pdf, txt])
+        assert len(result.images) == 1
+        assert len(result.pdfs) == 1
+        assert len(result.text_files) == 1
+
+    def test_assesses_relevance(self, tmp_path: Path):
+        tiny = tmp_path / "tiny.png"
+        tiny.write_bytes(b"P" * 100)
+        result = scan_files([tiny])
+        assert len(result.relevance) == 1
+        assert not result.relevance[0].relevant
