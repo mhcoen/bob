@@ -5,7 +5,7 @@ tell it what matters to you, and it builds a working version using
 [McLoop](https://github.com/mhcoen/mcloop).
 
 ```bash
-duplo https://superwhisper.com
+duplo init https://superwhisper.com
 ```
 
 Duplo scrapes the product page and docs, asks you which features matter
@@ -28,6 +28,14 @@ All state lives in `duplo.json` in the target project: source URL,
 selected features, phase history, and your feedback. If interrupted,
 `duplo run` picks up where it left off.
 
+## Commands
+
+```bash
+duplo init <url>   # Scrape URL, select features, save duplo.json + screenshots
+duplo run          # Generate Phase 1 PLAN.md from duplo.json (run inside project dir)
+duplo next         # Generate and run the next phase (coming soon)
+```
+
 ## Install
 
 ```bash
@@ -35,11 +43,12 @@ git clone https://github.com/mhcoen/duplo.git
 cd duplo
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install setuptools
+pip install --no-build-isolation -e .
 ```
 
 Requires McLoop (`pip install -e ~/proj/mcloop`), Python 3.11+,
-`claude` CLI on PATH, and macOS for native app building.
+`claude` CLI on PATH, and an `ANTHROPIC_API_KEY` environment variable.
 
 ## Author
 

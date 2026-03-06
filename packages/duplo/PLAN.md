@@ -25,7 +25,7 @@ short and focused. This is a thin orchestration layer, not a framework.
 - [ ] Plan generation
   - [x] Generate Phase 1 PLAN.md (smallest end-to-end working thing)
   - [x] Create target project directory with git init
-  - [ ] Write PLAN.md, README.md, and mcloop.json
+  - [x] Write PLAN.md, README.md, and mcloop.json
   - [ ] Include CLAUDE.md with appshot instructions
 - [ ] Phase execution
   - [ ] Run McLoop on the target project
