@@ -1,21 +1,21 @@
 # Bugs
 
-## video_extractor.py:191 -- Unhashable frames cause false duplicate detection
+## video_extractor.py:195 -- TypeError when deduplicating frames that failed to hash
 **Severity**: high
-When a frame cannot be hashed (e.g., corrupted image), `deduplicate_frames()` stores it with hash value 0. Subsequent valid frames are compared against all kept hashes via `_hamming(h, 0)`. Any frame with a low Hamming weight (few bits set in its 64-bit dHash) will have a Hamming distance <= 6 from 0, causing it to be incorrectly classified as a duplicate and deleted from disk. For example, a mostly-black frame with only 4 bits set in its hash would be silently deleted as a "duplicate" of the unhashable frame.
+When a frame fails to open/hash (line 189 except branch), it is appended to `kept` with `None` as its hash value. On subsequent iterations, line 195 checks `kh is not None` for kept frames but does not check whether the *current* frame's hash `h` is also non-None. If `h` is `None` (unhashable current frame) and some kept frame has `kh is not None`, `_hamming(h, kh)` is called with `h=None`, causing `TypeError: unsupported operand type(s) for ^: 'NoneType' and 'int'` in `_hamming` at line 153.
 
-## design_extractor.py:164 -- components field not type-validated
+## fetcher.py:179-183 -- Failed fetches consume page cap
 **Severity**: medium
-In `_parse_design()`, the `colors`, `fonts`, `spacing`, and `layout` fields are all validated with `isinstance(..., dict)` checks (lines 160-163), but `components` is stored as-is from the API response. If the API returns a non-list value (e.g., a string like `"none"`), `format_design_section()` at line 204 will iterate over its characters, and line 205 `comp.get("name")` will crash with `AttributeError` since strings don't have `.get()`.
+In `fetch_site()`, the page visit counter (`seed_visited` or `docs_visited`) is incremented on lines 181-183 *before* the HTTP request on line 186. If the request fails (caught by `except Exception` on line 194), the counter is already incremented, so a failed page permanently consumes one slot from the `max_pages` or `max_docs_pages` budget. With `max_pages=10`, a few timeouts or 404s can significantly reduce useful content fetched.
 
-## design_extractor.py:205 -- No type check on component items before calling .get()
+## saver.py:262 -- Unhandled JSONDecodeError in clear_in_progress()
 **Severity**: medium
-In `format_design_section()`, `comp.get("name", "unknown")` is called without first checking that `comp` is a dict. If the API returns a list containing non-dict items (e.g., strings), this crashes with `AttributeError`. The same pattern in `gap_detector.py:228` correctly guards with `if not isinstance(comp, dict): continue`.
+`clear_in_progress()` reads and parses `.duplo/duplo.json` with `json.loads()` on line 262 without catching `json.JSONDecodeError`. If the file contains invalid JSON (e.g. from a partial write or corruption), this crashes with an unhandled exception. Compare with `_subsequent_run()` in main.py (lines 700-704) which properly catches this case.
 
-## saver.py:317 -- advance_phase() crashes if duplo.json missing
-**Severity**: low
-`advance_phase()` calls `path.read_text()` on `.duplo/duplo.json` without checking if the file exists first. If called before duplo.json is created (e.g., due to an interrupted first run or external tooling), it raises `FileNotFoundError`. Other similar functions like `get_current_phase()` (line 333) and `clear_in_progress()` properly check existence before reading.
+## doc_examples.py:213-214 -- Shell parser comment contradicts behavior
+**Severity**: medium
+In `_parse_shell()`, when a new shell prompt (`$` or `%`) is encountered after output has started, the comment on line 213 says "keep accumulating" but line 214 does `break`, stopping parsing entirely. This means only the first command/output pair is captured from multi-command shell blocks. A block like `$ cmd1\noutput1\n$ cmd2\noutput2` will only capture cmd1/output1 and discard cmd2/output2.
 
-## runner.py:24 -- Docstring says "mcloop sync" but code runs bare "mcloop"
+## planner.py:248-253 -- append_test_tasks docstring says "insert before final item" but appends at end
 **Severity**: low
-The docstring for `run_mcloop()` says "Run ``mcloop sync`` in *target_dir*" but the actual subprocess command is `["mcloop"]` with no subcommand. If mcloop requires the "sync" argument to perform the intended operation, the function silently does the wrong thing.
+The docstring on line 248 says "Inserts the tasks before the final checklist item if one exists" but the implementation on line 253 always appends at the end of the plan. Test tasks will always appear after the final checklist item rather than before it.
