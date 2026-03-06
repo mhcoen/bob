@@ -10,20 +10,21 @@ from bs4 import BeautifulSoup
 
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _TIMEOUT = 30.0
-
-# Known wiki/docs hosting domains
-_WIKI_DOMAINS = re.compile(
-    r"(\.readthedocs\.io|\.readthedocs\.org|readthedocs\.org"
-    r"|\.gitbook\.io|\.gitbook\.com"
-    r"|\.notion\.site"
-    r"|\.atlassian\.net/wiki"
-    r"|\.confluence\.\w+)",
-    re.IGNORECASE,
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
 )
+_HEADERS = {"User-Agent": _USER_AGENT}
 
-# GitHub wiki path pattern: github.com/<owner>/<repo>/wiki
-_GITHUB_WIKI = re.compile(
-    r"github\.com/[^/]+/[^/]+/wiki",
+# Patterns in URL path or anchor text that indicate a documentation link.
+# Used to decide whether to follow cross-domain links during crawling.
+_DOCS_LINK = re.compile(
+    r"(docs?|documentation|wiki|guides?|handbook|reference|manual"
+    r"|getting.started|quickstart|tutorial|api.ref|user.guide"
+    r"|developer.guide|knowledge.base|help.center|support.portal"
+    r"|read.the.docs|gitbook|howto|how.to|cookbook|examples?|learn"
+    r"|instructions|usage|walkthrough)",
     re.IGNORECASE,
 )
 
@@ -43,22 +44,25 @@ _LOW_PRIORITY = re.compile(
 )
 
 
-def is_wiki_url(url: str) -> bool:
-    """Return True if *url* points to a known wiki or docs hosting site.
+def is_docs_link(url: str, anchor: str) -> bool:
+    """Return True if the link likely points to documentation.
 
-    Detects GitHub wikis, ReadTheDocs, GitBook, Notion, and Confluence.
+    Checks the URL path and anchor text for documentation-related words
+    rather than matching a hardcoded list of hosting platforms.
     """
-    return bool(_WIKI_DOMAINS.search(url) or _GITHUB_WIKI.search(url))
+    path = urlparse(url).path
+    text = f"{path} {anchor}"
+    return bool(_DOCS_LINK.search(text))
 
 
-def detect_wiki_links(html: str, base_url: str) -> list[tuple[str, str]]:
-    """Extract wiki/docs links from *html*, including cross-domain ones.
+def detect_docs_links(html: str, base_url: str) -> list[tuple[str, str]]:
+    """Extract documentation links from *html*, including cross-domain ones.
 
-    Returns (absolute_url, anchor_text) pairs for links pointing to known
-    wiki hosting platforms (GitHub wiki, ReadTheDocs, GitBook, etc.).
+    Returns (absolute_url, anchor_text) pairs for links whose text or URL
+    path indicates they point to documentation.
     """
     all_links = extract_links(html, base_url)
-    return [(url, anchor) for url, anchor in all_links if is_wiki_url(url)]
+    return [(url, anchor) for url, anchor in all_links if is_docs_link(url, anchor)]
 
 
 def score_link(url: str, anchor: str) -> int:
@@ -104,8 +108,8 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
 
     High-priority links (docs, features, guides, changelog, API references)
     are visited before neutral links. Low-priority links (marketing, blog,
-    pricing, legal, login) are skipped entirely. Cross-domain wiki links
-    (GitHub wiki, ReadTheDocs, GitBook, etc.) are always followed.
+    pricing, legal, login) are skipped entirely. Cross-domain documentation
+    links (detected by link text and URL path) are always followed.
 
     Returns concatenated text content from all visited pages, each prefixed
     with its URL as a section header.
@@ -142,7 +146,7 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
             link_norm = link_url.rstrip("/")
             if link_norm in visited or link_norm in queued:
                 continue
-            if is_wiki_url(link_url):
+            if is_docs_link(link_url, anchor):
                 queue.append((1, link_url))
                 queued.add(link_norm)
             elif _same_domain(link_url, url):

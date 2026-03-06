@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from duplo.fetcher import (
-    detect_wiki_links,
+    detect_docs_links,
     extract_links,
     extract_text,
     fetch_site,
     fetch_text,
-    is_wiki_url,
+    is_docs_link,
     score_link,
 )
 
@@ -125,57 +125,75 @@ class TestScoreLink:
         assert score_link(url, anchor) == 0
 
 
-class TestIsWikiUrl:
+class TestIsDocsLink:
     @pytest.mark.parametrize(
-        "url",
+        "url,anchor",
         [
-            "https://myproject.readthedocs.io/en/latest/",
-            "https://myproject.readthedocs.org/en/stable/",
-            "https://readthedocs.org/projects/myproject/",
-            "https://github.com/org/repo/wiki",
-            "https://github.com/org/repo/wiki/Getting-Started",
-            "https://myproject.gitbook.io/docs/",
-            "https://app.gitbook.com/o/org/s/space",
-            "https://myteam.notion.site/Doc-Page-abc123",
-            "https://myteam.atlassian.net/wiki/spaces/PROJ",
+            # Detected by URL path
+            ("https://example.com/docs", ""),
+            ("https://example.com/wiki", ""),
+            ("https://example.com/documentation", ""),
+            ("https://example.com/guide", ""),
+            ("https://example.com/handbook", ""),
+            ("https://example.com/reference", ""),
+            ("https://example.com/manual", ""),
+            ("https://example.com/getting-started", ""),
+            ("https://example.com/quickstart", ""),
+            ("https://example.com/tutorial", ""),
+            ("https://example.com/howto", ""),
+            ("https://example.com/examples", ""),
+            ("https://example.com/learn", ""),
+            # Detected by anchor text
+            ("https://other.com/abc", "Documentation"),
+            ("https://other.com/abc", "Read the docs"),
+            ("https://other.com/abc", "Wiki"),
+            ("https://other.com/abc", "User Guide"),
+            ("https://other.com/abc", "Developer Guide"),
+            ("https://other.com/abc", "Getting Started"),
+            ("https://other.com/abc", "API Reference"),
+            ("https://other.com/abc", "Help Center"),
+            # Known platforms detected by content in URL or anchor
+            ("https://github.com/org/repo/wiki", ""),
+            ("https://myproject.gitbook.io/docs/", ""),
+            ("https://myproject.readthedocs.io/en/latest/", "Read the Docs"),
         ],
     )
-    def test_detects_wiki_urls(self, url):
-        assert is_wiki_url(url) is True
+    def test_detects_docs_links(self, url, anchor):
+        assert is_docs_link(url, anchor) is True
 
     @pytest.mark.parametrize(
-        "url",
+        "url,anchor",
         [
-            "https://example.com/docs",
-            "https://example.com/wiki",
-            "https://github.com/org/repo",
-            "https://github.com/org/repo/issues",
-            "https://example.com",
-            "https://blog.example.com/readthedocs-review",
+            ("https://example.com/pricing", "Pricing"),
+            ("https://example.com/blog", "Blog"),
+            ("https://example.com/", "Home"),
+            ("https://example.com/product", "Product"),
+            ("https://github.com/org/repo", "Repository"),
+            ("https://github.com/org/repo/issues", "Issues"),
         ],
     )
-    def test_rejects_non_wiki_urls(self, url):
-        assert is_wiki_url(url) is False
+    def test_rejects_non_docs_links(self, url, anchor):
+        assert is_docs_link(url, anchor) is False
 
 
-class TestDetectWikiLinks:
-    def test_finds_wiki_links_in_html(self):
+class TestDetectDocsLinks:
+    def test_finds_docs_links_in_html(self):
         html = (
             "<html><body>"
-            '<a href="https://myproject.readthedocs.io/">Docs</a>'
+            '<a href="https://other.com/docs">Documentation</a>'
             '<a href="/features">Features</a>'
             '<a href="https://github.com/org/repo/wiki">Wiki</a>'
             "</body></html>"
         )
-        links = detect_wiki_links(html, "https://example.com")
+        links = detect_docs_links(html, "https://example.com")
         urls = [url for url, _ in links]
-        assert "https://myproject.readthedocs.io/" in urls
+        assert "https://other.com/docs" in urls
         assert "https://github.com/org/repo/wiki" in urls
         assert len(links) == 2
 
-    def test_returns_empty_when_no_wiki_links(self):
-        html = '<html><body><a href="/docs">Docs</a></body></html>'
-        assert detect_wiki_links(html, "https://example.com") == []
+    def test_returns_empty_when_no_docs_links(self):
+        html = '<html><body><a href="/pricing">Pricing</a></body></html>'
+        assert detect_docs_links(html, "https://example.com") == []
 
 
 class TestExtractLinks:
@@ -307,7 +325,7 @@ class TestFetchSite:
     def test_stays_on_same_domain(self):
         seed_html = (
             "<html><body><p>Home</p>"
-            '<a href="https://other.com/docs">External docs</a>'
+            '<a href="https://other.com/product">Check it out</a>'
             "</body></html>"
         )
 
@@ -322,19 +340,19 @@ class TestFetchSite:
 
         assert not any("other.com" in url for url in fetch_calls)
 
-    def test_follows_cross_domain_wiki_links(self):
+    def test_follows_cross_domain_docs_links(self):
         seed_html = (
             "<html><body><p>Home</p>"
-            '<a href="https://myproject.readthedocs.io/en/latest/">Docs</a>'
+            '<a href="https://other.com/docs/intro">Documentation</a>'
             '<a href="https://github.com/org/repo/wiki">Wiki</a>'
             "</body></html>"
         )
-        rtd_html = "<html><body><p>ReadTheDocs content</p></body></html>"
+        docs_html = "<html><body><p>External docs content</p></body></html>"
         wiki_html = "<html><body><p>Wiki content</p></body></html>"
 
         responses = {
             "https://example.com": self._make_response(seed_html),
-            "https://myproject.readthedocs.io/en/latest/": self._make_response(rtd_html),
+            "https://other.com/docs/intro": self._make_response(docs_html),
             "https://github.com/org/repo/wiki": self._make_response(wiki_html),
         }
 
@@ -348,12 +366,12 @@ class TestFetchSite:
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
             result = fetch_site("https://example.com", max_pages=5)
 
-        assert "ReadTheDocs content" in result
+        assert "External docs content" in result
         assert "Wiki content" in result
 
-    def test_does_not_follow_non_wiki_cross_domain(self):
+    def test_does_not_follow_non_docs_cross_domain(self):
         seed_html = (
-            '<html><body><p>Home</p><a href="https://other.com/docs">External</a></body></html>'
+            '<html><body><p>Home</p><a href="https://other.com/product">Product</a></body></html>'
         )
 
         fetch_calls: list[str] = []

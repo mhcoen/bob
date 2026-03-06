@@ -54,9 +54,16 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [ ] Tests should call the app's core logic directly without requiring GUI interaction
   - [ ] Include test generation tasks in the PLAN.md that Duplo generates for the target project
   - [ ] Group tests by category so failures are easy to diagnose
+- [ ] Persistent state in .duplo/ directory
+  - [ ] Create a .duplo/ directory in the target project for Duplo's working state between runs
+  - [ ] Save all reference URLs consulted during scraping, with timestamps and content hashes
+  - [ ] Save raw scraped content so re-runs can diff against what changed on the product site
+  - [ ] Save extracted examples separately from duplo.json so they can be reviewed and edited
+  - [ ] Add .duplo/ to the target project's .gitignore
 - [ ] Re-run mode (duplo update)
   - [ ] Add "update" subcommand that works on an existing project
   - [ ] Re-scrape the product URL and extract features and examples with the improved extractor
+  - [ ] Use .duplo/ state to identify what is new vs what was already seen
   - [ ] Compare against what is already in duplo.json and PLAN.md
   - [ ] Append new unchecked tasks to PLAN.md for any missing features or uncovered examples
   - [ ] Never modify or remove existing tasks (checked or unchecked)
