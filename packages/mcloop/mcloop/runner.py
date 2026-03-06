@@ -8,6 +8,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -153,6 +154,7 @@ def _build_command(
 
 
 SILENCE_TIMEOUT = 5  # seconds before checking pending
+PROGRESS_DOT_INTERVAL = 3  # seconds between progress dots
 _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 
@@ -229,11 +231,12 @@ def _run_session(
     output_lines: list[str] = []
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
+    last_dot = time.monotonic()
     try:
         while True:
             try:
                 line = line_q.get(
-                    timeout=SILENCE_TIMEOUT,
+                    timeout=PROGRESS_DOT_INTERVAL,
                 )
             except queue.Empty:
                 # Silence. Check for pending approvals.
@@ -254,12 +257,19 @@ def _run_session(
                             flush=True,
                         )
                         shown_waiting = True
+                        continue
+                # Print a progress dot
+                now = time.monotonic()
+                if now - last_dot >= PROGRESS_DOT_INTERVAL:
+                    print(".", end="", flush=True)
+                    last_dot = now
                 continue
             if line is _SENTINEL:
                 break
             output_lines.append(line)
             _print_stream_event(line)
             shown_waiting = False
+            last_dot = time.monotonic()
     except KeyboardInterrupt:
         process.kill()
         process.wait()
@@ -270,46 +280,106 @@ def _run_session(
     return "".join(output_lines), process.returncode
 
 
+_SUPPRESSED_TOOLS = frozenset({"Read", "Edit", "Write", "Glob", "Grep", "TodoWrite"})
+
+# Track the last tool name so we can suppress results from quiet tools
+_last_tool_name: str = ""
+
+
+def _extract_status(text: str) -> str | None:
+    """Extract a conceptual status line from streaming text.
+
+    Looks for sentences that describe what the model is doing
+    and returns a cleaned-up single-line version, or None.
+    """
+    text = text.strip()
+    if not text or len(text) < 10:
+        return None
+    # Skip lines that are just code, paths, or JSON
+    if text.startswith(("{", "[", "/", "```", "import ", "def ", "class ")):
+        return None
+    # Look for action-oriented sentences
+    for prefix in (
+        "Let me ",
+        "I'll ",
+        "I will ",
+        "Now ",
+        "Next ",
+        "First ",
+        "Running ",
+        "Reading ",
+        "Writing ",
+        "Editing ",
+        "Creating ",
+        "Updating ",
+        "Fixing ",
+        "Adding ",
+        "Checking ",
+        "Looking ",
+        "Searching ",
+        "Installing ",
+        "Building ",
+        "Testing ",
+        "Reviewing ",
+    ):
+        if text.startswith(prefix):
+            # Take the first sentence
+            for end in (".", "\n"):
+                idx = text.find(end)
+                if idx != -1:
+                    text = text[: idx + 1]
+                    break
+            return text[:120]
+    return None
+
+
 def _print_stream_event(line: str) -> None:
-    """Parse a stream-json line and print relevant info."""
+    """Parse a stream-json line and print relevant info.
+
+    Suppresses Read, Edit, Write, Glob, Grep, TodoWrite tool
+    calls entirely. Only prints Bash commands and conceptual
+    status lines extracted from streaming text.
+    """
+    global _last_tool_name
     line = line.strip()
     if not line:
         return
     try:
         event = _json.loads(line)
     except _json.JSONDecodeError:
-        print(line, flush=True)
         return
 
     etype = event.get("type", "")
 
-    # Streaming text tokens
+    # Streaming text tokens — extract status lines
     if etype == "stream_event":
         delta = event.get("event", {}).get("delta", {})
         if delta.get("type") == "text_delta":
-            print(delta.get("text", ""), end="", flush=True)
+            text = delta.get("text", "")
+            status = _extract_status(text)
+            if status:
+                print(f"\n    {status}", flush=True)
         return
 
-    # Tool use summary
+    # Tool use summary — only print Bash commands
     if etype == "assistant" and "message" in event:
         for block in event["message"].get("content", []):
             if block.get("type") == "tool_use":
                 name = block.get("name", "")
+                _last_tool_name = name
                 tool_input = block.get("input", {})
                 if name == "Bash":
-                    print(f"\n>>> Bash: {tool_input.get('command', '')[:120]}", flush=True)
-                elif name in ("Write", "Edit"):
-                    print(f"\n>>> {name}: {tool_input.get('file_path', '')}", flush=True)
-                elif name == "Read":
-                    print(f"\n>>> Read: {tool_input.get('file_path', '')}", flush=True)
-                else:
-                    print(f"\n>>> {name}", flush=True)
+                    print(
+                        f"\n>>> Bash: {tool_input.get('command', '')[:120]}",
+                        flush=True,
+                    )
 
-    # Tool results
+    # Tool results — only print for non-suppressed tools
     if etype == "result":
-        result = event.get("result", "")
-        if isinstance(result, str) and result:
-            print(f"\n{result[:200]}", flush=True)
+        if _last_tool_name not in _SUPPRESSED_TOOLS:
+            result = event.get("result", "")
+            if isinstance(result, str) and result:
+                print(f"\n{result[:200]}", flush=True)
 
 
 def gather_sync_context(project_dir: Path) -> dict[str, str]:

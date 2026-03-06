@@ -7,7 +7,10 @@ from unittest.mock import patch
 import pytest
 
 from mcloop.runner import (
+    _SUPPRESSED_TOOLS,
     _build_command,
+    _extract_status,
+    _print_stream_event,
     _reclaim_foreground,
     _slugify,
     _write_log,
@@ -575,3 +578,199 @@ def test_reclaim_foreground_tcsetpgrp_fails():
     ):
         _reclaim_foreground()  # should not raise
         mock_close.assert_called_once_with(fake_fd)
+
+
+# --- _SUPPRESSED_TOOLS ---
+
+
+def test_suppressed_tools_contains_expected():
+    """Verify the suppressed tools set has the right entries."""
+    assert "Read" in _SUPPRESSED_TOOLS
+    assert "Edit" in _SUPPRESSED_TOOLS
+    assert "Write" in _SUPPRESSED_TOOLS
+    assert "Glob" in _SUPPRESSED_TOOLS
+    assert "Grep" in _SUPPRESSED_TOOLS
+    assert "TodoWrite" in _SUPPRESSED_TOOLS
+    assert "Bash" not in _SUPPRESSED_TOOLS
+
+
+# --- _extract_status ---
+
+
+def test_extract_status_action_sentence():
+    assert _extract_status("Let me read the configuration file.") == (
+        "Let me read the configuration file."
+    )
+
+
+def test_extract_status_running_prefix():
+    assert _extract_status("Running the test suite now.") == ("Running the test suite now.")
+
+
+def test_extract_status_truncates_long():
+    long = "Let me " + "x" * 200
+    result = _extract_status(long)
+    assert result is not None
+    assert len(result) <= 120
+
+
+def test_extract_status_ignores_short_text():
+    assert _extract_status("ok") is None
+
+
+def test_extract_status_ignores_code():
+    assert _extract_status("import os") is None
+    assert _extract_status("def foo():") is None
+    assert _extract_status("class Bar:") is None
+
+
+def test_extract_status_ignores_json():
+    assert _extract_status('{"type": "result"}') is None
+
+
+def test_extract_status_ignores_paths():
+    assert _extract_status("/usr/local/bin/python") is None
+
+
+def test_extract_status_ignores_non_action():
+    assert _extract_status("The variable x is set to 5.") is None
+
+
+def test_extract_status_takes_first_sentence():
+    text = "Let me fix the bug. Then I will run the tests."
+    assert _extract_status(text) == "Let me fix the bug."
+
+
+def test_extract_status_empty():
+    assert _extract_status("") is None
+    assert _extract_status("   ") is None
+
+
+# --- _print_stream_event ---
+
+
+def test_print_stream_event_bash_tool(capsys):
+    """Bash tool calls should be printed."""
+    import json
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": "ruff check ."},
+                }
+            ]
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert "Bash: ruff check ." in captured.out
+
+
+def test_print_stream_event_suppresses_read(capsys):
+    """Read tool calls should be suppressed."""
+    import json
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Read",
+                    "input": {"file_path": "/foo/bar.py"},
+                }
+            ]
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_suppresses_edit(capsys):
+    """Edit tool calls should be suppressed."""
+    import json
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Edit",
+                    "input": {"file_path": "/foo/bar.py"},
+                }
+            ]
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_suppresses_glob(capsys):
+    """Glob tool calls should be suppressed."""
+    import json
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Glob",
+                    "input": {"pattern": "**/*.py"},
+                }
+            ]
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_status_line(capsys):
+    """Streaming text with action prefix should print status."""
+    import json
+
+    event = {
+        "type": "stream_event",
+        "event": {
+            "delta": {
+                "type": "text_delta",
+                "text": "Let me fix the failing test.",
+            }
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert "Let me fix the failing test." in captured.out
+
+
+def test_print_stream_event_no_status_for_code(capsys):
+    """Code text should not produce status output."""
+    import json
+
+    event = {
+        "type": "stream_event",
+        "event": {
+            "delta": {
+                "type": "text_delta",
+                "text": "def calculate_total():",
+            }
+        },
+    }
+    _print_stream_event(json.dumps(event))
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_invalid_json(capsys):
+    """Invalid JSON lines should be silently ignored."""
+    _print_stream_event("not json at all")
+    captured = capsys.readouterr()
+    assert captured.out == ""
