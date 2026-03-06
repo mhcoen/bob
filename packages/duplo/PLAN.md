@@ -61,7 +61,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Group tests by category so failures are easy to diagnose
 - [ ] Persistent state in .duplo/ directory
   - [x] Create a .duplo/ directory in the target project for Duplo's working state between runs
-  - [ ] Save all reference URLs consulted during scraping, with timestamps and content hashes
+  - [x] Save all reference URLs consulted during scraping, with timestamps and content hashes
   - [ ] Save raw scraped content so re-runs can diff against what changed on the product site
   - [ ] Save extracted examples separately from duplo.json so they can be reviewed and edited
   - [ ] Add .duplo/ to the target project's .gitignore
