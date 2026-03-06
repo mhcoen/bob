@@ -99,7 +99,7 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     return links
 
 
-def fetch_site(url: str, max_pages: int = 10) -> str:
+def fetch_site(url: str, max_pages: int = 10, max_docs_pages: int = 50) -> str:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
@@ -109,6 +109,11 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
     a cross-domain docs site is reached, same-domain links within that docs
     site are followed too (priority-scored like the seed domain).
 
+    *max_pages* limits pages fetched from the seed domain.
+    *max_docs_pages* limits pages fetched from documentation domains
+    (cross-domain docs sites). Doc pages are individually small but
+    collectively important, so this defaults higher than *max_pages*.
+
     Returns concatenated text content from all visited pages, each prefixed
     with its URL as a section header.
     """
@@ -116,20 +121,36 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
     queued: set[str] = set()
     results: list[str] = []
     docs_domains: set[str] = set()
+    seed_visited = 0
+    docs_visited = 0
 
     seed_domain = urlparse(url).netloc
     seed_norm = url.rstrip("/")
     queue: list[tuple[int, str]] = [(2, url)]  # seed at highest priority
     queued.add(seed_norm)
 
-    while queue and len(visited) < max_pages:
+    while queue:
         queue.sort(key=lambda x: -x[0])
         _, current_url = queue.pop(0)
 
         norm = current_url.rstrip("/")
         if norm in visited:
             continue
+
+        current_domain = urlparse(current_url).netloc
+        is_docs = current_domain in docs_domains
+        if is_docs:
+            if docs_visited >= max_docs_pages:
+                continue
+        else:
+            if seed_visited >= max_pages:
+                continue
+
         visited.add(norm)
+        if is_docs:
+            docs_visited += 1
+        else:
+            seed_visited += 1
 
         try:
             resp = httpx.get(

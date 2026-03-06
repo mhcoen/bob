@@ -449,6 +449,99 @@ class TestFetchSite:
             result = fetch_site("https://example.com", max_pages=1)
         assert "=== https://example.com ===" in result
 
+    def test_respects_max_docs_pages(self):
+        """Docs-domain pages are limited by max_docs_pages, not max_pages."""
+        seed_html = (
+            '<html><body><p>Home</p><a href="https://docs.other.com/guide">Guide</a></body></html>'
+        )
+        # Guide page links to many docs subpages
+        guide_links = "".join(
+            f'<a href="https://docs.other.com/page{i}">Page {i}</a>' for i in range(10)
+        )
+        guide_html = f"<html><body><p>Guide</p>{guide_links}</body></html>"
+        subpage_html = "<html><body><p>Subpage</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://docs.other.com/guide": self._make_response(guide_html),
+        }
+        for i in range(10):
+            url = f"https://docs.other.com/page{i}"
+            responses[url] = self._make_response(subpage_html)
+
+        docs_fetched: list[str] = []
+
+        def fake_get(url, **kwargs):
+            if "docs.other.com" in url:
+                docs_fetched.append(url)
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site(
+                "https://example.com",
+                max_pages=5,
+                max_docs_pages=3,
+            )
+
+        assert len(docs_fetched) == 3
+
+    def test_docs_limit_independent_of_seed_limit(self):
+        """Seed and docs page budgets are tracked independently."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="/page1">P1</a>'
+            '<a href="/page2">P2</a>'
+            '<a href="https://docs.ext.com/guide">Guide</a>'
+            "</body></html>"
+        )
+        page_html = "<html><body><p>Seed page</p></body></html>"
+        guide_html = (
+            "<html><body><p>Guide</p>"
+            '<a href="https://docs.ext.com/a">A</a>'
+            '<a href="https://docs.ext.com/b">B</a>'
+            "</body></html>"
+        )
+        doc_html = "<html><body><p>Doc page</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://example.com/page1": self._make_response(page_html),
+            "https://example.com/page2": self._make_response(page_html),
+            "https://docs.ext.com/guide": self._make_response(guide_html),
+            "https://docs.ext.com/a": self._make_response(doc_html),
+            "https://docs.ext.com/b": self._make_response(doc_html),
+        }
+
+        seed_fetched: list[str] = []
+        docs_fetched: list[str] = []
+
+        def fake_get(url, **kwargs):
+            if "docs.ext.com" in url:
+                docs_fetched.append(url)
+            elif "example.com" in url:
+                seed_fetched.append(url)
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site(
+                "https://example.com",
+                max_pages=2,
+                max_docs_pages=10,
+            )
+
+        # Seed limited to 2 (home + page1 or page2)
+        assert len(seed_fetched) == 2
+        # Docs not limited (all 3 fit within max_docs_pages=10)
+        assert len(docs_fetched) == 3
+
     def test_skips_failed_pages(self):
         seed_html = '<html><body><p>Home</p><a href="/docs">Docs</a></body></html>'
 
