@@ -1,11 +1,14 @@
 """Tests for loop.runner."""
 
+import os
 import subprocess
+from unittest.mock import patch
 
 import pytest
 
 from mcloop.runner import (
     _build_command,
+    _reclaim_foreground,
     _slugify,
     _write_log,
     bugs_md_has_bugs,
@@ -531,3 +534,44 @@ def test_parse_verification_output_removed_no_reason():
     assert len(results) == 1
     assert results[0][0] == "REMOVED"
     assert results[0][2] == ""
+
+
+# --- _reclaim_foreground ---
+
+
+def test_reclaim_foreground_calls_tcsetpgrp():
+    """Verify _reclaim_foreground opens /dev/tty and calls tcsetpgrp."""
+    fake_fd = 42
+    with (
+        patch("os.open", return_value=fake_fd) as mock_open,
+        patch("os.tcsetpgrp") as mock_tcsetpgrp,
+        patch("os.getpgrp", return_value=1234),
+        patch("os.close") as mock_close,
+    ):
+        _reclaim_foreground()
+        mock_open.assert_called_once_with("/dev/tty", os.O_RDWR)
+        mock_tcsetpgrp.assert_called_once_with(fake_fd, 1234)
+        mock_close.assert_called_once_with(fake_fd)
+
+
+def test_reclaim_foreground_no_tty():
+    """_reclaim_foreground silently returns when there is no tty."""
+    with (
+        patch("os.open", side_effect=OSError("no tty")),
+        patch("os.tcsetpgrp") as mock_tcsetpgrp,
+    ):
+        _reclaim_foreground()  # should not raise
+        mock_tcsetpgrp.assert_not_called()
+
+
+def test_reclaim_foreground_tcsetpgrp_fails():
+    """_reclaim_foreground silently handles tcsetpgrp OSError."""
+    fake_fd = 42
+    with (
+        patch("os.open", return_value=fake_fd),
+        patch("os.tcsetpgrp", side_effect=OSError("not a tty")),
+        patch("os.getpgrp", return_value=1234),
+        patch("os.close") as mock_close,
+    ):
+        _reclaim_foreground()  # should not raise
+        mock_close.assert_called_once_with(fake_fd)

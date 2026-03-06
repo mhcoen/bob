@@ -157,6 +157,27 @@ _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 
 
+def _reclaim_foreground() -> None:
+    """Reclaim the terminal foreground process group.
+
+    After launching a child with start_new_session=True,
+    the child may grab the foreground process group via
+    tcsetpgrp. This makes ctrl-c/ctrl-z go to the child
+    instead of mcloop. We call tcsetpgrp to reassign
+    the foreground group back to our own process group.
+    """
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR)
+    except OSError:
+        return  # no controlling terminal (e.g., CI)
+    try:
+        os.tcsetpgrp(fd, os.getpgrp())
+    except OSError:
+        pass  # not a tty or no permission
+    finally:
+        os.close(fd)
+
+
 def _run_session(
     cmd: list[str],
     cwd: Path,
@@ -180,6 +201,11 @@ def _run_session(
         start_new_session=True,
     )
     _active_process = process
+
+    # Reclaim the terminal foreground process group so
+    # ctrl-c and ctrl-z reach mcloop's signal handler
+    # instead of being sent to the child's process group.
+    _reclaim_foreground()
     if stdin_text and process.stdin:
         process.stdin.write(stdin_text)
         process.stdin.close()
