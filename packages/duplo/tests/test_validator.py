@@ -217,7 +217,28 @@ class TestValidateUrlInMain:
         out = capsys.readouterr().out
         assert "TestApp" in out
 
-    def test_multi_product_prompts_user(self, capsys):
+    def test_multi_product_select_by_number(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=["Alpha", "Beta", "Gamma"],
+            reason="Portfolio page.",
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="2"):
+                url, name = _validate_url("https://company.com")
+
+        assert url == "https://company.com"
+        assert name == "Beta"
+        out = capsys.readouterr().out
+        assert "1. Alpha" in out
+        assert "2. Beta" in out
+        assert "3. Gamma" in out
+        assert "Selected: Beta" in out
+
+    def test_multi_product_enter_url(self, capsys):
         from duplo.main import _validate_url
 
         result = ValidationResult(
@@ -232,9 +253,6 @@ class TestValidateUrlInMain:
 
         assert url == "https://alpha.example.com"
         assert name == ""
-        out = capsys.readouterr().out
-        assert "Alpha" in out
-        assert "Beta" in out
 
     def test_multi_product_user_enters_empty(self, capsys):
         from duplo.main import _validate_url
@@ -249,7 +267,60 @@ class TestValidateUrlInMain:
             with patch("builtins.input", return_value=""):
                 url, name = _validate_url("https://company.com")
 
-        assert url == "https://company.com"
+        assert url == ""
+        assert name == ""
+
+    def test_multi_product_invalid_number(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=["Alpha", "Beta"],
+            reason="Portfolio page.",
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="5"):
+                url, name = _validate_url("https://company.com")
+
+        assert url == ""
+        assert name == ""
+        out = capsys.readouterr().out
+        assert "Invalid selection" in out
+
+    def test_multi_product_invalid_text(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=["Alpha"],
+            reason="Portfolio page.",
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="not-a-url"):
+                url, name = _validate_url("https://company.com")
+
+        assert url == ""
+        assert name == ""
+        out = capsys.readouterr().out
+        assert "Not a valid number or URL" in out
+
+    def test_multi_product_no_product_list(self, capsys):
+        """When validator says multi-product but returns no product list."""
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=[],
+            reason="Unclear page.",
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="https://specific.example.com"):
+                url, name = _validate_url("https://company.com")
+
+        assert url == "https://specific.example.com"
         assert name == ""
 
     def test_validation_error_proceeds(self, capsys):

@@ -830,9 +830,11 @@ def _confirm_product(product_name: str, source_url: str) -> str:
 def _validate_url(url: str) -> tuple[str, str]:
     """Validate that *url* points to a single product.
 
-    If the page appears to list multiple products, prompt the user
-    to provide a more specific URL. Returns ``(validated_url, product_name)``
-    where *product_name* may be empty if unknown.
+    If the page appears to list multiple products, present them
+    and let the user choose one by number, enter a more specific URL,
+    or press Enter to quit. Returns ``(validated_url, product_name)``
+    where *product_name* may be empty if unknown.  Returns ``("", "")``
+    if the user cancels.
     """
     print(f"\nValidating {url} …")
     try:
@@ -848,17 +850,40 @@ def _validate_url(url: str) -> tuple[str, str]:
 
     print(f"This URL appears to list multiple products: {result.reason}")
     if result.products:
-        print("Products found:")
+        print("\nWhich product do you want to duplicate?\n")
         for i, name in enumerate(result.products, 1):
             print(f"  {i}. {name}")
-    print(
-        "\nPlease provide a URL that points to a single product,\n"
-        "or press Enter to proceed with the original URL anyway."
-    )
+        print(
+            "\nEnter a number to select a product, a URL for a specific product,\n"
+            "or press Enter to cancel."
+        )
+        choice = input("Choice: ").strip()
+        if not choice:
+            print("Cancelled.")
+            return "", ""
+        # Check if the user entered a number.
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(result.products):
+                selected = result.products[idx - 1]
+                print(f"Selected: {selected}")
+                return url, selected
+            print(f"Invalid selection: {idx}. Cancelled.")
+            return "", ""
+        except ValueError:
+            pass
+        # Treat as a URL.
+        if choice.startswith(("http://", "https://")):
+            return choice, ""
+        print(f"Not a valid number or URL: {choice}")
+        return "", ""
+    # No product list — ask for a URL.
+    print("\nPlease provide a URL that points to a single product,\nor press Enter to cancel.")
     new_url = input("Product URL: ").strip()
     if new_url:
         return new_url, ""
-    return url, ""
+    print("Cancelled.")
+    return "", ""
 
 
 def _init_project(
