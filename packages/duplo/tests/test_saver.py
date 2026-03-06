@@ -20,9 +20,11 @@ from duplo.questioner import BuildPreferences
 from duplo.saver import (
     CLAUDE_MD,
     DUPLO_JSON,
+    RAW_PAGES_DIR,
     append_phase_to_history,
     clear_in_progress,
     save_feedback,
+    save_raw_content,
     save_reference_urls,
     save_screenshot_feature_map,
     save_selections,
@@ -568,3 +570,62 @@ class TestSaveReferenceUrls:
     def test_file_ends_with_newline(self, tmp_path):
         save_reference_urls(self._RECORDS, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestSaveRawContent:
+    _HTML_A = "<html><body><h1>Page A</h1></body></html>"
+    _HTML_B = "<html><body><h1>Page B</h1></body></html>"
+    _RECORDS = [
+        PageRecord(
+            url="https://example.com",
+            fetched_at="2026-03-06T12:00:00+00:00",
+            content_hash="aaa111",
+        ),
+        PageRecord(
+            url="https://example.com/docs",
+            fetched_at="2026-03-06T12:00:01+00:00",
+            content_hash="bbb222",
+        ),
+    ]
+
+    def _raw_pages(self):
+        return {
+            "https://example.com": self._HTML_A,
+            "https://example.com/docs": self._HTML_B,
+        }
+
+    def test_creates_raw_pages_dir(self, tmp_path):
+        result = save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
+        assert result == tmp_path / RAW_PAGES_DIR
+        assert result.is_dir()
+
+    def test_saves_html_files(self, tmp_path):
+        save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert (pages_dir / "aaa111.html").read_text(encoding="utf-8") == self._HTML_A
+        assert (pages_dir / "bbb222.html").read_text(encoding="utf-8") == self._HTML_B
+
+    def test_skips_missing_urls(self, tmp_path):
+        partial = {"https://example.com": self._HTML_A}
+        save_raw_content(partial, self._RECORDS, target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert (pages_dir / "aaa111.html").exists()
+        assert not (pages_dir / "bbb222.html").exists()
+
+    def test_empty_raw_pages(self, tmp_path):
+        save_raw_content({}, self._RECORDS, target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert pages_dir.is_dir()
+        assert list(pages_dir.iterdir()) == []
+
+    def test_empty_records(self, tmp_path):
+        save_raw_content(self._raw_pages(), [], target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert list(pages_dir.iterdir()) == []
+
+    def test_overwrites_existing_files(self, tmp_path):
+        save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
+        new_html = "<html><body><h1>Updated</h1></body></html>"
+        save_raw_content({"https://example.com": new_html}, self._RECORDS[:1], target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert (pages_dir / "aaa111.html").read_text(encoding="utf-8") == new_html

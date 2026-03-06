@@ -117,7 +117,7 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
 
 def fetch_site(
     url: str, max_pages: int = 10, max_docs_pages: int = 50
-) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord]]:
+) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
@@ -132,13 +132,16 @@ def fetch_site(
     (cross-domain docs sites). Doc pages are individually small but
     collectively important, so this defaults higher than *max_pages*.
 
-    Returns a tuple of ``(text, code_examples, doc_structures, page_records)``
+    Returns a tuple of
+    ``(text, code_examples, doc_structures, page_records, raw_pages)``
     where *text* is concatenated text content from all visited pages,
     *code_examples* is a list of :class:`CodeExample` objects,
     *doc_structures* is a :class:`DocStructures` with feature tables,
-    operation lists, unit lists, and function references, and
+    operation lists, unit lists, and function references,
     *page_records* is a list of :class:`PageRecord` with URL, timestamp,
-    and content hash for every successfully fetched page.
+    and content hash for every successfully fetched page, and
+    *raw_pages* is a dict mapping each fetched URL to its raw HTML content
+    so re-runs can diff against what changed on the product site.
     """
     visited: set[str] = set()
     queued: set[str] = set()
@@ -146,6 +149,7 @@ def fetch_site(
     all_examples: list[CodeExample] = []
     all_structures = DocStructures()
     all_records: list[PageRecord] = []
+    raw_pages: dict[str, str] = {}
     docs_domains: set[str] = set()
     seed_visited = 0
     docs_visited = 0
@@ -196,6 +200,7 @@ def fetch_site(
             content_hash=hashlib.sha256(html.encode()).hexdigest(),
         )
         all_records.append(record)
+        raw_pages[current_url] = html
 
         text = extract_text(html)
         if text:
@@ -223,7 +228,7 @@ def fetch_site(
                     queue.append((link_score, link_url))
                     queued.add(link_norm)
 
-    return "\n\n".join(results), all_examples, all_structures, all_records
+    return "\n\n".join(results), all_examples, all_structures, all_records, raw_pages
 
 
 def fetch_text(url: str) -> str:

@@ -37,6 +37,7 @@ from duplo.saver import (
     clear_in_progress,
     get_current_phase,
     save_feedback,
+    save_raw_content,
     save_reference_urls,
     save_roadmap,
     save_screenshot_feature_map,
@@ -68,7 +69,7 @@ def main() -> None:
         print(f"Created project directory: {project_dir}")
 
         print(f"\nFetching {args.url} …")
-        text, code_examples, doc_structures, page_records = fetch_site(args.url)
+        text, code_examples, doc_structures, page_records, raw_pages = fetch_site(args.url)
         print(text)
         if code_examples:
             print(f"\nExtracted {len(code_examples)} code example(s) from docs.")
@@ -110,6 +111,7 @@ def main() -> None:
             code_examples=code_examples,
             doc_structures=doc_structures,
             page_records=page_records,
+            raw_pages=raw_pages,
         )
 
         if roadmap:
@@ -142,6 +144,7 @@ def _init_project(
     code_examples: list | None,
     doc_structures=None,
     page_records: list | None = None,
+    raw_pages: dict[str, str] | None = None,
 ) -> list | None:
     """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
 
@@ -162,6 +165,9 @@ def _init_project(
     if page_records:
         save_reference_urls(page_records, target_dir=project_dir)
         print(f"Saved {len(page_records)} reference URL(s) to duplo.json.")
+        if raw_pages:
+            save_raw_content(raw_pages, page_records, target_dir=project_dir)
+            print(f"Saved raw content for {len(raw_pages)} page(s).")
     if code_examples:
         print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
         test_source = generate_test_source(code_examples, project_name=project_name)

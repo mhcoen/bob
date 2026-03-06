@@ -400,6 +400,41 @@ def save_reference_urls(
     return path
 
 
+RAW_PAGES_DIR = ".duplo/raw_pages"
+
+
+def save_raw_content(
+    raw_pages: dict[str, str],
+    records: list[PageRecord],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save raw HTML content for each scraped page.
+
+    Writes each page's HTML to ``.duplo/raw_pages/<content_hash>.html``
+    so that re-runs can diff against what changed on the product site.
+    The content hash from *records* is used as the filename, linking
+    each file to its corresponding :class:`PageRecord`.
+
+    Args:
+        raw_pages: Dict mapping URL to raw HTML content.
+        records: List of :class:`PageRecord` with content hashes.
+        target_dir: Directory containing ``.duplo/``.
+
+    Returns:
+        Path to the ``raw_pages`` directory.
+    """
+    pages_dir = Path(target_dir) / RAW_PAGES_DIR
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    for record in records:
+        html = raw_pages.get(record.url)
+        if html is None:
+            continue
+        page_path = pages_dir / f"{record.content_hash}.html"
+        page_path.write_text(html, encoding="utf-8")
+    return pages_dir
+
+
 def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     """Write ``CLAUDE.md`` with appshot instructions to *target_dir*.
 
