@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from mcloop.checks import CheckResult
-from mcloop.main import _checkpoint, _commit, run_loop
+from mcloop.main import _checkpoint, _commit, _run_audit_fix_cycle, run_loop
 from mcloop.runner import RunResult
 
 
@@ -54,7 +54,7 @@ def test_full_cycle_two_tasks(
     md = _make_project(tmp_path, "- [ ] Task one\n- [ ] Task two\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md)
+    stuck = run_loop(md, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
@@ -64,12 +64,10 @@ def test_full_cycle_two_tasks(
     assert "- [ ]" not in content
     assert content.count("- [x]") == 2
 
-    # Notifications: one "Completed" per task + "All tasks completed"
+    # Only "All tasks completed" — no per-task notifications
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 3
-    assert calls[0] == ("Completed: Task one", "info")
-    assert calls[1] == ("Completed: Task two", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -88,19 +86,17 @@ def test_nested_subtasks(
     )
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md)
+    stuck = run_loop(md, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
     content = md.read_text()
     assert "- [ ]" not in content
 
-    # Notifications: one per child + all done. Parent auto-check has no notification.
+    # Only "All tasks completed" — no per-task notifications
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 3
-    assert calls[0] == ("Completed: Child A", "info")
-    assert calls[1] == ("Completed: Child B", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -116,19 +112,17 @@ def test_retry_then_succeed(
     md = _make_project(tmp_path, "- [ ] Flaky task\n")
     mock_run.side_effect = [_fail_run_result(), _ok_run_result()]
 
-    stuck = run_loop(md, max_retries=3)
+    stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
     content = md.read_text()
     assert "- [x] Flaky task" in content
 
-    # Notifications: one failure + one completion + all done
+    # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 3
-    assert calls[0] == ("Task failed (attempt 1/3): Flaky task", "error")
-    assert calls[1] == ("Completed: Flaky task", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -148,18 +142,16 @@ def test_checks_fail_then_pass(
         CheckResult(passed=True, output="ok", command="ruff check ."),
     ]
 
-    stuck = run_loop(md, max_retries=3)
+    stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
     assert mock_checks.call_count == 2
 
-    # Notifications: one check failure + one completion + all done
+    # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 3
-    assert calls[0] == ("Checks failed (attempt 1/3): Needs fixing", "error")
-    assert calls[1] == ("Completed: Needs fixing", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -182,13 +174,10 @@ def test_max_retries_exhausted_stops_loop(
     assert "- [!] Hopeless task" in content
     assert "- [ ] Next task" in content
 
-    # Notifications: one error per attempt + giving up. No "all done".
+    # Only "giving up" after all retries exhausted — no per-retry notifications
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 4
-    assert calls[0] == ("Task failed (attempt 1/3): Hopeless task", "error")
-    assert calls[1] == ("Task failed (attempt 2/3): Hopeless task", "error")
-    assert calls[2] == ("Task failed (attempt 3/3): Hopeless task", "error")
-    assert calls[3] == ("Giving up on: Hopeless task", "error")
+    assert len(calls) == 1
+    assert calls[0] == ("Giving up on: Hopeless task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -208,18 +197,17 @@ def test_rate_limit_notifies(
     ]
 
     with patch("mcloop.main.wait_for_reset", return_value="claude"):
-        stuck = run_loop(md, max_retries=3)
+        stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
 
-    # Notifications: rate-limit warning + completed + all done
+    # Rate-limit warning + all done (no per-task completion notification)
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[0][1] == "warning"
     assert "Rate-limited" in calls[0][0]
-    assert calls[1] == ("Completed: Task", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert calls[1] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.time.sleep")
@@ -246,7 +234,7 @@ def test_session_limit_polls_then_retries(
         _ok_run_result(),
     ]
 
-    stuck = run_loop(md, max_retries=3)
+    stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
@@ -254,7 +242,8 @@ def test_session_limit_polls_then_retries(
 
     calls = _notify_calls(mock_notify)
     assert any("Polling every 10m" in msg for msg, _ in calls)
-    assert any("Retrying" in msg for msg, _ in calls)
+    # No "retrying" notification — session limit was already reported
+    assert not any("Retrying" in msg for msg, _ in calls)
     assert calls[-1] == ("All tasks completed!", "info")
 
 
@@ -271,16 +260,15 @@ def test_skips_already_checked_no_extra_notifications(
     md = _make_project(tmp_path, "- [x] Done already\n- [ ] Still todo\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md)
+    stuck = run_loop(md, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 1
 
-    # Only notifications for the one task that ran + all done
+    # Only "All tasks completed" — no per-task notifications
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 2
-    assert calls[0] == ("Completed: Still todo", "info")
-    assert calls[1] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -306,12 +294,9 @@ def test_noop_task_treated_as_failure(
     assert "- [!] Already done task" in content
 
     calls = _notify_calls(mock_notify)
-    # Three no-op errors + giving up; no "all done"
-    assert len(calls) == 4
-    assert calls[0] == ("No-op task (attempt 1/3): Already done task", "error")
-    assert calls[1] == ("No-op task (attempt 2/3): Already done task", "error")
-    assert calls[2] == ("No-op task (attempt 3/3): Already done task", "error")
-    assert calls[3] == ("Giving up on: Already done task", "error")
+    # Only "giving up" — no per-retry notifications
+    assert len(calls) == 1
+    assert calls[0] == ("Giving up on: Already done task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -328,7 +313,7 @@ def test_noop_then_changes_succeeds(
 
     # First attempt: no changes. Second attempt: changes present.
     with patch("mcloop.main._has_meaningful_changes", side_effect=[False, True]):
-        stuck = run_loop(md, max_retries=3)
+        stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
@@ -336,10 +321,10 @@ def test_noop_then_changes_succeeds(
     content = md.read_text()
     assert "- [x] Retry task" in content
 
+    # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
-    assert calls[0] == ("No-op task (attempt 1/3): Retry task", "error")
-    assert calls[1] == ("Completed: Retry task", "info")
-    assert calls[2] == ("All tasks completed!", "info")
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
 
 
 @patch("mcloop.main.notify")
@@ -363,9 +348,10 @@ def test_noop_with_max_retries_one(
     content = md.read_text()
     assert "- [!] One-shot task" in content
 
+    # Only "giving up" — no per-retry notifications
     calls = _notify_calls(mock_notify)
-    assert calls[0] == ("No-op task (attempt 1/1): One-shot task", "error")
-    assert calls[1] == ("Giving up on: One-shot task", "error")
+    assert len(calls) == 1
+    assert calls[0] == ("Giving up on: One-shot task", "error")
 
 
 # --- _commit unit tests ---
@@ -491,7 +477,7 @@ def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock
     """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")
 
-    stuck = run_loop(md)
+    stuck = run_loop(md, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 0
@@ -569,9 +555,69 @@ def test_checkpoint_called_before_loop(
     md = _make_project(tmp_path, "- [ ] Task one\n")
     mock_run.return_value = _ok_run_result()
 
-    run_loop(md)
+    run_loop(md, no_audit=True)
 
     # Called once at start (no next_task) and once before the task
     assert mock_checkpoint.call_count >= 1
     # First call is the initial checkpoint
     assert mock_checkpoint.call_args_list[0] == call(tmp_path)
+
+
+# --- Audit notification tests ---
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._save_audit_hash")
+@patch("mcloop.main._should_skip_audit", return_value=False)
+@patch("mcloop.main.run_audit")
+def test_audit_notifies_no_bugs(mock_audit, mock_skip, mock_save, mock_notify, tmp_path):
+    """Audit cycle notifies when no bugs are found."""
+    mock_audit.return_value = _ok_run_result()
+    # No BUGS.md written by audit session
+
+    _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    calls = _notify_calls(mock_notify)
+    assert len(calls) == 1
+    assert calls[0] == ("Audit complete: no bugs found.", "info")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._save_audit_hash")
+@patch("mcloop.main._should_skip_audit", return_value=False)
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_post_fix_review")
+@patch("mcloop.main.run_bug_fix")
+@patch("mcloop.main.run_bug_verify")
+@patch("mcloop.main.run_audit")
+def test_audit_notifies_bugs_fixed(
+    mock_audit,
+    mock_verify,
+    mock_fix,
+    mock_review,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_save,
+    mock_skip,
+    mock_notify,
+    tmp_path,
+):
+    """Audit cycle notifies when bugs are found and fixed."""
+    bugs_path = tmp_path / "BUGS.md"
+
+    def write_bugs(*args, **kwargs):
+        bugs_path.write_text("# Bugs\n\n## Bug 1\nSomething wrong\n")
+        return _ok_run_result()
+
+    mock_audit.side_effect = write_bugs
+    mock_verify.return_value = _ok_run_result(output="CONFIRMED: Bug 1")
+    mock_fix.return_value = _ok_run_result()
+    mock_review.return_value = _ok_run_result(output="LGTM no problems")
+
+    _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    calls = _notify_calls(mock_notify)
+    assert any("Audit complete" in msg for msg, _ in calls)

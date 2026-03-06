@@ -199,10 +199,7 @@ def run_loop(
                     )
                     print("\nExiting.", flush=True)
                     return [task.text]
-                notify(
-                    "Retrying after session limit pause.",
-                    level="info",
-                )
+                # No notification on retry — session limit was already reported
                 attempt -= 1  # don't count as a real attempt
                 continue
 
@@ -226,10 +223,6 @@ def run_loop(
                     flush=True,
                 )
                 _print_error_tail(result.output)
-                notify(
-                    f"Task failed (attempt {attempt}/{max_retries}): " + task.text,
-                    level="error",
-                )
                 continue
 
             if not _has_meaningful_changes(project_dir):
@@ -237,10 +230,6 @@ def run_loop(
                 print(
                     f"\n!!! No-op task (attempt {attempt}/{max_retries}): {task.text}",
                     flush=True,
-                )
-                notify(
-                    f"No-op task (attempt {attempt}/{max_retries}): " + task.text,
-                    level="error",
                 )
                 continue
 
@@ -262,7 +251,6 @@ def run_loop(
                     result.output,
                     changed_files=changed_files,
                 )
-                notify(f"Completed: {task.text}")
                 success = True
                 break
             else:
@@ -274,10 +262,7 @@ def run_loop(
                     flush=True,
                 )
                 _print_error_tail(check_result.output)
-                notify(
-                    f"Checks failed (attempt {attempt}/{max_retries}): " + task.text,
-                    level="error",
-                )
+                # No notification on individual retry — only after all retries exhausted
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -970,7 +955,13 @@ def _run_audit_fix_cycle(
         )
         if not fixed:
             # No bugs found or fixed — no need for another round
+            if round_num == 1:
+                notify("Audit complete: no bugs found.")
+            else:
+                notify("Audit complete: fixes verified, no new bugs.")
             break
+        if round_num == max_rounds:
+            notify("Audit complete: bugs fixed.")
 
     _save_audit_hash(project_dir)
 
