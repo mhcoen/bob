@@ -40,5 +40,5 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Run McLoop for the next phase
 - [ ] State management
   - [ ] Store all state in duplo.json: source URL, features, phases, feedback
-  - [ ] Support resuming after interruption (duplo run picks up where it left off)
+  - [x] Support resuming after interruption (duplo run picks up where it left off)
   - [ ] Track which reference screenshots map to which features
