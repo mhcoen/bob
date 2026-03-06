@@ -99,7 +99,7 @@ over-abstraction. This is a simple tool and should stay that way.
 - [x] Debugging instruction in task prompt (read crash reports first)
 - [x] CLAUDE.md update instruction in task prompt
 - [x] Visual verification with bin/appshot
-- [ ] Retry on session limit: poll every 10 minutes instead of sleeping forever, resume the loop when the limit resets
+- [x] Retry on session limit: poll every 10 minutes instead of sleeping forever, resume the loop when the limit resets
 - [ ] Post-fix verification: after each bug fix succeeds and checks pass, run a focused review session on only the changed files to verify the fix did not introduce new bugs. Feed it the original bug description and the diff. If it finds a problem, feed it back into the fix loop before committing.
 - [ ] Pre-fix bug verification: after the audit writes BUGS.md, run a separate verification session that reads each reported bug and checks it against the actual source code. Remove any bug that is incorrect (code doesn't match the description, the issue was already handled, the bug is hypothetical). Print to the terminal: "Verifying N bugs..." then for each bug either "CONFIRMED: <file:line> <title>" or "REMOVED: <file:line> <title> (reason)". Rewrite BUGS.md with only confirmed bugs before the fix cycle runs. If all bugs are removed, skip the fix cycle and print "All reported bugs were false positives."
 - [ ] Two-round audit cycle: run the full audit/verify/fix cycle twice. The second round catches bugs introduced by the first round's fixes. After the second round completes, save the audit hash and stop. Do not loop beyond two rounds.
