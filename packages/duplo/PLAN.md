@@ -38,7 +38,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Generate next phase PLAN.md incorporating feedback and visual issues
   - [x] Append completed phases to duplo.json history
   - [x] Run McLoop for the next phase
-- [ ] State management
+- [x] State management
   - [x] Store all state in duplo.json: source URL, features, phases, feedback
   - [x] Support resuming after interruption (duplo run picks up where it left off)
-  - [ ] Track which reference screenshots map to which features
+  - [x] Track which reference screenshots map to which features

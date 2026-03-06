@@ -163,7 +163,7 @@ def _cmd_run() -> None:
     in_progress = data.get("in_progress")
 
     # If Phase 1 is already recorded in history it is complete.
-    history = data.get("history", [])
+    history = data.get("phases", [])
     if any(re.search(r"^Phase\s+1\b", h.get("phase", ""), re.IGNORECASE) for h in history):
         print("Phase 1 already complete. Run 'duplo next' to continue.")
         return
@@ -243,7 +243,7 @@ def _execute_phase(
 
 def _compare_with_references(current: Path) -> None:
     """Compare *current* screenshot against any reference images and print results."""
-    ref_dir = Path("screenshots") / "reference"
+    ref_dir = Path("screenshots")
     references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []
     if not references:
         print("No reference screenshots found — skipping visual comparison.")
