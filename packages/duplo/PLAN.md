@@ -91,7 +91,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Analyze any new files the same way as first run (images to Vision, PDFs to text, URLs to scraper)
   - [x] Re-scrape the product URL with the improved deep extractor if the URL was already known
   - [x] Compare newly extracted features and examples against existing PLAN.md
-  - [ ] Append new unchecked tasks for missing features, uncovered examples, and design refinements
+  - [x] Append new unchecked tasks for missing features, uncovered examples, and design refinements
   - [ ] Never modify or remove existing tasks (checked or unchecked)
   - [ ] Print a summary of what was found and what was added
 - [ ] Video reference extraction
