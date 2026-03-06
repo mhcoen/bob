@@ -33,11 +33,11 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Compare screenshots against reference images via Claude API
   - [x] Generate visual issue list
   - [x] Notify user that phase is complete and ready for testing
-- [ ] Feedback and iteration
+- [x] Feedback and iteration
   - [x] Collect user feedback (text input or from a file)
   - [x] Generate next phase PLAN.md incorporating feedback and visual issues
   - [x] Append completed phases to duplo.json history
-  - [ ] Run McLoop for the next phase
+  - [x] Run McLoop for the next phase
 - [ ] State management
   - [ ] Store all state in duplo.json: source URL, features, phases, feedback
   - [ ] Support resuming after interruption (duplo run picks up where it left off)
