@@ -98,7 +98,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Detect video files in the project directory (mp4, mov, webm, avi)
   - [x] Use ffmpeg scene change detection to extract frames at visual transition points
   - [x] Deduplicate similar frames using perceptual image hashing
-  - [ ] Send candidate frames to Claude Vision to filter: keep only clear, stable screenshots of the application showing a distinct UI state. Discard transitions, blur, marketing overlays, loading screens.
+  - [x] Send candidate frames to Claude Vision to filter: keep only clear, stable screenshots of the application showing a distinct UI state. Discard transitions, blur, marketing overlays, loading screens.
   - [ ] For each accepted frame, ask Claude Vision to describe what UI state it shows (main view, settings panel, dialog, menu, etc.)
   - [ ] Store accepted frames in .duplo/references/ with their UI state descriptions
   - [ ] Include extracted frames in the same analysis pipeline as user-provided screenshots
