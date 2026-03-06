@@ -14,24 +14,34 @@ _MODEL = "claude-haiku-4-5-20251001"
 _SYSTEM = """\
 You are a product analyst. Given text scraped from a URL, determine whether
 it represents a single, clearly identifiable product or software project,
-or whether it is a company homepage / portfolio page listing multiple
-distinct products.
+a company homepage / portfolio page listing multiple distinct products,
+or a landing page with unclear product boundaries.
 
 Return ONLY a JSON object with these fields:
-  "single_product" – true if the page is about one specific product, false
-                     if it lists multiple distinct products or is a company
-                     portfolio page
-  "product_name"   – name of the product (if single_product is true), or
-                     empty string
-  "products"       – if single_product is false, a list of product names
-                     found on the page (up to 10). Empty list if
-                     single_product is true.
-  "reason"         – one-sentence explanation of your assessment
+  "single_product"       – true if the page is about one specific product,
+                           false otherwise
+  "unclear_boundaries"   – true if the page is a landing page or marketing
+                           site where it is hard to tell what the specific
+                           product is — the page is too vague, generic, or
+                           broad to identify a concrete product to duplicate.
+                           false if the product(s) are clearly identifiable.
+  "product_name"         – name of the product (if single_product is true),
+                           or empty string
+  "products"             – if single_product is false and unclear_boundaries
+                           is false, a list of product names found on the
+                           page (up to 10). Empty list otherwise.
+  "reason"               – one-sentence explanation of your assessment
 
 A page is "single product" if it focuses on one tool, library, service,
 or application—even if that product has many features. A page is "multiple
 products" if it showcases a suite or portfolio of separate, independently
 named products (e.g. "Google Cloud" listing Compute Engine, BigQuery, etc.).
+A page has "unclear boundaries" if it is a generic landing page, platform
+overview, or marketing site where the product boundaries are vague — you
+cannot clearly name what specific product someone would duplicate from it
+(e.g. a consulting firm's homepage, a generic "AI platform" page with no
+concrete product, or a page that describes capabilities without naming a
+specific tool or service).
 """
 
 _MAX_CONTENT_CHARS = 30_000
@@ -45,6 +55,7 @@ class ValidationResult:
     product_name: str
     products: list[str]
     reason: str
+    unclear_boundaries: bool = False
 
 
 def validate_product_url(
@@ -124,4 +135,5 @@ def _parse_result(raw: str) -> ValidationResult:
         product_name=str(data.get("product_name", "")),
         products=[str(p) for p in data.get("products", [])],
         reason=str(data.get("reason", "")),
+        unclear_boundaries=bool(data.get("unclear_boundaries", False)),
     )

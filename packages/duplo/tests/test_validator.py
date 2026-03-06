@@ -60,6 +60,33 @@ class TestParseResult:
         assert result.single_product is True
         assert "Unexpected" in result.reason
 
+    def test_parses_unclear_boundaries(self):
+        raw = json.dumps(
+            {
+                "single_product": False,
+                "unclear_boundaries": True,
+                "product_name": "",
+                "products": [],
+                "reason": "Generic landing page.",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.single_product is False
+        assert result.unclear_boundaries is True
+        assert result.products == []
+
+    def test_unclear_boundaries_defaults_false(self):
+        raw = json.dumps(
+            {
+                "single_product": True,
+                "product_name": "Widget",
+                "products": [],
+                "reason": "ok",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.unclear_boundaries is False
+
     def test_missing_fields_use_defaults(self):
         raw = json.dumps({"single_product": False})
         result = _parse_result(raw)
@@ -67,6 +94,7 @@ class TestParseResult:
         assert result.product_name == ""
         assert result.products == []
         assert result.reason == ""
+        assert result.unclear_boundaries is False
 
 
 class TestValidateProductUrl:
@@ -322,6 +350,61 @@ class TestValidateUrlInMain:
 
         assert url == "https://specific.example.com"
         assert name == ""
+
+    def test_unclear_boundaries_user_describes_product(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=[],
+            reason="Generic AI platform page.",
+            unclear_boundaries=True,
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="Their chatbot widget"):
+                url, name = _validate_url("https://vague-platform.com")
+
+        assert url == "https://vague-platform.com"
+        assert name == "Their chatbot widget"
+        out = capsys.readouterr().out
+        assert "unclear product boundaries" in out
+
+    def test_unclear_boundaries_user_enters_url(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=[],
+            reason="Generic landing page.",
+            unclear_boundaries=True,
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value="https://specific.example.com/product"):
+                url, name = _validate_url("https://vague.example.com")
+
+        assert url == "https://specific.example.com/product"
+        assert name == ""
+
+    def test_unclear_boundaries_user_cancels(self, capsys):
+        from duplo.main import _validate_url
+
+        result = ValidationResult(
+            single_product=False,
+            product_name="",
+            products=[],
+            reason="Vague page.",
+            unclear_boundaries=True,
+        )
+        with patch("duplo.main.validate_product_url", return_value=result):
+            with patch("builtins.input", return_value=""):
+                url, name = _validate_url("https://vague.example.com")
+
+        assert url == ""
+        assert name == ""
+        out = capsys.readouterr().out
+        assert "Cancelled" in out
 
     def test_validation_error_proceeds(self, capsys):
         from duplo.main import _validate_url

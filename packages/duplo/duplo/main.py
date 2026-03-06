@@ -848,6 +848,22 @@ def _validate_url(url: str) -> tuple[str, str]:
         print(f"Identified product: {label}")
         return url, result.product_name
 
+    if result.unclear_boundaries:
+        print(f"This URL has unclear product boundaries: {result.reason}")
+        print(
+            "\nDuplo can't tell what specific product to duplicate from this page.\n"
+            "Please describe the product you want, enter a more specific URL,\n"
+            "or press Enter to cancel."
+        )
+        choice = input("Product or URL: ").strip()
+        if not choice:
+            print("Cancelled.")
+            return "", ""
+        if choice.startswith(("http://", "https://")):
+            return choice, ""
+        # Treat as a product description — use it as the product name.
+        return url, choice
+
     print(f"This URL appears to list multiple products: {result.reason}")
     if result.products:
         print("\nWhich product do you want to duplicate?\n")
