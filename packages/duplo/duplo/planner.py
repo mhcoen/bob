@@ -230,6 +230,17 @@ Generate the PLAN.md now.
     return message.content[0].text.strip()
 
 
+def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
+    """Append documentation-example test tasks to a generated plan.
+
+    Inserts the tasks before the final checklist item if one exists,
+    or appends them at the end.
+    """
+    if not test_tasks:
+        return plan
+    return plan.rstrip() + "\n" + "\n".join(test_tasks) + "\n"
+
+
 def save_plan(
     content: str,
     *,

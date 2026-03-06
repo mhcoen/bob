@@ -16,10 +16,21 @@ from duplo.extractor import Feature, extract_features
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
-from duplo.planner import generate_next_phase_plan, generate_phase_plan, save_plan
+from duplo.planner import (
+    append_test_tasks,
+    generate_next_phase_plan,
+    generate_phase_plan,
+    save_plan,
+)
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 from duplo.runner import run_mcloop
+from duplo.test_generator import (
+    generate_plan_test_tasks,
+    generate_test_source,
+    load_code_examples,
+    save_test_file,
+)
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -99,6 +110,11 @@ def main() -> None:
         print(f"\nSelections saved to {saved}")
         if code_examples:
             print(f"Saved {len(code_examples)} code example(s) to duplo.json.")
+            test_source = generate_test_source(code_examples, project_name=project_name)
+            if test_source:
+                tests_dir = project_dir / "tests"
+                test_path = save_test_file(test_source, target_dir=tests_dir)
+                print(f"Generated {len(code_examples)} test case(s) in {test_path}")
         if doc_structures:
             print("Saved doc structures to duplo.json.")
 
@@ -261,6 +277,10 @@ def _cmd_run() -> None:
         phase=phase_info,
         project_name=data.get("app_name", ""),
     )
+    doc_examples = load_code_examples()
+    test_tasks = generate_plan_test_tasks(doc_examples)
+    if test_tasks:
+        content = append_test_tasks(content, test_tasks)
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
     _execute_phase(content, app_name, phase_label)
