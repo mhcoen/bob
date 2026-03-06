@@ -34,55 +34,64 @@ test, add more if needed, run duplo again.
 
 ## What Duplo does on first run
 
-1. **Scans reference materials.** Images (png, jpg, gif, webp), PDFs,
-   text/markdown files, and any file containing URLs. Each file is
-   assessed for relevance (tiny images and empty files are flagged).
+1. **Scans reference materials.** Images (png, jpg, gif, webp), videos
+   (mp4, mov, webm, avi), PDFs, text/markdown files, and any file
+   containing URLs. Each file is assessed for relevance (tiny images
+   and empty files are flagged).
 
-2. **Validates the product URL.** Checks that the URL points to a
+2. **Extracts frames from videos.** If video files are present and
+   ffmpeg is installed, extracts frames at scene-change points,
+   deduplicates near-identical frames using perceptual hashing, and
+   filters them with Claude Vision to keep only clear UI screenshots.
+   Each accepted frame is described (e.g., "settings panel", "main
+   dashboard") and stored in `.duplo/references/`.
+
+3. **Validates the product URL.** Checks that the URL points to a
    single clear product, not a company portfolio or homepage with
    multiple products. If ambiguous, asks you to clarify.
 
-3. **Confirms the product.** States what it thinks it's duplicating
+4. **Confirms the product.** States what it thinks it's duplicating
    and gets your confirmation before proceeding.
 
-4. **Extracts visual design from images.** Sends reference screenshots
-   to Claude Vision to extract colors, fonts, spacing, layout, and
-   component styles. These become design requirements in the build plan.
+5. **Extracts visual design from images.** Sends reference screenshots
+   and accepted video frames to Claude Vision to extract colors, fonts,
+   spacing, layout, and component styles. These become design
+   requirements in the build plan.
 
-5. **Extracts text from PDFs.** Pulls text content from all PDF pages
+6. **Extracts text from PDFs.** Pulls text content from all PDF pages
    and includes it in the feature analysis.
 
-6. **Crawls product documentation.** Follows links from the product
+7. **Crawls product documentation.** Follows links from the product
    URL, prioritizing documentation, features, and API references over
    marketing and legal pages. Follows documentation links even if they
    leave the main domain (docs are often hosted separately). Extracts
    code examples as input/expected output pairs, plus feature tables,
    operation lists, and function references.
 
-7. **Extracts features.** Uses Claude to analyze all collected text
+8. **Extracts features.** Uses Claude to analyze all collected text
    and produce a structured feature list grouped by category.
 
-8. **Interactive selection.** Presents the features and asks which to
+9. **Interactive selection.** Presents the features and asks which to
    include. Then asks about platform, language, constraints, and
    preferences.
 
-9. **Generates a phased roadmap.** Breaks the selected features into
-   phases, starting with the smallest end-to-end working thing. Each
-   phase has a title, goal, feature list, and test criteria.
+10. **Generates a phased roadmap.** Breaks the selected features into
+    phases, starting with the smallest end-to-end working thing. Each
+    phase has a title, goal, feature list, and test criteria.
 
-10. **Generates test cases from documentation.** Every code example
+11. **Generates test cases from documentation.** Every code example
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-11. **Builds Phase 1.** Generates a PLAN.md for Phase 1, writes
+12. **Builds Phase 1.** Generates a PLAN.md for Phase 1, writes
     CLAUDE.md and mcloop.json, and runs McLoop to build it.
 
-12. **Captures and compares screenshots.** After McLoop finishes,
+13. **Captures and compares screenshots.** After McLoop finishes,
     uses appshot to capture a screenshot of the built app and compares
     it against reference images. Visual differences are saved to
     ISSUES.md.
 
-13. **Cleans up.** Moves processed reference files to
+14. **Cleans up.** Moves processed reference files to
     `.duplo/references/` and saves a file hash manifest for detecting
     changes on subsequent runs.
 
@@ -125,7 +134,15 @@ pip install -e .
 - [McLoop](https://github.com/mhcoen/mcloop) (`pip install -e ~/proj/mcloop`)
 - `claude` CLI on PATH
 - macOS for appshot screenshot verification
-- ffmpeg on PATH for video reference extraction (optional)
+- [ffmpeg](https://ffmpeg.org/) on PATH for video reference extraction (optional).
+  When video files (mp4, mov, webm, avi) are present in the project directory,
+  Duplo uses ffmpeg to extract frames at scene-change points, deduplicates
+  them with perceptual hashing, filters them with Claude Vision to keep only
+  clear UI screenshots, and includes the accepted frames in design extraction
+  alongside user-provided images. Install with `brew install ffmpeg` (macOS),
+  `apt install ffmpeg` (Debian/Ubuntu), or download from
+  [ffmpeg.org](https://ffmpeg.org/download.html). If ffmpeg is not installed,
+  video files are skipped with a warning.
 
 ## Development
 
