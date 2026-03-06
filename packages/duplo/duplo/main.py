@@ -39,6 +39,7 @@ from duplo.test_generator import (
     save_test_file,
 )
 from duplo.validator import validate_product_url
+from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.saver import (
@@ -190,6 +191,13 @@ def _first_run() -> None:
                 video_frames.extend(vr.frames)
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
+            print("Filtering frames with Vision …")
+            decisions = filter_frames(video_frames)
+            video_frames = apply_filter(decisions)
+            kept = sum(1 for d in decisions if d.keep)
+            rejected = len(decisions) - kept
+            if rejected:
+                print(f"  Kept {kept}, rejected {rejected} frame(s)")
 
     # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
@@ -336,8 +344,19 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                     print(f"  {vr.source.name}: {len(vr.frames)} frame(s)")
                     video_frames.extend(vr.frames)
             summary.videos_found = len(relevant_vids)
-            summary.video_frames_extracted = len(video_frames)
             analyzed_anything = True
+
+            # Filter frames with Vision before design extraction.
+            if video_frames:
+                print("Filtering frames with Vision …")
+                decisions = filter_frames(video_frames)
+                video_frames = apply_filter(decisions)
+                kept = sum(1 for d in decisions if d.keep)
+                rejected = len(decisions) - kept
+                if rejected:
+                    print(f"  Kept {kept}, rejected {rejected} frame(s)")
+
+            summary.video_frames_extracted = len(video_frames)
 
             # Send extracted video frames through design extraction.
             if video_frames:
