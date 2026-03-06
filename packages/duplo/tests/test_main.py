@@ -10,7 +10,7 @@ import pytest
 
 from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
-from duplo.main import _analyze_new_files, _init_project, main
+from duplo.main import _analyze_new_files, _init_project, _rescrape_product_url, main
 from duplo.questioner import BuildPreferences
 
 _DUPLO_JSON = ".duplo/duplo.json"
@@ -902,3 +902,99 @@ class TestAnalyzeNewFiles:
         assert "new image" in out.lower() or "Vision" in out
         data = _read_duplo_json(tmp_path)
         assert data["design_requirements"]["colors"] == {"primary": "#abc"}
+
+
+class TestRescrapeProductUrl:
+    """Tests for _rescrape_product_url()."""
+
+    def test_rescrapes_source_url(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
+        ) as mock_fetch:
+            with patch("duplo.main.save_reference_urls") as mock_save_urls:
+                with patch("duplo.main.save_raw_content") as mock_save_raw:
+                    _rescrape_product_url()
+
+        mock_fetch.assert_called_once_with("https://example.com")
+        mock_save_urls.assert_called_once()
+        mock_save_raw.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Re-scraping" in out
+        assert "1 page record" in out
+
+    def test_skips_when_no_source_url(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        with patch("duplo.main.fetch_site") as mock_fetch:
+            _rescrape_product_url()
+
+        mock_fetch.assert_not_called()
+        assert capsys.readouterr().out == ""
+
+    def test_skips_when_no_duplo_json(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.fetch_site") as mock_fetch:
+            _rescrape_product_url()
+
+        mock_fetch.assert_not_called()
+
+    def test_handles_fetch_failure(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        with patch("duplo.main.fetch_site", side_effect=Exception("network error")):
+            _rescrape_product_url()
+
+        out = capsys.readouterr().out
+        assert "Failed to re-scrape" in out
+        assert "network error" in out
+
+    def test_saves_code_examples(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        examples = [{"input": "1+1", "expected_output": "2", "source_url": "", "language": "py"}]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", examples, None, [], {}),
+        ):
+            with patch("duplo.main.save_examples") as mock_save_ex:
+                _rescrape_product_url()
+
+        mock_save_ex.assert_called_once_with(examples)
+        out = capsys.readouterr().out
+        assert "1 code example" in out
+
+    def test_subsequent_run_calls_rescrape(self, tmp_path, monkeypatch):
+        """Integration: _subsequent_run calls _rescrape_product_url."""
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main._rescrape_product_url") as mock_rescrape:
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                    with patch("duplo.main.run_mcloop", return_value=0):
+                        main()
+
+        mock_rescrape.assert_called_once()

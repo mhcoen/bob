@@ -329,6 +329,40 @@ def _load_existing_urls() -> set[str]:
     return {r["url"] for r in records if "url" in r}
 
 
+def _rescrape_product_url() -> None:
+    """Re-scrape the product URL stored in duplo.json with the deep extractor.
+
+    If ``source_url`` is set, fetches it again via :func:`fetch_site` and
+    updates the reference URLs and raw page content in duplo.json.  This
+    picks up any changes on the product site since the last run.
+    """
+    duplo_path = Path(_DUPLO_JSON)
+    if not duplo_path.exists():
+        return
+    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    source_url = data.get("source_url", "")
+    if not source_url:
+        return
+
+    print(f"\nRe-scraping {source_url} …")
+    try:
+        scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
+            source_url
+        )
+    except Exception as exc:
+        print(f"  Failed to re-scrape {source_url}: {exc}")
+        return
+
+    if page_records:
+        save_reference_urls(page_records)
+        if raw_pages:
+            save_raw_content(raw_pages, page_records)
+        print(f"  Updated {len(page_records)} page record(s).")
+    if code_examples:
+        save_examples(code_examples)
+        print(f"  Updated {len(code_examples)} code example(s).")
+
+
 def _subsequent_run() -> None:
     """Resume an interrupted phase or advance to the next one."""
     # Detect file changes since last run.
@@ -352,6 +386,9 @@ def _subsequent_run() -> None:
         ]
         if changed_files:
             _analyze_new_files(changed_files)
+
+    # Re-scrape the product URL to pick up site changes.
+    _rescrape_product_url()
 
     save_hashes(new_hashes)
 
