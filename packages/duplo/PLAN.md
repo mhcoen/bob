@@ -27,12 +27,12 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Create target project directory with git init
   - [x] Write PLAN.md, README.md, and mcloop.json
   - [x] Include CLAUDE.md with appshot instructions
-- [ ] Phase execution
+- [x] Phase execution
   - [x] Run McLoop on the target project
   - [x] Wait for completion, capture screenshots with appshot
   - [x] Compare screenshots against reference images via Claude API
   - [x] Generate visual issue list
-  - [ ] Notify user that phase is complete and ready for testing
+  - [x] Notify user that phase is complete and ready for testing
 - [ ] Feedback and iteration
   - [ ] Collect user feedback (text input or from a file)
   - [ ] Generate next phase PLAN.md incorporating feedback and visual issues
