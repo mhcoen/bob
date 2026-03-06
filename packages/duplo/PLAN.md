@@ -24,7 +24,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Save selections to duplo.json in the target project
 - [ ] Plan generation
   - [x] Generate Phase 1 PLAN.md (smallest end-to-end working thing)
-  - [ ] Create target project directory with git init
+  - [x] Create target project directory with git init
   - [ ] Write PLAN.md, README.md, and mcloop.json
   - [ ] Include CLAUDE.md with appshot instructions
 - [ ] Phase execution
