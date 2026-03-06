@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import sys
@@ -10,6 +11,11 @@ from pathlib import Path
 from duplo.appshot import capture_appshot
 from duplo.collector import collect_feedback
 from duplo.comparator import compare_screenshots
+from duplo.design_extractor import (
+    DesignRequirements,
+    extract_design,
+    format_design_section,
+)
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
 from duplo.notifier import notify_phase_complete
@@ -36,6 +42,7 @@ from duplo.saver import (
     append_phase_to_history,
     clear_in_progress,
     get_current_phase,
+    save_design_requirements,
     save_examples,
     save_feedback,
     save_raw_content,
@@ -123,6 +130,17 @@ def _first_run() -> None:
     if not product_name:
         return
 
+    # Extract visual design from reference images.
+    design = DesignRequirements()
+    relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
+    if relevant_images:
+        print("\nExtracting visual design from images …")
+        design = extract_design(relevant_images)
+        if design.colors or design.fonts or design.layout:
+            print(f"Extracted design details from {len(design.source_images)} image(s).")
+        else:
+            print("Could not extract design details from images.")
+
     combined_text = scraped_text
     if text_content:
         combined_text = text_content + "\n" + combined_text
@@ -160,6 +178,7 @@ def _first_run() -> None:
         doc_structures=doc_structures,
         page_records=page_records,
         raw_pages=raw_pages,
+        design=design,
     )
 
     if roadmap:
@@ -177,12 +196,14 @@ def _first_run() -> None:
             f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
         )
         print(f"\nGenerating {phase_label} PLAN.md …")
+        design_section = format_design_section(design) if design else ""
         content = generate_phase_plan(
             source_url,
             features,
             prefs,
             phase=phase_info,
             project_name=app_name,
+            design_section=design_section,
         )
         doc_examples = load_code_examples()
         test_tasks = generate_plan_test_tasks(doc_examples)
@@ -248,12 +269,18 @@ def _subsequent_run() -> None:
     )
 
     print(f"Generating {phase_label} PLAN.md …")
+    design_data = data.get("design_requirements", {})
+    design_section = ""
+    if design_data:
+        loaded_design = DesignRequirements(**design_data)
+        design_section = format_design_section(loaded_design)
     content = generate_phase_plan(
         source_url,
         features,
         preferences,
         phase=phase_info,
         project_name=data.get("app_name", ""),
+        design_section=design_section,
     )
     doc_examples = load_code_examples()
     test_tasks = generate_plan_test_tasks(doc_examples)
@@ -385,6 +412,7 @@ def _init_project(
     doc_structures=None,
     page_records: list | None = None,
     raw_pages: dict[str, str] | None = None,
+    design: DesignRequirements | None = None,
 ) -> list | None:
     """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
 
@@ -416,6 +444,9 @@ def _init_project(
             print(f"Generated {len(code_examples)} test case(s) in {test_path}")
     if doc_structures:
         print("Saved doc structures to duplo.json.")
+    if design and (design.colors or design.fonts or design.layout):
+        save_design_requirements(dataclasses.asdict(design), target_dir=project_dir)
+        print("Saved design requirements to duplo.json.")
 
     claude_md = write_claude_md(target_dir=project_dir)
     print(f"CLAUDE.md written to {claude_md}")

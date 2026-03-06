@@ -33,6 +33,9 @@ Rules for the plan:
 - Use subtasks (indented items) for complex items.
 - The description at the top of PLAN.md should include the
   platform, language, build system, and any constraints.
+- If visual design requirements are provided, include them
+  verbatim as a section in the plan so the builder knows the
+  exact colors, fonts, spacing, and component styles to use.
 
 Output ONLY the Markdown for PLAN.md. No explanation outside it.
 Format:
@@ -151,6 +154,7 @@ def generate_phase_plan(
     phase: dict | None = None,
     *,
     project_name: str = "",
+    design_section: str = "",
     client: anthropic.Anthropic | None = None,
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
@@ -163,6 +167,8 @@ def generate_phase_plan(
             features, and test. If None, generates a generic
             Phase 1 plan.
         project_name: Name for the project.
+        design_section: Optional Markdown section with visual design
+            requirements extracted from reference images.
         client: Optional Anthropic client.
 
     Returns:
@@ -197,6 +203,12 @@ def generate_phase_plan(
         features_text = "\n".join(f"- {f.name}: {f.description}" for f in features)
         phase_test = ""
 
+    design_block = ""
+    if design_section:
+        design_block = (
+            f"\nVisual design requirements (from reference screenshots):\n{design_section}\n"
+        )
+
     user_content = f"""\
 Project: {project_name or source_url}
 Source: {source_url}
@@ -214,7 +226,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-
+{design_block}
 Generate the PLAN.md now.
 """
 

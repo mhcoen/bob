@@ -518,6 +518,31 @@ def save_raw_content(
     return pages_dir
 
 
+def save_design_requirements(
+    design: dict,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save extracted visual design requirements to *duplo.json*.
+
+    Writes ``{"design_requirements": {...}}`` into *duplo.json*, preserving
+    all existing keys.
+
+    Args:
+        design: Dict with colors, fonts, spacing, layout, components keys.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["design_requirements"] = design
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     """Write ``CLAUDE.md`` with appshot instructions to *target_dir*.
 
