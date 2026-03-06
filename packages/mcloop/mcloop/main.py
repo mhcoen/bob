@@ -37,9 +37,12 @@ from mcloop.ratelimit import (
 )
 from mcloop.runner import (
     bugs_md_has_bugs,
+    parse_bugs_md,
+    parse_verification_output,
     review_found_problems,
     run_audit,
     run_bug_fix,
+    run_bug_verify,
     run_post_fix_review,
     run_sync,
     run_task,
@@ -989,6 +992,61 @@ def _run_audit_fix_cycle(
             bugs_path.unlink()
             _save_audit_hash(project_dir)
             return
+
+    # Pre-fix verification: check each bug against source code
+    bugs_content = bugs_path.read_text()
+    parsed_bugs = parse_bugs_md(bugs_content)
+    if parsed_bugs:
+        print(
+            f"\n>>> Verifying {len(parsed_bugs)} bugs...",
+            flush=True,
+        )
+        verify_result = run_bug_verify(
+            project_dir,
+            log_dir,
+            bugs_content,
+            model=model,
+        )
+        if verify_result.success:
+            verdicts = parse_verification_output(
+                verify_result.output,
+            )
+            for status, header, reason in verdicts:
+                if status == "CONFIRMED":
+                    print(
+                        f"  CONFIRMED: {header}",
+                        flush=True,
+                    )
+                else:
+                    suffix = f" ({reason})" if reason else ""
+                    print(
+                        f"  REMOVED: {header}{suffix}",
+                        flush=True,
+                    )
+
+            if verdicts:
+                removed_headers = {h for s, h, _ in verdicts if s == "REMOVED"}
+                # A bug is removed if any REMOVED verdict
+                # matches its title (substring match).
+                confirmed_bugs = [
+                    b
+                    for b in parsed_bugs
+                    if not any(b["title"] in rh or rh in b["title"] for rh in removed_headers)
+                ]
+                if not confirmed_bugs:
+                    print(
+                        "\n>>> All reported bugs were false positives.",
+                        flush=True,
+                    )
+                    bugs_path.unlink(missing_ok=True)
+                    _save_audit_hash(project_dir)
+                    return
+                if len(confirmed_bugs) < len(parsed_bugs):
+                    new_content = "# Bugs\n\n"
+                    for bug in confirmed_bugs:
+                        new_content += bug["body"] + "\n\n"
+                    bugs_path.write_text(new_content)
+                    bugs_content = new_content
 
     max_fix_attempts = 3
     for attempt in range(1, max_fix_attempts + 1):

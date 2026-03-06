@@ -11,10 +11,13 @@ from mcloop.runner import (
     bugs_md_has_bugs,
     build_audit_prompt,
     build_bug_fix_prompt,
+    build_bug_verify_prompt,
     build_post_fix_review_prompt,
     build_sync_prompt,
     gather_audit_context,
     gather_sync_context,
+    parse_bugs_md,
+    parse_verification_output,
     review_found_problems,
 )
 
@@ -369,3 +372,134 @@ def test_review_found_problems_no_end_marker():
     found, desc = review_found_problems(output)
     assert found is True
     assert "Something is wrong" in desc
+
+
+# --- parse_bugs_md ---
+
+
+def test_parse_bugs_md_single_bug():
+    content = "# Bugs\n\n## foo.py:10 -- Off-by-one\n**Severity**: low\nDetails here.\n"
+    bugs = parse_bugs_md(content)
+    assert len(bugs) == 1
+    assert bugs[0]["title"] == "foo.py:10 -- Off-by-one"
+    assert "Details here." in bugs[0]["body"]
+
+
+def test_parse_bugs_md_multiple_bugs():
+    content = (
+        "# Bugs\n\n"
+        "## foo.py:10 -- Off-by-one\n"
+        "**Severity**: low\n"
+        "First bug.\n\n"
+        "## bar.py:20 -- Null check\n"
+        "**Severity**: high\n"
+        "Second bug.\n"
+    )
+    bugs = parse_bugs_md(content)
+    assert len(bugs) == 2
+    assert "Off-by-one" in bugs[0]["title"]
+    assert "Null check" in bugs[1]["title"]
+
+
+def test_parse_bugs_md_no_bugs():
+    content = "# Bugs\n\nNo bugs found.\n"
+    bugs = parse_bugs_md(content)
+    assert len(bugs) == 0
+
+
+def test_parse_bugs_md_empty():
+    assert parse_bugs_md("") == []
+
+
+def test_parse_bugs_md_body_includes_header():
+    content = "## foo.py:5 -- Bug\n**Severity**: medium\nDesc.\n"
+    bugs = parse_bugs_md(content)
+    assert len(bugs) == 1
+    assert bugs[0]["body"].startswith("## foo.py:5")
+
+
+# --- build_bug_verify_prompt ---
+
+
+def test_build_bug_verify_prompt_includes_bugs():
+    prompt = build_bug_verify_prompt("## foo.py:10 -- Bug\nDetails.")
+    assert "foo.py:10" in prompt
+    assert "Details." in prompt
+
+
+def test_build_bug_verify_prompt_read_only():
+    prompt = build_bug_verify_prompt("bugs")
+    assert "read-only" in prompt.lower() or "Do not modify" in prompt
+
+
+def test_build_bug_verify_prompt_format():
+    prompt = build_bug_verify_prompt("bugs")
+    assert "--- VERIFY RESULT ---" in prompt
+    assert "--- END VERIFY ---" in prompt
+    assert "CONFIRMED" in prompt
+    assert "REMOVED" in prompt
+
+
+# --- parse_verification_output ---
+
+
+def test_parse_verification_output_confirmed():
+    output = (
+        "Some analysis\n"
+        "--- VERIFY RESULT ---\n"
+        "CONFIRMED: foo.py:10 Off-by-one\n"
+        "--- END VERIFY ---\n"
+    )
+    results = parse_verification_output(output)
+    assert len(results) == 1
+    assert results[0][0] == "CONFIRMED"
+    assert "foo.py:10" in results[0][1]
+
+
+def test_parse_verification_output_removed():
+    output = (
+        "--- VERIFY RESULT ---\n"
+        "REMOVED: bar.py:20 Null check (already handled)\n"
+        "--- END VERIFY ---\n"
+    )
+    results = parse_verification_output(output)
+    assert len(results) == 1
+    assert results[0][0] == "REMOVED"
+    assert "bar.py:20" in results[0][1]
+    assert results[0][2] == "already handled"
+
+
+def test_parse_verification_output_mixed():
+    output = (
+        "--- VERIFY RESULT ---\n"
+        "CONFIRMED: foo.py:10 Off-by-one\n"
+        "REMOVED: bar.py:20 Null check (not real)\n"
+        "CONFIRMED: baz.py:5 Logic error\n"
+        "--- END VERIFY ---\n"
+    )
+    results = parse_verification_output(output)
+    assert len(results) == 3
+    assert results[0][0] == "CONFIRMED"
+    assert results[1][0] == "REMOVED"
+    assert results[2][0] == "CONFIRMED"
+
+
+def test_parse_verification_output_no_marker():
+    output = "No structured output"
+    results = parse_verification_output(output)
+    assert results == []
+
+
+def test_parse_verification_output_no_end_marker():
+    output = "--- VERIFY RESULT ---\nCONFIRMED: foo.py:10 Bug\n"
+    results = parse_verification_output(output)
+    assert len(results) == 1
+    assert results[0][0] == "CONFIRMED"
+
+
+def test_parse_verification_output_removed_no_reason():
+    output = "--- VERIFY RESULT ---\nREMOVED: foo.py:10 Bug\n--- END VERIFY ---\n"
+    results = parse_verification_output(output)
+    assert len(results) == 1
+    assert results[0][0] == "REMOVED"
+    assert results[0][2] == ""

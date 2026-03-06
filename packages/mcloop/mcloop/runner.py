@@ -515,6 +515,142 @@ def bugs_md_has_bugs(content: str) -> bool:
     return "No bugs found." not in content
 
 
+def parse_bugs_md(content: str) -> list[dict[str, str]]:
+    """Parse BUGS.md into a list of bug entries.
+
+    Each entry has keys: header, title, body (full text of that section).
+    """
+    bugs: list[dict[str, str]] = []
+    lines = content.splitlines(keepends=True)
+    current: dict[str, str] | None = None
+    body_lines: list[str] = []
+
+    for line in lines:
+        if line.startswith("## "):
+            if current is not None:
+                current["body"] = "".join(body_lines).strip()
+                bugs.append(current)
+            header = line.strip().lstrip("#").strip()
+            current = {"header": header, "title": header, "body": ""}
+            body_lines = [line]
+        elif current is not None:
+            body_lines.append(line)
+
+    if current is not None:
+        current["body"] = "".join(body_lines).strip()
+        bugs.append(current)
+
+    return bugs
+
+
+def build_bug_verify_prompt(bugs_content: str) -> str:
+    """Build the prompt for the pre-fix bug verification session."""
+    return (
+        "You are verifying bug reports against the actual "
+        "source code. For each bug listed below, read the "
+        "referenced file and line number, then determine "
+        "whether the bug is real.\n\n"
+        "A bug is CONFIRMED if:\n"
+        "- The code at the referenced location matches the "
+        "description\n"
+        "- The defect described actually exists in the "
+        "current code\n\n"
+        "A bug should be REMOVED if:\n"
+        "- The code does not match the description\n"
+        "- The issue was already handled (e.g., there is "
+        "error handling the report claims is missing)\n"
+        "- The bug is hypothetical or speculative with no "
+        "evidence in the code\n"
+        "- The referenced file or line does not exist\n\n"
+        "## Bug reports to verify\n\n"
+        f"{bugs_content}\n\n"
+        "For each bug, read the actual source file and "
+        "check whether the described defect exists.\n\n"
+        "Print your results in this exact format:\n"
+        "--- VERIFY RESULT ---\n"
+        "CONFIRMED: <file:line> <title>\n"
+        "or\n"
+        "REMOVED: <file:line> <title> (reason)\n"
+        "--- END VERIFY ---\n\n"
+        "List one line per bug. Do not modify any files. "
+        "This is a read-only verification."
+    )
+
+
+def parse_verification_output(
+    output: str,
+) -> list[tuple[str, str, str]]:
+    """Parse verification session output.
+
+    Returns list of (status, header, reason) tuples.
+    status is 'CONFIRMED' or 'REMOVED'.
+    """
+    results: list[tuple[str, str, str]] = []
+    marker = "--- VERIFY RESULT ---"
+    end_marker = "--- END VERIFY ---"
+    idx = output.find(marker)
+    if idx == -1:
+        return results
+    after = output[idx + len(marker) :]
+    end_idx = after.find(end_marker)
+    if end_idx != -1:
+        after = after[:end_idx]
+    for line in after.strip().splitlines():
+        line = line.strip()
+        if line.startswith("CONFIRMED:"):
+            header = line[len("CONFIRMED:") :].strip()
+            results.append(("CONFIRMED", header, ""))
+        elif line.startswith("REMOVED:"):
+            rest = line[len("REMOVED:") :].strip()
+            # Extract reason from parentheses at end
+            paren_idx = rest.rfind("(")
+            if paren_idx != -1 and rest.endswith(")"):
+                header = rest[:paren_idx].strip()
+                reason = rest[paren_idx + 1 : -1]
+            else:
+                header = rest
+                reason = ""
+            results.append(("REMOVED", header, reason))
+    return results
+
+
+def run_bug_verify(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    bugs_content: str,
+    model: str | None = None,
+) -> RunResult:
+    """Launch a read-only session to verify bug reports."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = build_bug_verify_prompt(bugs_content)
+    cmd = _build_command(
+        "claude",
+        prompt=prompt,
+        model=model,
+    )
+    output, returncode = _run_session(
+        cmd,
+        project_dir,
+    )
+    log_path = _write_log(
+        log_dir,
+        "bug-verify",
+        cmd,
+        output,
+        returncode,
+    )
+
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
+
+
 def build_bug_fix_prompt() -> str:
     """Build the prompt for the bug fix Claude session."""
 
