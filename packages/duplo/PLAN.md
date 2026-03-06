@@ -20,7 +20,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Extract a structured feature list from the scraped content
 - [ ] Interactive feature selection
   - [x] Present features to the user and ask which to include
-  - [ ] Ask about platform, language, constraints, and preferences
+  - [x] Ask about platform, language, constraints, and preferences
   - [ ] Save selections to duplo.json in the target project
 - [ ] Plan generation
   - [ ] Generate Phase 1 PLAN.md (smallest end-to-end working thing)
