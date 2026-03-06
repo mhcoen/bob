@@ -43,24 +43,21 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Support resuming after interruption (duplo run picks up where it left off)
   - [x] Track which reference screenshots map to which features
 - [ ] Deep documentation extraction
-  - [ ] Detect and follow wiki links (GitHub wiki, GitBook, ReadTheDocs, etc.) from the product page
-  - [ ] Increase max_pages in fetch_site for documentation-heavy sites (docs pages are small and dense)
-  - [ ] Extract code examples from documentation as structured data (input, expected output pairs)
-  - [ ] Extract feature tables from documentation (operation tables, unit lists, function lists)
-  - [ ] Store extracted examples in duplo.json under an "examples" key
-  - [ ] Each example should have: category, input, expected_output, source_url
-- [ ] Test case generation
-  - [ ] Generate unit test cases from extracted documentation examples
-  - [ ] For each example with an input/output pair, create a test that calls the evaluate function directly (no GUI needed)
-  - [ ] Write test cases to the target project as a test file (e.g., Tests/NumiTests/DocExampleTests.swift)
-  - [ ] Include test generation as tasks in the generated PLAN.md so McLoop builds them
-  - [ ] Group tests by category (arithmetic, units, percentages, variables, etc.)
+  - [ ] When scraping a product site, identify links to documentation pages by reading the page content and link text, not by matching a hardcoded list of platforms
+  - [ ] Follow documentation links even if they leave the main domain (docs are often hosted separately)
+  - [ ] Increase the page limit for documentation sites since doc pages are individually small but collectively important
+  - [ ] Extract code examples from documentation pages as input/expected_output pairs
+  - [ ] Extract feature tables, operation lists, unit lists, and function references
+  - [ ] Store all extracted examples in duplo.json so they persist across runs
+- [ ] Test case generation from documentation
+  - [ ] Every input/output example extracted from documentation becomes a unit test case
+  - [ ] Tests should call the app's core logic directly without requiring GUI interaction
+  - [ ] Include test generation tasks in the PLAN.md that Duplo generates for the target project
+  - [ ] Group tests by category so failures are easy to diagnose
 - [ ] Re-run mode (duplo update)
-  - [ ] Add "update" subcommand to CLI: duplo update
-  - [ ] Re-scrape the product URL with the improved deep extractor
-  - [ ] Compare newly extracted features against existing features in duplo.json
-  - [ ] Compare extracted examples against existing test coverage in the target project
-  - [ ] Append new unchecked tasks to the existing PLAN.md for missing features
-  - [ ] Append new test tasks for uncovered documentation examples
-  - [ ] Do not modify or remove any existing checked or unchecked tasks
+  - [ ] Add "update" subcommand that works on an existing project
+  - [ ] Re-scrape the product URL and extract features and examples with the improved extractor
+  - [ ] Compare against what is already in duplo.json and PLAN.md
+  - [ ] Append new unchecked tasks to PLAN.md for any missing features or uncovered examples
+  - [ ] Never modify or remove existing tasks (checked or unchecked)
   - [ ] Print a summary of what was added

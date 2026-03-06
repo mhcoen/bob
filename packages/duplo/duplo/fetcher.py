@@ -11,6 +11,22 @@ from bs4 import BeautifulSoup
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _TIMEOUT = 30.0
 
+# Known wiki/docs hosting domains
+_WIKI_DOMAINS = re.compile(
+    r"(\.readthedocs\.io|\.readthedocs\.org|readthedocs\.org"
+    r"|\.gitbook\.io|\.gitbook\.com"
+    r"|\.notion\.site"
+    r"|\.atlassian\.net/wiki"
+    r"|\.confluence\.\w+)",
+    re.IGNORECASE,
+)
+
+# GitHub wiki path pattern: github.com/<owner>/<repo>/wiki
+_GITHUB_WIKI = re.compile(
+    r"github\.com/[^/]+/[^/]+/wiki",
+    re.IGNORECASE,
+)
+
 # Paths/anchors that indicate high-value technical content
 _HIGH_PRIORITY = re.compile(
     r"(docs?|documentation|features?|guides?|changelog|changelogs?|"
@@ -25,6 +41,24 @@ _LOW_PRIORITY = re.compile(
     r"privacy|terms|contact|about|careers?|jobs?|press|news)",
     re.IGNORECASE,
 )
+
+
+def is_wiki_url(url: str) -> bool:
+    """Return True if *url* points to a known wiki or docs hosting site.
+
+    Detects GitHub wikis, ReadTheDocs, GitBook, Notion, and Confluence.
+    """
+    return bool(_WIKI_DOMAINS.search(url) or _GITHUB_WIKI.search(url))
+
+
+def detect_wiki_links(html: str, base_url: str) -> list[tuple[str, str]]:
+    """Extract wiki/docs links from *html*, including cross-domain ones.
+
+    Returns (absolute_url, anchor_text) pairs for links pointing to known
+    wiki hosting platforms (GitHub wiki, ReadTheDocs, GitBook, etc.).
+    """
+    all_links = extract_links(html, base_url)
+    return [(url, anchor) for url, anchor in all_links if is_wiki_url(url)]
 
 
 def score_link(url: str, anchor: str) -> int:
@@ -70,7 +104,8 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
 
     High-priority links (docs, features, guides, changelog, API references)
     are visited before neutral links. Low-priority links (marketing, blog,
-    pricing, legal, login) are skipped entirely.
+    pricing, legal, login) are skipped entirely. Cross-domain wiki links
+    (GitHub wiki, ReadTheDocs, GitBook, etc.) are always followed.
 
     Returns concatenated text content from all visited pages, each prefixed
     with its URL as a section header.
@@ -107,12 +142,14 @@ def fetch_site(url: str, max_pages: int = 10) -> str:
             link_norm = link_url.rstrip("/")
             if link_norm in visited or link_norm in queued:
                 continue
-            if not _same_domain(link_url, url):
-                continue
-            link_score = score_link(link_url, anchor)
-            if link_score >= 0:
-                queue.append((link_score, link_url))
+            if is_wiki_url(link_url):
+                queue.append((1, link_url))
                 queued.add(link_norm)
+            elif _same_domain(link_url, url):
+                link_score = score_link(link_url, anchor)
+                if link_score >= 0:
+                    queue.append((link_score, link_url))
+                    queued.add(link_norm)
 
     return "\n\n".join(results)
 
