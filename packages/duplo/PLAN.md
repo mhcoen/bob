@@ -86,14 +86,14 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Extract text content from PDFs and include in feature analysis.
   - [x] Move processed reference materials to .duplo/references/ to keep the project directory clean.
   - [x] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
-- [ ] Incremental update mode
+- [x] Incremental update mode
   - [x] On subsequent runs, detect new or changed files in the project directory by comparing against .duplo/file_hashes.json
   - [x] Analyze any new files the same way as first run (images to Vision, PDFs to text, URLs to scraper)
   - [x] Re-scrape the product URL with the improved deep extractor if the URL was already known
   - [x] Compare newly extracted features and examples against existing PLAN.md
   - [x] Append new unchecked tasks for missing features, uncovered examples, and design refinements
   - [x] Never modify or remove existing tasks (checked or unchecked)
-  - [ ] Print a summary of what was found and what was added
+  - [x] Print a summary of what was found and what was added
 - [ ] Video reference extraction
   - [ ] Detect video files in the project directory (mp4, mov, webm, avi)
   - [ ] Use ffmpeg scene change detection to extract frames at visual transition points
