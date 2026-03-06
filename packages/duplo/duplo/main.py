@@ -10,6 +10,7 @@ from pathlib import Path
 from duplo.extractor import extract_features
 from duplo.fetcher import fetch_site
 from duplo.screenshotter import save_reference_screenshots
+from duplo.selector import select_features
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 
@@ -27,10 +28,8 @@ def main() -> None:
         print("\nExtracting features …")
         features = extract_features(text)
         if features:
-            print(f"\nFound {len(features)} feature(s):\n")
-            for f in features:
-                print(f"  [{f.category}] {f.name}")
-                print(f"    {f.description}")
+            print(f"\nFound {len(features)} feature(s).")
+            features = select_features(features)
         else:
             print("No features extracted.")
 
