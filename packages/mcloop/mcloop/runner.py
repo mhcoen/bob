@@ -43,6 +43,21 @@ def run_task(
         "Do not chain shell commands with && or ;."
         " Use separate Bash calls instead."
     )
+    parts.append(
+        "When debugging crashes or unexpected"
+        " behavior, always find and read the actual"
+        " error output first. Check crash reports"
+        " (~/Library/Logs/DiagnosticReports/ on"
+        " macOS), stderr, log files, tracebacks, core"
+        " dumps, or browser console errors. Read them"
+        " before looking at source code. Do not guess"
+        " at the cause from code inspection alone."
+        " After applying a fix, find a way to"
+        " reproduce the original failure and verify"
+        " the fix actually works. Run the app, trigger"
+        " the same condition, and confirm it no longer"
+        " crashes. Compiling is not enough."
+    )
     notes_instruction = (
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"

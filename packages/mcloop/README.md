@@ -352,6 +352,24 @@ If you approved any commands via Telegram during the run, McLoop suggests
 adding them to your allowlist in the format used by `settings.json`. Dangerous
 commands (like `rm`, `sudo`, `chmod`) are never suggested even if approved.
 
+## Visual verification
+
+McLoop includes `bin/appshot`, a utility for capturing deterministic
+screenshots of macOS app windows. Use it to verify that GUI applications
+built by McLoop render correctly. It works with any app that puts a
+window on screen: Swift, Electron, Qt, Java, React Native, anything.
+
+```bash
+bin/appshot "AppName" screenshot.png
+bin/appshot "AppName" screenshot.png --launch .build/debug/AppName
+bin/appshot "AppName" screenshot.png --wait 2
+bin/appshot "AppName" screenshot.png --setup 'tell app "AppName" to activate'
+```
+
+Claude Code sessions are instructed via CLAUDE.md to always use appshot
+for visual verification rather than reinventing screenshot capture.
+Requires macOS Screen Recording permission (granted once).
+
 ## Implementation notes
 
 During each task session, Claude Code may notice edge cases, design decisions,
