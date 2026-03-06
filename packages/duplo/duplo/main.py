@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
-from duplo.extractor import extract_features
+from duplo.extractor import Feature, extract_features
 from duplo.fetcher import fetch_site
-from duplo.questioner import ask_preferences
+from duplo.planner import generate_phase_plan, save_plan
+from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.saver import save_selections
 from duplo.screenshotter import save_reference_screenshots
 from duplo.selector import select_features
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
+_DUPLO_JSON = "duplo.json"
 
 
 def main() -> None:
     args = _parse_args()
     if args.command == "run":
-        print("duplo run: not yet implemented")
+        _cmd_run()
     elif args.command == "next":
         print("duplo next: not yet implemented")
     elif args.command == "init":
@@ -49,6 +52,29 @@ def main() -> None:
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
         sys.exit(1)
+
+
+def _cmd_run() -> None:
+    duplo_path = Path(_DUPLO_JSON)
+    if not duplo_path.exists():
+        print(f"Error: {_DUPLO_JSON} not found. Run 'duplo init <url>' first.")
+        sys.exit(1)
+
+    data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    source_url = data["source_url"]
+    features = [Feature(**f) for f in data["features"]]
+    prefs_data = data["preferences"]
+    preferences = BuildPreferences(
+        platform=prefs_data["platform"],
+        language=prefs_data["language"],
+        constraints=prefs_data.get("constraints", []),
+        preferences=prefs_data.get("preferences", []),
+    )
+
+    print("Generating Phase 1 PLAN.md …")
+    content = generate_phase_plan(source_url, features, preferences)
+    saved = save_plan(content)
+    print(f"Phase 1 plan saved to {saved}")
 
 
 def _parse_args() -> argparse.Namespace:
