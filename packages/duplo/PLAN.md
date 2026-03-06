@@ -9,10 +9,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all
 code generation. Ruff for linting, pytest for tests. Keep modules
 short and focused. This is a thin orchestration layer, not a framework.
 
-- [ ] Project scaffolding
+- [x] Project scaffolding
   - [x] Create duplo package with __init__.py and main.py entry point
   - [x] Add CLI argument parser: duplo <url>, duplo run, duplo next
-  - [ ] Verify pip install -e . works and duplo command runs
+  - [x] Verify pip install -e . works and duplo command runs
 - [ ] Product scraping
   - [ ] Fetch the product URL and extract text content
   - [ ] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
