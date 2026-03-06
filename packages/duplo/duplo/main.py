@@ -82,7 +82,13 @@ def main() -> None:
 
 
 def _cmd_next(feedback_file: str | None = None) -> None:
-    """Collect feedback and generate the next phase PLAN.md."""
+    """Collect feedback, generate the next phase PLAN.md, and run McLoop."""
+    app_name = ""
+    duplo_path = Path(_DUPLO_JSON)
+    if duplo_path.exists():
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+        app_name = data.get("app_name", "")
+
     plan_path = Path("PLAN.md")
     if not plan_path.exists():
         print("Error: PLAN.md not found. Run 'duplo run' first.")
@@ -105,6 +111,10 @@ def _cmd_next(feedback_file: str | None = None) -> None:
     content = generate_next_phase_plan(current_plan, feedback, issues_text)
     saved = save_plan(content)
     print(f"Next phase plan saved to {saved}")
+
+    match = re.search(r"#\s*(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
+    phase_label = match.group(1).strip() if match else "Next Phase"
+    _execute_phase(content, app_name, phase_label)
 
 
 def _cmd_run() -> None:
@@ -129,6 +139,12 @@ def _cmd_run() -> None:
     saved = save_plan(content)
     print(f"Phase 1 plan saved to {saved}")
 
+    app_name = data.get("app_name", "")
+    _execute_phase(content, app_name, "Phase 1")
+
+
+def _execute_phase(plan_content: str, app_name: str, phase_label: str) -> None:
+    """Run McLoop, capture screenshots, compare, notify, and record history."""
     print("\nRunning McLoop …")
     exit_code = run_mcloop(".")
     if exit_code != 0:
@@ -136,10 +152,9 @@ def _cmd_run() -> None:
         sys.exit(exit_code)
     print("McLoop complete.")
 
-    append_phase_to_history(content)
+    append_phase_to_history(plan_content)
     print("Phase appended to duplo.json history.")
 
-    app_name = data.get("app_name", "")
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"
         launch_cmd = "./run.sh" if Path("run.sh").exists() else None
@@ -151,7 +166,7 @@ def _cmd_run() -> None:
         else:
             print(f"appshot exited with code {shot_code} (screenshot skipped)")
 
-    notify_phase_complete("Phase 1")
+    notify_phase_complete(phase_label)
 
 
 def _compare_with_references(current: Path) -> None:
