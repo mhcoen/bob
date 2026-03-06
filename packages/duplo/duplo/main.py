@@ -7,6 +7,7 @@ import re
 import sys
 from pathlib import Path
 
+from duplo.extractor import extract_features
 from duplo.fetcher import fetch_site
 from duplo.screenshotter import save_reference_screenshots
 
@@ -23,6 +24,16 @@ def main() -> None:
         print(f"Fetching {args.url} …")
         text = fetch_site(args.url)
         print(text)
+        print("\nExtracting features …")
+        features = extract_features(text)
+        if features:
+            print(f"\nFound {len(features)} feature(s):\n")
+            for f in features:
+                print(f"  [{f.category}] {f.name}")
+                print(f"    {f.description}")
+        else:
+            print("No features extracted.")
+
         urls = _SECTION_URL_RE.findall(text)
         if urls:
             output_dir = Path("screenshots")

@@ -17,7 +17,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Fetch the product URL and extract text content
   - [x] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
   - [x] Save reference screenshots from the product website
-  - [ ] Extract a structured feature list from the scraped content
+  - [x] Extract a structured feature list from the scraped content
 - [ ] Interactive feature selection
   - [ ] Present features to the user and ask which to include
   - [ ] Ask about platform, language, constraints, and preferences
