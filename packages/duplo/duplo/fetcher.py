@@ -8,6 +8,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from duplo.doc_examples import CodeExample, extract_code_examples
+
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _TIMEOUT = 30.0
 _USER_AGENT = (
@@ -99,7 +101,9 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     return links
 
 
-def fetch_site(url: str, max_pages: int = 10, max_docs_pages: int = 50) -> str:
+def fetch_site(
+    url: str, max_pages: int = 10, max_docs_pages: int = 50
+) -> tuple[str, list[CodeExample]]:
     """Fetch *url* and follow prioritized same-domain links.
 
     High-priority links (docs, features, guides, changelog, API references)
@@ -114,12 +118,15 @@ def fetch_site(url: str, max_pages: int = 10, max_docs_pages: int = 50) -> str:
     (cross-domain docs sites). Doc pages are individually small but
     collectively important, so this defaults higher than *max_pages*.
 
-    Returns concatenated text content from all visited pages, each prefixed
-    with its URL as a section header.
+    Returns a tuple of (text, code_examples) where *text* is concatenated
+    text content from all visited pages (each prefixed with its URL as a
+    section header) and *code_examples* is a list of :class:`CodeExample`
+    objects extracted from documentation pages.
     """
     visited: set[str] = set()
     queued: set[str] = set()
     results: list[str] = []
+    all_examples: list[CodeExample] = []
     docs_domains: set[str] = set()
     seed_visited = 0
     docs_visited = 0
@@ -168,6 +175,9 @@ def fetch_site(url: str, max_pages: int = 10, max_docs_pages: int = 50) -> str:
         if text:
             results.append(f"=== {current_url} ===\n{text}")
 
+        page_examples = extract_code_examples(html, current_url)
+        all_examples.extend(page_examples)
+
         for link_url, anchor in extract_links(html, current_url):
             link_norm = link_url.rstrip("/")
             if link_norm in visited or link_norm in queued:
@@ -184,7 +194,7 @@ def fetch_site(url: str, max_pages: int = 10, max_docs_pages: int = 50) -> str:
                     queue.append((link_score, link_url))
                     queued.add(link_norm)
 
-    return "\n\n".join(results)
+    return "\n\n".join(results), all_examples
 
 
 def fetch_text(url: str) -> str:

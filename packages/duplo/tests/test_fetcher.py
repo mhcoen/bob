@@ -254,9 +254,9 @@ class TestFetchSite:
     def test_fetches_seed_url(self):
         html = "<html><body><h1>Product</h1></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            result = fetch_site("https://example.com", max_pages=1)
-        assert "Product" in result
-        assert "https://example.com" in result
+            text, _examples = fetch_site("https://example.com", max_pages=1)
+        assert "Product" in text
+        assert "https://example.com" in text
 
     def test_follows_high_priority_links(self):
         seed_html = '<html><body><p>Home</p><a href="/docs">Documentation</a></body></html>'
@@ -275,10 +275,10 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            result = fetch_site("https://example.com", max_pages=5)
+            text, _examples = fetch_site("https://example.com", max_pages=5)
 
-        assert "Home" in result
-        assert "API docs here" in result
+        assert "Home" in text
+        assert "API docs here" in text
 
     def test_skips_low_priority_links(self):
         seed_html = (
@@ -364,10 +364,10 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            result = fetch_site("https://example.com", max_pages=5)
+            text, _examples = fetch_site("https://example.com", max_pages=5)
 
-        assert "External docs content" in result
-        assert "Wiki content" in result
+        assert "External docs content" in text
+        assert "Wiki content" in text
 
     def test_follows_links_within_docs_domain(self):
         """Once a cross-domain docs site is reached, follow its internal links."""
@@ -398,11 +398,11 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            result = fetch_site("https://example.com", max_pages=10)
+            text, _examples = fetch_site("https://example.com", max_pages=10)
 
-        assert "Guide content" in result
-        assert "Concepts content" in result
-        assert "Advanced content" in result
+        assert "Guide content" in text
+        assert "Concepts content" in text
+        assert "Advanced content" in text
 
     def test_does_not_follow_non_docs_cross_domain(self):
         seed_html = (
@@ -446,8 +446,8 @@ class TestFetchSite:
     def test_section_headers_in_output(self):
         html = "<html><body><p>Content</p></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            result = fetch_site("https://example.com", max_pages=1)
-        assert "=== https://example.com ===" in result
+            text, _examples = fetch_site("https://example.com", max_pages=1)
+        assert "=== https://example.com ===" in text
 
     def test_respects_max_docs_pages(self):
         """Docs-domain pages are limited by max_docs_pages, not max_pages."""
@@ -551,9 +551,9 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            result = fetch_site("https://example.com", max_pages=5)
+            text, _examples = fetch_site("https://example.com", max_pages=5)
 
-        assert "Home" in result  # seed page still returned
+        assert "Home" in text  # seed page still returned
 
 
 class TestFetchText:

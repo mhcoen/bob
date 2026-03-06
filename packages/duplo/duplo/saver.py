@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
 
@@ -266,6 +267,31 @@ def get_current_phase(
         if phase.get("phase") == current:
             return (current, phase)
     return (current, None)
+
+
+def save_code_examples(
+    examples: list[CodeExample],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save extracted code examples to *duplo.json*.
+
+    Writes ``{"code_examples": [...]}`` into *duplo.json*, preserving
+    all existing keys.  Each example is stored as a dict with ``input``,
+    ``expected_output``, ``source_url``, and ``language`` keys.
+
+    Args:
+        examples: List of :class:`CodeExample` objects to store.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data["code_examples"] = [dataclasses.asdict(ex) for ex in examples]
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def write_claude_md(*, target_dir: Path | str = ".") -> Path:
