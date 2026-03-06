@@ -10,6 +10,7 @@ from pathlib import Path
 
 from duplo.extractor import Feature, extract_features
 from duplo.fetcher import fetch_site
+from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.saver import save_selections
@@ -27,7 +28,16 @@ def main() -> None:
     elif args.command == "next":
         print("duplo next: not yet implemented")
     elif args.command == "init":
-        print(f"Fetching {args.url} …")
+        default_name = project_name_from_url(args.url)
+        project_name = input(f"Project directory name [{default_name}]: ").strip() or default_name
+        try:
+            project_dir = create_project_dir(project_name)
+        except FileExistsError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        print(f"Created project directory: {project_dir}")
+
+        print(f"\nFetching {args.url} …")
         text = fetch_site(args.url)
         print(text)
         print("\nExtracting features …")
@@ -40,12 +50,12 @@ def main() -> None:
 
         prefs = ask_preferences()
 
-        saved = save_selections(args.url, features, prefs)
+        saved = save_selections(args.url, features, prefs, target_dir=project_dir)
         print(f"\nSelections saved to {saved}")
 
         urls = _SECTION_URL_RE.findall(text)
         if urls:
-            output_dir = Path("screenshots")
+            output_dir = project_dir / "screenshots"
             print(f"\nSaving reference screenshots to {output_dir}/ …")
             saved = save_reference_screenshots(urls, output_dir)
             print(f"Saved {len(saved)} screenshot(s).")
