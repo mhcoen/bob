@@ -29,7 +29,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Include CLAUDE.md with appshot instructions
 - [ ] Phase execution
   - [x] Run McLoop on the target project
-  - [ ] Wait for completion, capture screenshots with appshot
+  - [x] Wait for completion, capture screenshots with appshot
   - [ ] Compare screenshots against reference images via Claude API
   - [ ] Generate visual issue list
   - [ ] Notify user that phase is complete and ready for testing
