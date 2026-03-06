@@ -96,7 +96,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Print a summary of what was found and what was added
 - [ ] Video reference extraction
   - [x] Detect video files in the project directory (mp4, mov, webm, avi)
-  - [ ] Use ffmpeg scene change detection to extract frames at visual transition points
+  - [x] Use ffmpeg scene change detection to extract frames at visual transition points
   - [ ] Deduplicate similar frames using perceptual image hashing
   - [ ] Send candidate frames to Claude Vision to filter: keep only clear, stable screenshots of the application showing a distinct UI state. Discard transitions, blur, marketing overlays, loading screens.
   - [ ] For each accepted frame, ask Claude Vision to describe what UI state it shows (main view, settings panel, dialog, menu, etc.)

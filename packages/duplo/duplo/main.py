@@ -39,6 +39,7 @@ from duplo.test_generator import (
     save_test_file,
 )
 from duplo.validator import validate_product_url
+from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.saver import (
     advance_phase,
@@ -75,6 +76,7 @@ class UpdateSummary:
     files_removed: int = 0
     images_analyzed: int = 0
     videos_found: int = 0
+    video_frames_extracted: int = 0
     pdfs_extracted: int = 0
     text_files_read: int = 0
     urls_fetched: int = 0
@@ -173,9 +175,26 @@ def _first_run() -> None:
     if not product_name:
         return
 
-    # Extract visual design from reference images.
+    # Extract frames from video files at scene change points.
+    video_frames: list[Path] = []
+    relevant_videos = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
+    if relevant_videos:
+        print(f"\nExtracting frames from {len(relevant_videos)} video(s) …")
+        frames_dir = Path(".duplo") / "video_frames"
+        results = extract_all_videos(relevant_videos, frames_dir)
+        for vr in results:
+            if vr.error:
+                print(f"  {vr.source.name}: {vr.error}")
+            elif vr.frames:
+                print(f"  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
+                video_frames.extend(vr.frames)
+        if video_frames:
+            print(f"  Total: {len(video_frames)} frame(s) from video(s)")
+
+    # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
     relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
+    relevant_images.extend(video_frames)
     if relevant_images:
         print("\nExtracting visual design from images …")
         design = extract_design(relevant_images)
@@ -302,11 +321,33 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         else:
             print("  Could not extract design details from new images.")
 
-    # Track new video files (not analyzed, but noted as reference material).
+    # Extract frames from new video files at scene change points.
     if scan.videos:
-        print(f"\nFound {len(scan.videos)} new video file(s).")
-        summary.videos_found = len(scan.videos)
-        analyzed_anything = True
+        relevant_vids = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
+        if relevant_vids:
+            print(f"\nExtracting frames from {len(relevant_vids)} new video(s) …")
+            frames_dir = Path(".duplo") / "video_frames"
+            vid_results = extract_all_videos(relevant_vids, frames_dir)
+            video_frames: list[Path] = []
+            for vr in vid_results:
+                if vr.error:
+                    print(f"  {vr.source.name}: {vr.error}")
+                elif vr.frames:
+                    print(f"  {vr.source.name}: {len(vr.frames)} frame(s)")
+                    video_frames.extend(vr.frames)
+            summary.videos_found = len(relevant_vids)
+            summary.video_frames_extracted = len(video_frames)
+            analyzed_anything = True
+
+            # Send extracted video frames through design extraction.
+            if video_frames:
+                print(f"Analyzing {len(video_frames)} video frame(s) with Vision …")
+                design = extract_design(video_frames)
+                if design.colors or design.fonts or design.layout:
+                    save_design_requirements(dataclasses.asdict(design))
+                    summary.images_analyzed += len(video_frames)
+        else:
+            summary.videos_found = len(scan.videos)
 
     # Extract text from new PDFs.
     relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
@@ -496,6 +537,8 @@ def _print_summary(summary: UpdateSummary) -> None:
         found_lines.append(f"  Images analyzed: {summary.images_analyzed}")
     if summary.videos_found:
         found_lines.append(f"  Videos found: {summary.videos_found}")
+    if summary.video_frames_extracted:
+        found_lines.append(f"  Video frames extracted: {summary.video_frames_extracted}")
     if summary.pdfs_extracted:
         found_lines.append(f"  PDFs extracted: {summary.pdfs_extracted}")
     if summary.text_files_read:
