@@ -243,6 +243,10 @@ def _cmd_next(feedback_file: str | None = None) -> None:
 
     print("Generating next phase PLAN.md …")
     content = generate_next_phase_plan(current_plan, feedback, issues_text)
+    doc_examples = load_code_examples()
+    test_tasks = generate_plan_test_tasks(doc_examples)
+    if test_tasks:
+        content = append_test_tasks(content, test_tasks)
     saved = save_plan(content)
     print(f"Next phase plan saved to {saved}")
 

@@ -11,6 +11,7 @@ from duplo.extractor import Feature
 from duplo.planner import (
     _PLAN_FILENAME,
     _detect_next_phase_number,
+    append_test_tasks,
     generate_next_phase_plan,
     generate_phase_plan,
     save_plan,
@@ -239,6 +240,19 @@ class TestGenerateNextPhasePlan:
         with patch("duplo.planner.anthropic.Anthropic", return_value=mock_client):
             result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
         assert result == _SAMPLE_NEXT_PLAN.strip()
+
+
+class TestAppendTestTasks:
+    def test_appends_tasks_to_plan(self):
+        plan = "# Phase 1\n- [ ] Build core"
+        tasks = ["- [ ] Wire up tests", "  - [ ] Replace stub"]
+        result = append_test_tasks(plan, tasks)
+        assert result.endswith("- [ ] Wire up tests\n  - [ ] Replace stub\n")
+        assert "Build core" in result
+
+    def test_returns_plan_unchanged_when_no_tasks(self):
+        plan = "# Phase 1\n- [ ] Build core\n"
+        assert append_test_tasks(plan, []) == plan
 
 
 class TestSavePlan:

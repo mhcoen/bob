@@ -415,6 +415,40 @@ class TestMain:
         )
         assert "Layout broken" in issues_text
 
+    def test_next_command_appends_test_tasks(self, tmp_path, monkeypatch):
+        import json
+
+        duplo_data = {
+            "source_url": "https://example.com",
+            "features": [],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "code_examples": [
+                {"input": "1+1", "expected_output": "2", "source_url": "", "language": "python"}
+            ],
+        }
+        (tmp_path / "duplo.json").write_text(json.dumps(duplo_data), encoding="utf-8")
+        (tmp_path / "PLAN.md").write_text("# Phase 1: Core\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        with patch("sys.argv", ["duplo", "next"]):
+            with patch("duplo.main.collect_feedback", return_value="feedback"):
+                with patch(
+                    "duplo.main.generate_next_phase_plan", return_value="# Phase 2\n- [ ] Task"
+                ):
+                    with patch(
+                        "duplo.main.save_plan", return_value=tmp_path / "PLAN.md"
+                    ) as mock_save:
+                        with patch("duplo.main.run_mcloop", return_value=0):
+                            with patch("duplo.main.notify_phase_complete"):
+                                main()
+        saved_content = mock_save.call_args.args[0]
+        assert "Wire up" in saved_content
+        assert "run_example()" in saved_content
+
     def test_next_command_missing_plan_md(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["duplo", "next"]):
