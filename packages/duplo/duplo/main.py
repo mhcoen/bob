@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+from pathlib import Path
 
 from duplo.fetcher import fetch_site
+from duplo.screenshotter import save_reference_screenshots
+
+_SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 
 
 def main() -> None:
@@ -18,6 +23,12 @@ def main() -> None:
         print(f"Fetching {args.url} …")
         text = fetch_site(args.url)
         print(text)
+        urls = _SECTION_URL_RE.findall(text)
+        if urls:
+            output_dir = Path("screenshots")
+            print(f"\nSaving reference screenshots to {output_dir}/ …")
+            saved = save_reference_screenshots(urls, output_dir)
+            print(f"Saved {len(saved)} screenshot(s).")
     else:
         print("Usage: duplo init <url> | duplo run | duplo next")
         sys.exit(1)
