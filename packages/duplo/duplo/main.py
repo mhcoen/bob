@@ -20,6 +20,7 @@ from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import fetch_site
+from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
     append_test_tasks,
     generate_next_phase_plan,
@@ -103,6 +104,15 @@ def _first_run() -> None:
             text_content += tf.read_text(encoding="utf-8", errors="ignore") + "\n"
         except OSError:
             pass
+
+    # Extract text from PDFs.
+    relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
+    if relevant_pdfs:
+        print("Extracting text from PDFs …")
+        pdf_text = extract_pdf_text(relevant_pdfs)
+        if pdf_text:
+            text_content = text_content + pdf_text + "\n"
+            print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
 
     # Fetch the first URL found (primary product URL).
     source_url = ""
