@@ -84,7 +84,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Clearly state what product Duplo thinks it is duplicating and get confirmation before proceeding. No ambiguity.
   - [x] Send images to Claude Vision to extract visual design details: colors, fonts, spacing, layout, component styles. These become design requirements in PLAN.md.
   - [x] Extract text content from PDFs and include in feature analysis.
-  - [ ] Move processed reference materials to .duplo/references/ to keep the project directory clean.
+  - [x] Move processed reference materials to .duplo/references/ to keep the project directory clean.
   - [ ] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
 - [ ] Incremental update mode
   - [ ] On subsequent runs, detect new or changed files in the project directory by comparing against .duplo/file_hashes.json
