@@ -1,21 +1,21 @@
 # Bugs
 
-## design_extractor.py:155 -- format_design_section crashes on non-dict design fields
-**Severity**: medium
-`_parse_design()` stores whatever JSON types Claude returns via `data.get("colors", {})` etc. without validating they are dicts. If the LLM returns a string or list instead of an object for `colors`, `fonts`, `spacing`, or `layout`, the values are stored in `DesignRequirements` as-is. When `format_design_section()` later calls `.items()` on these fields (lines 176, 182, 188, 194), it crashes with `AttributeError: 'str' object has no attribute 'items'` (or similar for list). The prompt asks for objects but LLM responses are not guaranteed to conform.
+## video_extractor.py:191 -- Unhashable frames cause false duplicate detection
+**Severity**: high
+When a frame cannot be hashed (e.g., corrupted image), `deduplicate_frames()` stores it with hash value 0. Subsequent valid frames are compared against all kept hashes via `_hamming(h, 0)`. Any frame with a low Hamming weight (few bits set in its 64-bit dHash) will have a Hamming distance <= 6 from 0, causing it to be incorrectly classified as a duplicate and deleted from disk. For example, a mostly-black frame with only 4 bits set in its hash would be silently deleted as a "duplicate" of the unhashable frame.
 
-## gap_detector.py:205 -- detect_design_gaps crashes on non-dict design values
+## design_extractor.py:164 -- components field not type-validated
 **Severity**: medium
-`detect_design_gaps()` calls `.items()` on `design.get("colors", {})` and `design.get("fonts", {})` at lines 205 and 215. If the stored `design_requirements` in duplo.json has non-dict values for these keys (possible if the original extraction stored bad types from the LLM, or if the file was manually edited), this crashes with `AttributeError`. Same root cause as the `design_extractor.py` bug but a separate code path.
+In `_parse_design()`, the `colors`, `fonts`, `spacing`, and `layout` fields are all validated with `isinstance(..., dict)` checks (lines 160-163), but `components` is stored as-is from the API response. If the API returns a non-list value (e.g., a string like `"none"`), `format_design_section()` at line 204 will iterate over its characters, and line 205 `comp.get("name")` will crash with `AttributeError` since strings don't have `.get()`.
 
-## hasher.py:68 -- load_hashes crashes on corrupted file_hashes.json
+## design_extractor.py:205 -- No type check on component items before calling .get()
 **Severity**: medium
-`load_hashes()` handles the case where `.duplo/file_hashes.json` does not exist (returns `{}`), but if the file exists with invalid JSON (e.g., truncated by an interrupted write during `save_hashes()`), `json.loads()` raises an unhandled `JSONDecodeError`. Since `save_hashes()` uses non-atomic `path.write_text()`, a Ctrl-C or crash during write can corrupt this file. This is called on every subsequent run (`_subsequent_run()` at main.py:653).
+In `format_design_section()`, `comp.get("name", "unknown")` is called without first checking that `comp` is a dict. If the API returns a list containing non-dict items (e.g., strings), this crashes with `AttributeError`. The same pattern in `gap_detector.py:228` correctly guards with `if not isinstance(comp, dict): continue`.
 
-## saver.py:68 -- load_product crashes on corrupted product.json
+## saver.py:317 -- advance_phase() crashes if duplo.json missing
 **Severity**: low
-`load_product()` handles missing `.duplo/product.json` (returns `None`) but does not catch `JSONDecodeError` if the file exists with invalid JSON. Same class of bug as `hasher.py:68` -- non-atomic writes mean an interrupted process can leave a corrupt file that crashes the next run.
+`advance_phase()` calls `path.read_text()` on `.duplo/duplo.json` without checking if the file exists first. If called before duplo.json is created (e.g., due to an interrupted first run or external tooling), it raises `FileNotFoundError`. Other similar functions like `get_current_phase()` (line 333) and `clear_in_progress()` properly check existence before reading.
 
-## main.py:700 -- _subsequent_run crashes on corrupted duplo.json
-**Severity**: medium
-In `_subsequent_run()`, `json.loads(duplo_path.read_text())` at line 700 has no `JSONDecodeError` handling. This is the main entry point for all subsequent runs. If `.duplo/duplo.json` is corrupted (truncated write, manual edit error), the entire tool becomes unusable with an unhelpful traceback. Many functions in `saver.py` that read duplo.json (e.g., `advance_phase`, `get_current_phase`, `clear_in_progress`) have the same issue, but this call site is the most impactful since it gates all subsequent-run functionality.
+## runner.py:24 -- Docstring says "mcloop sync" but code runs bare "mcloop"
+**Severity**: low
+The docstring for `run_mcloop()` says "Run ``mcloop sync`` in *target_dir*" but the actual subprocess command is `["mcloop"]` with no subcommand. If mcloop requires the "sync" argument to perform the intended operation, the function silently does the wrong thing.
