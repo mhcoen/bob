@@ -83,7 +83,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] If a URL is found, validate it points to a single clear product, not a company portfolio or homepage with multiple products. Ask the user to clarify if ambiguous.
   - [x] Clearly state what product Duplo thinks it is duplicating and get confirmation before proceeding. No ambiguity.
   - [x] Send images to Claude Vision to extract visual design details: colors, fonts, spacing, layout, component styles. These become design requirements in PLAN.md.
-  - [ ] Extract text content from PDFs and include in feature analysis.
+  - [x] Extract text content from PDFs and include in feature analysis.
   - [ ] Move processed reference materials to .duplo/references/ to keep the project directory clean.
   - [ ] Keep a hash manifest of all files in the project directory in .duplo/file_hashes.json
 - [ ] Incremental update mode
