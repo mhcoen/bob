@@ -15,7 +15,7 @@ short and focused. This is a thin orchestration layer, not a framework.
   - [x] Verify pip install -e . works and duplo command runs
 - [ ] Product scraping
   - [x] Fetch the product URL and extract text content
-  - [ ] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
+  - [x] Follow links, prioritizing documentation, features, guides, changelogs, and API references over marketing, blog, pricing, legal, and login pages
   - [ ] Save reference screenshots from the product website
   - [ ] Extract a structured feature list from the scraped content
 - [ ] Interactive feature selection
