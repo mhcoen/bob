@@ -520,6 +520,119 @@ class TestAdvanceToNext:
         assert "run_example()" in saved_content
 
 
+class TestSubsequentRunFileChanges:
+    """Tests for file change detection on subsequent runs."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    def test_detects_added_file(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        # Save initial hashes with no files.
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        # Add a new file that will be detected.
+        (tmp_path / "new_ref.png").write_bytes(b"PNG image data")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "File changes detected" in out
+        assert "+ new_ref.png" in out
+
+    def test_detects_changed_file(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "notes.txt").write_text("original")
+        monkeypatch.chdir(tmp_path)
+
+        # Compute and save hashes with original content.
+        from duplo.hasher import compute_hashes, save_hashes
+
+        hashes = compute_hashes(tmp_path)
+        save_hashes(hashes, directory=tmp_path)
+
+        # Modify the file.
+        (tmp_path / "notes.txt").write_text("modified content")
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "File changes detected" in out
+        assert "~ notes.txt" in out
+
+    def test_detects_removed_file(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "old.txt").write_text("data")
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.hasher import compute_hashes, save_hashes
+
+        hashes = compute_hashes(tmp_path)
+        save_hashes(hashes, directory=tmp_path)
+
+        # Remove the file.
+        (tmp_path / "old.txt").unlink()
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "File changes detected" in out
+        assert "- old.txt" in out
+
+    def test_no_changes_no_message(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.hasher import compute_hashes, save_hashes
+
+        hashes = compute_hashes(tmp_path)
+        save_hashes(hashes, directory=tmp_path)
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        out = capsys.readouterr().out
+        assert "File changes detected" not in out
+
+    def test_updates_hashes_after_detection(self, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "new.txt").write_text("hello")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.main.run_mcloop", return_value=0):
+                    main()
+
+        # Verify hashes were updated.
+        from duplo.hasher import load_hashes
+
+        saved = load_hashes(tmp_path)
+        assert "new.txt" in saved
+
+
 class TestInitProject:
     """Test _init_project directly."""
 

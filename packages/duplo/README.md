@@ -20,7 +20,8 @@ duplo
 
 Duplo scans the directory, analyzes everything it finds, identifies
 the product, extracts features and visual design details, asks which
-features you want, and generates a build plan. McLoop then builds it.
+features you want, and generates a phased build plan. McLoop then
+builds it phase by phase.
 
 When you test the result and find things missing or wrong, drop more
 reference material into the directory (a screenshot showing the right
@@ -30,6 +31,83 @@ tasks to the plan for anything that was missed.
 
 The cycle is: add reference material, run duplo, let McLoop build,
 test, add more if needed, run duplo again.
+
+## What Duplo does on first run
+
+1. **Scans reference materials.** Images (png, jpg, gif, webp), PDFs,
+   text/markdown files, and any file containing URLs. Each file is
+   assessed for relevance (tiny images and empty files are flagged).
+
+2. **Validates the product URL.** Checks that the URL points to a
+   single clear product, not a company portfolio or homepage with
+   multiple products. If ambiguous, asks you to clarify.
+
+3. **Confirms the product.** States what it thinks it's duplicating
+   and gets your confirmation before proceeding.
+
+4. **Extracts visual design from images.** Sends reference screenshots
+   to Claude Vision to extract colors, fonts, spacing, layout, and
+   component styles. These become design requirements in the build plan.
+
+5. **Extracts text from PDFs.** Pulls text content from all PDF pages
+   and includes it in the feature analysis.
+
+6. **Crawls product documentation.** Follows links from the product
+   URL, prioritizing documentation, features, and API references over
+   marketing and legal pages. Follows documentation links even if they
+   leave the main domain (docs are often hosted separately). Extracts
+   code examples as input/expected output pairs, plus feature tables,
+   operation lists, and function references.
+
+7. **Extracts features.** Uses Claude to analyze all collected text
+   and produce a structured feature list grouped by category.
+
+8. **Interactive selection.** Presents the features and asks which to
+   include. Then asks about platform, language, constraints, and
+   preferences.
+
+9. **Generates a phased roadmap.** Breaks the selected features into
+   phases, starting with the smallest end-to-end working thing. Each
+   phase has a title, goal, feature list, and test criteria.
+
+10. **Generates test cases from documentation.** Every code example
+    extracted from the docs becomes a unit test case that calls the
+    app's core logic directly. Tests are grouped by category.
+
+11. **Builds Phase 1.** Generates a PLAN.md for Phase 1, writes
+    CLAUDE.md and mcloop.json, and runs McLoop to build it.
+
+12. **Captures and compares screenshots.** After McLoop finishes,
+    uses appshot to capture a screenshot of the built app and compares
+    it against reference images. Visual differences are saved to
+    ISSUES.md.
+
+13. **Cleans up.** Moves processed reference files to
+    `.duplo/references/` and saves a file hash manifest for detecting
+    changes on subsequent runs.
+
+## Subsequent runs
+
+Running `duplo` again in the same directory detects what happened
+since the last run:
+
+- **Interrupted phase:** If McLoop was killed mid-phase, Duplo
+  resumes where it left off. If McLoop finished but the post-phase
+  steps (screenshots, comparison) didn't complete, those are resumed.
+
+- **Phase complete:** Duplo collects your feedback (text input or
+  from a file), incorporates it along with any visual issues, and
+  generates the next phase's PLAN.md. McLoop then builds it.
+
+- **New files detected:** Duplo compares the directory against its
+  stored file hash manifest and reports what changed (added, modified,
+  removed files).
+
+All state lives in `.duplo/` (added to `.gitignore` automatically):
+`duplo.json` for selections, features, phases, and preferences;
+`references/` for processed reference files; `examples/` for
+extracted code examples; `raw_pages/` for scraped HTML content;
+`file_hashes.json` for change detection.
 
 ## Install
 
@@ -41,8 +119,21 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Requires McLoop (`pip install -e ~/proj/mcloop`), Python 3.11+,
-`claude` CLI on PATH, and macOS for native app building.
+## Requirements
+
+- Python 3.11+
+- [McLoop](https://github.com/mhcoen/mcloop) (`pip install -e ~/proj/mcloop`)
+- `claude` CLI on PATH
+- macOS for appshot screenshot verification
+- ffmpeg on PATH for video reference extraction (optional)
+
+## Development
+
+```bash
+ruff check .              # Lint
+ruff format --check .     # Format check
+pytest                    # Tests
+```
 
 ## Author
 
