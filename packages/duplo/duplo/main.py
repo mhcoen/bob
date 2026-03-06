@@ -18,11 +18,15 @@ from duplo.fetcher import fetch_site
 from duplo.initializer import create_project_dir, project_name_from_url
 from duplo.planner import generate_next_phase_plan, generate_phase_plan, save_plan
 from duplo.questioner import BuildPreferences, ask_preferences
+from duplo.roadmap import format_roadmap, generate_roadmap
 from duplo.runner import run_mcloop
 from duplo.saver import (
+    advance_phase,
     append_phase_to_history,
     clear_in_progress,
+    get_current_phase,
     save_feedback,
+    save_roadmap,
     save_screenshot_feature_map,
     save_selections,
     set_in_progress,
@@ -71,12 +75,38 @@ def main() -> None:
         )
 
         saved = save_selections(
-            args.url, features, prefs, app_name=app_name, target_dir=project_dir
+            args.url,
+            features,
+            prefs,
+            app_name=app_name,
+            target_dir=project_dir,
         )
         print(f"\nSelections saved to {saved}")
 
-        claude_md = write_claude_md(target_dir=project_dir)
-        print(f"Appshot instructions written to {claude_md}")
+        claude_md = write_claude_md(
+            target_dir=project_dir,
+        )
+        print(f"CLAUDE.md written to {claude_md}")
+
+        print("\nGenerating build roadmap ...")
+        roadmap = generate_roadmap(
+            args.url,
+            features,
+            prefs,
+        )
+        if roadmap:
+            print("\n" + format_roadmap(roadmap))
+            answer = input("Approve this roadmap? [Y/n] ").strip().lower()
+            if answer and answer != "y":
+                print("Roadmap not approved. Edit duplo.json manually or re-run duplo init.")
+            else:
+                save_roadmap(
+                    roadmap,
+                    target_dir=project_dir,
+                )
+                print("Roadmap saved to duplo.json.")
+        else:
+            print("Failed to generate roadmap.")
 
         urls = _SECTION_URL_RE.findall(text)
         if urls:
@@ -162,26 +192,36 @@ def _cmd_run() -> None:
     app_name = data.get("app_name", "")
     in_progress = data.get("in_progress")
 
-    # If Phase 1 is already recorded in history it is complete.
+    phase_num, phase_info = get_current_phase()
+    phase_label = (
+        f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
+    )
+
+    # Check if current phase is already in history.
     history = data.get("phases", [])
-    if any(re.search(r"^Phase\s+1\b", h.get("phase", ""), re.IGNORECASE) for h in history):
-        print("Phase 1 already complete. Run 'duplo next' to continue.")
+    if any(h.get("phase", "").startswith(phase_label) for h in history):
+        print(f"{phase_label} already complete. Run 'duplo next' to continue.")
         return
 
     plan_path = Path("PLAN.md")
 
     # McLoop finished but post-processing was interrupted.
     if in_progress and in_progress.get("mcloop_done"):
-        print(f"Resuming {in_progress['label']}: McLoop already done, completing phase …")
+        print(f"Resuming {in_progress['label']}: McLoop already done, completing ...")
         content = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
-        _execute_phase(content, app_name, in_progress["label"], skip_mcloop=True)
+        _execute_phase(
+            content,
+            app_name,
+            in_progress["label"],
+            skip_mcloop=True,
+        )
         return
 
-    # PLAN.md exists from a prior interrupted run — skip plan generation.
+    # PLAN.md exists from a prior interrupted run.
     if plan_path.exists():
-        print("Resuming Phase 1: PLAN.md found, re-running McLoop …")
+        print(f"Resuming {phase_label}: PLAN.md found, re-running McLoop ...")
         content = plan_path.read_text(encoding="utf-8")
-        _execute_phase(content, app_name, "Phase 1")
+        _execute_phase(content, app_name, phase_label)
         return
 
     source_url = data["source_url"]
@@ -194,11 +234,17 @@ def _cmd_run() -> None:
         preferences=prefs_data.get("preferences", []),
     )
 
-    print("Generating Phase 1 PLAN.md …")
-    content = generate_phase_plan(source_url, features, preferences)
+    print(f"Generating {phase_label} PLAN.md ...")
+    content = generate_phase_plan(
+        source_url,
+        features,
+        preferences,
+        phase=phase_info,
+        project_name=data.get("app_name", ""),
+    )
     saved = save_plan(content)
-    print(f"Phase 1 plan saved to {saved}")
-    _execute_phase(content, app_name, "Phase 1")
+    print(f"{phase_label} plan saved to {saved}")
+    _execute_phase(content, app_name, phase_label)
 
 
 def _execute_phase(
@@ -224,8 +270,9 @@ def _execute_phase(
         set_in_progress(phase_label, mcloop_done=True)
 
     append_phase_to_history(plan_content)
+    advance_phase()
     clear_in_progress()
-    print("Phase appended to duplo.json history.")
+    print("Phase complete. Recorded in duplo.json.")
 
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"
