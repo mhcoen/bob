@@ -4,82 +4,105 @@ import json
 import subprocess
 from unittest.mock import patch
 
-from mcloop.checks import _detect_commands, _load_config_commands, run_checks
+from mcloop.checks import (
+    _detect_commands,
+    _load_config,
+    get_check_commands,
+    run_checks,
+)
 
 
 def test_detect_commands_pyproject(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "ruff check ." in cmds
     assert "pytest" in cmds
 
 
 def test_detect_commands_pyproject_ruff_only(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "ruff check ." in cmds
     assert "pytest" not in cmds
 
 
 def test_detect_commands_package_json(tmp_path):
     (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}')
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "npm test" in cmds
 
 
 def test_detect_commands_package_json_no_test(tmp_path):
     (tmp_path / "package.json").write_text('{"scripts": {"build": "tsc"}}')
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "npm test" not in cmds
 
 
 def test_detect_commands_makefile(tmp_path):
     (tmp_path / "Makefile").write_text("check:\n\techo ok\n")
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "make check" in cmds
 
 
 def test_detect_commands_swift(tmp_path):
     (tmp_path / "Package.swift").write_text("// swift package\n")
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "swift build" in cmds
 
 
 def test_detect_commands_empty(tmp_path):
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert cmds == []
 
 
 def test_detect_commands_multiple(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
     (tmp_path / "Makefile").write_text("check:\n\techo ok\n")
-    cmds = _detect_commands(tmp_path)
+    cmds = _detect_commands(tmp_path, {})
     assert "ruff check ." in cmds
     assert "make check" in cmds
 
 
-def test_load_config_commands_no_file(tmp_path):
-    assert _load_config_commands(tmp_path) is None
+def test_load_config_no_file(tmp_path):
+    assert _load_config(tmp_path) == {}
 
 
-def test_load_config_commands_with_checks(tmp_path):
-    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["ruff check .", "pytest"]}))
-    assert _load_config_commands(tmp_path) == ["ruff check .", "pytest"]
+def test_load_config_with_checks(tmp_path):
+    data = {"checks": ["ruff check .", "pytest"]}
+    (tmp_path / "mcloop.json").write_text(json.dumps(data))
+    assert _load_config(tmp_path) == data
 
 
-def test_load_config_commands_no_checks_key(tmp_path):
-    (tmp_path / "mcloop.json").write_text(json.dumps({"other": "value"}))
-    assert _load_config_commands(tmp_path) is None
+def test_load_config_no_checks_key(tmp_path):
+    data = {"other": "value"}
+    (tmp_path / "mcloop.json").write_text(json.dumps(data))
+    assert _load_config(tmp_path) == data
 
 
-def test_load_config_commands_invalid_json(tmp_path):
+def test_load_config_invalid_json(tmp_path):
     (tmp_path / "mcloop.json").write_text("not json")
-    assert _load_config_commands(tmp_path) is None
+    assert _load_config(tmp_path) == {}
 
 
-def test_load_config_commands_checks_not_list(tmp_path):
-    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": "ruff check ."}))
-    assert _load_config_commands(tmp_path) is None
+def test_get_check_commands_explicit(tmp_path):
+    data = {"checks": ["ruff check .", "pytest"]}
+    (tmp_path / "mcloop.json").write_text(json.dumps(data))
+    assert get_check_commands(tmp_path) == [
+        "ruff check .",
+        "pytest",
+    ]
+
+
+def test_get_check_commands_fallback(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
+    cmds = get_check_commands(tmp_path)
+    assert "ruff check ." in cmds
+
+
+def test_get_check_commands_checks_not_list(tmp_path):
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": "not a list"}))
+    # Falls back to detect since checks is not a list
+    assert get_check_commands(tmp_path) == []
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -93,7 +116,7 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     assert result.passed
     assert mock_run.call_count == 1
     called_cmd = mock_run.call_args[0][0]
-    assert called_cmd == "ruff check ."
+    assert called_cmd == ["ruff", "check", "."]
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -108,7 +131,7 @@ def test_run_checks_uses_config_commands(mock_run, tmp_path):
     assert result.passed
     assert mock_run.call_count == 1
     called_cmd = mock_run.call_args[0][0]
-    assert called_cmd == "echo hello"
+    assert called_cmd == ["echo", "hello"]
 
 
 def test_run_checks_config_overrides_autodetect(tmp_path):

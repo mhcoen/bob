@@ -51,9 +51,7 @@ def test_slugify_empty():
 
 
 def test_write_log(tmp_path):
-    log_path = _write_log(
-        tmp_path, "My task", ["claude", "-p", "do stuff"], "output here\n", 0
-    )
+    log_path = _write_log(tmp_path, "My task", ["claude", "-p", "do stuff"], "output here\n", 0)
     assert log_path.exists()
     content = log_path.read_text()
     assert "Task: My task" in content
@@ -146,67 +144,52 @@ def test_gather_sync_context_excludes_git_dir(tmp_path):
 # --- build_sync_prompt ---
 
 
-def test_build_sync_prompt_includes_context():
-    ctx = {"PLAN.md": "- [x] Do something", "README.md": "# Readme"}
-    prompt = build_sync_prompt(ctx)
-    assert "- [x] Do something" in prompt
-    assert "# Readme" in prompt
-    assert "=== PLAN.md ===" in prompt
-    assert "=== README.md ===" in prompt
-
-
 def test_build_sync_prompt_append_only_instruction():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "APPEND ONLY" in prompt
     assert "Never modify" in prompt
 
 
 def test_build_sync_prompt_checked_items_instruction():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "- [x]" in prompt
 
 
 def test_build_sync_prompt_granularity_instruction():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "granularity" in prompt
 
 
 def test_build_sync_prompt_no_duplicates_instruction():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "duplicate" in prompt
 
 
-def test_build_sync_prompt_empty_context():
-    prompt = build_sync_prompt({})
-    assert "APPEND ONLY" in prompt
-    assert "- [x]" in prompt
-
-
 def test_build_sync_prompt_flags_checked_no_code():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "CHECKED BUT NOT IMPLEMENTED" in prompt
     assert "CHECKED ITEMS WITH NO CODE" in prompt
 
 
 def test_build_sync_prompt_flags_unchecked_already_done():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "UNCHECKED BUT ALREADY DONE" in prompt
     assert "UNCHECKED ITEMS ALREADY DONE" in prompt
 
 
 def test_build_sync_prompt_flags_description_drift():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "DESCRIPTION DRIFT" in prompt
 
 
 def test_build_sync_prompt_problems_report_format():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "--- SYNC PROBLEMS ---" in prompt
     assert "--- END PROBLEMS ---" in prompt
 
 
 def test_build_sync_prompt_no_problems_instruction():
-    prompt = build_sync_prompt({})
+    prompt = build_sync_prompt()
     assert "No problems found." in prompt
 
 
@@ -253,16 +236,8 @@ def test_gather_audit_context_omits_plan_md(tmp_path):
 # --- build_audit_prompt ---
 
 
-def test_build_audit_prompt_includes_source():
-    ctx = {"app.py": "x = 1", "README.md": "# Hi"}
-    prompt = build_audit_prompt(ctx)
-    assert "=== app.py ===" in prompt
-    assert "x = 1" in prompt
-    assert "=== README.md ===" in prompt
-
-
 def test_build_audit_prompt_defect_categories():
-    prompt = build_audit_prompt({})
+    prompt = build_audit_prompt()
     assert "Crashes" in prompt
     assert "Incorrect behavior" in prompt
     assert "Unhandled errors" in prompt
@@ -270,30 +245,24 @@ def test_build_audit_prompt_defect_categories():
 
 
 def test_build_audit_prompt_exclusions():
-    prompt = build_audit_prompt({})
+    prompt = build_audit_prompt()
     assert "Style" in prompt or "style" in prompt
     assert "Refactoring" in prompt or "refactoring" in prompt
 
 
 def test_build_audit_prompt_bugs_md_output():
-    prompt = build_audit_prompt({})
+    prompt = build_audit_prompt()
     assert "BUGS.md" in prompt
 
 
 def test_build_audit_prompt_no_bugs_instruction():
-    prompt = build_audit_prompt({})
+    prompt = build_audit_prompt()
     assert "No bugs found." in prompt
 
 
 def test_build_audit_prompt_format_severity():
-    prompt = build_audit_prompt({})
+    prompt = build_audit_prompt()
     assert "Severity" in prompt
-
-
-def test_build_audit_prompt_empty_context():
-    prompt = build_audit_prompt({})
-    assert "BUGS.md" in prompt
-    assert "No bugs found." in prompt
 
 
 # --- bugs_md_has_bugs ---
@@ -320,31 +289,17 @@ def test_bugs_md_has_bugs_partial_match():
 # --- build_bug_fix_prompt ---
 
 
-def test_build_bug_fix_prompt_includes_bugs():
-    bugs = "## foo.py:5 — crash\n**Severity**: high\nUnhandled exception.\n"
-    prompt = build_bug_fix_prompt(bugs, {})
-    assert "foo.py:5" in prompt
-    assert "BUGS.md" in prompt
-
-
 def test_build_bug_fix_prompt_fix_only_instruction():
-    prompt = build_bug_fix_prompt("bugs", {})
+    prompt = build_bug_fix_prompt()
     assert "Fix ONLY" in prompt
     assert "minimal" in prompt
 
 
 def test_build_bug_fix_prompt_no_delete_instruction():
-    prompt = build_bug_fix_prompt("bugs", {})
+    prompt = build_bug_fix_prompt()
     assert "deleted automatically" in prompt
 
 
-def test_build_bug_fix_prompt_includes_context():
-    ctx = {"app.py": "x = 1", "README.md": "# Hi"}
-    prompt = build_bug_fix_prompt("bugs", ctx)
-    assert "=== app.py ===" in prompt
-    assert "x = 1" in prompt
-
-
-def test_build_bug_fix_prompt_empty_context():
-    prompt = build_bug_fix_prompt("no bugs", {})
-    assert "Fix ONLY" in prompt
+def test_build_bug_fix_prompt_bugs_md_reference():
+    prompt = build_bug_fix_prompt()
+    assert "BUGS.md" in prompt

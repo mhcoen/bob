@@ -1,6 +1,7 @@
 """Integration test: subtask ordering — depth-first execution and parent auto-checking."""
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,7 +23,9 @@ def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
 
     plan_md = tmp_path / "PLAN.md"
     plan_md.write_text(plan_content)
-    (tmp_path / "mcloop.json").write_text('{"checks": ["python -c \\"print(\'ok\')\\""]}\n')
+    (tmp_path / "mcloop.json").write_text(
+        f'{{"checks": ["{sys.executable} -c \\"print(\'ok\')\\""]}}\\n'
+    )
 
     _git(["git", "add", "."], tmp_path)
     _git(["git", "commit", "-m", "initial"], tmp_path)
@@ -60,11 +63,7 @@ def _make_fake_run_task(execution_order: list[str]) -> object:
 @pytest.mark.integration
 def test_children_execute_before_parent(tmp_path):
     """Children are executed depth-first; parent is auto-checked without calling run_task."""
-    plan_content = (
-        "- [ ] Parent task\n"
-        "  - [ ] Child A\n"
-        "  - [ ] Child B\n"
-    )
+    plan_content = "- [ ] Parent task\n  - [ ] Child A\n  - [ ] Child B\n"
     plan_md = _setup_repo(tmp_path, plan_content)
 
     execution_order: list[str] = []
@@ -90,12 +89,7 @@ def test_children_execute_before_parent(tmp_path):
 @pytest.mark.integration
 def test_parent_auto_checked_after_all_children_complete(tmp_path):
     """Parent is auto-checked on disk when all its children are done, without being run."""
-    plan_content = (
-        "- [ ] Feature\n"
-        "  - [ ] Step 1\n"
-        "  - [ ] Step 2\n"
-        "  - [ ] Step 3\n"
-    )
+    plan_content = "- [ ] Feature\n  - [ ] Step 1\n  - [ ] Step 2\n  - [ ] Step 3\n"
     plan_md = _setup_repo(tmp_path, plan_content)
 
     execution_order: list[str] = []
@@ -116,11 +110,7 @@ def test_parent_auto_checked_after_all_children_complete(tmp_path):
 @pytest.mark.integration
 def test_deep_nesting_runs_depth_first(tmp_path):
     """Grandchildren execute before children, children before parents."""
-    plan_content = (
-        "- [ ] Grandparent\n"
-        "  - [ ] Parent\n"
-        "    - [ ] Grandchild\n"
-    )
+    plan_content = "- [ ] Grandparent\n  - [ ] Parent\n    - [ ] Grandchild\n"
     plan_md = _setup_repo(tmp_path, plan_content)
 
     execution_order: list[str] = []
@@ -144,12 +134,7 @@ def test_deep_nesting_runs_depth_first(tmp_path):
 @pytest.mark.integration
 def test_mixed_parent_and_leaf_tasks_ordered_correctly(tmp_path):
     """A top-level leaf before a parent-with-children runs before its children."""
-    plan_content = (
-        "- [ ] Standalone task\n"
-        "- [ ] Group\n"
-        "  - [ ] Sub A\n"
-        "  - [ ] Sub B\n"
-    )
+    plan_content = "- [ ] Standalone task\n- [ ] Group\n  - [ ] Sub A\n  - [ ] Sub B\n"
     plan_md = _setup_repo(tmp_path, plan_content)
 
     execution_order: list[str] = []

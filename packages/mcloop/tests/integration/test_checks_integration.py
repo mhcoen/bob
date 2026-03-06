@@ -1,5 +1,8 @@
 """Integration tests for run_checks: exercises real subprocesses."""
 
+import json
+import shutil
+import sys
 import textwrap
 
 import pytest
@@ -7,9 +10,26 @@ import pytest
 from mcloop.checks import run_checks
 
 
+def _ruff_path():
+    return shutil.which("ruff")
+
+
+def _pytest_path():
+    return shutil.which("pytest") or f"{sys.executable} -m pytest"
+
+
 @pytest.mark.integration
 def test_run_checks_passes_on_clean_project(tmp_path):
     """run_checks returns passed=True for a project with ruff-clean, passing pytest."""
+    ruff = _ruff_path()
+    pt = _pytest_path()
+    if not ruff:
+        pytest.skip("ruff not found on PATH")
+
+    checks = [f"{ruff} check ."]
+    checks.append(f"{pt}")
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": checks}))
+
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent("""\
         [tool.ruff]
@@ -31,6 +51,11 @@ def test_run_checks_passes_on_clean_project(tmp_path):
 @pytest.mark.integration
 def test_run_checks_fails_on_ruff_error(tmp_path):
     """run_checks returns passed=False when ruff finds a lint error."""
+    ruff = _ruff_path()
+    if not ruff:
+        pytest.skip("ruff not found on PATH")
+
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": [f"{ruff} check ."]}))
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent("""\
         [tool.ruff]
@@ -52,6 +77,8 @@ def test_run_checks_fails_on_ruff_error(tmp_path):
 @pytest.mark.integration
 def test_run_checks_fails_on_pytest_failure(tmp_path):
     """run_checks returns passed=False when a pytest test fails."""
+    pt = _pytest_path()
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": [pt]}))
     (tmp_path / "pyproject.toml").write_text(
         textwrap.dedent("""\
         [tool.pytest.ini_options]
@@ -71,10 +98,8 @@ def test_run_checks_fails_on_pytest_failure(tmp_path):
 @pytest.mark.integration
 def test_run_checks_uses_mcloop_json_commands(tmp_path):
     """run_checks uses commands from mcloop.json when present."""
-    import json
-
     (tmp_path / "mcloop.json").write_text(
-        json.dumps({"checks": ["python -c \"print('custom check ran')\""]})
+        json.dumps({"checks": [f"{sys.executable} -c \"print('custom check ran')\""]})
     )
 
     result = run_checks(tmp_path)
@@ -95,15 +120,13 @@ def test_run_checks_no_config_no_commands(tmp_path):
 @pytest.mark.integration
 def test_run_checks_stops_at_first_failure(tmp_path):
     """run_checks stops after the first failing command and doesn't run subsequent ones."""
-    import json
-
     marker = tmp_path / "second_ran.txt"
     (tmp_path / "mcloop.json").write_text(
         json.dumps(
             {
                 "checks": [
-                    "python -c \"raise SystemExit(1)\"",
-                    f"python -c \"open('{marker}', 'w').close()\"",
+                    f'{sys.executable} -c "raise SystemExit(1)"',
+                    f"""{sys.executable} -c "open('{marker}', 'w').close()" """,
                 ]
             }
         )

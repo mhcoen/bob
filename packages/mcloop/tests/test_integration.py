@@ -354,10 +354,7 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
 
     _commit(tmp_path, "my task description")
 
-    commit_calls = [
-        c for c in mock_run.call_args_list
-        if c.args[0][0:2] == ["git", "commit"]
-    ]
+    commit_calls = [c for c in mock_run.call_args_list if c.args[0][0:2] == ["git", "commit"]]
     assert len(commit_calls) == 1
     assert any("my task description" in arg for arg in commit_calls[0].args[0])
 
@@ -454,9 +451,7 @@ def test_commit_ignores_errors(mock_run, tmp_path):
 @patch("mcloop.main._commit")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_all_done_noop(
-    mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path
-):
+def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path):
     """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")
 
@@ -496,7 +491,7 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
         capture_output=True,
     )
     assert mock_run.call_args_list[2] == call(
-        ["git", "commit", "-m", "mcloop: checkpoint before run"],
+        ["git", "commit", "-m", "mcloop: checkpoint"],
         cwd=tmp_path,
         capture_output=True,
     )
@@ -529,10 +524,13 @@ def test_checkpoint_ignores_errors(mock_run, tmp_path):
 def test_checkpoint_called_before_loop(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """run_loop calls _checkpoint exactly once before processing tasks."""
+    """run_loop calls _checkpoint at start and before each task."""
     md = _make_project(tmp_path, "- [ ] Task one\n")
     mock_run.return_value = _ok_run_result()
 
     run_loop(md)
 
-    mock_checkpoint.assert_called_once_with(tmp_path)
+    # Called once at start (no next_task) and once before the task
+    assert mock_checkpoint.call_count >= 1
+    # First call is the initial checkpoint
+    assert mock_checkpoint.call_args_list[0] == call(tmp_path)

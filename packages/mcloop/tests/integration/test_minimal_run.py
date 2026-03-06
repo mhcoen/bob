@@ -1,6 +1,7 @@
 """Integration test: minimal end-to-end run through run_loop."""
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,7 +25,9 @@ def _setup_repo(tmp_path: Path) -> Path:
     plan_md.write_text("- [ ] Create hello.txt\n")
 
     # Use a trivial check so run_checks always passes
-    (tmp_path / "mcloop.json").write_text('{"checks": ["python -c \\"print(\'ok\')\\""]}\n')
+    (tmp_path / "mcloop.json").write_text(
+        f'{{"checks": ["{sys.executable} -c \\"print(\'ok\')\\""]}}\\n'
+    )
 
     _git(["git", "add", "."], tmp_path)
     _git(["git", "commit", "-m", "initial"], tmp_path)

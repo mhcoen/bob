@@ -24,7 +24,6 @@ def test_notify_imessage_when_configured(mock_imsg):
     mock_imsg.assert_called_once()
 
 
-
 @patch("mcloop.notify._send_telegram")
 @patch("mcloop.notify._backend", "telegram")
 def test_notify_error_prefix(mock_tg):

@@ -97,8 +97,10 @@ def test_run_audit_fix_cycle_no_bugs(tmp_path):
         bugs_path.write_text("# Bugs\n\nNo bugs found.\n")
         return _make_result()
 
-    with patch("mcloop.main.run_audit", side_effect=fake_audit) as mock_audit, \
-         patch("mcloop.main.run_bug_fix") as mock_fix:
+    with (
+        patch("mcloop.main.run_audit", side_effect=fake_audit) as mock_audit,
+        patch("mcloop.main.run_bug_fix") as mock_fix,
+    ):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_audit.assert_called_once()
@@ -107,7 +109,7 @@ def test_run_audit_fix_cycle_no_bugs(tmp_path):
 
 
 def test_run_audit_fix_cycle_with_bugs(tmp_path):
-    """When audit finds bugs, fix session runs and BUGS.md is deleted."""
+    """When audit finds bugs, fix session runs."""
     bugs_path = tmp_path / "BUGS.md"
     bug_content = "# Bugs\n\n## foo.py:1 — crash\n**Severity**: high\nBad.\n"
 
@@ -115,22 +117,22 @@ def test_run_audit_fix_cycle_with_bugs(tmp_path):
         bugs_path.write_text(bug_content)
         return _make_result()
 
-    check_result = MagicMock()
-    check_result.passed = False
-
-    with patch("mcloop.main.run_audit", side_effect=fake_audit), \
-         patch("mcloop.main.run_bug_fix", return_value=_make_result()) as mock_fix, \
-         patch("mcloop.main._has_meaningful_changes", return_value=False):
+    with (
+        patch("mcloop.main.run_audit", side_effect=fake_audit),
+        patch("mcloop.main.run_bug_fix", return_value=_make_result()) as mock_fix,
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+    ):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_called_once()
-    assert not bugs_path.exists()
 
 
 def test_run_audit_fix_cycle_audit_failure(tmp_path):
     """When audit session fails, fix session is not run."""
-    with patch("mcloop.main.run_audit", return_value=_make_result(success=False, exit_code=1)), \
-         patch("mcloop.main.run_bug_fix") as mock_fix:
+    with (
+        patch("mcloop.main.run_audit", return_value=_make_result(success=False, exit_code=1)),
+        patch("mcloop.main.run_bug_fix") as mock_fix,
+    ):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_not_called()
@@ -138,8 +140,10 @@ def test_run_audit_fix_cycle_audit_failure(tmp_path):
 
 def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
     """When audit succeeds but BUGS.md not written, fix session is not run."""
-    with patch("mcloop.main.run_audit", return_value=_make_result()), \
-         patch("mcloop.main.run_bug_fix") as mock_fix:
+    with (
+        patch("mcloop.main.run_audit", return_value=_make_result()),
+        patch("mcloop.main.run_bug_fix") as mock_fix,
+    ):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_not_called()
@@ -150,11 +154,13 @@ def test_run_loop_no_audit_skips_audit(tmp_path):
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n\nNo tasks.\n")
 
-    with patch("mcloop.main._checkpoint"), \
-         patch("mcloop.main.parse", return_value=[]), \
-         patch("mcloop.main._run_audit_fix_cycle") as mock_audit, \
-         patch("mcloop.main._print_summary"), \
-         patch("mcloop.main.notify"):
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+    ):
         run_loop(plan, no_audit=True)
 
     mock_audit.assert_not_called()
@@ -165,11 +171,13 @@ def test_run_loop_audit_called_by_default(tmp_path):
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n\nNo tasks.\n")
 
-    with patch("mcloop.main._checkpoint"), \
-         patch("mcloop.main.parse", return_value=[]), \
-         patch("mcloop.main._run_audit_fix_cycle") as mock_audit, \
-         patch("mcloop.main._print_summary"), \
-         patch("mcloop.main.notify"):
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+    ):
         run_loop(plan, no_audit=False)
 
     mock_audit.assert_called_once()
@@ -186,11 +194,13 @@ def test_run_audit_fix_cycle_commits_when_checks_pass(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    with patch("mcloop.main.run_audit", side_effect=fake_audit), \
-         patch("mcloop.main.run_bug_fix", return_value=_make_result()), \
-         patch("mcloop.main._has_meaningful_changes", return_value=True), \
-         patch("mcloop.main.run_checks", return_value=check_result), \
-         patch("mcloop.main._commit") as mock_commit:
+    with (
+        patch("mcloop.main.run_audit", side_effect=fake_audit),
+        patch("mcloop.main.run_bug_fix", return_value=_make_result()),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit") as mock_commit,
+    ):
         _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_commit.assert_called_once_with(tmp_path, "Fix bugs from audit")

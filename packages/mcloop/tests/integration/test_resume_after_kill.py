@@ -1,6 +1,7 @@
 """Integration test: resume after kill — restart picks up where it left off."""
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,12 +22,10 @@ def _setup_repo(tmp_path: Path) -> Path:
     _git(["git", "config", "user.name", "McLoop Test"], tmp_path)
 
     plan_md = tmp_path / "PLAN.md"
-    plan_md.write_text(
-        "- [ ] Create alpha.txt\n"
-        "- [ ] Create beta.txt\n"
-        "- [ ] Create gamma.txt\n"
+    plan_md.write_text("- [ ] Create alpha.txt\n- [ ] Create beta.txt\n- [ ] Create gamma.txt\n")
+    (tmp_path / "mcloop.json").write_text(
+        f'{{"checks": ["{sys.executable} -c \\"print(\'ok\')\\""]}}\\n'
     )
-    (tmp_path / "mcloop.json").write_text('{"checks": ["python -c \\"print(\'ok\')\\""]}\n')
 
     _git(["git", "add", "."], tmp_path)
     _git(["git", "commit", "-m", "initial"], tmp_path)
@@ -40,6 +39,7 @@ def _make_run_task(task_files: dict[str, str], kill_on: str | None = None):
     task_files maps task_text -> filename to create.
     If kill_on is set, raises KeyboardInterrupt when that task is called.
     """
+
     def fake_run_task(task_text, cli, project_dir, log_dir, description="", **kwargs):
         if task_text == kill_on:
             raise KeyboardInterrupt("simulated kill")

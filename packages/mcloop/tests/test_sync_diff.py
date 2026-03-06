@@ -1,6 +1,5 @@
 """Tests for sync diff and confirmation logic."""
 
-
 from mcloop.main import _confirm_sync_changes, _show_diff
 
 

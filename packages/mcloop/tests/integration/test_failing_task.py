@@ -1,6 +1,7 @@
 """Integration test: failing task — retry behavior and [!] marking after max retries."""
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,7 +23,9 @@ def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
 
     plan_md = tmp_path / "PLAN.md"
     plan_md.write_text(plan_content)
-    (tmp_path / "mcloop.json").write_text('{"checks": ["python -c \\"print(\'ok\')\\""]}\n')
+    (tmp_path / "mcloop.json").write_text(
+        f'{{"checks": ["{sys.executable} -c \\"print(\'ok\')\\""]}}\\n'
+    )
 
     _git(["git", "add", "."], tmp_path)
     _git(["git", "commit", "-m", "initial"], tmp_path)
