@@ -112,6 +112,28 @@ since the last run:
   stored file hash manifest and reports what changed (added, modified,
   removed files).
 
+### Non-destructive updates
+
+The update cycle is non-destructive. Running `duplo` again never
+removes or overwrites existing code, plans, or configuration:
+
+- **PLAN.md:** New tasks are appended to the end of the file.
+  Existing checked and unchecked items are preserved exactly as
+  they are.
+- **CLAUDE.md:** Only sections with new headings are appended.
+  Sections already present are left untouched.
+- **mcloop.json:** New check commands are merged in. Existing
+  commands are never removed or modified.
+- **README.md:** New sections are appended by heading. Existing
+  content is not replaced.
+- **Code and project files:** Duplo never modifies files that
+  McLoop or the user created. It only writes to its own state
+  directory (`.duplo/`) and the configuration files above.
+
+This means you can safely re-run `duplo` at any point without
+losing work. Add more reference material, run duplo, and only
+new tasks for uncovered features or design refinements are added.
+
 All state lives in `.duplo/` (added to `.gitignore` automatically):
 `duplo.json` for selections, features, phases, and preferences;
 `references/` for processed reference files; `examples/` for
