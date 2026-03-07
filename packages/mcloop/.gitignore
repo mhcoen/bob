@@ -13,6 +13,7 @@ logs/
 local
 .mcloop-last-audit
 .mcloop/
+BUGS.md
 *~
 \#*\#
 .#*
