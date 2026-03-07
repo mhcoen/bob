@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,13 +11,13 @@ class ClaudeCliError(Exception):
     """Raised when the claude CLI returns a non-zero exit code."""
 
 
-def query(prompt: str, *, system: str = "", model: str = "haiku") -> str:
+def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     """Send a text prompt to ``claude -p`` and return the response text.
 
     Args:
         prompt: The user prompt to send.
         system: Optional system prompt.
-        model: Model alias or full name (default ``"haiku"``).
+        model: Model alias or full name (default ``"sonnet"``).
 
     Returns:
         The response text stripped of leading/trailing whitespace.
@@ -27,12 +28,14 @@ def query(prompt: str, *, system: str = "", model: str = "haiku") -> str:
     cmd = ["claude", "-p", "--model", model]
     if system:
         cmd.extend(["--system-prompt", system])
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     result = subprocess.run(
         cmd,
         input=prompt,
         capture_output=True,
         text=True,
         timeout=300,
+        env=env,
     )
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
@@ -44,7 +47,7 @@ def query_with_images(
     image_paths: list[Path],
     *,
     system: str = "",
-    model: str = "haiku",
+    model: str = "sonnet",
 ) -> str:
     """Send a prompt with image file references to ``claude -p``.
 
@@ -55,7 +58,7 @@ def query_with_images(
         prompt: The analysis instructions.
         image_paths: Paths to image files for Claude to read.
         system: Optional system prompt.
-        model: Model alias or full name (default ``"haiku"``).
+        model: Model alias or full name (default ``"sonnet"").
 
     Returns:
         The response text stripped of leading/trailing whitespace.
@@ -72,12 +75,14 @@ def query_with_images(
     cmd = ["claude", "-p", "--model", model, "--tools", "Read"]
     if system:
         cmd.extend(["--system-prompt", system])
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     result = subprocess.run(
         cmd,
         input=full_prompt,
         capture_output=True,
         text=True,
         timeout=300,
+        env=env,
     )
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
