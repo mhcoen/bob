@@ -191,7 +191,7 @@ def deduplicate_frames(
     if not frames:
         return frames
 
-    kept: list[tuple[Path, int]] = []
+    kept: list[tuple[Path, int | None]] = []
     for frame in frames:
         try:
             img = Image.open(frame)
@@ -202,9 +202,6 @@ def deduplicate_frames(
             kept.append((frame, None))
             continue
 
-        if h is None:
-            kept.append((frame, None))
-            continue
         is_dup = any(kh is not None and _hamming(h, kh) <= max_distance for _, kh in kept)
         if is_dup:
             frame.unlink(missing_ok=True)

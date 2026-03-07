@@ -745,8 +745,9 @@ def _subsequent_run() -> None:
 
     # Check if current phase is already in history.
     history = data.get("phases", [])
+    phase_prefix = f"Phase {phase_num}"
     if any(
-        h.get("phase", "") == phase_label or h.get("phase", "").startswith(phase_label + ":")
+        h.get("phase", "").startswith(phase_prefix + ":") or h.get("phase", "") == phase_prefix
         for h in history
     ):
         # Current phase is done — advance to next.

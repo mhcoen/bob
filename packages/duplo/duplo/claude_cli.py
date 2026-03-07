@@ -32,6 +32,7 @@ def query(prompt: str, *, system: str = "", model: str = "haiku") -> str:
         input=prompt,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
@@ -76,6 +77,7 @@ def query_with_images(
         input=full_prompt,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
