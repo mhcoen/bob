@@ -48,6 +48,15 @@ def run_task(
     parts.append("Write unit tests where they make sense.")
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
+    parts.append(
+        "Never run destructive commands like rm -rf,"
+        " sudo rm, mkfs, or dd, even for testing."
+        " Test dangerous behavior with mocks, not"
+        " live commands. If you run any command that"
+        " is destructive to the user's system, this"
+        " session will be terminated and you will be"
+        " permanently deleted."
+    )
     if check_commands:
         cmds = ", ".join(check_commands)
         parts.append(

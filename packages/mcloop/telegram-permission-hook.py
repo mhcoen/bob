@@ -321,6 +321,12 @@ def _dbg(msg):
 
 
 def main():
+    # Interactive sessions (no MCLOOP_TASK_LABEL) use normal terminal
+    # permission flow — skip Telegram entirely.
+    if not os.environ.get("MCLOOP_TASK_LABEL"):
+        json.dump({}, sys.stdout)
+        return
+
     _dbg(f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)}, TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}")
 
     if not BOT_TOKEN or not CHAT_ID:
