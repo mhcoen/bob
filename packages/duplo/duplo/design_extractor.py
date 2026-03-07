@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import anthropic
-
-_MODEL = "claude-haiku-4-5-20251001"
+from duplo.claude_cli import query_with_images
 
 _SYSTEM = """\
 You are a visual design analyst. Given screenshot(s) of a product, extract
@@ -51,33 +48,14 @@ class DesignRequirements:
     source_images: list[str] = field(default_factory=list)
 
 
-def _image_media_type(path: Path) -> str:
-    """Return the MIME type for an image file based on extension."""
-    ext = path.suffix.lower()
-    types = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-    }
-    return types.get(ext, "image/png")
-
-
-def extract_design(
-    images: list[Path],
-    *,
-    client: anthropic.Anthropic | None = None,
-) -> DesignRequirements:
+def extract_design(images: list[Path]) -> DesignRequirements:
     """Analyse reference images and extract visual design requirements.
 
-    Sends up to ``_MAX_IMAGES`` images to Claude Vision and returns
+    Sends up to ``_MAX_IMAGES`` images to ``claude -p`` and returns
     structured design details (colors, fonts, spacing, layout, components).
 
     Args:
         images: Paths to reference image files (PNG, JPG, GIF, WEBP).
-        client: Optional Anthropic client; a default client is created
-            if omitted.
 
     Returns:
         A :class:`DesignRequirements` with extracted visual details.
@@ -87,44 +65,14 @@ def extract_design(
     if not images:
         return DesignRequirements()
 
-    if client is None:
-        client = anthropic.Anthropic()
-
     to_send = images[:_MAX_IMAGES]
+    source_names = [img.name for img in to_send]
 
-    content: list[dict] = []
-    source_names: list[str] = []
-
-    for img in to_send:
-        data = base64.standard_b64encode(img.read_bytes()).decode()
-        media = _image_media_type(img)
-        content.append({"type": "text", "text": f"Screenshot ({img.name}):"})
-        content.append(
-            {
-                "type": "image",
-                "source": {"type": "base64", "media_type": media, "data": data},
-            }
-        )
-        source_names.append(img.name)
-
-    content.append(
-        {
-            "type": "text",
-            "text": (
-                "Analyse these screenshot(s) and extract the visual design details.\n"
-                "Return ONLY the JSON object as described."
-            ),
-        }
+    prompt = (
+        "Analyse these screenshot(s) and extract the visual design details.\n"
+        "Return ONLY the JSON object as described."
     )
-
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": content}],
-    )
-
-    raw = message.content[0].text.strip()
+    raw = query_with_images(prompt, to_send, system=_SYSTEM)
     result = _parse_design(raw)
     result.source_images = source_names
     return result

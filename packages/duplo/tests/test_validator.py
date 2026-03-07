@@ -98,131 +98,69 @@ class TestParseResult:
 
 
 class TestValidateProductUrl:
-    def test_calls_api_with_fetched_text(self):
-        mock_response = type(
-            "Resp",
-            (),
+    def test_calls_query_with_text(self):
+        response = json.dumps(
             {
-                "content": [
-                    type(
-                        "Block",
-                        (),
-                        {
-                            "text": json.dumps(
-                                {
-                                    "single_product": True,
-                                    "product_name": "TestProd",
-                                    "products": [],
-                                    "reason": "Single product page.",
-                                }
-                            )
-                        },
-                    )()
-                ]
-            },
-        )()
-
-        mock_client = type(
-            "Client",
-            (),
-            {
-                "messages": type(
-                    "Messages", (), {"create": staticmethod(lambda **kw: mock_response)}
-                )()
-            },
-        )()
-
-        result = validate_product_url(
-            "https://example.com",
-            client=mock_client,
-            text="Product page content",
+                "single_product": True,
+                "product_name": "TestProd",
+                "products": [],
+                "reason": "Single product page.",
+            }
         )
+        with patch("duplo.validator.query", return_value=response):
+            result = validate_product_url(
+                "https://example.com",
+                text="Product page content",
+            )
         assert result.single_product is True
         assert result.product_name == "TestProd"
 
     def test_fetches_url_when_no_text_provided(self):
-        mock_response = type(
-            "Resp",
-            (),
+        response = json.dumps(
             {
-                "content": [
-                    type(
-                        "Block",
-                        (),
-                        {
-                            "text": json.dumps(
-                                {
-                                    "single_product": True,
-                                    "product_name": "Fetched",
-                                    "products": [],
-                                    "reason": "ok",
-                                }
-                            )
-                        },
-                    )()
-                ]
-            },
-        )()
-
-        mock_client = type(
-            "Client",
-            (),
-            {
-                "messages": type(
-                    "Messages", (), {"create": staticmethod(lambda **kw: mock_response)}
-                )()
-            },
-        )()
-
-        with patch("duplo.validator.fetch_text", return_value="fetched content") as m:
-            result = validate_product_url(
-                "https://example.com",
-                client=mock_client,
-            )
+                "single_product": True,
+                "product_name": "Fetched",
+                "products": [],
+                "reason": "ok",
+            }
+        )
+        with patch("duplo.validator.query", return_value=response):
+            with patch("duplo.validator.fetch_text", return_value="fetched content") as m:
+                result = validate_product_url("https://example.com")
         m.assert_called_once_with("https://example.com")
         assert result.product_name == "Fetched"
 
     def test_multi_product_result(self):
-        mock_response = type(
-            "Resp",
-            (),
+        response = json.dumps(
             {
-                "content": [
-                    type(
-                        "Block",
-                        (),
-                        {
-                            "text": json.dumps(
-                                {
-                                    "single_product": False,
-                                    "product_name": "",
-                                    "products": ["Alpha", "Beta"],
-                                    "reason": "Portfolio page.",
-                                }
-                            )
-                        },
-                    )()
-                ]
-            },
-        )()
-
-        mock_client = type(
-            "Client",
-            (),
-            {
-                "messages": type(
-                    "Messages", (), {"create": staticmethod(lambda **kw: mock_response)}
-                )()
-            },
-        )()
-
-        result = validate_product_url(
-            "https://company.com",
-            client=mock_client,
-            text="Company portfolio page content",
+                "single_product": False,
+                "product_name": "",
+                "products": ["Alpha", "Beta"],
+                "reason": "Portfolio page.",
+            }
         )
+        with patch("duplo.validator.query", return_value=response):
+            result = validate_product_url(
+                "https://company.com",
+                text="Company portfolio page content",
+            )
         assert result.single_product is False
         assert result.products == ["Alpha", "Beta"]
+
+    def test_prompt_contains_url_and_text(self):
+        response = json.dumps(
+            {
+                "single_product": True,
+                "product_name": "X",
+                "products": [],
+                "reason": "ok",
+            }
+        )
+        with patch("duplo.validator.query", return_value=response) as mock_query:
+            validate_product_url("https://example.com", text="page content here")
+        prompt = mock_query.call_args[0][0]
+        assert "https://example.com" in prompt
+        assert "page content here" in prompt
 
 
 class TestValidateUrlInMain:

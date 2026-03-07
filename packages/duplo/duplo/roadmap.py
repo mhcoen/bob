@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 
-import anthropic
-
+from duplo.claude_cli import query
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
-
-_MODEL = "claude-haiku-4-5-20251001"
 
 _SYSTEM = """\
 You are a senior software architect creating a phased build roadmap.
@@ -46,17 +43,12 @@ def generate_roadmap(
     source_url: str,
     features: list[Feature],
     preferences: BuildPreferences,
-    *,
-    client: anthropic.Anthropic | None = None,
 ) -> list[dict]:
     """Generate a phased build roadmap.
 
     Returns a list of phase dicts, each with phase, title, goal,
     features, and test.
     """
-    if client is None:
-        client = anthropic.Anthropic()
-
     features_text = "\n".join(f"- {f.name} ({f.category}): {f.description}" for f in features)
     prefs = dataclasses.asdict(preferences)
     constraints = (
@@ -66,7 +58,7 @@ def generate_roadmap(
         "\n".join(f"  - {p}" for p in prefs["preferences"]) if prefs["preferences"] else "  (none)"
     )
 
-    user_content = f"""\
+    prompt = f"""\
 Product: {source_url}
 
 Platform: {prefs["platform"]}
@@ -82,14 +74,8 @@ Features to include:
 Generate the roadmap now.
 """
 
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": user_content}],
-    )
-
-    return _parse_roadmap(message.content[0].text)
+    raw = query(prompt, system=_SYSTEM)
+    return _parse_roadmap(raw)
 
 
 def _parse_roadmap(raw: str) -> list[dict]:

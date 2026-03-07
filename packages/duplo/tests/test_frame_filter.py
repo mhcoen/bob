@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from duplo.frame_filter import (
     FilterDecision,
@@ -15,7 +15,6 @@ from duplo.frame_filter import (
 
 def _make_png(path: Path, size: int = 4) -> Path:
     """Create a minimal valid PNG file at *path*."""
-    # 1x1 white PNG (smallest valid PNG).
     data = (
         b"\x89PNG\r\n\x1a\n"
         b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -25,17 +24,6 @@ def _make_png(path: Path, size: int = 4) -> Path:
     )
     path.write_bytes(data)
     return path
-
-
-def _mock_client(response_text: str) -> MagicMock:
-    """Create a mock Anthropic client returning *response_text*."""
-    client = MagicMock()
-    msg = MagicMock()
-    block = MagicMock()
-    block.text = response_text
-    msg.content = [block]
-    client.messages.create.return_value = msg
-    return client
 
 
 # --- _parse_decisions ---
@@ -73,7 +61,6 @@ def test_parse_decisions_missing_index(tmp_path):
     raw = '{"decisions": [{"index": 0, "keep": false, "reason": "bad"}]}'
     result = _parse_decisions(raw, frames)
     assert result[0].keep is False
-    # Frame 1 not in response → kept by default.
     assert result[1].keep is True
     assert result[1].reason == "not classified"
 
@@ -134,12 +121,12 @@ def test_filter_frames_single_batch(tmp_path):
         '{"index": 1, "keep": false, "reason": "loading screen"}'
         "]}"
     )
-    client = _mock_client(response)
-    result = filter_frames(frames, client=client)
+    with patch("duplo.frame_filter.query_with_images", return_value=response) as mock_q:
+        result = filter_frames(frames)
     assert len(result) == 2
     assert result[0].keep is True
     assert result[1].keep is False
-    client.messages.create.assert_called_once()
+    mock_q.assert_called_once()
 
 
 def test_filter_frames_multiple_batches(tmp_path):
@@ -150,16 +137,19 @@ def test_filter_frames_multiple_batches(tmp_path):
         '{"index": 1, "keep": true, "reason": "ok"}'
         "]}"
     )
-    client = _mock_client(response)
-    result = filter_frames(frames, client=client, batch_size=2)
+    with patch("duplo.frame_filter.query_with_images", return_value=response) as mock_q:
+        result = filter_frames(frames, batch_size=2)
     assert len(result) == 5
     # 3 batches: [0,1], [2,3], [4]
-    assert client.messages.create.call_count == 3
+    assert mock_q.call_count == 3
 
 
 def test_filter_frames_api_error_keeps_all(tmp_path):
     frames = [_make_png(tmp_path / "a.png")]
-    client = _mock_client("totally broken response {{{{")
-    result = filter_frames(frames, client=client)
+    with patch(
+        "duplo.frame_filter.query_with_images",
+        return_value="totally broken response {{{{",
+    ):
+        result = filter_frames(frames)
     assert len(result) == 1
     assert result[0].keep is True

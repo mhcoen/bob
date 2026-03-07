@@ -5,12 +5,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-import anthropic
-
+from duplo.claude_cli import query
 from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
-
-_MODEL = "claude-haiku-4-5-20251001"
 
 _SYSTEM = """\
 You are a project analyst comparing extracted product features and code examples
@@ -90,8 +87,6 @@ def detect_gaps(
     plan_content: str,
     features: list[Feature],
     examples: list[CodeExample] | None = None,
-    *,
-    client: anthropic.Anthropic | None = None,
 ) -> GapResult:
     """Compare *features* and *examples* against *plan_content*.
 
@@ -100,9 +95,6 @@ def detect_gaps(
     """
     if not features and not examples:
         return GapResult(missing_features=[], missing_examples=[])
-
-    if client is None:
-        client = anthropic.Anthropic()
 
     features_text = _format_features(features)[:_MAX_FEATURES_CHARS]
     examples_text = ""
@@ -119,14 +111,8 @@ def detect_gaps(
         user_parts.append("No code examples to compare.\n")
     user_parts.append("Identify any features or examples NOT covered by the plan.")
 
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": "\n".join(user_parts)}],
-    )
-
-    raw = message.content[0].text.strip()
+    prompt = "\n".join(user_parts)
+    raw = query(prompt, system=_SYSTEM)
     return _parse_result(raw, features, examples or [])
 
 

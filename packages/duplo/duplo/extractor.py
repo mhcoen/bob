@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-import anthropic
-
-_MODEL = "claude-haiku-4-5-20251001"
+from duplo.claude_cli import query
 
 _SYSTEM = """\
 You are a product analyst. Given scraped text from a product website, extract a
@@ -37,39 +35,21 @@ class Feature:
     category: str
 
 
-def extract_features(
-    scraped_text: str, *, client: anthropic.Anthropic | None = None
-) -> list[Feature]:
+def extract_features(scraped_text: str) -> list[Feature]:
     """Return a structured feature list extracted from *scraped_text*.
 
-    Uses the Anthropic API to analyse the content. Truncates input to
+    Uses ``claude -p`` to analyse the content. Truncates input to
     *_MAX_CONTENT_CHARS* characters to stay within context limits.
 
     Args:
         scraped_text: Raw text scraped from a product website.
-        client: Optional Anthropic client; a default client is created if omitted.
 
     Returns:
         List of :class:`Feature` objects. Empty list if nothing could be extracted.
     """
-    if client is None:
-        client = anthropic.Anthropic()
-
     content = scraped_text[:_MAX_CONTENT_CHARS]
-
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Extract features from this product website content:\n\n{content}",
-            }
-        ],
-    )
-
-    raw = message.content[0].text.strip()
+    prompt = f"Extract features from this product website content:\n\n{content}"
+    raw = query(prompt, system=_SYSTEM)
     return _parse_features(raw)
 
 

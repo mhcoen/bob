@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from duplo.design_extractor import (
     DesignRequirements,
@@ -84,15 +84,6 @@ class TestParseDesign:
 
 
 class TestExtractDesign:
-    def _make_client(self, response_text: str) -> MagicMock:
-        content_block = MagicMock()
-        content_block.text = response_text
-        message = MagicMock()
-        message.content = [content_block]
-        client = MagicMock()
-        client.messages.create.return_value = message
-        return client
-
     def test_returns_empty_for_no_images(self):
         result = extract_design([])
         assert result.colors == {}
@@ -101,54 +92,43 @@ class TestExtractDesign:
     def test_extracts_design_from_images(self, tmp_path):
         img = _make_image(tmp_path, "screenshot.png")
         response = json.dumps(_sample_response())
-        client = self._make_client(response)
-        result = extract_design([img], client=client)
+        with patch("duplo.design_extractor.query_with_images", return_value=response):
+            result = extract_design([img])
         assert result.colors["primary"] == "#1a73e8"
         assert result.source_images == ["screenshot.png"]
-        client.messages.create.assert_called_once()
 
-    def test_sends_images_as_base64(self, tmp_path):
+    def test_passes_image_paths(self, tmp_path):
         img1 = _make_image(tmp_path, "a.png")
         img2 = _make_image(tmp_path, "b.jpg")
-        client = self._make_client(json.dumps({"colors": {}}))
-        extract_design([img1, img2], client=client)
-
-        call_kwargs = client.messages.create.call_args
-        user_content = call_kwargs.kwargs["messages"][0]["content"]
-        image_blocks = [b for b in user_content if b.get("type") == "image"]
-        assert len(image_blocks) == 2
-        assert image_blocks[0]["source"]["media_type"] == "image/png"
-        assert image_blocks[1]["source"]["media_type"] == "image/jpeg"
+        with patch(
+            "duplo.design_extractor.query_with_images",
+            return_value=json.dumps({"colors": {}}),
+        ) as mock_q:
+            extract_design([img1, img2])
+        image_paths = mock_q.call_args[0][1]
+        assert len(image_paths) == 2
+        assert image_paths[0] == img1
+        assert image_paths[1] == img2
 
     def test_limits_to_max_images(self, tmp_path):
         images = [_make_image(tmp_path, f"img{i}.png") for i in range(15)]
-        client = self._make_client(json.dumps({"colors": {}}))
-        result = extract_design(images, client=client)
-        assert len(result.source_images) == 10
-
-    def test_creates_default_client_when_none(self, tmp_path):
-        img = _make_image(tmp_path, "test.png")
-        response = json.dumps({"colors": {"bg": "#fff"}})
-        mock_client = self._make_client(response)
         with patch(
-            "duplo.design_extractor.anthropic.Anthropic",
-            return_value=mock_client,
-        ):
-            result = extract_design([img])
-        assert result.colors["bg"] == "#fff"
+            "duplo.design_extractor.query_with_images",
+            return_value=json.dumps({"colors": {}}),
+        ) as mock_q:
+            result = extract_design(images)
+        assert len(result.source_images) == 10
+        image_paths = mock_q.call_args[0][1]
+        assert len(image_paths) == 10
 
     def test_returns_empty_on_bad_response(self, tmp_path):
         img = _make_image(tmp_path, "test.png")
-        client = self._make_client("I cannot analyse this image.")
-        result = extract_design([img], client=client)
+        with patch(
+            "duplo.design_extractor.query_with_images",
+            return_value="I cannot analyse this image.",
+        ):
+            result = extract_design([img])
         assert result.colors == {}
-
-    def test_uses_expected_model(self, tmp_path):
-        img = _make_image(tmp_path, "test.png")
-        client = self._make_client(json.dumps({"colors": {}}))
-        extract_design([img], client=client)
-        call_kwargs = client.messages.create.call_args
-        assert call_kwargs.kwargs["model"] == "claude-haiku-4-5-20251001"
 
 
 class TestFormatDesignSection:

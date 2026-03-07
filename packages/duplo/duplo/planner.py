@@ -6,12 +6,9 @@ import dataclasses
 import re
 from pathlib import Path
 
-import anthropic
-
+from duplo.claude_cli import query
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
-
-_MODEL = "claude-haiku-4-5-20251001"
 
 _PHASE_SYSTEM = """\
 You are a senior software architect generating a build plan for one
@@ -99,26 +96,20 @@ def generate_next_phase_plan(
     current_plan: str,
     feedback: str,
     issues_text: str = "",
-    *,
-    client: anthropic.Anthropic | None = None,
 ) -> str:
     """Return the next phase PLAN.md content as a string.
 
-    Uses Claude to generate the plan based on the completed phase plan, user
-    feedback, and visual issues from screenshot comparison.
+    Uses ``claude -p`` to generate the plan based on the completed phase
+    plan, user feedback, and visual issues from screenshot comparison.
 
     Args:
         current_plan: Markdown content of the just-completed PLAN.md.
         feedback: User feedback collected after testing the phase.
         issues_text: Optional visual issues text (e.g. from ISSUES.md).
-        client: Optional Anthropic client; a default client is created if omitted.
 
     Returns:
         Markdown string suitable for writing to ``PLAN.md``.
     """
-    if client is None:
-        client = anthropic.Anthropic()
-
     next_phase = _detect_next_phase_number(current_plan)
 
     issues_section = (
@@ -127,7 +118,7 @@ def generate_next_phase_plan(
         else "\nNo visual issues reported.\n"
     )
 
-    user_content = f"""\
+    prompt = f"""\
 Completed phase plan:
 {current_plan.strip()}
 
@@ -137,14 +128,7 @@ User feedback:
 Generate Phase {next_phase} PLAN.md now.
 """
 
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_NEXT_PHASE_SYSTEM,
-        messages=[{"role": "user", "content": user_content}],
-    )
-
-    return message.content[0].text.strip()
+    return query(prompt, system=_NEXT_PHASE_SYSTEM)
 
 
 def generate_phase_plan(
@@ -155,7 +139,6 @@ def generate_phase_plan(
     *,
     project_name: str = "",
     design_section: str = "",
-    client: anthropic.Anthropic | None = None,
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
 
@@ -169,14 +152,10 @@ def generate_phase_plan(
         project_name: Name for the project.
         design_section: Optional Markdown section with visual design
             requirements extracted from reference images.
-        client: Optional Anthropic client.
 
     Returns:
         Markdown string suitable for writing to PLAN.md.
     """
-    if client is None:
-        client = anthropic.Anthropic()
-
     prefs_dict = dataclasses.asdict(preferences)
     constraints_text = (
         "\n".join(f"  - {c}" for c in prefs_dict["constraints"])
@@ -209,7 +188,7 @@ def generate_phase_plan(
             f"\nVisual design requirements (from reference screenshots):\n{design_section}\n"
         )
 
-    user_content = f"""\
+    prompt = f"""\
 Project: {project_name or source_url}
 Source: {source_url}
 
@@ -230,16 +209,7 @@ Features for this phase:
 Generate the PLAN.md now.
 """
 
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=2048,
-        system=_PHASE_SYSTEM,
-        messages=[
-            {"role": "user", "content": user_content},
-        ],
-    )
-
-    return message.content[0].text.strip()
+    return query(prompt, system=_PHASE_SYSTEM)
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:

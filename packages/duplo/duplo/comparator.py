@@ -1,12 +1,11 @@
-"""Compare app screenshots against reference images using the Claude API."""
+"""Compare app screenshots against reference images using claude -p."""
 
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import anthropic
+from duplo.claude_cli import query_with_images
 
 
 @dataclass
@@ -22,9 +21,9 @@ def compare_screenshots(
     current: Path,
     references: list[Path],
     *,
-    model: str = "claude-opus-4-6",
+    model: str = "opus",
 ) -> ComparisonResult:
-    """Compare *current* screenshot against *references* using the Claude vision API.
+    """Compare *current* screenshot against *references* using ``claude -p``.
 
     Sends all images to Claude and asks it to assess how closely the current
     app matches the reference screenshots visually.
@@ -32,7 +31,7 @@ def compare_screenshots(
     Args:
         current: Path to the current app screenshot (PNG).
         references: Paths to reference screenshots to compare against.
-        model: Claude model to use for comparison.
+        model: Claude model alias or full name for comparison.
 
     Returns:
         A ComparisonResult with a similarity verdict, summary sentence, and
@@ -41,52 +40,23 @@ def compare_screenshots(
     if not references:
         return ComparisonResult(similar=False, summary="No reference images provided.")
 
-    client = anthropic.Anthropic()
+    all_images = list(references) + [current]
 
-    content: list[dict] = []
-
-    for ref in references:
-        data = base64.standard_b64encode(ref.read_bytes()).decode()
-        content.append({"type": "text", "text": f"Reference image ({ref.name}):"})
-        content.append(
-            {
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": data},
-            }
-        )
-
-    data = base64.standard_b64encode(current.read_bytes()).decode()
-    content.append({"type": "text", "text": "Current app screenshot:"})
-    content.append(
-        {
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": data},
-        }
+    prompt = (
+        "The first image(s) are reference screenshots. "
+        "The last image is the current app screenshot.\n"
+        "Compare the current app screenshot against the reference image(s).\n"
+        "Assess how closely the current implementation matches the reference visually.\n"
+        "Respond using exactly this format:\n"
+        "SIMILAR: yes or no\n"
+        "SUMMARY: one sentence verdict\n"
+        "DETAILS:\n"
+        "- observation one\n"
+        "- observation two\n"
     )
 
-    content.append(
-        {
-            "type": "text",
-            "text": (
-                "Compare the current app screenshot against the reference image(s) above.\n"
-                "Assess how closely the current implementation matches the reference visually.\n"
-                "Respond using exactly this format:\n"
-                "SIMILAR: yes or no\n"
-                "SUMMARY: one sentence verdict\n"
-                "DETAILS:\n"
-                "- observation one\n"
-                "- observation two\n"
-            ),
-        }
-    )
-
-    message = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": content}],
-    )
-
-    return _parse_response(message.content[0].text)
+    raw = query_with_images(prompt, all_images, model=model)
+    return _parse_response(raw)
 
 
 def _parse_response(text: str) -> ComparisonResult:

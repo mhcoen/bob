@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
@@ -60,7 +60,7 @@ class TestFormatExamples:
     def test_truncates_long_input(self):
         ex = _example("x" * 300)
         text = _format_examples([ex])
-        assert "…" in text
+        assert "\u2026" in text
         assert len(text) < 300
 
     def test_includes_source_url(self):
@@ -206,38 +206,27 @@ class TestFormatGapTasks:
 
 
 class TestDetectGaps:
-    def _make_client(self, json_response: str) -> MagicMock:
-        content_block = MagicMock()
-        content_block.text = json_response
-        message = MagicMock()
-        message.content = [content_block]
-        client = MagicMock()
-        client.messages.create.return_value = message
-        return client
-
     def test_returns_empty_when_no_features_or_examples(self):
         result = detect_gaps("# Plan", [], None)
         assert result.missing_features == []
         assert result.missing_examples == []
 
-    def test_calls_api_with_plan_and_features(self):
+    def test_calls_query_with_plan_and_features(self):
         response = json.dumps({"missing_features": [], "missing_examples": []})
-        client = self._make_client(response)
-        features = [_feat("Search")]
-        detect_gaps("# Plan\n- [ ] Build search", features, client=client)
-        call_args = client.messages.create.call_args
-        user_msg = call_args.kwargs["messages"][0]["content"]
-        assert "Plan" in user_msg
-        assert "Search" in user_msg
+        with patch("duplo.gap_detector.query", return_value=response) as mock_query:
+            features = [_feat("Search")]
+            detect_gaps("# Plan\n- [ ] Build search", features)
+        prompt = mock_query.call_args[0][0]
+        assert "Plan" in prompt
+        assert "Search" in prompt
 
     def test_includes_examples_in_prompt(self):
         response = json.dumps({"missing_features": [], "missing_examples": []})
-        client = self._make_client(response)
-        examples = [_example("print('test')")]
-        detect_gaps("# Plan", [_feat("X")], examples, client=client)
-        call_args = client.messages.create.call_args
-        user_msg = call_args.kwargs["messages"][0]["content"]
-        assert "print('test')" in user_msg
+        with patch("duplo.gap_detector.query", return_value=response) as mock_query:
+            examples = [_example("print('test')")]
+            detect_gaps("# Plan", [_feat("X")], examples)
+        prompt = mock_query.call_args[0][0]
+        assert "print('test')" in prompt
 
     def test_returns_parsed_gaps(self):
         response = json.dumps(
@@ -246,17 +235,10 @@ class TestDetectGaps:
                 "missing_examples": [],
             }
         )
-        client = self._make_client(response)
-        result = detect_gaps("# Plan", [_feat("Export")], client=client)
+        with patch("duplo.gap_detector.query", return_value=response):
+            result = detect_gaps("# Plan", [_feat("Export")])
         assert len(result.missing_features) == 1
         assert result.missing_features[0].name == "Export"
-
-    def test_creates_default_client_when_none(self):
-        response = json.dumps({"missing_features": [], "missing_examples": []})
-        mock_client = self._make_client(response)
-        with patch("duplo.gap_detector.anthropic.Anthropic", return_value=mock_client):
-            result = detect_gaps("# Plan", [_feat("X")])
-        assert result.missing_features == []
 
 
 # ---------------------------------------------------------------------------
@@ -406,12 +388,9 @@ class TestFormatGapTasksAppendOnly:
         gap_text = format_gap_tasks(result)
         updated = original.rstrip() + "\n" + gap_text
 
-        # Every original line preserved.
         for line in original.strip().splitlines():
             assert line in updated
-        # New task present.
         assert "- [ ] Implement Search" in updated
-        # Original is a prefix.
         assert updated.startswith(original.rstrip())
 
     def test_gap_tasks_only_contain_unchecked_items(self):
@@ -422,7 +401,6 @@ class TestFormatGapTasksAppendOnly:
             design_refinements=[DesignRefinement(category="color", detail="x", reason="r")],
         )
         text = format_gap_tasks(result)
-        # All task lines are unchecked.
         for line in text.splitlines():
             if line.startswith("- "):
                 assert line.startswith("- [ ]"), f"Non-unchecked task: {line!r}"

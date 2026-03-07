@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,16 +17,6 @@ from duplo.planner import (
     save_plan,
 )
 from duplo.questioner import BuildPreferences
-
-
-def _make_client(response_text: str) -> MagicMock:
-    content_block = MagicMock()
-    content_block.text = response_text
-    message = MagicMock()
-    message.content = [content_block]
-    client = MagicMock()
-    client.messages.create.return_value = message
-    return client
 
 
 def _sample_features() -> list[Feature]:
@@ -45,114 +35,81 @@ def _sample_prefs() -> BuildPreferences:
     )
 
 
-_SAMPLE_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal working app.\n"
+_SAMPLE_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal working app."
 
 
 class TestGeneratePhasePlan:
     def test_returns_string(self):
-        client = _make_client(_SAMPLE_PLAN)
-        result = generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        assert isinstance(result, str)
-        assert result == _SAMPLE_PLAN.strip()
-
-    def test_passes_source_url_to_api(self):
-        client = _make_client(_SAMPLE_PLAN)
-        generate_phase_plan(
-            "https://acme.io",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "https://acme.io" in user_content
-
-    def test_passes_features_to_api(self):
-        client = _make_client(_SAMPLE_PLAN)
-        generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "User auth" in user_content
-        assert "Dashboard" in user_content
-
-    def test_passes_preferences_to_api(self):
-        client = _make_client(_SAMPLE_PLAN)
-        generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "Python/FastAPI" in user_content
-        assert "PostgreSQL only" in user_content
-
-    def test_passes_platform_to_api(self):
-        client = _make_client(_SAMPLE_PLAN)
-        generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "web" in user_content
-
-    def test_uses_expected_model(self):
-        client = _make_client(_SAMPLE_PLAN)
-        generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            _sample_prefs(),
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        assert call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
-
-    def test_creates_default_client_when_none(self):
-        mock_client = _make_client(_SAMPLE_PLAN)
-        with patch("duplo.planner.anthropic.Anthropic", return_value=mock_client):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        assert result == _SAMPLE_PLAN.strip()
+        assert isinstance(result, str)
+        assert result == _SAMPLE_PLAN
+
+    def test_passes_source_url_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://acme.io",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "https://acme.io" in prompt
+
+    def test_passes_features_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "User auth" in prompt
+        assert "Dashboard" in prompt
+
+    def test_passes_preferences_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Python/FastAPI" in prompt
+        assert "PostgreSQL only" in prompt
+
+    def test_passes_platform_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "web" in prompt
 
     def test_handles_empty_features(self):
-        client = _make_client(_SAMPLE_PLAN)
-        result = generate_phase_plan(
-            "https://example.com",
-            [],
-            _sample_prefs(),
-            client=client,
-        )
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                [],
+                _sample_prefs(),
+            )
         assert isinstance(result, str)
 
     def test_handles_empty_constraints_and_preferences(self):
-        client = _make_client(_SAMPLE_PLAN)
         prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
-        result = generate_phase_plan(
-            "https://example.com",
-            _sample_features(),
-            prefs,
-            client=client,
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "(none)" in user_content
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                prefs,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "(none)" in prompt
         assert isinstance(result, str)
 
 
@@ -172,74 +129,52 @@ class TestDetectNextPhaseNumber:
         assert _detect_next_phase_number("# phase 2: Foo") == 3
 
 
-_SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search.\n"
-_SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app.\n"
+_SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search."
+_SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
 
 
 class TestGenerateNextPhasePlan:
     def test_returns_string(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        result = generate_next_phase_plan(
-            _SAMPLE_CURRENT_PLAN, "Add search feature.", client=client
-        )
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN):
+            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search feature.")
         assert isinstance(result, str)
-        assert result == _SAMPLE_NEXT_PLAN.strip()
+        assert result == _SAMPLE_NEXT_PLAN
 
-    def test_passes_current_plan_to_api(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", client=client)
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "Phase 1: Core Auth" in user_content
+    def test_passes_current_plan_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
+        prompt = mock_query.call_args[0][0]
+        assert "Phase 1: Core Auth" in prompt
 
-    def test_passes_feedback_to_api(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Needs dark mode.", client=client)
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "Needs dark mode." in user_content
+    def test_passes_feedback_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Needs dark mode.")
+        prompt = mock_query.call_args[0][0]
+        assert "Needs dark mode." in prompt
 
-    def test_passes_issues_text_to_api(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(
-            _SAMPLE_CURRENT_PLAN, "feedback", "- Layout broken", client=client
-        )
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "Layout broken" in user_content
+    def test_passes_issues_text_to_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", "- Layout broken")
+        prompt = mock_query.call_args[0][0]
+        assert "Layout broken" in prompt
 
     def test_next_phase_number_in_prompt(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", client=client)
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "Phase 2" in user_content
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
+        prompt = mock_query.call_args[0][0]
+        assert "Phase 2" in prompt
 
     def test_no_issues_text_shows_no_issues_message(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", client=client)
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "No visual issues reported" in user_content
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
+        prompt = mock_query.call_args[0][0]
+        assert "No visual issues reported" in prompt
 
     def test_empty_issues_text_shows_no_issues_message(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", "", client=client)
-        call_args = client.messages.create.call_args
-        user_content = call_args.kwargs["messages"][0]["content"]
-        assert "No visual issues reported" in user_content
-
-    def test_uses_expected_model(self):
-        client = _make_client(_SAMPLE_NEXT_PLAN)
-        generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", client=client)
-        call_args = client.messages.create.call_args
-        assert call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
-
-    def test_creates_default_client_when_none(self):
-        mock_client = _make_client(_SAMPLE_NEXT_PLAN)
-        with patch("duplo.planner.anthropic.Anthropic", return_value=mock_client):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        assert result == _SAMPLE_NEXT_PLAN.strip()
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", "")
+        prompt = mock_query.call_args[0][0]
+        assert "No visual issues reported" in prompt
 
 
 class TestAppendTestTasks:
@@ -248,7 +183,6 @@ class TestAppendTestTasks:
         tasks = ["- [ ] Wire up tests", "  - [ ] Replace stub"]
         result = append_test_tasks(plan, tasks)
         assert "Build core" in result
-        # Test tasks are inserted before the final checklist item.
         assert result == (
             "# Phase 1\n- [ ] Wire up tests\n  - [ ] Replace stub\n- [ ] Build core\n"
         )

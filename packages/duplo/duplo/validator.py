@@ -5,11 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-import anthropic
-
+from duplo.claude_cli import query
 from duplo.fetcher import fetch_text
-
-_MODEL = "claude-haiku-4-5-20251001"
 
 _SYSTEM = """\
 You are a product analyst. Given text scraped from a URL, determine whether
@@ -61,40 +58,23 @@ class ValidationResult:
 def validate_product_url(
     url: str,
     *,
-    client: anthropic.Anthropic | None = None,
     text: str | None = None,
 ) -> ValidationResult:
     """Check whether *url* points to a single product or a multi-product page.
 
     Args:
         url: The URL to validate.
-        client: Optional Anthropic client; created if omitted.
         text: Pre-fetched page text. If not provided, fetches the URL.
 
     Returns:
         A :class:`ValidationResult` describing what was found.
     """
-    if client is None:
-        client = anthropic.Anthropic()
-
     if text is None:
         text = fetch_text(url)
 
     content = text[:_MAX_CONTENT_CHARS]
-
-    message = client.messages.create(
-        model=_MODEL,
-        max_tokens=1024,
-        system=_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": (f"Analyze this page scraped from {url}:\n\n{content}"),
-            }
-        ],
-    )
-
-    raw = message.content[0].text.strip()
+    prompt = f"Analyze this page scraped from {url}:\n\n{content}"
+    raw = query(prompt, system=_SYSTEM)
     return _parse_result(raw)
 
 

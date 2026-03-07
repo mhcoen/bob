@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from duplo.frame_describer import (
     _parse_descriptions,
@@ -22,17 +22,6 @@ def _make_png(path: Path) -> Path:
     )
     path.write_bytes(data)
     return path
-
-
-def _mock_client(response_text: str) -> MagicMock:
-    """Create a mock Anthropic client returning *response_text*."""
-    client = MagicMock()
-    msg = MagicMock()
-    block = MagicMock()
-    block.text = response_text
-    msg.content = [block]
-    client.messages.create.return_value = msg
-    return client
 
 
 # --- _parse_descriptions ---
@@ -108,12 +97,12 @@ def test_describe_frames_single_batch(tmp_path):
         '{"index": 1, "state": "Dashboard", "detail": "Cards grid"}'
         "]}"
     )
-    client = _mock_client(response)
-    result = describe_frames(frames, client=client)
+    with patch("duplo.frame_describer.query_with_images", return_value=response) as mock_q:
+        result = describe_frames(frames)
     assert len(result) == 2
     assert result[0].state == "Settings"
     assert result[1].state == "Dashboard"
-    client.messages.create.assert_called_once()
+    mock_q.assert_called_once()
 
 
 def test_describe_frames_multiple_batches(tmp_path):
@@ -124,16 +113,19 @@ def test_describe_frames_multiple_batches(tmp_path):
         '{"index": 1, "state": "View", "detail": "ok"}'
         "]}"
     )
-    client = _mock_client(response)
-    result = describe_frames(frames, client=client, batch_size=2)
+    with patch("duplo.frame_describer.query_with_images", return_value=response) as mock_q:
+        result = describe_frames(frames, batch_size=2)
     assert len(result) == 5
     # 3 batches: [0,1], [2,3], [4]
-    assert client.messages.create.call_count == 3
+    assert mock_q.call_count == 3
 
 
 def test_describe_frames_api_error_returns_unknown(tmp_path):
     frames = [_make_png(tmp_path / "a.png")]
-    client = _mock_client("totally broken response {{{{")
-    result = describe_frames(frames, client=client)
+    with patch(
+        "duplo.frame_describer.query_with_images",
+        return_value="totally broken response {{{{",
+    ):
+        result = describe_frames(frames)
     assert len(result) == 1
     assert result[0].state == "unknown"
