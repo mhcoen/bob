@@ -233,9 +233,9 @@ def run_loop(
                 )
                 continue
 
-            check_result = run_checks(project_dir)
+            changed_files = _changed_files(project_dir)
+            check_result = run_checks(project_dir, changed_files=changed_files)
             if check_result.passed:
-                changed_files = _changed_files(project_dir)
                 _commit(project_dir, task.text)
                 check_off(checklist_path, task)
                 elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -292,6 +292,14 @@ def run_loop(
     if status.startswith("stage_complete:"):
         done_stage = status.split(":", 1)[1]
         next_stg = current_stage(parse(checklist_path))
+        print("\n>>> Running full test suite (stage boundary)...", flush=True)
+        full_check = run_checks(project_dir)
+        if not full_check.passed:
+            print(
+                f"\n!!! Full suite failed at stage boundary: {full_check.command}",
+                flush=True,
+            )
+            _print_error_tail(full_check.output)
         _run_build(project_dir)
         total = time.monotonic() - run_start
         _print_summary(
@@ -309,6 +317,16 @@ def run_loop(
             msg += f" Run mcloop again to start {next_stg}."
         notify(msg)
         return []
+
+    # Full test suite at end of run
+    print("\n>>> Running full test suite (end of run)...", flush=True)
+    full_check = run_checks(project_dir)
+    if not full_check.passed:
+        print(
+            f"\n!!! Full suite failed at end of run: {full_check.command}",
+            flush=True,
+        )
+        _print_error_tail(full_check.output)
 
     if not no_audit:
         _run_audit_fix_cycle(

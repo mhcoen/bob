@@ -38,10 +38,33 @@ def get_check_commands(project_dir: str | Path) -> list[str]:
     return _detect_commands(project_dir, config)
 
 
-def run_checks(project_dir: str | Path) -> CheckResult:
-    """Run the project's checks. Returns a CheckResult."""
+def run_checks(
+    project_dir: str | Path,
+    changed_files: list[str] | None = None,
+) -> CheckResult:
+    """Run the project's checks. Returns a CheckResult.
+
+    When *changed_files* is provided, test commands (e.g. pytest) are
+    scoped to only the test files that correspond to the changed source
+    files.  Linters always run in full.  If no matching test files are
+    found the test command is skipped entirely.
+    """
+    from mcloop.targeted import is_test_command, map_to_tests, targeted_pytest_command
+
     project_dir = Path(project_dir)
     commands = get_check_commands(project_dir)
+
+    if changed_files is not None:
+        test_files = map_to_tests(changed_files, project_dir)
+        narrowed: list[str] = []
+        for cmd in commands:
+            if is_test_command(cmd):
+                if test_files:
+                    narrowed.append(targeted_pytest_command(test_files))
+                # else: skip the test command entirely
+            else:
+                narrowed.append(cmd)
+        commands = narrowed
 
     if not commands:
         return CheckResult(

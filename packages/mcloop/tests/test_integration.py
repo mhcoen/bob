@@ -140,13 +140,14 @@ def test_checks_fail_then_pass(
     mock_checks.side_effect = [
         CheckResult(passed=False, output="lint error", command="ruff check ."),
         CheckResult(passed=True, output="ok", command="ruff check ."),
+        CheckResult(passed=True, output="ok", command="ruff check ."),  # end-of-run full suite
     ]
 
     stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
     assert mock_run.call_count == 2
-    assert mock_checks.call_count == 2
+    assert mock_checks.call_count == 3
 
     # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
