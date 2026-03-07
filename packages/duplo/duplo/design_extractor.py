@@ -85,7 +85,9 @@ def _parse_design(raw: str) -> DesignRequirements:
     Returns an empty DesignRequirements if parsing fails.
     """
     text = raw
-    if text.startswith("```"):
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
         lines = text.splitlines()
         lines = lines[1:]
         if lines and lines[-1].strip().startswith("```"):

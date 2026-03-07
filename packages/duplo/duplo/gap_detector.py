@@ -123,7 +123,9 @@ def _parse_result(
 ) -> GapResult:
     """Parse the JSON response into a :class:`GapResult`."""
     text = raw
-    if text.startswith("```"):
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
         lines = text.splitlines()
         lines = lines[1:]
         if lines and lines[-1].strip().startswith("```"):

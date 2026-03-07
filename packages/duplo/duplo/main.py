@@ -16,6 +16,7 @@ from duplo.design_extractor import (
     extract_design,
     format_design_section,
 )
+from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
 from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
@@ -51,6 +52,7 @@ from duplo.saver import (
     load_product,
     move_references,
     save_design_requirements,
+    save_doc_structures,
     save_examples,
     save_features,
     save_feedback,
@@ -451,6 +453,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
             all_page_records = []
             all_raw_pages: dict[str, str] = {}
             all_code_examples = []
+            all_doc_structures = DocStructures()
             for url in new_urls:
                 print(f"  Fetching {url} …")
                 try:
@@ -461,6 +464,11 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                             all_raw_pages.update(raw_pages)
                     if code_examples:
                         all_code_examples.extend(code_examples)
+                    if doc_structures:
+                        all_doc_structures.feature_tables.extend(doc_structures.feature_tables)
+                        all_doc_structures.operation_lists.extend(doc_structures.operation_lists)
+                        all_doc_structures.unit_lists.extend(doc_structures.unit_lists)
+                        all_doc_structures.function_refs.extend(doc_structures.function_refs)
                     fetched += 1
                     analyzed_anything = True
                 except Exception as exc:
@@ -471,6 +479,8 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                     save_raw_content(all_raw_pages, all_page_records)
             if all_code_examples:
                 save_examples(all_code_examples)
+            if all_doc_structures:
+                save_doc_structures(all_doc_structures)
             summary.urls_fetched = fetched
 
     # Move processed reference files into .duplo/references/.
@@ -542,6 +552,8 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         save_examples(code_examples)
         examples_updated = len(code_examples)
         print(f"  Updated {examples_updated} code example(s).")
+    if doc_structures:
+        save_doc_structures(doc_structures)
 
     return pages_updated, examples_updated, scraped_text
 
@@ -767,6 +779,16 @@ def _subsequent_run() -> None:
         return
 
     phase_num, phase_info = get_current_phase()
+
+    # Detect end of roadmap: roadmap exists but current_phase is past last entry.
+    roadmap = data.get("roadmap", [])
+    if roadmap and phase_info is None:
+        print("All roadmap phases complete. Nothing to do.")
+        plan_path = Path("PLAN.md")
+        if plan_path.exists():
+            plan_path.unlink()
+        return
+
     phase_label = (
         f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
     )
@@ -859,6 +881,8 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     test_tasks = generate_plan_test_tasks(doc_examples)
     if test_tasks:
         content = append_test_tasks(content, test_tasks)
+    # Remove old PLAN.md so save_plan writes fresh instead of appending.
+    plan_path.unlink()
     saved = save_plan(content)
     print(f"Next phase plan saved to {saved}")
 

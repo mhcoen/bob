@@ -84,7 +84,9 @@ def _parse_roadmap(raw: str) -> list[dict]:
 
     text = raw.strip()
     # Strip markdown fences if present
-    if text.startswith("```"):
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
         lines = text.splitlines()
         # strip opening fence
         lines = lines[1:]

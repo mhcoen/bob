@@ -60,7 +60,9 @@ def _parse_features(raw: str) -> list[Feature]:
     Returns an empty list if parsing fails.
     """
     text = raw
-    if text.startswith("```"):
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
         lines = text.splitlines()
         # strip opening fence
         lines = lines[1:]

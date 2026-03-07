@@ -82,7 +82,9 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
     Falls back to keeping all frames if parsing fails.
     """
     text = raw
-    if text.startswith("```"):
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
         lines = text.splitlines()
         lines = lines[1:]
         if lines and lines[-1].strip().startswith("```"):
