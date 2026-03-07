@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
+import signal
 import sys
 from pathlib import Path
 
@@ -31,7 +33,7 @@ from duplo.planner import (
 )
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
-from duplo.runner import run_mcloop
+
 from duplo.scanner import scan_directory, scan_files
 from duplo.test_generator import (
     generate_plan_test_tasks,
@@ -62,7 +64,6 @@ from duplo.saver import (
     save_roadmap,
     save_screenshot_feature_map,
     save_selections,
-    set_in_progress,
     store_accepted_frames,
     write_claude_md,
 )
@@ -105,6 +106,14 @@ def main() -> None:
 
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
+
+    def _handle_signal(signum, frame):
+        print("\nInterrupted.", flush=True)
+        os._exit(130)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTSTP, _handle_signal)
+
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
         _first_run()
@@ -332,7 +341,7 @@ def _first_run() -> None:
             content = append_test_tasks(content, test_tasks)
         saved = save_plan(content)
         print(f"Plan saved to {saved}")
-        _execute_phase(content, app_name, phase_label)
+        _plan_ready(phase_label)
     else:
         print("Failed to generate roadmap.")
 
@@ -771,17 +780,18 @@ def _subsequent_run() -> None:
     app_name = data.get("app_name", "")
     in_progress = data.get("in_progress")
 
-    # Resume interrupted phase.
+    # Check for interrupted or completed phase.
     if in_progress:
         phase_label = in_progress["label"]
         plan_path = Path("PLAN.md")
         content = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
-        if in_progress.get("mcloop_done"):
-            print(f"Resuming {phase_label}: McLoop already done, completing phase …")
-            _execute_phase(content, app_name, phase_label, skip_mcloop=True)
+        if _plan_is_complete():
+            print(f"Completing {phase_label} (all tasks done).")
+            _complete_phase(content, app_name, phase_label)
         else:
-            print(f"Resuming {phase_label}: re-running McLoop …")
-            _execute_phase(content, app_name, phase_label)
+            clear_in_progress()
+            print(f"{phase_label} has uncompleted tasks.")
+            print("Run mcloop to continue building.")
         return
 
     phase_num, phase_info = get_current_phase()
@@ -812,11 +822,15 @@ def _subsequent_run() -> None:
 
     plan_path = Path("PLAN.md")
 
-    # PLAN.md exists from a prior interrupted run.
+    # PLAN.md exists from a prior run.
     if plan_path.exists():
-        print(f"Resuming {phase_label}: PLAN.md found, re-running McLoop …")
-        content = plan_path.read_text(encoding="utf-8")
-        _execute_phase(content, app_name, phase_label)
+        if _plan_is_complete():
+            content = plan_path.read_text(encoding="utf-8")
+            print(f"Completing {phase_label} (all tasks done).")
+            _complete_phase(content, app_name, phase_label)
+        else:
+            print(f"{phase_label} has uncompleted tasks in PLAN.md.")
+            print("Run mcloop to continue building.")
         return
 
     # Generate plan for current phase and execute.
@@ -850,7 +864,7 @@ def _subsequent_run() -> None:
         content = append_test_tasks(content, test_tasks)
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
-    _execute_phase(content, app_name, phase_label)
+    _plan_ready(phase_label)
 
 
 def _advance_to_next(data: dict, app_name: str) -> None:
@@ -894,7 +908,7 @@ def _advance_to_next(data: dict, app_name: str) -> None:
 
     match = re.search(r"#\s*(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
     phase_label = match.group(1).strip() if match else "Next Phase"
-    _execute_phase(content, app_name, phase_label)
+    _plan_ready(phase_label)
 
 
 def _confirm_product(product_name: str, source_url: str) -> str:
@@ -1074,31 +1088,41 @@ def _init_project(
     return roadmap
 
 
-def _execute_phase(
+def _plan_is_complete() -> bool:
+    """Return True if PLAN.md exists and all checkboxes are checked."""
+    plan_path = Path("PLAN.md")
+    if not plan_path.exists():
+        return False
+    content = plan_path.read_text(encoding="utf-8")
+    has_tasks = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- [ ]") or stripped.startswith("- [!]"):
+            return False
+        if stripped.startswith("- [x]") or stripped.startswith("- [X]"):
+            has_tasks = True
+    return has_tasks
+
+
+def _plan_ready(phase_label: str) -> None:
+    """Print a message telling the user to run mcloop."""
+    print(f"\nPlan ready for {phase_label}.")
+    print("Run mcloop to start building.")
+
+
+def _complete_phase(
     plan_content: str,
     app_name: str,
     phase_label: str,
-    *,
-    skip_mcloop: bool = False,
 ) -> None:
-    """Run McLoop, capture screenshots, compare, notify, and record history."""
-    if not skip_mcloop:
-        set_in_progress(phase_label, mcloop_done=False)
-        print("\nRunning McLoop …")
-        exit_code = run_mcloop(".")
-        if exit_code != 0:
-            print(f"McLoop exited with code {exit_code}")
-            sys.exit(exit_code)
-        print("McLoop complete.")
-        set_in_progress(phase_label, mcloop_done=True)
-
+    """Record a completed phase, capture screenshots, and advance."""
     append_phase_to_history(plan_content)
     advance_phase()
     clear_in_progress()
     plan_path = Path("PLAN.md")
     if plan_path.exists():
         plan_path.unlink()
-    print("Phase complete. Recorded in duplo.json.")
+    print(f"{phase_label} complete. Recorded in duplo.json.")
 
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"

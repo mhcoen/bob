@@ -2,8 +2,30 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def _find_appshot() -> str | None:
+    """Find the appshot script.
+
+    Checks PATH first, then looks for it in mcloop's source tree
+    (``bin/appshot`` next to the mcloop package directory).
+    """
+    found = shutil.which("appshot")
+    if found:
+        return found
+    try:
+        import mcloop
+
+        mcloop_dir = Path(mcloop.__file__).resolve().parent.parent
+        candidate = mcloop_dir / "bin" / "appshot"
+        if candidate.exists():
+            return str(candidate)
+    except (ImportError, AttributeError):
+        pass
+    return None
 
 
 def capture_appshot(
@@ -25,12 +47,17 @@ def capture_appshot(
         wait: Seconds to wait after launch before capturing (``--wait``).
 
     Returns:
-        Exit code of the appshot process (0 on success).
+        Exit code of the appshot process (0 on success),
+        or -1 if appshot is not found.
     """
+    appshot = _find_appshot()
+    if appshot is None:
+        return -1
+
     dest = Path(output_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = ["appshot", app_name, str(dest), "--wait", str(wait)]
+    cmd = [appshot, app_name, str(dest), "--wait", str(wait)]
     if launch is not None:
         cmd += ["--launch", launch]
 

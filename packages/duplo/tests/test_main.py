@@ -166,17 +166,13 @@ class TestMainFirstRun:
                                                             return_value=tmp_path / "PLAN.md",
                                                         ):
                                                             with patch(
-                                                                "duplo.main.run_mcloop",
+                                                                "duplo.main.capture_appshot",
                                                                 return_value=0,
                                                             ):
                                                                 with patch(
-                                                                    "duplo.main.capture_appshot",
-                                                                    return_value=0,
+                                                                    "duplo.main.notify_phase_complete"
                                                                 ):
-                                                                    with patch(
-                                                                        "duplo.main.notify_phase_complete"
-                                                                    ):
-                                                                        main()
+                                                                    main()
 
     def test_skips_validation_when_product_json_exists(self, tmp_path, monkeypatch):
         """When .duplo/product.json exists, skip URL validation and product confirmation."""
@@ -271,75 +267,20 @@ class TestMainSubsequentRun:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save:
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         mock_save.assert_called_once()
 
-    def test_captures_appshot_when_app_name_set(self, tmp_path, monkeypatch):
-        data = {**self._BASE_DATA, "app_name": "MyApp"}
-        _write_duplo_json(tmp_path, data)
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    with patch("duplo.main.capture_appshot", return_value=0) as mock_shot:
-                        main()
-
-        mock_shot.assert_called_once()
-        assert mock_shot.call_args.args[0] == "MyApp"
-
-    def test_skips_appshot_when_no_app_name(self, tmp_path, monkeypatch):
+    def test_prints_plan_ready(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    with patch("duplo.main.capture_appshot") as mock_shot:
-                        main()
+                main()
 
-        mock_shot.assert_not_called()
-
-    def test_uses_run_sh_as_launch_when_present(self, tmp_path, monkeypatch):
-        data = {**self._BASE_DATA, "app_name": "MyApp"}
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "run.sh").write_text("#!/bin/sh\n")
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    with patch("duplo.main.capture_appshot", return_value=0) as mock_shot:
-                        main()
-
-        _, kwargs = mock_shot.call_args
-        assert kwargs.get("launch") == "./run.sh"
-
-    def test_appends_phase_history(self, tmp_path, monkeypatch):
-        _write_duplo_json(tmp_path, self._BASE_DATA)
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0: Core\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
-
-        data = _read_duplo_json(tmp_path)
-        assert len(data["phases"]) == 1
-        assert data["phases"][0]["phase"] == "Phase 0: Core"
-
-    def test_exits_on_mcloop_failure(self, tmp_path, monkeypatch):
-        _write_duplo_json(tmp_path, self._BASE_DATA)
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=1):
-                    with pytest.raises(SystemExit) as exc_info:
-                        main()
-        assert exc_info.value.code == 1
+        out = capsys.readouterr().out
+        assert "Run mcloop to start building" in out
 
 
 class TestSubsequentRunResume:
@@ -362,54 +303,35 @@ class TestSubsequentRunResume:
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.generate_phase_plan") as mock_gen:
-            with patch("duplo.main.run_mcloop", return_value=0):
-                with patch("duplo.main.notify_phase_complete"):
-                    main()
-
-        mock_gen.assert_not_called()
-
-    def test_skips_mcloop_when_mcloop_done(self, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "in_progress": {"label": "Phase 0", "mcloop_done": True},
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        with patch("duplo.main.run_mcloop") as mock_run:
             with patch("duplo.main.notify_phase_complete"):
                 main()
 
-        mock_run.assert_not_called()
+        mock_gen.assert_not_called()
 
-    def test_in_progress_cleared_after_success(self, tmp_path, monkeypatch):
+    def test_in_progress_cleared_when_incomplete(self, tmp_path, monkeypatch):
         data = {
             **self._BASE_DATA,
             "in_progress": {"label": "Phase 0", "mcloop_done": False},
         }
         _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Task\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.run_mcloop", return_value=0):
-            with patch("duplo.main.notify_phase_complete"):
-                main()
+        main()
 
         result = _read_duplo_json(tmp_path)
         assert "in_progress" not in result
 
-    def test_resumes_print_message(self, capsys, tmp_path, monkeypatch):
+    def test_incomplete_plan_prints_run_mcloop(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Task\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.run_mcloop", return_value=0):
-            with patch("duplo.main.notify_phase_complete"):
-                main()
+        main()
 
         out = capsys.readouterr().out
-        assert "Resuming" in out
+        assert "uncompleted tasks" in out
+        assert "Run mcloop" in out
 
 
 class TestAdvanceToNext:
@@ -454,15 +376,14 @@ class TestAdvanceToNext:
                         "duplo.main.save_plan",
                         return_value=tmp_path / "PLAN.md",
                     ):
-                        with patch("duplo.main.run_mcloop", return_value=0):
-                            with patch("duplo.main.notify_phase_complete"):
-                                main()
+                        with patch("duplo.main.notify_phase_complete"):
+                            main()
 
         out = capsys.readouterr().out
         assert "next phase" in out.lower()
         mock_gen.assert_called_once()
 
-    def test_appends_phase_history(self, tmp_path, monkeypatch):
+    def test_generates_next_plan(self, capsys, tmp_path, monkeypatch):
         data = {
             **self._BASE_DATA,
             "phases": [
@@ -485,15 +406,13 @@ class TestAdvanceToNext:
                 with patch(
                     "duplo.main.generate_next_phase_plan",
                     return_value="# Phase 1: Next\n",
-                ):
+                ) as mock_gen:
                     with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                        with patch("duplo.main.run_mcloop", return_value=0):
-                            with patch("duplo.main.notify_phase_complete"):
-                                main()
+                        main()
 
-        result = _read_duplo_json(tmp_path)
-        assert len(result["phases"]) == 2
-        assert result["phases"][1]["phase"] == "Phase 1: Next"
+        mock_gen.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Run mcloop to start building" in out
 
     def test_loads_issues_when_present(self, tmp_path, monkeypatch):
         data = {
@@ -521,9 +440,8 @@ class TestAdvanceToNext:
                     return_value="# Phase 1\n",
                 ) as mock_gen:
                     with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                        with patch("duplo.main.run_mcloop", return_value=0):
-                            with patch("duplo.main.notify_phase_complete"):
-                                main()
+                        with patch("duplo.main.notify_phase_complete"):
+                            main()
 
         args = mock_gen.call_args.args
         issues_text = (
@@ -549,10 +467,8 @@ class TestAdvanceToNext:
             "duplo.main.get_current_phase",
             return_value=(0, {"title": "Core"}),
         ):
-            with patch("duplo.main.run_mcloop") as mock_run:
-                main()
+            main()
 
-        mock_run.assert_not_called()
         out = capsys.readouterr().out
         assert "complete" in out.lower()
 
@@ -592,9 +508,8 @@ class TestAdvanceToNext:
                         "duplo.main.save_plan",
                         return_value=tmp_path / "PLAN.md",
                     ) as mock_save:
-                        with patch("duplo.main.run_mcloop", return_value=0):
-                            with patch("duplo.main.notify_phase_complete"):
-                                main()
+                        with patch("duplo.main.notify_phase_complete"):
+                            main()
 
         saved_content = mock_save.call_args.args[0]
         assert "Wire up" in saved_content
@@ -626,8 +541,7 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "File changes detected" in out
@@ -649,8 +563,7 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "File changes detected" in out
@@ -671,8 +584,7 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "File changes detected" in out
@@ -689,8 +601,7 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "File changes detected" not in out
@@ -704,8 +615,7 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         # Verify hashes reflect post-move state (new.txt moved to .duplo/references/).
         from duplo.hasher import load_hashes
@@ -975,8 +885,7 @@ class TestAnalyzeNewFiles:
         with patch("duplo.main.extract_design", return_value=design):
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                    with patch("duplo.main.run_mcloop", return_value=0):
-                        main()
+                    main()
 
         out = capsys.readouterr().out
         assert "new image" in out.lower() or "Vision" in out
@@ -1074,8 +983,7 @@ class TestRescrapeProductUrl:
         with patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")) as mock_rescrape:
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                    with patch("duplo.main.run_mcloop", return_value=0):
-                        main()
+                    main()
 
         mock_rescrape.assert_called_once()
 
@@ -1337,8 +1245,7 @@ class TestDetectAndAppendGaps:
         with patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)) as mock_gaps:
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                    with patch("duplo.main.run_mcloop", return_value=0):
-                        main()
+                    main()
 
         mock_gaps.assert_called_once()
 
@@ -1605,8 +1512,7 @@ class TestSubsequentRunSummary:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "Update summary" in out
@@ -1623,8 +1529,7 @@ class TestSubsequentRunSummary:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.run_mcloop", return_value=0):
-                    main()
+                main()
 
         out = capsys.readouterr().out
         assert "No changes detected" in out
@@ -1690,7 +1595,6 @@ class TestSubsequentRunReextractsFeatures:
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
-            patch("duplo.main.run_mcloop", return_value=0),
         ):
             main()
 
@@ -1709,7 +1613,6 @@ class TestSubsequentRunReextractsFeatures:
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
-            patch("duplo.main.run_mcloop", return_value=0),
         ):
             main()
 

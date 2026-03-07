@@ -7,12 +7,18 @@ from unittest.mock import MagicMock, patch
 from duplo.appshot import capture_appshot
 
 
+_PATCH_FIND = patch("duplo.appshot._find_appshot", return_value="appshot")
+
+
 class TestCaptureAppshot:
     def test_runs_appshot_with_app_name_and_output(self, tmp_path):
         output = tmp_path / "screenshots" / "current" / "main.png"
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
             code = capture_appshot("MyApp", output)
 
         mock_run.assert_called_once_with(["appshot", "MyApp", str(output), "--wait", "2"])
@@ -23,7 +29,7 @@ class TestCaptureAppshot:
         assert not output.parent.exists()
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result):
+        with _PATCH_FIND, patch("duplo.appshot.subprocess.run", return_value=mock_result):
             capture_appshot("MyApp", output)
 
         assert output.parent.exists()
@@ -32,7 +38,10 @@ class TestCaptureAppshot:
         output = tmp_path / "main.png"
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
             capture_appshot("MyApp", output, launch="./run.sh")
 
         args = mock_run.call_args[0][0]
@@ -43,7 +52,10 @@ class TestCaptureAppshot:
         output = tmp_path / "main.png"
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
             capture_appshot("MyApp", output)
 
         args = mock_run.call_args[0][0]
@@ -53,7 +65,10 @@ class TestCaptureAppshot:
         output = tmp_path / "main.png"
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
             capture_appshot("MyApp", output, wait=5)
 
         args = mock_run.call_args[0][0]
@@ -64,14 +79,14 @@ class TestCaptureAppshot:
         output = tmp_path / "main.png"
         mock_result = MagicMock()
         mock_result.returncode = 1
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result):
+        with _PATCH_FIND, patch("duplo.appshot.subprocess.run", return_value=mock_result):
             code = capture_appshot("MyApp", output)
 
         assert code == 1
 
     def test_returns_neg1_when_appshot_not_found(self, tmp_path):
         output = tmp_path / "main.png"
-        with patch("duplo.appshot.subprocess.run", side_effect=FileNotFoundError):
+        with patch("duplo.appshot._find_appshot", return_value=None):
             code = capture_appshot("MyApp", output)
 
         assert code == -1
@@ -80,7 +95,10 @@ class TestCaptureAppshot:
         output = str(tmp_path / "main.png")
         mock_result = MagicMock()
         mock_result.returncode = 0
-        with patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
             capture_appshot("MyApp", output)
 
         args = mock_run.call_args[0][0]

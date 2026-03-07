@@ -1,8 +1,8 @@
 # Duplo
 
 Duplo duplicates apps, customized however you want. Give it reference
-material and it builds a working version using
-[McLoop](https://github.com/mhcoen/mcloop).
+material and it generates a build plan. You then run
+[McLoop](https://github.com/mhcoen/mcloop) to build it.
 
 ## How it works
 
@@ -20,8 +20,8 @@ duplo
 
 Duplo scans the directory, analyzes everything it finds, identifies
 the product, extracts features and visual design details, asks which
-features you want, and generates a phased build plan. McLoop then
-builds it phase by phase.
+features you want, and generates a phased build plan. You then run
+mcloop to build it.
 
 When you test the result and find things missing or wrong, drop more
 reference material into the directory (a screenshot showing the right
@@ -29,8 +29,8 @@ colors, a PDF of the full docs, notes about what to fix) and run
 `duplo` again. It detects the new files, re-analyzes, and appends
 tasks to the plan for anything that was missed.
 
-The cycle is: add reference material, run duplo, let McLoop build,
-test, add more if needed, run duplo again.
+The cycle is: run duplo to generate the plan, run mcloop to build
+it, test, add more reference material if needed, run duplo again.
 
 ## What Duplo does on first run
 
@@ -83,15 +83,11 @@ test, add more if needed, run duplo again.
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-12. **Builds Phase 1.** Generates a PLAN.md for Phase 1, writes
-    CLAUDE.md and mcloop.json, and runs McLoop to build it.
+12. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
+    CLAUDE.md, and mcloop.json. Prints "Run mcloop to start
+    building." and exits. You run mcloop separately.
 
-13. **Captures and compares screenshots.** After McLoop finishes,
-    uses appshot to capture a screenshot of the built app and compares
-    it against reference images. Visual differences are saved to
-    ISSUES.md.
-
-14. **Cleans up.** Moves processed reference files to
+13. **Cleans up.** Moves processed reference files to
     `.duplo/references/` and saves a file hash manifest for detecting
     changes on subsequent runs.
 
@@ -100,17 +96,29 @@ test, add more if needed, run duplo again.
 Running `duplo` again in the same directory detects what happened
 since the last run:
 
-- **Interrupted phase:** If McLoop was killed mid-phase, Duplo
-  resumes where it left off. If McLoop finished but the post-phase
-  steps (screenshots, comparison) didn't complete, those are resumed.
+- **Completed phase:** If all tasks in PLAN.md are checked off,
+  Duplo records the phase in history, captures screenshots for
+  comparison, collects your feedback, and generates the next
+  phase's PLAN.md. You then run mcloop again.
 
-- **Phase complete:** Duplo collects your feedback (text input or
-  from a file), incorporates it along with any visual issues, and
-  generates the next phase's PLAN.md. McLoop then builds it.
+- **Incomplete phase:** If PLAN.md has unchecked tasks, Duplo
+  tells you to run mcloop to continue building.
 
 - **New files detected:** Duplo compares the directory against its
   stored file hash manifest and reports what changed (added, modified,
   removed files).
+
+- **Re-scrapes the product URL.** If the product site has changed,
+  Duplo fetches it again, re-extracts features from the updated
+  content, and merges new features into its stored feature list
+  (without removing existing ones). The gap detector then compares
+  the combined feature list against PLAN.md.
+
+- **Gap detection is platform-aware.** When comparing features against
+  the plan, Duplo tells Claude the project's target platform and
+  language. Features that are infeasible for the target stack (e.g.,
+  "Windows support" for a macOS-only SwiftUI app) are skipped rather
+  than appended as tasks.
 
 ### Non-destructive updates
 
@@ -150,12 +158,25 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+## Important: URLs in reference files
+
+Duplo extracts HTTP(S) URLs from **every** readable file in the
+project directory, not just files with a `.txt` extension. If your
+`plan.txt` or any other text file contains GitHub URLs, documentation
+links, or other URLs you don't want scraped, Duplo will attempt to
+fetch and analyze them as product pages. Keep the product URL in
+`urls.txt` and avoid embedding URLs in other reference files unless
+you want them crawled.
+
 ## Requirements
 
 - Python 3.11+
 - [McLoop](https://github.com/mhcoen/mcloop) (`pip install -e ~/proj/mcloop`)
 - `claude` CLI on PATH
 - macOS for appshot screenshot verification
+- [Playwright](https://playwright.dev/) for reference screenshots
+  (`playwright install chromium` after pip install). Only needed on
+  first run if the product URL has documentation pages to screenshot.
 - [ffmpeg](https://ffmpeg.org/) on PATH for video reference extraction (optional).
   When video files (mp4, mov, webm, avi) are present in the project directory,
   Duplo uses ffmpeg to extract frames at scene-change points, deduplicates
