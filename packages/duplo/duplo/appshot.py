@@ -37,6 +37,5 @@ def capture_appshot(
     try:
         result = subprocess.run(cmd)
     except FileNotFoundError:
-        print("appshot not found, skipping screenshot.")
-        return 1
+        return -1
     return result.returncode

@@ -18,6 +18,12 @@ the plan. A feature is "covered" if the plan contains a task or description that
 clearly addresses it — even if the wording differs. A code example is "covered"
 if the plan includes a task to implement or test the functionality it demonstrates.
 
+IMPORTANT: Skip any feature that is infeasible or irrelevant for the target
+platform and language. For example, do not report "Windows support" as missing
+for a macOS-only SwiftUI app, or "JavaScript plugin API" for a project that
+has no extension system in its architecture. Only report features that could
+reasonably be implemented within the project's technology stack.
+
 Return ONLY a JSON object with these fields:
   "missing_features" – array of objects, each with:
       "name" – the feature name (from the input list)
@@ -29,6 +35,7 @@ Return ONLY a JSON object with these fields:
 
 If everything is covered, return empty arrays.
 Do NOT include features or examples that ARE covered by the plan.
+Do NOT include features that are infeasible for the target platform.
 """
 
 _MAX_PLAN_CHARS = 30_000
@@ -87,6 +94,9 @@ def detect_gaps(
     plan_content: str,
     features: list[Feature],
     examples: list[CodeExample] | None = None,
+    *,
+    platform: str = "",
+    language: str = "",
 ) -> GapResult:
     """Compare *features* and *examples* against *plan_content*.
 
@@ -103,7 +113,15 @@ def detect_gaps(
 
     plan_text = plan_content[:_MAX_PLAN_CHARS]
 
-    user_parts = [f"Current PLAN.md:\n{plan_text}\n"]
+    user_parts = []
+    if platform or language:
+        parts = []
+        if platform:
+            parts.append(f"platform: {platform}")
+        if language:
+            parts.append(f"language: {language}")
+        user_parts.append(f"Target project: {', '.join(parts)}\n")
+    user_parts.append(f"Current PLAN.md:\n{plan_text}\n")
     user_parts.append(f"Extracted features:\n{features_text}\n")
     if examples_text:
         user_parts.append(f"Extracted code examples:\n{examples_text}\n")

@@ -69,6 +69,13 @@ class TestCaptureAppshot:
 
         assert code == 1
 
+    def test_returns_neg1_when_appshot_not_found(self, tmp_path):
+        output = tmp_path / "main.png"
+        with patch("duplo.appshot.subprocess.run", side_effect=FileNotFoundError):
+            code = capture_appshot("MyApp", output)
+
+        assert code == -1
+
     def test_accepts_string_path(self, tmp_path):
         output = str(tmp_path / "main.png")
         mock_result = MagicMock()

@@ -586,8 +586,14 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
 
     examples = load_examples()
 
+    prefs = data.get("preferences", {})
+    platform = prefs.get("platform", "")
+    language = prefs.get("language", "")
+
     print("\nComparing features and examples against PLAN.md …")
-    result = detect_gaps(plan_content, features, examples or None)
+    result = detect_gaps(
+        plan_content, features, examples or None, platform=platform, language=language
+    )
 
     # Check for design refinements not yet in the plan.
     design_data = data.get("design_requirements", {})
@@ -1102,6 +1108,8 @@ def _execute_phase(
         if shot_code == 0:
             print(f"Screenshot saved to {output_path}")
             _compare_with_references(output_path)
+        elif shot_code == -1:
+            print("appshot not found, skipping screenshot.")
         else:
             print(f"appshot exited with code {shot_code} (screenshot skipped)")
 
