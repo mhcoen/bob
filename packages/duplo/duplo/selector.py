@@ -82,7 +82,7 @@ def _parse_selection(raw: str, count: int) -> set[int]:
                 end = int(parts[1].strip())
             except ValueError:
                 continue
-            for n in range(start, end + 1):
+            for n in range(min(start, end), max(start, end) + 1):
                 if 1 <= n <= count:
                     indices.add(n - 1)
         else:

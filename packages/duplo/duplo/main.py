@@ -716,7 +716,11 @@ def _subsequent_run() -> None:
         print("\nRe-extracting features …")
         new_features = extract_features(scraped_text)
         if new_features:
-            old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            try:
+                old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                print(f"Error: {_DUPLO_JSON} contains invalid JSON. Delete or fix it.")
+                return
             old_count = len(old_data.get("features", []))
             save_features(new_features)
             updated_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))

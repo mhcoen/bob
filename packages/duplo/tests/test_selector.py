@@ -53,8 +53,8 @@ class TestParseSelection:
         assert _parse_selection("a-b", 5) == set()
 
     def test_range_reversed_still_works(self):
-        # "4-2" would produce no items since range(4,3) is empty
-        assert _parse_selection("4-2", 5) == set()
+        # "4-2" should select features 2, 3, 4 (indices 1, 2, 3)
+        assert _parse_selection("4-2", 5) == {1, 2, 3}
 
 
 # ---------------------------------------------------------------------------

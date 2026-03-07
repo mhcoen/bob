@@ -28,6 +28,16 @@ def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
     return duplo_dir
 
 
+def _safe_read_json(path: Path) -> dict:
+    """Read *path* as JSON, returning ``{}`` if missing or corrupted."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
 def save_product(
     product_name: str,
     source_url: str,
@@ -181,7 +191,7 @@ def append_phase_to_history(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
 
     match = re.search(r"^#\s*(Phase\s+\d+[^\n]*)", plan_content, re.IGNORECASE | re.MULTILINE)
     phase_title = match.group(1).strip() if match else "Unknown phase"
@@ -215,7 +225,7 @@ def save_feedback(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
 
     entry = {
         "after_phase": after_phase,
@@ -246,7 +256,7 @@ def set_in_progress(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["in_progress"] = {"label": label, "mcloop_done": mcloop_done}
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
@@ -290,7 +300,7 @@ def save_screenshot_feature_map(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["screenshot_features"] = mapping
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
@@ -304,7 +314,7 @@ def save_roadmap(
     """Save the roadmap to duplo.json."""
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["roadmap"] = roadmap
     data["current_phase"] = 0
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -366,7 +376,7 @@ def save_features(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     existing = data.get("features", [])
     existing_names = {f["name"] for f in existing}
     for feat in features:
@@ -398,7 +408,7 @@ def save_code_examples(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["code_examples"] = [dataclasses.asdict(ex) for ex in examples]
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
@@ -539,7 +549,7 @@ def save_doc_structures(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["doc_structures"] = _serialize_doc_structures(structures)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
@@ -565,7 +575,7 @@ def save_reference_urls(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["reference_urls"] = [dataclasses.asdict(r) for r in records]
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
@@ -627,7 +637,7 @@ def save_design_requirements(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["design_requirements"] = design
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
@@ -652,7 +662,7 @@ def save_frame_descriptions(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    data: dict = _safe_read_json(path)
     data["frame_descriptions"] = descriptions
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path

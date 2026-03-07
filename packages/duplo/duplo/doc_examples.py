@@ -75,9 +75,9 @@ def extract_code_examples(html: str, source_url: str = "") -> list[CodeExample]:
         if i in used_indices:
             continue
 
-        example = _parse_doctest(code, source_url, lang)
-        if example:
-            examples.append(example)
+        doctest_examples = _parse_doctest(code, source_url, lang)
+        if doctest_examples:
+            examples.extend(doctest_examples)
             used_indices.add(i)
             continue
 
@@ -166,37 +166,42 @@ def _get_preceding_text(tag: Tag) -> str:
     return " ".join(parts)
 
 
-def _parse_doctest(code: str, source_url: str, lang: str) -> CodeExample | None:
+def _parse_doctest(code: str, source_url: str, lang: str) -> list[CodeExample]:
     """Parse Python doctest-style code (``>>>`` prompts)."""
     if not _DOCTEST_RE.search(code):
-        return None
+        return []
 
+    results: list[CodeExample] = []
     input_lines: list[str] = []
     output_lines: list[str] = []
+
+    def _flush() -> None:
+        if input_lines and output_lines:
+            results.append(
+                CodeExample(
+                    input="\n".join(input_lines),
+                    expected_output="\n".join(output_lines),
+                    source_url=source_url,
+                    language=lang or "python",
+                )
+            )
+        input_lines.clear()
+        output_lines.clear()
+
     for line in code.splitlines():
         if line.startswith(">>> ") or line.startswith("... "):
             if output_lines:
-                # New prompt after output — only keep last example.
-                input_lines = []
-                output_lines = []
+                _flush()
             input_lines.append(line[4:])
         elif line.startswith(">>>"):
             if output_lines:
-                input_lines = []
-                output_lines = []
+                _flush()
             input_lines.append(line[3:])
         elif input_lines:
             output_lines.append(line)
 
-    if not input_lines or not output_lines:
-        return None
-
-    return CodeExample(
-        input="\n".join(input_lines),
-        expected_output="\n".join(output_lines),
-        source_url=source_url,
-        language=lang or "python",
-    )
+    _flush()
+    return results
 
 
 def _parse_shell(code: str, source_url: str, lang: str) -> CodeExample | None:

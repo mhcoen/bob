@@ -104,7 +104,7 @@ class TestDoctest:
         assert "    print(i)" in examples[0].input
         assert examples[0].expected_output == "0\n1\n2"
 
-    def test_multiple_doctests_keeps_last(self):
+    def test_multiple_doctests_keeps_all(self):
         html = """
         <html><body>
         <pre><code>>>> 1 + 1
@@ -114,9 +114,11 @@ class TestDoctest:
         </body></html>
         """
         examples = extract_code_examples(html)
-        assert len(examples) == 1
-        assert examples[0].input == "3 + 4"
-        assert examples[0].expected_output == "7"
+        assert len(examples) == 2
+        assert examples[0].input == "1 + 1"
+        assert examples[0].expected_output == "2"
+        assert examples[1].input == "3 + 4"
+        assert examples[1].expected_output == "7"
 
     def test_no_output_skipped(self):
         html = """
