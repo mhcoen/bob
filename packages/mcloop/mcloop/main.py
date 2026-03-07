@@ -52,13 +52,18 @@ from mcloop.runner import (
 def main() -> None:
     def _handle_sigint(sig, frame):
         print("\nInterrupted.", flush=True)
-        from mcloop.runner import _active_process
+        import mcloop.runner as _runner
 
-        if _active_process is not None:
+        proc = _runner._active_process
+        if proc is not None:
             try:
-                _active_process.kill()
-            except OSError:
-                pass
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
         os._exit(130)
 
     signal.signal(signal.SIGINT, _handle_sigint)
@@ -75,7 +80,7 @@ def _main() -> None:
         sys.exit(1)
 
     if args.command == "sync":
-        _cmd_sync(checklist_path)
+        _cmd_sync(checklist_path, dry_run=args.dry_run)
         return
 
     if args.command == "audit":
@@ -362,7 +367,10 @@ def _parse_args() -> argparse.Namespace:
         "--no-audit", action="store_true", help="Skip the post-completion bug audit cycle"
     )
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
+    sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
+    sync_parser.add_argument(
+        "--dry-run", action="store_true", help="Show changes without modifying PLAN.md"
+    )
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
     return parser.parse_args()
 
@@ -384,16 +392,29 @@ def _cmd_audit(checklist_path: Path) -> None:
         print("audit: BUGS.md was not written", file=sys.stderr)
 
 
-def _cmd_sync(checklist_path: Path) -> None:
+def _cmd_sync(checklist_path: Path, *, dry_run: bool = False) -> None:
     """Launch a Claude Code session with full project context for sync analysis."""
     project_dir = checklist_path.parent
     log_dir = project_dir / "logs"
+    mode = "(dry run)" if dry_run else ""
+    print(f"Syncing PLAN.md with codebase {mode}...".strip(), flush=True)
     original = checklist_path.read_text() if checklist_path.exists() else ""
+    global _SUPPRESS_ALL_TOOLS
+    _SUPPRESS_ALL_TOOLS = False
     result = run_sync(project_dir, log_dir)
+    _SUPPRESS_ALL_TOOLS = True
     if not result.success:
         print(f"sync: session exited with code {result.exit_code}", file=sys.stderr)
         sys.exit(result.exit_code)
     proposed = checklist_path.read_text() if checklist_path.exists() else ""
+    if dry_run:
+        if proposed != original:
+            _show_diff(original, proposed, checklist_path.name)
+        else:
+            print("No changes to PLAN.md.")
+        checklist_path.write_text(original)
+        print("Dry run: no changes applied.")
+        return
     if not _confirm_sync_changes(checklist_path, original, proposed):
         checklist_path.write_text(original)
         print("Changes discarded.")

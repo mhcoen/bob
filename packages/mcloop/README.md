@@ -88,6 +88,7 @@ mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 mcloop --model opus       # Use a specific Claude model
 mcloop --no-audit         # Skip the post-completion bug audit
 mcloop sync               # Sync PLAN.md with the codebase
+mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
 ```
 
@@ -444,12 +445,15 @@ existing plan, then:
 
 1. Appends checked items for any features, fixes, or changes reflected in the
    code but not yet in PLAN.md, matching the granularity of existing items.
-2. Flags problems: checked items with no corresponding code, unchecked items
-   that appear already implemented, and descriptions that have drifted from
-   what the code actually does.
+2. Checks off unchecked items that are already implemented in the codebase.
+3. Flags problems: checked items with no corresponding code, and descriptions
+   that have drifted from what the code actually does.
 
 Before writing, McLoop shows a diff of the proposed changes and asks for
-confirmation. No existing items are modified or removed.
+confirmation. No existing items are deleted.
+
+Use `mcloop sync --dry-run` to see the proposed changes without modifying
+PLAN.md.
 
 This is useful for keeping PLAN.md accurate after manual edits, interactive
 Claude Code sessions, or any other changes made outside McLoop.
@@ -502,6 +506,10 @@ Each log captures the full CLI output and exit code.
 ## Requirements
 
 - Python >= 3.11
+- `git` on PATH (McLoop requires git for checkpointing and recovery.
+  If no `.git` directory exists, McLoop initializes one automatically
+  before the first task. All git errors are reported to the terminal
+  and via Telegram.)
 - `claude` CLI on PATH
 - `gh` CLI on PATH (for automatic GitHub repo creation)
 - macOS for iMessage notifications (Telegram works anywhere)

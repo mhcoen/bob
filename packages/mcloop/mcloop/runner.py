@@ -100,6 +100,14 @@ def run_task(
         " to note."
     )
     parts.append(notes_instruction)
+    parts.append(
+        "Never install tools or dependencies via brew,"
+        " cargo, pip, npm, apt, or any other package"
+        " manager. If a required tool is not found,"
+        " report what is missing and stop. Do not"
+        " search for alternative ways to obtain it."
+        " The user will install it and re-run."
+    )
     if prior_errors:
         parts.append(
             "IMPORTANT: A previous attempt at this task failed. Fix these errors:\n" + prior_errors
@@ -212,11 +220,6 @@ def _run_session(
         start_new_session=True,
     )
     _active_process = process
-
-    # Reclaim the terminal foreground process group so
-    # ctrl-c and ctrl-z reach mcloop's signal handler
-    # instead of being sent to the child's process group.
-    _reclaim_foreground()
     if stdin_text and process.stdin:
         process.stdin.write(stdin_text)
         process.stdin.close()
@@ -249,24 +252,40 @@ def _run_session(
                 )
             except queue.Empty:
                 # Silence. Check for pending approvals.
-                if not shown_waiting and pending_dir.exists():
-                    try:
-                        pending = list(pending_dir.iterdir())
-                    except OSError:
-                        pending = []
-                    if pending:
-                        count = len(pending)
+                if pending_dir.exists():
+                    # Check if a permission was denied
+                    denied_file = pending_dir / "denied"
+                    if denied_file.exists():
                         try:
-                            desc = pending[0].read_text()[:80]
+                            reason = denied_file.read_text()[:200]
                         except OSError:
-                            desc = "unknown"
-                        extra = f" ({count} pending)" if count > 1 else ""
+                            reason = "unknown"
+                        denied_file.unlink(missing_ok=True)
                         print(
-                            f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
+                            f"\n!!! Permission denied, killing session: {reason}",
                             flush=True,
                         )
-                        shown_waiting = True
-                        continue
+                        process.kill()
+                        process.wait()
+                        return "\n".join(output_lines), 1
+                    if not shown_waiting:
+                        try:
+                            pending = list(pending_dir.iterdir())
+                        except OSError:
+                            pending = []
+                        if pending:
+                            count = len(pending)
+                            try:
+                                desc = pending[0].read_text()[:80]
+                            except OSError:
+                                desc = "unknown"
+                            extra = f" ({count} pending)" if count > 1 else ""
+                            print(
+                                f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
+                                flush=True,
+                            )
+                            shown_waiting = True
+                            continue
                 # Print a progress dot
                 now = time.monotonic()
                 if now - last_dot >= PROGRESS_DOT_INTERVAL:
@@ -403,23 +422,21 @@ def build_sync_prompt() -> str:
         "5. Do not duplicate existing items, even if worded differently.\n"
         "6. Add new items at the end of the most relevant section, or at the end of "
         "PLAN.md if no section fits.\n\n"
-        "PART 2 — FLAG PROBLEMS\n"
-        "After updating PLAN.md, print a problems report to stdout. "
-        "Check for these three categories of problems:\n\n"
+        "PART 2 — CHECK OFF COMPLETED ITEMS AND FLAG PROBLEMS\n"
+        "Scan every unchecked item (- [ ]) in PLAN.md. If the feature "
+        "or fix it describes is clearly implemented in the codebase, "
+        "change it to checked (- [x]). Do NOT uncheck any item.\n\n"
+        "Then print a problems report to stdout. "
+        "Check for these two categories of problems:\n\n"
         "A. CHECKED ITEMS WITH NO CODE: Checked items (- [x]) that have no "
         "corresponding implementation in the codebase. The code does not contain "
         "any evidence this was done.\n\n"
-        "B. UNCHECKED ITEMS ALREADY DONE: Unchecked items (- [ ]) that appear to "
-        "already be implemented in the codebase. The feature or fix described is "
-        "clearly present in the code.\n\n"
-        "C. DESCRIPTION DRIFT: Items (checked or unchecked) whose description no "
+        "B. DESCRIPTION DRIFT: Items (checked or unchecked) whose description no "
         "longer matches what the code actually does — the implementation diverged "
         "from what was planned.\n\n"
         "Format the problems report exactly like this (omit any section with no findings):\n"
         "--- SYNC PROBLEMS ---\n"
         "CHECKED BUT NOT IMPLEMENTED:\n"
-        "  - <item text>\n"
-        "UNCHECKED BUT ALREADY DONE:\n"
         "  - <item text>\n"
         "DESCRIPTION DRIFT:\n"
         "  - <item text>: <brief explanation of the mismatch>\n"

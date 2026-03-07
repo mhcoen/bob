@@ -182,10 +182,10 @@ def test_build_sync_prompt_flags_checked_no_code():
     assert "CHECKED ITEMS WITH NO CODE" in prompt
 
 
-def test_build_sync_prompt_flags_unchecked_already_done():
+def test_build_sync_prompt_checks_off_completed_items():
     prompt = build_sync_prompt()
-    assert "UNCHECKED BUT ALREADY DONE" in prompt
-    assert "UNCHECKED ITEMS ALREADY DONE" in prompt
+    assert "change it to checked" in prompt
+    assert "Do NOT uncheck" in prompt
 
 
 def test_build_sync_prompt_flags_description_drift():

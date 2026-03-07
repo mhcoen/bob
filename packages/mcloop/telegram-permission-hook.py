@@ -432,6 +432,12 @@ def main():
     elif decision == "deny":
         update_message(message_id, f"{label_prefix}Denied: *{tool_name}*\n{desc}")
         _dbg("EXIT: denied via Telegram")
+        # Write denial marker so mcloop can kill the session
+        try:
+            denied_file = pending_dir / "denied"
+            denied_file.write_text(f"Denied: {tool_name} {desc[:200]}")
+        except OSError:
+            pass
         _respond("deny", "Denied via Telegram")
     else:
         update_message(message_id, f"{label_prefix}Timed out: *{tool_name}*\n{desc}")
