@@ -1036,6 +1036,9 @@ def _execute_phase(
     append_phase_to_history(plan_content)
     advance_phase()
     clear_in_progress()
+    plan_path = Path("PLAN.md")
+    if plan_path.exists():
+        plan_path.unlink()
     print("Phase complete. Recorded in duplo.json.")
 
     if app_name:

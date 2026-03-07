@@ -190,6 +190,10 @@ def fetch_site(
         except Exception:
             continue
 
+        final_norm = str(resp.url).rstrip("/")
+        if final_norm != norm:
+            visited.add(final_norm)
+
         if is_docs:
             docs_visited += 1
         else:
