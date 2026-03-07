@@ -353,6 +353,31 @@ def get_current_phase(
     return (current, None)
 
 
+def save_features(
+    features: list[Feature],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Merge *features* into the ``features`` list in *duplo.json*.
+
+    Adds any features whose ``name`` is not already present.  Existing
+    features are never removed or modified.  Returns the path to the
+    updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    existing = data.get("features", [])
+    existing_names = {f["name"] for f in existing}
+    for feat in features:
+        if feat.name not in existing_names:
+            existing.append(dataclasses.asdict(feat))
+            existing_names.add(feat.name)
+    data["features"] = existing
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def save_code_examples(
     examples: list[CodeExample],
     *,

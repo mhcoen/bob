@@ -52,6 +52,7 @@ from duplo.saver import (
     move_references,
     save_design_requirements,
     save_examples,
+    save_features,
     save_feedback,
     save_product,
     save_raw_content,
@@ -87,6 +88,7 @@ class UpdateSummary:
     urls_fetched: int = 0
     pages_rescraped: int = 0
     examples_rescraped: int = 0
+    new_features: int = 0
     missing_features: int = 0
     missing_examples: int = 0
     design_refinements: int = 0
@@ -497,25 +499,26 @@ def _load_existing_urls() -> set[str]:
     return {r["url"] for r in records if "url" in r}
 
 
-def _rescrape_product_url() -> tuple[int, int]:
+def _rescrape_product_url() -> tuple[int, int, str]:
     """Re-scrape the product URL stored in duplo.json with the deep extractor.
 
     If ``source_url`` is set, fetches it again via :func:`fetch_site` and
     updates the reference URLs and raw page content in duplo.json.  This
     picks up any changes on the product site since the last run.
 
-    Returns ``(pages_updated, examples_updated)`` counts.
+    Returns ``(pages_updated, examples_updated, scraped_text)`` counts
+    and the scraped text content for downstream feature re-extraction.
     """
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
-        return 0, 0
+        return 0, 0, ""
     try:
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return 0, 0
+        return 0, 0, ""
     source_url = data.get("source_url", "")
     if not source_url:
-        return 0, 0
+        return 0, 0, ""
 
     print(f"\nRe-scraping {source_url} …")
     try:
@@ -524,7 +527,7 @@ def _rescrape_product_url() -> tuple[int, int]:
         )
     except Exception as exc:
         print(f"  Failed to re-scrape {source_url}: {exc}")
-        return 0, 0
+        return 0, 0, ""
 
     pages_updated = 0
     examples_updated = 0
@@ -540,7 +543,7 @@ def _rescrape_product_url() -> tuple[int, int]:
         examples_updated = len(code_examples)
         print(f"  Updated {examples_updated} code example(s).")
 
-    return pages_updated, examples_updated
+    return pages_updated, examples_updated, scraped_text
 
 
 def _detect_and_append_gaps() -> tuple[int, int, int, int]:
@@ -636,6 +639,8 @@ def _print_summary(summary: UpdateSummary) -> None:
         found_lines.append(f"  Pages re-scraped: {summary.pages_rescraped}")
     if summary.examples_rescraped:
         found_lines.append(f"  Code examples updated: {summary.examples_rescraped}")
+    if summary.new_features:
+        found_lines.append(f"  New features extracted: {summary.new_features}")
 
     added_lines: list[str] = []
     if summary.missing_features:
@@ -701,9 +706,28 @@ def _subsequent_run() -> None:
             summary.video_frames_extracted = analysis.video_frames_extracted
 
     # Re-scrape the product URL to pick up site changes.
-    pages, examples = _rescrape_product_url()
+    pages, examples, scraped_text = _rescrape_product_url()
     summary.pages_rescraped = pages
     summary.examples_rescraped = examples
+
+    # Re-extract features from the updated scraped content and merge
+    # new ones into duplo.json so the gap detector can find them.
+    if scraped_text:
+        print("\nRe-extracting features …")
+        new_features = extract_features(scraped_text)
+        if new_features:
+            old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            old_count = len(old_data.get("features", []))
+            save_features(new_features)
+            updated_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            new_count = len(updated_data.get("features", [])) - old_count
+            if new_count > 0:
+                print(f"  {new_count} new feature(s) merged into duplo.json.")
+                summary.new_features = new_count
+            else:
+                print("  No new features found.")
+        else:
+            print("  No features extracted.")
 
     save_hashes(compute_hashes("."))
 

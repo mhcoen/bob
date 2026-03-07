@@ -1071,7 +1071,7 @@ class TestRescrapeProductUrl:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._rescrape_product_url", return_value=(0, 0)) as mock_rescrape:
+        with patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")) as mock_rescrape:
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
                     with patch("duplo.main.run_mcloop", return_value=0):
@@ -1516,9 +1516,10 @@ class TestRescrapeReturnsCounts:
     def test_returns_zeros_when_no_url(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "", "features": []})
-        pages, examples = _rescrape_product_url()
+        pages, examples, text = _rescrape_product_url()
         assert pages == 0
         assert examples == 0
+        assert text == ""
 
     def test_returns_counts(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -1532,9 +1533,10 @@ class TestRescrapeReturnsCounts:
             with patch("duplo.main.save_reference_urls"):
                 with patch("duplo.main.save_raw_content"):
                     with patch("duplo.main.save_examples"):
-                        pages, ex = _rescrape_product_url()
+                        pages, ex, text = _rescrape_product_url()
         assert pages == 1
         assert ex == 1
+        assert text == "text"
 
 
 class TestDetectGapsReturnsCounts:
@@ -1626,3 +1628,95 @@ class TestSubsequentRunSummary:
 
         out = capsys.readouterr().out
         assert "No changes detected" in out
+
+
+class TestRescrapeReturnsText:
+    """Tests that _rescrape_product_url returns scraped text."""
+
+    def test_returns_scraped_text(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("product content", [], None, records, {}),
+        ):
+            with patch("duplo.main.save_reference_urls"):
+                pages, ex, text = _rescrape_product_url()
+        assert text == "product content"
+
+    def test_returns_empty_on_failure(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+        with patch("duplo.main.fetch_site", side_effect=Exception("fail")):
+            pages, ex, text = _rescrape_product_url()
+        assert text == ""
+
+    def test_returns_empty_when_no_source(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        pages, ex, text = _rescrape_product_url()
+        assert text == ""
+
+
+class TestSubsequentRunReextractsFeatures:
+    """Tests that _subsequent_run re-extracts features after re-scraping."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [{"name": "Auth", "description": "Login.", "category": "core"}],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    def test_reextracts_and_merges_features(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        new_feature = Feature(name="Search", description="Find things.", category="core")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[new_feature]) as mock_extract,
+            patch("duplo.main.save_features") as mock_save,
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.main.run_mcloop", return_value=0),
+        ):
+            main()
+
+        mock_extract.assert_called_once_with("product text")
+        mock_save.assert_called_once_with([new_feature])
+
+    def test_skips_extraction_when_no_scraped_text(self, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main.extract_features") as mock_extract,
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.main.run_mcloop", return_value=0),
+        ):
+            main()
+
+        mock_extract.assert_not_called()
+
+    def test_summary_shows_new_features(self, capsys):
+        summary = UpdateSummary(new_features=3)
+        _print_summary(summary)
+        out = capsys.readouterr().out
+        assert "New features extracted: 3" in out

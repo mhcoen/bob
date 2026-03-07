@@ -31,6 +31,7 @@ from duplo.saver import (
     load_product,
     move_references,
     save_examples,
+    save_features,
     save_feedback,
     save_frame_descriptions,
     save_product,
@@ -1009,3 +1010,42 @@ class TestLoadProduct:
         save_product("", "", target_dir=tmp_path)
         result = load_product(target_dir=tmp_path)
         assert result == ("", "")
+
+
+class TestSaveFeatures:
+    """Tests for save_features() merge behaviour."""
+
+    def test_adds_new_features(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        new = [Feature(name="Dark mode", description="Toggle dark theme.", category="ui")]
+        save_features(new, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+        assert "Dark mode" in names
+        assert "Search" in names
+        assert len(data["features"]) == 3
+
+    def test_skips_duplicates(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        dup = [Feature(name="Search", description="Different desc.", category="core")]
+        save_features(dup, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["features"]) == 2
+        search_feat = [f for f in data["features"] if f["name"] == "Search"][0]
+        assert search_feat["description"] == "Full-text search."
+
+    def test_creates_features_key_when_absent(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True)
+        (duplo_dir / "duplo.json").write_text("{}", encoding="utf-8")
+        new = [Feature(name="Auth", description="User login.", category="core")]
+        save_features(new, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["features"]) == 1
+        assert data["features"][0]["name"] == "Auth"
+
+    def test_preserves_existing_features(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        save_features([], target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["features"]) == 2
