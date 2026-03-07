@@ -13,8 +13,8 @@ import os
 import re
 import sys
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
@@ -48,6 +48,7 @@ RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
 
 # --- Session memory ---
 
+
 def _tool_pattern(tool_name, tool_input):
     """Create a pattern key for session memory. Uses the full command."""
     if tool_name == "Bash":
@@ -80,10 +81,14 @@ def _save_session(patterns):
             created = existing.get("created", time.time())
         except (OSError, json.JSONDecodeError):
             created = time.time()
-        SESSION_FILE.write_text(json.dumps({
-            "created": created,
-            "patterns": sorted(patterns),
-        }))
+        SESSION_FILE.write_text(
+            json.dumps(
+                {
+                    "created": created,
+                    "patterns": sorted(patterns),
+                }
+            )
+        )
         _dbg(f"saved session: {sorted(patterns)}")
     except Exception as e:
         _dbg(f"session save FAILED: {e}")
@@ -103,6 +108,7 @@ def remember_session(tool_name, tool_input):
 
 
 # --- Permission rules ---
+
 
 def _respond(decision, reason=""):
     """Write a properly formatted PreToolUse hook response to stdout."""
@@ -155,6 +161,7 @@ def match_rule(rule, tool_name, tool_input):
             url = tool_input.get("url", "")
             try:
                 from urllib.parse import urlparse
+
                 url_domain = urlparse(url).hostname or ""
                 return url_domain == domain or url_domain.endswith("." + domain)
             except Exception:
@@ -181,7 +188,7 @@ def _unwrap_rtk(tool_input):
         return tool_input
     cmd = tool_input["command"].strip()
     if cmd.startswith("rtk proxy "):
-        unwrapped = cmd[len("rtk proxy "):]
+        unwrapped = cmd[len("rtk proxy ") :]
         return {**tool_input, "command": unwrapped}
     return tool_input
 
@@ -194,14 +201,12 @@ def is_allowed(tool_name, tool_input):
     # Check if the unwrapped command (without rtk proxy) is allowed
     unwrapped = _unwrap_rtk(tool_input)
     if unwrapped is not tool_input:
-        return any(
-            match_rule(rule, tool_name, unwrapped)
-            for rule in rules
-        )
+        return any(match_rule(rule, tool_name, unwrapped) for rule in rules)
     return False
 
 
 # --- Telegram ---
+
 
 def telegram_api(method, data=None):
     """Call a Telegram Bot API method. Use data dict for POST body (supports nested JSON)."""
@@ -263,11 +268,14 @@ def poll_for_response(message_id):
     deadline = time.time() + POLL_TIMEOUT
     while time.time() < deadline:
         try:
-            updates = telegram_api("getUpdates", data={
-                "offset": offset,
-                "timeout": POLL_INTERVAL,
-                "allowed_updates": ["callback_query"],
-            })
+            updates = telegram_api(
+                "getUpdates",
+                data={
+                    "offset": offset,
+                    "timeout": POLL_INTERVAL,
+                    "allowed_updates": ["callback_query"],
+                },
+            )
         except Exception:
             time.sleep(POLL_INTERVAL)
             continue
@@ -282,9 +290,12 @@ def poll_for_response(message_id):
 
             # Answer the callback to dismiss the spinner
             try:
-                telegram_api("answerCallbackQuery", data={
-                    "callback_query_id": cb["id"],
-                })
+                telegram_api(
+                    "answerCallbackQuery",
+                    data={
+                        "callback_query_id": cb["id"],
+                    },
+                )
             except Exception:
                 pass
 
@@ -327,7 +338,10 @@ def main():
         json.dump({}, sys.stdout)
         return
 
-    _dbg(f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)}, TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}")
+    _dbg(
+        f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)},"
+        f" TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}"
+    )
 
     if not BOT_TOKEN or not CHAT_ID:
         _dbg("EXIT: no credentials, no opinion")
@@ -347,10 +361,7 @@ def main():
 
     # Block MCP tools in McLoop sessions
     if task_label and tool_name.startswith("mcp__"):
-        _dbg(
-            f"EXIT: blocked MCP tool {tool_name}"
-            " in mcloop session"
-        )
+        _dbg(f"EXIT: blocked MCP tool {tool_name} in mcloop session")
         _respond("deny", "MCP tools blocked in mcloop")
         return
 
@@ -383,9 +394,7 @@ def main():
     try:
         pending_dir.mkdir(parents=True, exist_ok=True)
         pending_file = pending_dir / f"{os.getpid()}"
-        pending_file.write_text(
-            f"{tool_name}: {desc[:200]}"
-        )
+        pending_file.write_text(f"{tool_name}: {desc[:200]}")
     except OSError:
         pass
 
@@ -413,7 +422,11 @@ def main():
         _respond("allow", "Approved via Telegram")
     elif decision == "allow_session":
         remember_session(tool_name, tool_input)
-        update_message(message_id, f"{label_prefix}Approved (session): *{tool_name}*\n{desc}\nPattern `{pattern}` remembered")
+        msg = (
+            f"{label_prefix}Approved (session): *{tool_name}*\n"
+            f"{desc}\nPattern `{pattern}` remembered"
+        )
+        update_message(message_id, msg)
         _dbg(f"EXIT: session-approved via Telegram ({pattern})")
         _respond("allow", f"Session-approved via Telegram: {pattern}")
     elif decision == "deny":
@@ -434,6 +447,7 @@ if __name__ == "__main__":
         err_path = str(Path.home() / ".claude" / "telegram-hook-error.log")
         with open(err_path, "a") as f:
             import traceback
+
             f.write(f"--- {time.strftime('%H:%M:%S')} ---\n")
             traceback.print_exc(file=f)
         json.dump({}, sys.stdout)
