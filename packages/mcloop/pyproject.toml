@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 
 [tool.setuptools]
 packages = ["mcloop"]
+script-files = ["bin/appshot"]
 
 [project.scripts]
 mcloop = "mcloop.main:main"

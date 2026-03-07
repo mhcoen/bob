@@ -111,6 +111,7 @@ def run_loop(
 
     project_checks = get_check_commands(project_dir)
 
+    _ensure_git(project_dir)
     _checkpoint(project_dir)
 
     # Clean up stale pending files from previous runs
@@ -669,83 +670,70 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
     Uses git status --porcelain which works even in repos
     with no commits (no HEAD).
     """
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return True
-        all_files = []
-        for line in result.stdout.strip().splitlines():
-            # porcelain format: XY filename (or XY old -> new for renames)
-            if len(line) > 3:
-                name = line[3:]
-                if " -> " in name:
-                    name = name.split(" -> ", 1)[1]
-                all_files.append(name)
-        meaningful = [
-            f
-            for f in all_files
-            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md"
-        ]
-        return len(meaningful) > 0
-    except Exception:
+    result = _git(
+        ["git", "status", "--porcelain"],
+        cwd=project_dir,
+        label="check changes",
+    )
+    if result.returncode != 0:
         return True
+    all_files = []
+    for line in result.stdout.strip().splitlines():
+        # porcelain format: XY filename (or XY old -> new for renames)
+        if len(line) > 3:
+            name = line[3:]
+            if " -> " in name:
+                name = name.split(" -> ", 1)[1]
+            all_files.append(name)
+    meaningful = [
+        f
+        for f in all_files
+        if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md"
+    ]
+    return len(meaningful) > 0
 
 
 def _get_diff(project_dir: Path) -> str:
     """Return the combined diff of staged and unstaged changes."""
-    try:
-        result = subprocess.run(
-            ["git", "diff", "HEAD"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-        # Fallback: unstaged diff only (no HEAD yet)
-        result = subprocess.run(
-            ["git", "diff"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
+    result = _git(
+        ["git", "diff", "HEAD"],
+        cwd=project_dir,
+        label="get diff",
+    )
+    if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
-    except Exception:
-        return ""
+    # Fallback: unstaged diff only (no HEAD yet)
+    result = _git(
+        ["git", "diff"],
+        cwd=project_dir,
+        label="get diff (no HEAD)",
+    )
+    return result.stdout.strip()
 
 
 def _changed_files(project_dir: Path) -> list[str]:
     """Return list of files with uncommitted changes, excluding logs and metadata."""
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return []
-        files = []
-        for line in result.stdout.strip().splitlines():
-            if len(line) > 3:
-                f = line[3:]
-                if " -> " in f:
-                    f = f.split(" -> ", 1)[1]
-                if (
-                    f
-                    and not f.startswith("logs/")
-                    and not f.startswith(".mcloop/")
-                    and f != "PLAN.md"
-                ):
-                    files.append(f)
-        return files
-    except Exception:
+    result = _git(
+        ["git", "status", "--porcelain"],
+        cwd=project_dir,
+        label="changed files",
+    )
+    if result.returncode != 0:
         return []
+    files = []
+    for line in result.stdout.strip().splitlines():
+        if len(line) > 3:
+            f = line[3:]
+            if " -> " in f:
+                f = f.split(" -> ", 1)[1]
+            if (
+                f
+                and not f.startswith("logs/")
+                and not f.startswith(".mcloop/")
+                and f != "PLAN.md"
+            ):
+                files.append(f)
+    return files
 
 
 def _snapshot_notes(
@@ -898,16 +886,12 @@ AUDIT_HASH_FILE = ".mcloop-last-audit"
 
 def _get_git_hash(project_dir: Path) -> str:
     """Return current HEAD commit hash."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout.strip()
-    except Exception:
-        return ""
+    result = _git(
+        ["git", "rev-parse", "HEAD"],
+        cwd=project_dir,
+        label="get HEAD hash",
+    )
+    return result.stdout.strip()
 
 
 def _should_skip_audit(project_dir: Path) -> bool:
@@ -918,23 +902,19 @@ def _should_skip_audit(project_dir: Path) -> bool:
     last_hash = hash_file.read_text().strip()
     if not last_hash:
         return False
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", last_hash, "HEAD"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return False
-        changed = [
-            f
-            for f in result.stdout.strip().splitlines()
-            if f and not f.startswith("logs/") and f != "PLAN.md" and f != AUDIT_HASH_FILE
-        ]
-        return len(changed) == 0
-    except Exception:
+    result = _git(
+        ["git", "diff", "--name-only", last_hash, "HEAD"],
+        cwd=project_dir,
+        label="audit diff check",
+    )
+    if result.returncode != 0:
         return False
+    changed = [
+        f
+        for f in result.stdout.strip().splitlines()
+        if f and not f.startswith("logs/") and f != "PLAN.md" and f != AUDIT_HASH_FILE
+    ]
+    return len(changed) == 0
 
 
 def _save_audit_hash(project_dir: Path) -> None:
@@ -1174,6 +1154,91 @@ def _run_single_audit_round(
     return False
 
 
+def _ensure_git(project_dir: Path) -> None:
+    """Initialize a git repo if one does not exist.
+
+    Mcloop depends on git for checkpointing, commits, and
+    change detection. If the project directory has no ``.git``
+    this creates one with an initial commit so all subsequent
+    git operations work.
+
+    Prints a prominent warning and notifies via Telegram if
+    git init fails, since mcloop cannot function safely
+    without version control.
+    """
+    git_dir = project_dir / ".git"
+    if git_dir.exists():
+        return
+    print(
+        "\n!!! No git repository found. Initializing one now...",
+        flush=True,
+    )
+    try:
+        result = subprocess.run(
+            ["git", "init"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            msg = f"CRITICAL: git init failed: {result.stderr.strip()}"
+            print(f"\n!!! {msg}", flush=True)
+            notify(msg, level="error")
+            sys.exit(1)
+        # Create .gitignore if missing
+        gitignore = project_dir / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(
+                ".duplo/\nlogs/\n.mcloop/\n.build/\n"
+            )
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "mcloop: initial commit"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        print(">>> Git repository initialized.", flush=True)
+    except FileNotFoundError:
+        msg = "CRITICAL: git is not installed or not on PATH. Mcloop cannot run without git."
+        print(f"\n!!! {msg}", flush=True)
+        notify(msg, level="error")
+        sys.exit(1)
+
+
+def _git(
+    args: list[str],
+    cwd: Path,
+    *,
+    label: str = "",
+) -> subprocess.CompletedProcess:
+    """Run a git command and report errors.
+
+    Every git failure is printed to the terminal and sent via
+    Telegram so the user is always aware of version control
+    problems.
+    """
+    result = subprocess.run(
+        args,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        cmd_str = " ".join(args)
+        context = f" ({label})" if label else ""
+        stderr = result.stderr.strip()
+        msg = f"git error{context}: `{cmd_str}` exited {result.returncode}"
+        if stderr:
+            msg += f"\n    {stderr}"
+        print(f"\n!!! {msg}", flush=True)
+        notify(msg, level="error")
+    return result
+
+
 def _checkpoint(
     project_dir: Path,
     next_task: str = "",
@@ -1184,84 +1249,70 @@ def _checkpoint(
     (except logs/ and .mcloop/) so orphaned files from
     failed runs get committed before the next task.
     """
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
-            return
-        msg = "mcloop: checkpoint"
-        if next_task:
-            msg += f" (next: {next_task})"
-        # Stage tracked changes
-        subprocess.run(
-            ["git", "add", "-u"],
-            cwd=project_dir,
-            capture_output=True,
-        )
-        # Also stage untracked files (orphans from
-        # failed runs). git add -A respects .gitignore.
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=project_dir,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", msg],
-            cwd=project_dir,
-            capture_output=True,
-        )
-    except Exception:
-        pass
+    if not (project_dir / ".git").exists():
+        msg = "Git checkpoint skipped: no .git directory"
+        print(f"\n!!! {msg}", flush=True)
+        notify(msg, level="error")
+        return
+    result = _git(
+        ["git", "status", "--porcelain"],
+        cwd=project_dir,
+        label="checkpoint status",
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return
+    msg = "mcloop: checkpoint"
+    if next_task:
+        msg += f" (next: {next_task})"
+    _git(["git", "add", "-u"], cwd=project_dir, label="checkpoint add -u")
+    _git(["git", "add", "-A"], cwd=project_dir, label="checkpoint add -A")
+    _git(
+        ["git", "commit", "-m", msg],
+        cwd=project_dir,
+        label="checkpoint commit",
+    )
 
 
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
-    try:
+    if not (project_dir / ".git").exists():
+        msg = "Git commit skipped: no .git directory"
+        print(f"\n!!! {msg}", flush=True)
+        notify(msg, level="error")
+        return
+    _git(["git", "add", "-A"], cwd=project_dir, label="commit add")
+    _git(
+        ["git", "commit", "-m", f"Complete: {task_text}"],
+        cwd=project_dir,
+        label="commit",
+    )
+    result = _git(
+        ["git", "remote"],
+        cwd=project_dir,
+        label="commit remote check",
+    )
+    if not result.stdout.strip():
         subprocess.run(
-            ["git", "add", "-A"],
+            [
+                "gh",
+                "repo",
+                "create",
+                project_dir.name,
+                "--private",
+                "--source=.",
+                "--remote=origin",
+            ],
             cwd=project_dir,
             capture_output=True,
         )
-        subprocess.run(
-            ["git", "commit", "-m", f"Complete: {task_text}"],
-            cwd=project_dir,
-            capture_output=True,
-        )
-        result = subprocess.run(
+        result = _git(
             ["git", "remote"],
             cwd=project_dir,
-            capture_output=True,
-            text=True,
+            label="commit remote recheck",
         )
-        if not result.stdout.strip():
-            subprocess.run(
-                [
-                    "gh",
-                    "repo",
-                    "create",
-                    project_dir.name,
-                    "--private",
-                    "--source=.",
-                    "--remote=origin",
-                ],
-                cwd=project_dir,
-                capture_output=True,
-            )
-            result = subprocess.run(
-                ["git", "remote"],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-            )
-        if result.stdout.strip():
-            subprocess.run(
-                ["git", "push"],
-                cwd=project_dir,
-                capture_output=True,
-            )
-    except Exception:
-        pass
+    if result.stdout.strip():
+        _git(
+            ["git", "push"],
+            cwd=project_dir,
+            label="push",
+        )

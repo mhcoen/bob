@@ -135,6 +135,7 @@ def _build_command(
     prompt: str | None = None,
     model: str | None = None,
     use_stdin: bool = False,
+    allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
 ) -> list[str]:
     if cli == "claude":
         cmd = ["claude", "-p"]
@@ -143,7 +144,7 @@ def _build_command(
         cmd.extend(
             [
                 "--allowedTools",
-                "Edit,Write,Bash,Read,Glob,Grep",
+                allowed_tools,
                 "--permission-mode",
                 "default",
                 "--output-format",
@@ -288,7 +289,9 @@ def _run_session(
     return "".join(output_lines), process.returncode
 
 
-_SUPPRESSED_TOOLS = frozenset({"Read", "Edit", "Write", "Glob", "Grep", "TodoWrite"})
+# Suppress ALL tool names from stream output. Only the task
+# label (">>> Task N)") and progress dots are shown.
+_SUPPRESS_ALL_TOOLS = True
 
 # Track the last tool name so we can suppress results from quiet tools
 _last_tool_name: str = ""
@@ -297,47 +300,8 @@ _last_tool_name: str = ""
 def _extract_status(text: str) -> str | None:
     """Extract a conceptual status line from streaming text.
 
-    Looks for sentences that describe what the model is doing
-    and returns a cleaned-up single-line version, or None.
+    Returns None always. Narration lines add noise without value.
     """
-    text = text.strip()
-    if not text or len(text) < 10:
-        return None
-    # Skip lines that are just code, paths, or JSON
-    if text.startswith(("{", "[", "/", "```", "import ", "def ", "class ")):
-        return None
-    # Look for action-oriented sentences
-    for prefix in (
-        "Let me ",
-        "I'll ",
-        "I will ",
-        "Now ",
-        "Next ",
-        "First ",
-        "Running ",
-        "Reading ",
-        "Writing ",
-        "Editing ",
-        "Creating ",
-        "Updating ",
-        "Fixing ",
-        "Adding ",
-        "Checking ",
-        "Looking ",
-        "Searching ",
-        "Installing ",
-        "Building ",
-        "Testing ",
-        "Reviewing ",
-    ):
-        if text.startswith(prefix):
-            # Take the first sentence
-            for end in (".", "\n"):
-                idx = text.find(end)
-                if idx != -1:
-                    text = text[: idx + 1]
-                    break
-            return text[:120]
     return None
 
 
@@ -361,7 +325,7 @@ def _print_stream_event(line: str) -> None:
             if block.get("type") == "tool_use":
                 name = block.get("name", "")
                 _last_tool_name = name
-                if name not in _SUPPRESSED_TOOLS:
+                if not _SUPPRESS_ALL_TOOLS:
                     inp = block.get("input", {})
                     detail = inp.get("command", "") if name == "Bash" else ""
                     label = f"{name}: {detail}" if detail else name
@@ -554,6 +518,13 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
         "- Missing documentation\n"
         "- Hypothetical issues with no evidence in the "
         "code\n",
+        "IMPORTANT: This is a source-code-only review. "
+        "Read the source files and reason about defects "
+        "from the code. Do NOT run bash commands, python "
+        "snippets, or any other experiments to test edge "
+        "cases. Do NOT execute the code. Only use the "
+        "Read tool to examine source files. Report only "
+        "bugs you can see directly in the code.\n",
     ]
 
     if existing_bugs:

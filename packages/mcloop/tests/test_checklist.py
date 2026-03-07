@@ -287,6 +287,21 @@ def test_multiple_roots_mixed(tmp_path):
     assert nxt.text == "Child B"
 
 
+def test_mark_failed_checked_task(tmp_path):
+    """mark_failed handles tasks that Claude Code already checked off."""
+    md = "- [x] Already checked\n- [ ] Other\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    mark_failed(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].failed
+    assert not tasks2[0].checked
+    assert "- [!] Already checked" in f.read_text()
+
+
 def test_mark_failed_preserves_other_tasks(tmp_path):
     md = "- [ ] Task A\n- [ ] Task B\n- [ ] Task C\n"
     f = tmp_path / "tasks.md"

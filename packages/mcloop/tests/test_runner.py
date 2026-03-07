@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from mcloop.runner import (
-    _SUPPRESSED_TOOLS,
+    _SUPPRESS_ALL_TOOLS,
     _build_command,
     _extract_status,
     _print_stream_event,
@@ -580,38 +580,29 @@ def test_reclaim_foreground_tcsetpgrp_fails():
         mock_close.assert_called_once_with(fake_fd)
 
 
-# --- _SUPPRESSED_TOOLS ---
+# --- _SUPPRESS_ALL_TOOLS ---
 
 
-def test_suppressed_tools_contains_expected():
-    """Verify the suppressed tools set has the right entries."""
-    assert "Read" in _SUPPRESSED_TOOLS
-    assert "Edit" in _SUPPRESSED_TOOLS
-    assert "Write" in _SUPPRESSED_TOOLS
-    assert "Glob" in _SUPPRESSED_TOOLS
-    assert "Grep" in _SUPPRESSED_TOOLS
-    assert "TodoWrite" in _SUPPRESSED_TOOLS
-    assert "Bash" not in _SUPPRESSED_TOOLS
+def test_suppress_all_tools_enabled():
+    """All tool output is suppressed."""
+    assert _SUPPRESS_ALL_TOOLS is True
 
 
 # --- _extract_status ---
 
 
 def test_extract_status_action_sentence():
-    assert _extract_status("Let me read the configuration file.") == (
-        "Let me read the configuration file."
-    )
+    assert _extract_status("Let me read the configuration file.") is None
 
 
 def test_extract_status_running_prefix():
-    assert _extract_status("Running the test suite now.") == ("Running the test suite now.")
+    assert _extract_status("Running the test suite now.") is None
 
 
 def test_extract_status_truncates_long():
     long = "Let me " + "x" * 200
     result = _extract_status(long)
-    assert result is not None
-    assert len(result) <= 120
+    assert result is None
 
 
 def test_extract_status_ignores_short_text():
@@ -638,7 +629,7 @@ def test_extract_status_ignores_non_action():
 
 def test_extract_status_takes_first_sentence():
     text = "Let me fix the bug. Then I will run the tests."
-    assert _extract_status(text) == "Let me fix the bug."
+    assert _extract_status(text) is None
 
 
 def test_extract_status_empty():
@@ -650,7 +641,7 @@ def test_extract_status_empty():
 
 
 def test_print_stream_event_bash_tool(capsys):
-    """Bash tool calls should be printed."""
+    """Bash tool calls should be suppressed."""
     import json
 
     event = {
@@ -667,7 +658,7 @@ def test_print_stream_event_bash_tool(capsys):
     }
     _print_stream_event(json.dumps(event))
     captured = capsys.readouterr()
-    assert "Bash: ruff check ." in captured.out
+    assert captured.out == ""
 
 
 def test_print_stream_event_suppresses_read(capsys):
@@ -734,7 +725,7 @@ def test_print_stream_event_suppresses_glob(capsys):
 
 
 def test_print_stream_event_status_line(capsys):
-    """Streaming text with action prefix should print status."""
+    """Streaming text no longer prints narration status."""
     import json
 
     event = {
@@ -748,7 +739,7 @@ def test_print_stream_event_status_line(capsys):
     }
     _print_stream_event(json.dumps(event))
     captured = capsys.readouterr()
-    assert "Let me fix the failing test." in captured.out
+    assert captured.out == ""
 
 
 def test_print_stream_event_no_status_for_code(capsys):

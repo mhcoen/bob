@@ -204,15 +204,24 @@ def detect_run(project_dir: str | Path) -> str | None:
         return str(override)
 
     if (project_dir / "Package.swift").exists():
-        # Parse target name from Package.swift
+        # Parse target name from Package.swift.
+        # If multiple executable targets exist, prefer the one
+        # matching the package name (the main app, not a CLI tool).
         try:
             text = (project_dir / "Package.swift").read_text()
-            m = re.search(
+            targets = re.findall(
                 r'executableTarget\s*\(\s*name:\s*"([^"]+)"',
                 text,
             )
-            if m:
-                return f"swift run {m.group(1)}"
+            pkg_match = re.search(r'Package\s*\(\s*name:\s*"([^"]+)"', text)
+            pkg_name = pkg_match.group(1) if pkg_match else ""
+            if targets:
+                best = targets[0]
+                for t in targets:
+                    if t == pkg_name:
+                        best = t
+                        break
+                return f"swift run {best}"
         except OSError:
             pass
         return "swift run"

@@ -204,26 +204,54 @@ def check_off(path: str | Path, task: Task) -> None:
     """Rewrite `- [ ]` to `- [x]` at the task's line number.
 
     Also auto-checks parent tasks when all their children are done.
+    If the task cannot be found (e.g. file was overwritten during
+    execution), prints a warning instead of crashing.
     """
     p = Path(path)
     lines = p.read_text().splitlines()
-    _check_line(lines, _find_task_line(lines, task))
+    try:
+        _check_line(lines, _find_task_line(lines, task))
+    except (IndexError, ValueError):
+        print(
+            f"Warning: could not check off task (file may have been modified): {task.text}",
+            flush=True,
+        )
+        return
 
     p.write_text("\n".join(lines) + "\n")
     _auto_check_parents(p)
 
 
 def mark_failed(path: str | Path, task: Task) -> None:
-    """Rewrite `- [ ]` to `- [!]` at the task's line number."""
+    """Rewrite `- [ ]` or `- [x]` to `- [!]` at the task's line number.
+
+    Claude Code sometimes checks off a task during execution before
+    mcloop's post-task checks run.  If checks then fail, the line
+    will contain ``- [x]`` rather than ``- [ ]``.  Handle both.
+    """
     p = Path(path)
     lines = p.read_text().splitlines()
-    idx = _find_task_line(lines, task)
-    line = lines[idx]
-    new_line = line.replace("- [ ]", "- [!]", 1)
-    if new_line == line:
-        raise RuntimeError(
-            f"Could not mark task as failed: line {idx} does not contain '- [ ]': {line!r}"
+    try:
+        idx = _find_task_line(lines, task)
+    except IndexError:
+        print(
+            f"Warning: could not mark task as failed (file may have been modified): {task.text}",
+            flush=True,
         )
+        return
+    line = lines[idx]
+    if "- [ ]" in line:
+        new_line = line.replace("- [ ]", "- [!]", 1)
+    elif "- [x]" in line or "- [X]" in line:
+        new_line = re.sub(r"- \[[xX]\]", "- [!]", line, count=1)
+    else:
+        new_line = line
+    if new_line == line:
+        print(
+            f"Warning: could not mark task as failed (no checkbox found): {task.text}",
+            flush=True,
+        )
+        return
     lines[idx] = new_line
     p.write_text("\n".join(lines) + "\n")
 
