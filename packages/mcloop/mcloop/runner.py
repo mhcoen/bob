@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json as _json
 import os
 import queue
 import re
@@ -343,52 +342,38 @@ def _extract_status(text: str) -> str | None:
 
 
 def _print_stream_event(line: str) -> None:
-    """Parse a stream-json line and print relevant info.
+    """Parse a stream-json line and print relevant activity.
 
-    Suppresses Read, Edit, Write, Glob, Grep, TodoWrite tool
-    calls entirely. Only prints Bash commands and conceptual
-    status lines extracted from streaming text.
+    Prints non-suppressed tool calls (e.g. Bash) and status lines
+    extracted from streaming text. Suppresses quiet tools and code.
     """
-    global _last_tool_name
-    line = line.strip()
-    if not line:
-        return
+    import json as _json
+
     try:
-        event = _json.loads(line)
-    except _json.JSONDecodeError:
+        data = _json.loads(line)
+    except (ValueError, TypeError):
         return
 
-    etype = event.get("type", "")
+    global _last_tool_name
 
-    # Streaming text tokens — extract status lines
-    if etype == "stream_event":
-        delta = event.get("event", {}).get("delta", {})
-        if delta.get("type") == "text_delta":
-            text = delta.get("text", "")
-            status = _extract_status(text)
-            if status:
-                print(f"\n    {status}", flush=True)
-        return
-
-    # Tool use summary — only print Bash commands
-    if etype == "assistant" and "message" in event:
-        for block in event["message"].get("content", []):
+    if data.get("type") == "assistant":
+        for block in data.get("message", {}).get("content", []):
             if block.get("type") == "tool_use":
                 name = block.get("name", "")
                 _last_tool_name = name
-                tool_input = block.get("input", {})
-                if name == "Bash":
-                    print(
-                        f"\n>>> Bash: {tool_input.get('command', '')[:120]}",
-                        flush=True,
-                    )
+                if name not in _SUPPRESSED_TOOLS:
+                    inp = block.get("input", {})
+                    detail = inp.get("command", "") if name == "Bash" else ""
+                    label = f"{name}: {detail}" if detail else name
+                    print(f"  {label}", flush=True)
+        return
 
-    # Tool results — only print for non-suppressed tools
-    if etype == "result":
-        if _last_tool_name not in _SUPPRESSED_TOOLS:
-            result = event.get("result", "")
-            if isinstance(result, str) and result:
-                print(f"\n{result[:200]}", flush=True)
+    if data.get("type") == "stream_event":
+        delta = data.get("event", {}).get("delta", {})
+        if delta.get("type") == "text_delta":
+            status = _extract_status(delta.get("text", ""))
+            if status:
+                print(f"  {status}", flush=True)
 
 
 def gather_sync_context(project_dir: Path) -> dict[str, str]:

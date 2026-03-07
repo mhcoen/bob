@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -9,10 +10,14 @@ RATE_LIMIT_PATTERNS = [
     "rate limit",
     "rate_limit",
     "too many requests",
-    "429",
     "usage limit",
     "quota exceeded",
     "capacity",
+]
+
+# Patterns checked via regex (word-boundary matching to avoid false positives)
+_RATE_LIMIT_REGEX_PATTERNS = [
+    r"\b429\b",
 ]
 
 SESSION_LIMIT_PATTERNS = [
@@ -58,7 +63,9 @@ def is_rate_limited(output: str, exit_code: int) -> bool:
     if exit_code == 0:
         return False
     lower = output.lower()
-    return any(p in lower for p in RATE_LIMIT_PATTERNS)
+    if any(p in lower for p in RATE_LIMIT_PATTERNS):
+        return True
+    return any(re.search(p, lower) for p in _RATE_LIMIT_REGEX_PATTERNS)
 
 
 def is_session_limited(output: str, exit_code: int) -> bool:

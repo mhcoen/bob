@@ -191,7 +191,7 @@ def _find_task_line(lines: list[str], task: Task) -> int:
     """Find task line by text match, falling back to line_number."""
     for i, line in enumerate(lines):
         m = CHECKBOX_RE.match(line)
-        if m and m.group(2) == " " and m.group(3).strip() == task.text:
+        if m and m.group(3).strip() == task.text:
             return i
     if task.line_number >= len(lines):
         raise IndexError(

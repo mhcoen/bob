@@ -24,18 +24,22 @@ def _load_env() -> dict[str, str]:
     return vals
 
 
-_env = _load_env()
-_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or _env.get("TELEGRAM_BOT_TOKEN", "")
-_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or _env.get("TELEGRAM_CHAT_ID", "")
-_IMESSAGE_ID = os.environ.get("IMESSAGE_ID") or _env.get("IMESSAGE_ID", "")
+def _get_config() -> tuple[str, str, str]:
+    """Load notification config from env vars and env file at call time."""
+    env = _load_env()
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or env.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID") or env.get("TELEGRAM_CHAT_ID", "")
+    imessage_id = os.environ.get("IMESSAGE_ID") or env.get("IMESSAGE_ID", "")
+    return bot_token, chat_id, imessage_id
 
 
 def _send_telegram(text: str) -> None:
-    if not _BOT_TOKEN or not _CHAT_ID:
+    bot_token, chat_id, _ = _get_config()
+    if not bot_token or not chat_id:
         return
-    url = f"https://api.telegram.org/bot{_BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     data = urllib.parse.urlencode(
-        {"chat_id": _CHAT_ID, "text": text, "parse_mode": "Markdown"}
+        {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     ).encode()
     req = urllib.request.Request(url, data=data)
     try:
@@ -46,9 +50,10 @@ def _send_telegram(text: str) -> None:
 
 
 def _send_imessage(text: str) -> None:
-    if not _IMESSAGE_ID:
+    _, _, imessage_id = _get_config()
+    if not imessage_id:
         return
-    chat_id = f"any;-;{_IMESSAGE_ID}"
+    chat_id = f"any;-;{imessage_id}"
     script = (
         'tell application "Messages"\n'
         f'  send "{_escape_applescript(text)}" to chat id "{_escape_applescript(chat_id)}"\n'
@@ -64,13 +69,10 @@ def _escape_applescript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-_backend = "imessage" if os.environ.get("MCLOOP_IMESSAGE") else "telegram"
-
-
 def notify(message: str, level: str = "info") -> None:
     """Send a notification. Default: Telegram. Set MCLOOP_IMESSAGE=1 for iMessage."""
     prefix = {"info": "", "warning": "Warning: ", "error": "ERROR: "}.get(level, "")
-    if _backend == "imessage":
+    if os.environ.get("MCLOOP_IMESSAGE"):
         _send_imessage(f"McLoop: {prefix}{message}")
     else:
         _send_telegram(f"*McLoop* {prefix}{message}")

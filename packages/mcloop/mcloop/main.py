@@ -680,9 +680,12 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
             return True
         all_files = []
         for line in result.stdout.strip().splitlines():
-            # porcelain format: XY filename
+            # porcelain format: XY filename (or XY old -> new for renames)
             if len(line) > 3:
-                all_files.append(line[3:])
+                name = line[3:]
+                if " -> " in name:
+                    name = name.split(" -> ", 1)[1]
+                all_files.append(name)
         meaningful = [
             f
             for f in all_files
@@ -731,6 +734,8 @@ def _changed_files(project_dir: Path) -> list[str]:
         for line in result.stdout.strip().splitlines():
             if len(line) > 3:
                 f = line[3:]
+                if " -> " in f:
+                    f = f.split(" -> ", 1)[1]
                 if (
                     f
                     and not f.startswith("logs/")
@@ -1009,12 +1014,11 @@ def _run_single_audit_round(
             return False
     else:
         print("\n>>> Running bug audit...", flush=True)
-        existing = bugs_path.read_text() if bugs_path.exists() else ""
         audit_result = run_audit(
             project_dir,
             log_dir,
             model=model,
-            existing_bugs=existing,
+            existing_bugs="",
         )
         if not audit_result.success:
             print(

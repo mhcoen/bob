@@ -11,21 +11,21 @@ def test_escape_applescript():
 
 
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._backend", "telegram")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": ""}, clear=False)
 def test_notify_defaults_to_telegram(mock_tg):
     notify("test message")
     mock_tg.assert_called_once()
 
 
 @patch("mcloop.notify._send_imessage")
-@patch("mcloop.notify._backend", "imessage")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": "1"}, clear=False)
 def test_notify_imessage_when_configured(mock_imsg):
     notify("test message")
     mock_imsg.assert_called_once()
 
 
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._backend", "telegram")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": ""}, clear=False)
 def test_notify_error_prefix(mock_tg):
     notify("bad thing", level="error")
     call_text = mock_tg.call_args[0][0]
@@ -33,7 +33,7 @@ def test_notify_error_prefix(mock_tg):
 
 
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._backend", "telegram")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": ""}, clear=False)
 def test_notify_warning_prefix(mock_tg):
     notify("low disk", level="warning")
     tg_text = mock_tg.call_args[0][0]
@@ -41,14 +41,14 @@ def test_notify_warning_prefix(mock_tg):
 
 
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._backend", "telegram")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": ""}, clear=False)
 def test_notify_info_no_prefix(mock_tg):
     notify("task done", level="info")
     assert mock_tg.call_args[0][0] == "*McLoop* task done"
 
 
 @patch("mcloop.notify._send_imessage")
-@patch("mcloop.notify._backend", "imessage")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": "1"}, clear=False)
 def test_notify_imessage_info_no_prefix(mock_imsg):
     notify("task done", level="info")
     assert mock_imsg.call_args[0][0] == "McLoop: task done"
@@ -56,7 +56,7 @@ def test_notify_imessage_info_no_prefix(mock_imsg):
 
 @patch("mcloop.notify._send_imessage")
 @patch("mcloop.notify._send_telegram")
-@patch("mcloop.notify._backend", "telegram")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": ""}, clear=False)
 def test_telegram_mode_does_not_send_imessage(mock_tg, mock_imsg):
     notify("test")
     mock_imsg.assert_not_called()
@@ -64,15 +64,18 @@ def test_telegram_mode_does_not_send_imessage(mock_tg, mock_imsg):
 
 @patch("mcloop.notify._send_telegram")
 @patch("mcloop.notify._send_imessage")
-@patch("mcloop.notify._backend", "imessage")
+@patch.dict("os.environ", {"MCLOOP_IMESSAGE": "1"}, clear=False)
 def test_imessage_mode_does_not_send_telegram(mock_imsg, mock_tg):
     notify("test")
     mock_tg.assert_not_called()
 
 
 @patch("mcloop.notify.subprocess.run")
-@patch("mcloop.notify._IMESSAGE_ID", "mhcoen@gmail.com")
-def test_imessage_uses_chat_id_format(mock_run):
+@patch(
+    "mcloop.notify._get_config",
+    return_value=("", "", "mhcoen@gmail.com"),
+)
+def test_imessage_uses_chat_id_format(mock_config, mock_run):
     from mcloop.notify import _send_imessage
 
     _send_imessage("hello")
@@ -83,8 +86,8 @@ def test_imessage_uses_chat_id_format(mock_run):
 
 
 @patch("mcloop.notify.subprocess.run")
-@patch("mcloop.notify._IMESSAGE_ID", "")
-def test_imessage_skips_when_no_id(mock_run):
+@patch("mcloop.notify._get_config", return_value=("", "", ""))
+def test_imessage_skips_when_no_id(mock_config, mock_run):
     from mcloop.notify import _send_imessage
 
     _send_imessage("hello")
@@ -92,9 +95,11 @@ def test_imessage_skips_when_no_id(mock_run):
 
 
 @patch("mcloop.notify.urllib.request.urlopen")
-@patch("mcloop.notify._BOT_TOKEN", "fake-token")
-@patch("mcloop.notify._CHAT_ID", "12345")
-def test_telegram_sends_to_correct_url(mock_urlopen):
+@patch(
+    "mcloop.notify._get_config",
+    return_value=("fake-token", "12345", ""),
+)
+def test_telegram_sends_to_correct_url(mock_config, mock_urlopen):
     from mcloop.notify import _send_telegram
 
     _send_telegram("hello")
@@ -106,9 +111,8 @@ def test_telegram_sends_to_correct_url(mock_urlopen):
 
 
 @patch("mcloop.notify.urllib.request.urlopen")
-@patch("mcloop.notify._BOT_TOKEN", "")
-@patch("mcloop.notify._CHAT_ID", "12345")
-def test_telegram_skips_when_no_token(mock_urlopen):
+@patch("mcloop.notify._get_config", return_value=("", "12345", ""))
+def test_telegram_skips_when_no_token(mock_config, mock_urlopen):
     from mcloop.notify import _send_telegram
 
     _send_telegram("hello")
