@@ -98,7 +98,14 @@ def _run_ffmpeg_scene_detect(
     max_frames: int,
 ) -> list[Path] | str:
     """Run ffmpeg scene detection and return frame paths or error string."""
-    pattern = str(output_dir / f"{stem}_scene_%04d.png")
+    # Remove stale frames from prior runs so they don't appear in results.
+    prefix = f"{stem}_scene_"
+    for old in output_dir.iterdir():
+        if old.name.startswith(prefix) and old.name.endswith(".png"):
+            old.unlink()
+
+    safe_stem = stem.replace("%", "%%")
+    pattern = str(output_dir / f"{safe_stem}_scene_%04d.png")
     cmd = [
         "ffmpeg",
         "-i",

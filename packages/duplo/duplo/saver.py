@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -736,6 +737,6 @@ def move_references(
         if not src.exists():
             continue
         dest = refs_dir / src.name
-        src.rename(dest)
+        shutil.move(str(src), dest)
         moved.append(dest)
     return moved

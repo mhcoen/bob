@@ -38,18 +38,19 @@ def save_reference_screenshots(urls: list[str], output_dir: Path) -> list[Path]:
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
+        try:
+            page = browser.new_page()
 
-        for url in urls:
-            dest = output_dir / _url_to_filename(url)
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                page.screenshot(path=str(dest), full_page=True)
-                saved.append(dest)
-            except Exception:
-                pass
-
-        browser.close()
+            for url in urls:
+                dest = output_dir / _url_to_filename(url)
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                    page.screenshot(path=str(dest), full_page=True)
+                    saved.append(dest)
+                except Exception:
+                    pass
+        finally:
+            browser.close()
 
     return saved
 

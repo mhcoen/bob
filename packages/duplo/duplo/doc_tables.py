@@ -253,7 +253,7 @@ def _extract_dl(soup: BeautifulSoup, source_url: str, result: DocStructures) -> 
             _SIGNATURE_RE.search(t.get_text()) for t in terms
         ):
             for dt, dd in itertools.zip_longest(terms, defs):
-                name_text = dt.get_text(separator=" ").strip()
+                name_text = dt.get_text(separator=" ").strip() if dt else ""
                 desc_text = dd.get_text(separator=" ").strip() if dd else ""
                 sig_match = _SIGNATURE_RE.search(name_text)
                 name = sig_match.group(1) if sig_match else name_text
