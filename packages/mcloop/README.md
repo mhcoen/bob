@@ -197,20 +197,23 @@ while unchecked items remain:
        The CLI receives: project description + current task + your codebase.
        On retries, the previous error output is included so Claude can fix it.
     3. Verify the session produced meaningful file changes
-    4. Run project checks (tests, lint, auto-detected from project files)
+    4. Run targeted checks (lint + tests for changed files only)
     5. If checks pass  -> commit, push, check the box, notify, continue
     6. If checks fail  -> retry with error context (up to --max-retries)
     7. If retries exhausted -> mark [!], notify, stop
     8. If rate-limited -> pause, wait for reset, resume
-9. Run bug audit/fix cycle (unless --no-audit)
-10. Print summary with elapsed time and whitelist suggestions
+       If session-limited -> poll every 10 minutes, resume when limit resets
+    9. At stage boundaries -> run full test suite
+10. Run bug audit/fix cycle (unless --no-audit)
+11. Print summary with elapsed time and whitelist suggestions
 ```
 
 Tasks within a single run share a rolling session context. After each task
-completes, McLoop summarizes what changed and feeds that summary into the
-next task's prompt. This gives later tasks awareness of what earlier tasks
-did without carrying over the full conversation history. The context resets
-when you restart McLoop.
+completes, McLoop summarizes what changed, including which files were
+created or modified, and feeds that summary into the next task's prompt.
+This gives later tasks awareness of what earlier tasks did without
+carrying over the full conversation history. The context resets when you
+restart McLoop.
 
 McLoop streams Claude Code's output in real time, showing text, tool calls,
 and results as they happen. Each task is numbered (e.g., "Task 3.2)") to make
@@ -313,6 +316,13 @@ it finds (like `pyproject.toml` or `package.json`). No configuration
 is needed for common setups. Use `mcloop.json` at the project root to
 override or extend the defaults.
 
+To avoid running the entire test suite after every task, McLoop runs
+targeted tests after each task: only tests corresponding to changed
+files (e.g., changes to `hasher.py` runs `test_hasher.py`). The full
+test suite runs at stage boundaries and at the end of the run. This
+keeps individual tasks fast while still catching cross-module
+regressions before moving on.
+
 ### Explicit checks
 
 If `mcloop.json` has a `checks` array, McLoop runs those commands in
@@ -389,26 +399,42 @@ is treated as failed and retried.
 
 ## Bug audit
 
-After all checklist tasks complete, McLoop automatically runs a bug audit
-cycle (unless `--no-audit` is passed). It launches a Claude Code session that
-reads the entire codebase and writes a `BUGS.md` file listing actual defects:
-crashes, incorrect behavior, unhandled errors, and security issues. Style
-issues and refactoring suggestions are excluded.
+After all checklist tasks complete, McLoop automatically runs two rounds
+of bug auditing (unless `--no-audit` is passed). Each round follows the
+same cycle:
 
-If bugs are found, McLoop launches a fix session scoped to only the bugs in
-`BUGS.md`. If the fix introduces check failures (e.g., a lint error), the
-error output is appended to `BUGS.md` and the fix is retried up to 3 times.
-On success, `BUGS.md` is deleted and the fix is committed. On failure,
-`BUGS.md` is left in place so you can see what was found.
+1. **Find bugs.** A Claude Code session reads the entire codebase and
+   writes findings to `BUGS.md`. Only actual defects are included:
+   crashes, incorrect behavior, unhandled errors, and security issues.
+   Style issues and refactoring suggestions are excluded. If BUGS.md
+   already exists, new findings are appended rather than replacing
+   what's there.
+
+2. **Verify they are real.** A separate session reads each reported bug
+   and checks it against the actual source code. Bugs that are incorrect
+   are removed. The terminal shows which bugs were confirmed and which
+   were removed with reasons.
+
+3. **Fix them.** A fix session addresses only the confirmed bugs.
+
+4. **Verify the fixes.** A post-fix review session examines the changed
+   files to verify the fixes didn't introduce new bugs. If problems are
+   found, they're fed back into the fix loop.
+
+5. **Test.** The checks run. If a test fails because of the bug fix,
+   the fix session corrects the test.
+
+The second round catches bugs introduced by the first round's fixes.
+After both rounds complete, the audit hash is saved.
 
 If McLoop starts and finds an existing `BUGS.md`, it skips the audit and
 resumes the fix cycle directly.
 
-To prevent the audit from running endlessly on the same code, McLoop writes
-the current git hash to `.mcloop-last-audit` after a successful audit cycle.
-On the next run, if no source files have changed since that hash, the audit
-is skipped. Delete `.mcloop-last-audit` to force a re-audit, or run
-`mcloop audit` for a standalone audit at any time.
+To prevent the audit from running on unchanged code, McLoop writes the
+current git hash to `.mcloop-last-audit` after a successful audit cycle.
+On the next run, if no source files have changed since that hash, the
+audit is skipped. Delete `.mcloop-last-audit` to force a re-audit, or
+run `mcloop audit` for a standalone audit at any time.
 
 ## Syncing PLAN.md
 
