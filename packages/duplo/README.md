@@ -6,17 +6,20 @@ material and it generates a build plan. You then run
 
 ## How it works
 
-Create a project directory. Drop in whatever you have: screenshots of
-the app, PDFs of the docs, text files with notes, a file containing
-the product URL. Run `duplo` from that directory.
+Point duplo at a product URL:
 
 ```bash
 mkdir ~/proj/my-app
 cd ~/proj/my-app
-# Drop in reference material: screenshots, PDFs, URLs...
-echo "https://example.com/product" > url.txt
-duplo
+duplo https://example.com/product
 ```
+
+Or drop reference materials into the directory (screenshots, PDFs,
+text files with notes) and run `duplo` with no arguments. If any
+text file in the directory contains a URL, Duplo will find and
+scrape it. Be careful with this: Duplo extracts URLs from every
+readable file, so avoid placing files with URLs you don't want
+crawled (like notes with GitHub links) in the project directory.
 
 Duplo scans the directory, analyzes everything it finds, identifies
 the product, extracts features and visual design details, asks which
@@ -31,6 +34,14 @@ tasks to the plan for anything that was missed.
 
 The cycle is: run duplo to generate the plan, run mcloop to build
 it, test, add more reference material if needed, run duplo again.
+
+```bash
+duplo https://example.com # Analyze, extract features, generate PLAN.md
+mcloop                    # Build it (runs until all tasks complete)
+# ... test the result ...
+duplo                     # Detect gaps, generate next phase
+mcloop                    # Build the next phase
+```
 
 ## What Duplo does on first run
 
@@ -115,17 +126,14 @@ since the last run:
   stored file hash manifest and reports what changed (added, modified,
   removed files).
 
-- **Re-scrapes the product URL.** If the product site has changed,
-  Duplo fetches it again, re-extracts features from the updated
-  content, and merges new features into its stored feature list
-  (without removing existing ones). The gap detector then compares
-  the combined feature list against PLAN.md.
-
-- **Gap detection is platform-aware.** When comparing features against
-  the plan, Duplo tells Claude the project's target platform and
-  language. Features that are infeasible for the target stack (e.g.,
-  "Windows support" for a macOS-only SwiftUI app) are skipped rather
-  than appended as tasks.
+On every subsequent run, Duplo also re-scrapes the product URL to
+pick up site changes, re-extracts features from the updated content,
+and merges new features into its stored list (without removing
+existing ones). It then runs gap detection to compare the full
+feature list against PLAN.md and appends tasks for anything missing.
+Gap detection is platform-aware: features that are infeasible for
+the target stack (e.g., "Windows support" for a macOS-only SwiftUI
+app) are skipped.
 
 ### Non-destructive updates
 
@@ -155,26 +163,6 @@ All state lives in `.duplo/` (added to `.gitignore` automatically):
 extracted code examples; `raw_pages/` for scraped HTML content;
 `file_hashes.json` for change detection.
 
-## Install
-
-```bash
-git clone https://github.com/mhcoen/duplo.git
-cd duplo
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-## Important: URLs in reference files
-
-Duplo extracts HTTP(S) URLs from **every** readable file in the
-project directory, not just files with a `.txt` extension. If your
-`plan.txt` or any other text file contains GitHub URLs, documentation
-links, or other URLs you don't want scraped, Duplo will attempt to
-fetch and analyze them as product pages. Keep the product URL in
-`urls.txt` and avoid embedding URLs in other reference files unless
-you want them crawled.
-
 ## Requirements
 
 - Python 3.11+
@@ -184,15 +172,19 @@ you want them crawled.
 - [Playwright](https://playwright.dev/) for reference screenshots
   (`playwright install chromium` after pip install). Only needed on
   first run if the product URL has documentation pages to screenshot.
-- [ffmpeg](https://ffmpeg.org/) on PATH for video reference extraction (optional).
-  When video files (mp4, mov, webm, avi) are present in the project directory,
-  Duplo uses ffmpeg to extract frames at scene-change points, deduplicates
-  them with perceptual hashing, filters them with Claude Vision to keep only
-  clear UI screenshots, and includes the accepted frames in design extraction
-  alongside user-provided images. Install with `brew install ffmpeg` (macOS),
-  `apt install ffmpeg` (Debian/Ubuntu), or download from
-  [ffmpeg.org](https://ffmpeg.org/download.html). If ffmpeg is not installed,
+- [ffmpeg](https://ffmpeg.org/) on PATH for video frame extraction
+  (optional). Install with `brew install ffmpeg`. If not installed,
   video files are skipped with a warning.
+
+## Install
+
+```bash
+git clone https://github.com/mhcoen/duplo.git
+cd duplo
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
 ## Development
 

@@ -24,6 +24,12 @@ from duplo.questioner import BuildPreferences
 _DUPLO_JSON = ".duplo/duplo.json"
 
 
+@pytest.fixture(autouse=True)
+def _clean_argv(monkeypatch):
+    """Prevent argparse from seeing pytest's CLI arguments."""
+    monkeypatch.setattr("sys.argv", ["duplo"])
+
+
 def _write_duplo_json(tmp_path: Path, data: dict) -> None:
     """Write duplo.json into the .duplo/ subdirectory of *tmp_path*."""
     duplo_dir = tmp_path / ".duplo"

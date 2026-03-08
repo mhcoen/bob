@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import json
 import os
@@ -137,6 +138,16 @@ def main() -> None:
 
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
+    parser = argparse.ArgumentParser(
+        description="Duplicate an app from reference materials or a product URL.",
+    )
+    parser.add_argument(
+        "url",
+        nargs="?",
+        default=None,
+        help="Product URL to duplicate (e.g. https://numi.app)",
+    )
+    args = parser.parse_args()
 
     def _handle_signal(signum, frame):
         print("\nInterrupted.", flush=True)
@@ -147,14 +158,20 @@ def main() -> None:
 
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
-        _first_run()
+        _first_run(url=args.url)
     else:
+        if args.url:
+            print("Project already initialized. URL argument ignored.")
         _subsequent_run()
 
 
-def _first_run() -> None:
+def _first_run(*, url: str | None = None) -> None:
     """Scan reference materials in the current directory and bootstrap the project."""
     scan = scan_directory(".")
+    if url:
+        # URL provided on command line takes priority.
+        if url not in scan.urls:
+            scan.urls.insert(0, url)
     if (
         not scan.images
         and not scan.videos
@@ -164,7 +181,8 @@ def _first_run() -> None:
     ):
         print(
             "No reference materials found.\n"
-            "Drop images, PDFs, text files, or a file containing URLs\n"
+            "Provide a URL: duplo https://example.com\n"
+            "Or drop images, PDFs, text files, or a file containing URLs\n"
             "into this directory and run duplo again."
         )
         sys.exit(1)
@@ -237,7 +255,9 @@ def _first_run() -> None:
             for img in site_images:
                 scan.relevance.append(
                     FileRelevance(
-                        path=img, category="image", relevant=True,
+                        path=img,
+                        category="image",
+                        relevant=True,
                         reason="downloaded from product site",
                     )
                 )
@@ -247,7 +267,9 @@ def _first_run() -> None:
             for v in site_videos:
                 scan.relevance.append(
                     FileRelevance(
-                        path=v, category="video", relevant=True,
+                        path=v,
+                        category="video",
+                        relevant=True,
                         reason="downloaded from product site",
                     )
                 )
