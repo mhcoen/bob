@@ -98,6 +98,14 @@ def run_task(
         f" [{task_label}] {task_text}."
         " Do not create NOTES.md if you have nothing"
         " to note."
+        " NOTES.md must use three sections:"
+        " ## Observations (confirmed facts from"
+        " runtime, docs, logs, or experiments),"
+        " ## Hypotheses (candidate explanations not"
+        " yet confirmed), and ## Eliminated (things"
+        " ruled out, with the experiment that ruled"
+        " them out). Place each note under the"
+        " appropriate section."
     )
     parts.append(notes_instruction)
     parts.append(

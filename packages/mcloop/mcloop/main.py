@@ -1263,9 +1263,10 @@ def _checkpoint(
     failed runs get committed before the next task.
     """
     if not (project_dir / ".git").exists():
-        msg = "Git checkpoint skipped: no .git directory"
-        print(f"\n!!! {msg}", flush=True)
-        notify(msg, level="error")
+        print(
+            "\n!!! Git checkpoint skipped: no .git directory",
+            flush=True,
+        )
         return
     result = _git(
         ["git", "status", "--porcelain"],
@@ -1289,9 +1290,10 @@ def _checkpoint(
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     if not (project_dir / ".git").exists():
-        msg = "Git commit skipped: no .git directory"
-        print(f"\n!!! {msg}", flush=True)
-        notify(msg, level="error")
+        print(
+            "\n!!! Git commit skipped: no .git directory",
+            flush=True,
+        )
         return
     _git(["git", "add", "-A"], cwd=project_dir, label="commit add")
     _git(
