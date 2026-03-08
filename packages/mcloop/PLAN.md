@@ -135,7 +135,7 @@ The debugging playbook this enforces:
 6. Clean up temporary scaffolding after the fix.
 
 - [ ] Accessibility labels in task prompt
-  - [ ] Add instruction to the task prompt in runner.py: when building UI (SwiftUI, HTML, React, Qt, etc.), add accessibility identifiers to every interactive element (buttons, text fields, menu items, toggles). This makes every app mcloop builds programmatically testable.
+  - [x] Add instruction to the task prompt in runner.py: when building UI (SwiftUI, HTML, React, Qt, etc.), add accessibility identifiers to every interactive element (buttons, text fields, menu items, toggles). This makes every app mcloop builds programmatically testable.
   - [ ] Add tests verifying the instruction is present in the prompt
 
 - [ ] Investigation NOTES.md structure
