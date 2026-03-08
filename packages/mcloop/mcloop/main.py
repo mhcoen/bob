@@ -590,6 +590,7 @@ def _print_summary(
                 f"\nTo run: {run_cmd}",
                 flush=True,
             )
+        _print_manual_verification(project_dir)
 
     if project_dir:
         _print_notes_update(
@@ -598,6 +599,36 @@ def _print_summary(
         )
 
     print("=" * 40, flush=True)
+
+
+def _print_manual_verification(project_dir: Path) -> None:
+    """Print manual verification items from PLAN.md if present."""
+    plan_path = project_dir / "PLAN.md"
+    if not plan_path.exists():
+        return
+    try:
+        content = plan_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    # Find the manual verification section
+    in_section = False
+    items: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("## manual verification"):
+            in_section = True
+            continue
+        if in_section:
+            if stripped.startswith("## ") or stripped == "---":
+                break
+            if stripped.startswith("- [ ] "):
+                items.append(stripped[6:])
+            elif stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
+                continue  # already done
+    if items:
+        print("\nThings to try and verify:", flush=True)
+        for item in items:
+            print(f"  - {item}", flush=True)
 
 
 SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"

@@ -1,6 +1,10 @@
 # McLoop
 
-McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task, running your tests and linter, committing only if everything passes, and notifying you of progress. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
+McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
+
+Because McLoop fully automates Claude Code invocation, it will consume
+your plan allowance faster than you have ever experienced. See
+[Best practices](#best-practices) for how to manage this effectively.
 
 Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
@@ -57,11 +61,19 @@ to create one:
   AI-generated plan and reshape it. You decide the decomposition, the
   ordering, the constraints. The AI coding tool is purely an executor
   of your design decisions.
+- **Automated extraction with [Duplo](https://github.com/mhcoen/duplo).**
+  Point Duplo at a product URL and it scrapes the site, downloading
+  text, images, and demo videos. It extracts frames from videos at
+  scene-change points, analyzes screenshots for visual design details
+  (colors, fonts, layout), pulls features from documentation, and
+  generates a phased PLAN.md for McLoop to execute. This lets you
+  reproduce existing software, SaaS products, or websites by letting
+  Duplo do the design extraction and plan generation automatically.
 - **Hybrid.** Start with AI-generated plans, edit them, add your own
   tasks, remove what you don't want, reorder priorities. The plan is a
   living text file you own completely.
 
-In all three cases, the human controls the design. McLoop separates
+In each case, the human controls the design. McLoop separates
 design from execution cleanly enough that you can use whatever process
 works for you on the design side, and the execution is mechanical.
 
@@ -145,14 +157,10 @@ session, or by hand, are not reflected in the file. The codebase itself is the
 source of truth. PLAN.md drives what happens next, but it cannot reproduce what
 already happened.
 
-You can partially close this gap by asking Claude Code to review the codebase
-and update PLAN.md with any work that isn't already captured, adding checked
-items for features or fixes it finds in the code. This won't catch everything,
-but it makes the file a more accurate record of what has actually been built.
-
-**Tip:** You can use your favorite chat interface (e.g., Claude, ChatGPT) to
-help write the PLAN.md file. Feed it the README.md along with a description of
-your project, have it ask any questions it has, and output the markdown file.
+You can close this gap with `mcloop sync`, which launches a Claude Code
+session to review the codebase and git history, check off tasks that are
+already implemented, append items for work not yet in the plan, and flag
+discrepancies. See [Syncing PLAN.md](#syncing-planmd) for details.
 
 The checklist is what McLoop executes. Each item should be a meaningful unit of
 work, such as a feature, a subsystem, or a named refactor, not a single function
@@ -163,6 +171,10 @@ wherever you left off. Add tasks as you think of them, reorder them, break
 them into subtasks. When McLoop finishes the current queue, just add more and
 re-run. This makes it equally useful for iterative refinement of an existing
 codebase as for building something from scratch.
+
+**Tip:** You can use your favorite chat interface (e.g., Claude, ChatGPT) to
+help write the PLAN.md file. Feed it the README.md along with a description of
+your project, have it ask any questions it has, and output the markdown file.
 
 ### Subtasks
 
@@ -216,10 +228,9 @@ This gives later tasks awareness of what earlier tasks did without
 carrying over the full conversation history. The context resets when you
 restart McLoop.
 
-McLoop streams Claude Code's output in real time, showing text, tool calls,
-and results as they happen. Each task is numbered (e.g., "Task 3.2)") to make
-it easy to track progress through the checklist. Elapsed time is shown for
-each completed task and in the final summary.
+Each task is numbered (e.g., "Task 3.2)") and shows progress dots as the
+session works. Tool output is suppressed to keep the terminal clean. Elapsed
+time is shown for each completed task and in the final summary.
 
 When a task or check fails, McLoop prints the error output directly in the
 terminal and includes it in the prompt for the next retry so Claude can fix
@@ -254,8 +265,9 @@ call Claude Code makes as a `PreToolUse` hook:
   do, then pauses and waits for your response. McLoop resumes immediately once
   you tap a button. **Allow All Session** remembers the approved command pattern
   for 24 hours, so identical commands pass through automatically for the rest of
-  the session. If no response is received within 10 minutes, the command is
-  denied automatically.
+  the session. If you **deny** a command, McLoop kills the session immediately
+  and treats the task as failed. If no response is received within 10 minutes,
+  the command is denied automatically.
 
 ### Setup
 
@@ -464,6 +476,9 @@ When McLoop finishes (whether all tasks completed or one failed), it prints a
 summary showing completed tasks with elapsed times, the failed task with error
 details, remaining task count, and total elapsed time.
 
+If PLAN.md contains a `## Manual verification` section with unchecked
+items, the summary lists them as things for you to test by hand.
+
 If you approved any commands via Telegram during the run, McLoop suggests
 adding them to your allowlist in the format used by `settings.json`. Dangerous
 commands (like `rm`, `sudo`, `chmod`) are never suggested even if approved.
@@ -529,6 +544,64 @@ ruff check .              # Lint
 ruff format --check .     # Format check
 pytest                    # Tests
 ```
+
+## Best practices
+
+McLoop does not require its own API key or tokens. It runs through
+your existing Claude Code installation, using whatever plan you
+already have (Pro, Max, etc.). There is nothing extra to provision.
+
+That said, McLoop will use your plan allowance aggressively. A single
+McLoop run can consume in a few hours what you would normally spread
+across days of interactive use. Each task launches a full Claude Code
+session that reads files, writes code, runs tests, and iterates on
+failures. The audit cycle after task completion adds further usage.
+This is by design, but you should be aware of it.
+
+Practical advice for getting the most out of your allowance:
+
+**Use [RTK](https://github.com/rtk-ai/rtk).**  RTK is a CLI proxy
+that compresses command output before it reaches Claude Code's
+context, reducing token consumption by 60-90%. Install it, run
+`rtk init --global`, and register the hook in your
+`~/.claude/settings.json`. McLoop's Telegram permission hook already
+handles RTK-wrapped commands, so no additional configuration is
+needed. This is one of the most effective ways to extend your plan
+usage.
+
+**Write detailed task descriptions.** Vague tasks cause Claude Code
+to explore, guess, and backtrack, all of which burn tokens. A
+well-specified task with clear constraints completes faster and in
+fewer tokens. Spend time on the plan.
+
+**Break large tasks into small ones.** Each task gets a fresh
+context. A task that tries to do too much will hit context limits,
+lose track of what it was doing, and waste retries. Small, focused
+tasks complete reliably on the first attempt.
+
+**Whitelist safe commands.** Every command that is not whitelisted
+sends you a Telegram notification and idles until you respond.
+Whitelisting commands you always approve avoids the interruptions
+and keeps sessions moving. McLoop prints whitelist suggestions at
+the end of each run.
+
+**Use stages for large projects.** Divide PLAN.md into stages with
+`## Stage N:` headers. McLoop completes one stage and stops, giving
+you a chance to test and give feedback before it consumes more of
+your allowance on the next stage.
+
+**Run overnight or during off-peak hours.** If your plan has
+time-based rate limits, long McLoop runs benefit from starting when
+you are not using Claude Code interactively.
+
+**Monitor with `rtk gain`.** If RTK is installed, run `rtk gain`
+after a McLoop session to see how many tokens were saved. This helps
+you gauge whether the compression is working and how much headroom
+you have.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Author
 
