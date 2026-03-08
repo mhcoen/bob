@@ -798,3 +798,36 @@ def test_run_task_prompt_includes_accessibility_instruction(tmp_path):
     assert "accessibilityIdentifier" in prompt
     assert "data-testid" in prompt
     assert "setAccessibleName" in prompt
+    # Covers interactive element types
+    assert "buttons" in prompt
+    assert "text fields" in prompt
+    assert "toggles" in prompt
+    # States the purpose
+    assert "programmatically testable" in prompt
+
+
+def test_run_task_accessibility_instruction_present_for_non_ui_task(tmp_path):
+    """Accessibility instruction is included even for non-UI tasks."""
+    log_dir = tmp_path / "logs"
+    captured_prompt = {}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_prompt["prompt"] = prompt
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        from mcloop.runner import run_task
+
+        run_task(
+            task_text="Refactor the database module",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+        )
+
+    prompt = captured_prompt["prompt"]
+    assert "accessibilityIdentifier" in prompt
