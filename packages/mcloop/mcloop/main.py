@@ -746,12 +746,7 @@ def _changed_files(project_dir: Path) -> list[str]:
             f = line[3:]
             if " -> " in f:
                 f = f.split(" -> ", 1)[1]
-            if (
-                f
-                and not f.startswith("logs/")
-                and not f.startswith(".mcloop/")
-                and f != "PLAN.md"
-            ):
+            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md":
                 files.append(f)
     return files
 
@@ -1208,9 +1203,7 @@ def _ensure_git(project_dir: Path) -> None:
         # Create .gitignore if missing
         gitignore = project_dir / ".gitignore"
         if not gitignore.exists():
-            gitignore.write_text(
-                ".duplo/\nlogs/\n.mcloop/\n.build/\n"
-            )
+            gitignore.write_text(".duplo/\nlogs/\n.mcloop/\n.build/\n")
         subprocess.run(
             ["git", "add", "-A"],
             cwd=project_dir,

@@ -101,6 +101,17 @@ def run_task(
     )
     parts.append(notes_instruction)
     parts.append(
+        "When building UI (SwiftUI, HTML, React, Qt,"
+        " or any other UI framework), add accessibility"
+        " identifiers to every interactive element"
+        " (buttons, text fields, menu items, toggles,"
+        " sliders, pickers, links, tabs). Use the"
+        " platform-native API: .accessibilityIdentifier()"
+        " in SwiftUI, data-testid in HTML/React,"
+        " setAccessibleName() in Qt. This makes the"
+        " app programmatically testable."
+    )
+    parts.append(
         "Never install tools or dependencies via brew,"
         " cargo, pip, npm, apt, or any other package"
         " manager. If a required tool is not found,"

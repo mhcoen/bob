@@ -765,3 +765,36 @@ def test_print_stream_event_invalid_json(capsys):
     _print_stream_event("not json at all")
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+# --- run_task prompt content ---
+
+
+def test_run_task_prompt_includes_accessibility_instruction(tmp_path):
+    """run_task prompt instructs sessions to add accessibility identifiers."""
+    log_dir = tmp_path / "logs"
+    captured_prompt = {}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_prompt["prompt"] = prompt
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        from mcloop.runner import run_task
+
+        run_task(
+            task_text="Build a settings screen",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+        )
+
+    prompt = captured_prompt["prompt"]
+    assert "accessibility" in prompt.lower()
+    assert "accessibilityIdentifier" in prompt
+    assert "data-testid" in prompt
+    assert "setAccessibleName" in prompt
