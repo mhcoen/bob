@@ -44,7 +44,21 @@ def run_task(
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
     parts.append(f"Task: {task_text}")
-    parts.append("Write unit tests where they make sense.")
+    parts.append(
+        "Write tests that exercise real code with real inputs."
+        " Do not mock core logic, only external dependencies"
+        " (network, filesystem, hardware). Every public function"
+        " should be tested with at least one realistic input"
+        " that exercises the actual implementation, not a mock."
+        " If the code involves threading, async, or callbacks,"
+        " write tests that verify the work completes without"
+        " deadlocking. If the code touches system APIs (audio,"
+        " accessibility, permissions), write tests that handle"
+        " both the granted and denied cases gracefully."
+        " Never block the main thread with synchronous calls"
+        " to async APIs. Use @MainActor, DispatchQueue.main.async,"
+        " or Task {} as appropriate."
+    )
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     parts.append(
@@ -856,6 +870,40 @@ def run_post_fix_review(
         output,
         returncode,
     )
+
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
+
+
+def run_fixbug(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    crash_context: str,
+    model: str | None = None,
+) -> RunResult:
+    """Launch a Claude Code session to fix a runtime crash."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = (
+        "The app crashes at runtime. Fix the bug.\n\n"
+        f"{crash_context}\n\n"
+        "Read the crash report carefully. Identify the exact line\n"
+        "and cause of the crash from the stack trace. Read the\n"
+        "relevant source files. Fix the root cause, not symptoms.\n"
+        "Write or update tests to cover the crash scenario.\n"
+        "Verify the fix compiles. Do not guess at the cause\n"
+        "from code inspection alone if the crash report tells\n"
+        "you the exact location."
+    )
+    cmd = _build_command("claude", prompt=prompt, model=model)
+    output, returncode = _run_session(cmd, project_dir)
+    log_path = _write_log(log_dir, "fixbug", cmd, output, returncode)
 
     return RunResult(
         success=returncode == 0,

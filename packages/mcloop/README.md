@@ -1,6 +1,6 @@
 # McLoop
 
-McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
+McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes integration tests that exercise real code with real inputs (not mocked stubs), runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
 
 Because McLoop fully automates Claude Code invocation, it will consume
 your plan allowance faster than you have ever experienced. See
@@ -102,6 +102,9 @@ mcloop --no-audit         # Skip the post-completion bug audit
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
+mcloop fixbug             # Find latest crash report and fix the bug
+mcloop fixbug "description"  # Fix with additional context
+mcloop fixbug --log err.txt  # Fix using a log file
 ```
 
 ## Writing a PLAN.md
@@ -448,6 +451,45 @@ current git hash to `.mcloop-last-audit` after a successful audit cycle.
 On the next run, if no source files have changed since that hash, the
 audit is skipped. Delete `.mcloop-last-audit` to force a re-audit, or
 run `mcloop audit` for a standalone audit at any time.
+
+## Fixing runtime crashes
+
+Run `mcloop fixbug` when your app crashes at runtime. It searches
+for crash information from multiple sources, feeds it to a Claude
+Code session, and commits the fix if checks pass.
+
+Sources checked (in order):
+
+1. **Piped input.** `./my-app 2>&1 | mcloop fixbug` captures the
+   crash output directly.
+2. **Log file.** `mcloop fixbug --log crash.txt` reads from a file.
+3. **Last run log.** If `.mcloop/last-run.log` exists from a
+   previous launch, it is included automatically.
+4. **macOS crash reports.** `~/Library/Logs/DiagnosticReports/` is
+   searched for `.ips` and `.crash` files matching the app name
+   (derived from `mcloop.json`). Only reports from the last hour
+   are considered. This works automatically for native macOS
+   binaries (Swift, C, Rust) without any logging setup.
+5. **Description argument.** `mcloop fixbug "crashes when parsing
+   percentages"` provides additional context.
+
+Multiple sources can be combined. If no crash information is found
+from any source, fixbug prints what it looked for and exits.
+
+For hangs and visual bugs that don't produce crash reports, use a
+description:
+
+```bash
+mcloop fixbug "app hangs with spinning wheel when I press the hotkey"
+mcloop fixbug "settings window opens but all fields are empty"
+mcloop fixbug "output is garbled when input contains unicode"
+```
+
+The recommended workflow is: you test the app, and when something
+breaks, run `mcloop fixbug` with whatever information you have.
+You don't need to diagnose the problem. Fixbug feeds the crash
+report or your description to Claude Code along with the full
+codebase, and Claude Code finds and fixes the root cause.
 
 ## Syncing PLAN.md
 
