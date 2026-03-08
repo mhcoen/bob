@@ -115,3 +115,82 @@ over-abstraction. This is a simple tool and should stay that way.
 - [x] Reduce Telegram notification frequency: only send notifications for events that require attention or mark real progress. Do not notify on individual retry failures (attempt 1/3, 2/3). Only notify when a task genuinely fails after all retries are exhausted, when a stage or the full run completes, when a session limit is hit, and when the audit cycle finishes. Combine stage completion and next stage start into a single message. Goal: no more than one notification every few minutes during normal operation.
 - [x] Targeted testing: after each task, only run tests corresponding to changed files (e.g., changes to hasher.py runs test_hasher.py). Map source files to test files by naming convention. Run the full test suite only at stage boundaries and at the end of the run. This avoids running the entire test suite after every single task.
 - [x] Skip Telegram permission hook for interactive sessions: the hook should check for the MCLOOP_TASK_LABEL environment variable (already set by runner.py) and exit 0 immediately if it's absent. This lets interactive Claude Code sessions use the normal terminal permission flow instead of sending Telegram approvals.
+
+## Stage: Investigation system (`mcloop investigate`)
+
+Adds an interactive debugging mode for hard runtime bugs that survive
+the build/test/audit cycle. The system creates a git worktree for
+isolation, generates an investigation plan, runs it, and can interact
+with the built app programmatically via accessibility APIs. The user
+is in the terminal loop for observations the system cannot make
+itself. Apps built by mcloop are instrumented with accessibility
+labels from the start to enable automated UI testing.
+
+The debugging playbook this enforces:
+1. Reproduce the problem.
+2. Instrument at stage boundaries.
+3. Isolate subsystems with standalone probes.
+4. Inspect live runtime behavior.
+5. Only then patch production code.
+6. Clean up temporary scaffolding after the fix.
+
+- [ ] Accessibility labels in task prompt
+  - [ ] Add instruction to the task prompt in runner.py: when building UI (SwiftUI, HTML, React, Qt, etc.), add accessibility identifiers to every interactive element (buttons, text fields, menu items, toggles). This makes every app mcloop builds programmatically testable.
+  - [ ] Add tests verifying the instruction is present in the prompt
+
+- [ ] Investigation NOTES.md structure
+  - [ ] Add instruction to the investigation plan description requiring three sections in NOTES.md: Observations (confirmed facts from runtime, docs, logs, or experiments), Hypotheses (candidate explanations not yet confirmed), and Eliminated (things ruled out, with the experiment that ruled them out)
+  - [ ] The investigation prompt must instruct the agent to check Eliminated before proposing any approach and refuse to repeat an eliminated approach unless new evidence contradicts the elimination
+
+- [ ] Process monitor module
+  - [ ] Create `mcloop/process_monitor.py` with functions to: launch a process from a run command, check if a process is alive by PID, detect a hung process (alive but not producing output for N seconds), sample a hung process on macOS (`sample <pid>`), kill a process, read the most recent crash report from `~/Library/Logs/DiagnosticReports/` matching a process name
+  - [ ] For CLI apps: launch with subprocess, capture stdout/stderr, detect crash (non-zero exit) or hang (no output timeout)
+  - [ ] For GUI apps: launch, check alive with pgrep, detect crash (process disappears) or hang (process alive but sample shows stuck main thread)
+  - [ ] Add tests with mock subprocesses
+
+- [ ] App interaction layer
+  - [ ] Create `mcloop/app_interact.py` with functions for macOS GUI app interaction via osascript/System Events: click button by accessibility label, select menu item by path, type text into focused field, read value of UI element by label, list all UI elements in a window, check if a window exists, take a screenshot of a specific window
+  - [ ] For CLI apps: send input to stdin, read stdout/stderr, send signals
+  - [ ] For web apps: detect if Playwright is available, launch headless browser, navigate to URL, click element, read page content, take screenshot
+  - [ ] Detect app type from mcloop.json (run command patterns: `open *.app` or `./run.sh` for GUI, bare binary or `python` for CLI, `npm start` or `flask run` for web)
+  - [ ] Add tests for each interaction type with mock targets
+
+- [ ] Investigation plan generator
+  - [ ] Create `mcloop/investigator.py` with a function that takes bug context (crash report, user description, failure history, source code summary) and produces an investigation PLAN.md following the debugging playbook
+  - [ ] The prompt for plan generation must include: the debugging playbook (reproduce, instrument, isolate, inspect, fix, clean up), instruction to create standalone probes for unclear subsystems, instruction to search the web for working examples before writing code, the "What has been tried" section populated from any available failure history
+  - [ ] The generated plan should include steps that use the process monitor and app interaction layer where applicable (e.g., "Launch the app and verify the menu bar icon appears" becomes a step that programmatically checks for the window/element)
+  - [ ] Add tests with sample bug descriptions verifying the generated plan contains research steps, isolation steps, and verification steps
+
+- [ ] Git worktree management
+  - [ ] Create `mcloop/worktree.py` with functions to: create a worktree from the current branch with a descriptive name and branch, check if a worktree already exists for a given investigation, list active investigation worktrees, merge an investigation branch back to the source branch, remove a worktree after successful merge
+  - [ ] Branch naming convention: `investigate-<slug>` where slug is derived from the bug description
+  - [ ] Directory naming convention: `../<project>-investigate-<slug>/` (sibling of the project directory)
+  - [ ] Handle the case where a worktree already exists (resume the investigation rather than creating a new one)
+  - [ ] Add tests for worktree creation, merge, and cleanup
+
+- [ ] The `investigate` subcommand
+  - [ ] Add `investigate` subcommand to argument parser with optional positional description argument and --log flag
+  - [ ] Gather bug context from multiple sources (DiagnosticReports, .mcloop/last-run.log, piped stdin, --log file, description argument)
+  - [ ] Create or resume a git worktree for the investigation
+  - [ ] If new: generate investigation PLAN.md via the plan generator, copy mcloop.json and .claude/ settings from the parent project
+  - [ ] Run mcloop as a subprocess in the worktree directory with --no-audit
+  - [ ] After mcloop completes: if all tasks passed, offer to merge back (show diff, ask confirmation). If tasks failed, print the investigation state (what was learned, what remains) and leave the worktree for the user to resume or review.
+
+- [ ] Interactive investigation loop
+  - [ ] When an investigation task requires user observation (the plan generator marks these with a keyword like `[USER]`), pause and print clearly formatted instructions for the user: what to do, what to look for, how to provide the result
+  - [ ] Accept free-form text input from the user at the terminal, incorporate it into the next session's context
+  - [ ] When the system can perform the observation itself (via process monitor or app interaction), do so automatically and feed the result into the next session
+  - [ ] Visual formatting: use clear visual separators to distinguish system actions from user prompts. User prompts should be impossible to miss in a scrolling terminal.
+
+- [ ] Automated verification after fix
+  - [ ] After the investigation produces a fix, automatically launch the app using the process monitor
+  - [ ] Use the app interaction layer to repeat the actions that triggered the original bug
+  - [ ] Verify the app survives (no crash, no hang, expected UI state)
+  - [ ] If verification fails, feed the new failure information back into the investigation loop
+  - [ ] If verification passes, proceed to merge
+
+- [ ] Integration with existing infrastructure
+  - [ ] Share bug context gathering code between investigate and any future fixbug command (same sources: DiagnosticReports, logs, piped input, description)
+  - [ ] Enable WebFetch and WebSearch tools for investigation sessions so the agent can research APIs and find working examples
+  - [ ] Enhanced testing instruction for investigation sessions: write tests that exercise real code with real inputs, do not mock core logic, test threading/async for deadlocks, handle system API permission cases gracefully
+  - [ ] Enhanced debugging instruction for investigation sessions: decompose before patching, search web for working examples, question assumptions when repeated approaches fail

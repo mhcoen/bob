@@ -43,7 +43,6 @@ from mcloop.runner import (
     run_audit,
     run_bug_fix,
     run_bug_verify,
-    run_fixbug,
     run_post_fix_review,
     run_sync,
     run_task,
@@ -75,14 +74,6 @@ def main() -> None:
 def _main() -> None:
     args = _parse_args()
     checklist_path = Path(args.file).resolve()
-
-    if args.command == "fixbug":
-        _cmd_fixbug(
-            checklist_path.parent,
-            description=args.description,
-            log_path=args.log,
-        )
-        return
 
     if not checklist_path.exists():
         print(f"Checklist not found: {checklist_path}", file=sys.stderr)
@@ -381,15 +372,6 @@ def _parse_args() -> argparse.Namespace:
         "--dry-run", action="store_true", help="Show changes without modifying PLAN.md"
     )
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
-    fixbug_parser = subparsers.add_parser(
-        "fixbug", help="Find the latest crash report and fix the bug"
-    )
-    fixbug_parser.add_argument(
-        "description", nargs="?", default=None, help="Bug description or error message"
-    )
-    fixbug_parser.add_argument(
-        "--log", default=None, help="Path to a file containing the crash/error output"
-    )
     return parser.parse_args()
 
 
@@ -468,157 +450,6 @@ def _confirm_sync_changes(
     _show_diff(original, proposed, checklist_path.name)
     answer = _input("\nApply these changes? [y/N] ").strip().lower()
     return answer == "y"
-
-
-_DIAG_REPORTS = Path.home() / "Library" / "Logs" / "DiagnosticReports"
-
-
-def _find_crash_report(project_dir: Path, max_age_seconds: int = 3600) -> str | None:
-    """Find the most recent crash report for this project's app.
-
-    Searches ``~/Library/Logs/DiagnosticReports/`` for ``.ips`` and
-    ``.crash`` files whose name matches the app name from
-    ``mcloop.json``.  Returns the file contents or None.
-    """
-    config_path = project_dir / "mcloop.json"
-    if not config_path.exists():
-        return None
-    try:
-        config = _json.loads(config_path.read_text())
-    except (OSError, _json.JSONDecodeError):
-        return None
-
-    # Derive app name from the run command or project directory.
-    app_name = config.get("app_name", "")
-    if not app_name:
-        run_cmd = config.get("run", "")
-        if run_cmd:
-            # Try to extract app name from common patterns.
-            # "./run.sh" -> use project dir name.
-            # "open Foo.app" -> "Foo".
-            # "swift run Foo" -> "Foo".
-            parts = run_cmd.split()
-            if "open" in parts:
-                idx = parts.index("open")
-                if idx + 1 < len(parts):
-                    app_name = parts[idx + 1].replace(".app", "")
-            elif "swift" in parts and "run" in parts:
-                idx = parts.index("run")
-                if idx + 1 < len(parts):
-                    app_name = parts[idx + 1]
-        if not app_name:
-            app_name = project_dir.name
-
-    if not _DIAG_REPORTS.is_dir():
-        return None
-
-    cutoff = time.time() - max_age_seconds
-    best: tuple[float, Path] | None = None
-    for ext in (".ips", ".crash"):
-        for f in _DIAG_REPORTS.glob(f"*{ext}"):
-            if app_name.lower() not in f.name.lower():
-                continue
-            try:
-                mtime = f.stat().st_mtime
-            except OSError:
-                continue
-            if mtime < cutoff:
-                continue
-            if best is None or mtime > best[0]:
-                best = (mtime, f)
-
-    if best is None:
-        return None
-    try:
-        return best[1].read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-
-def _cmd_fixbug(
-    project_dir: Path,
-    *,
-    description: str | None = None,
-    log_path: str | None = None,
-) -> None:
-    """Find a crash report and launch a Claude Code session to fix the bug."""
-    log_dir = project_dir / "logs"
-    project_checks = get_check_commands(project_dir)
-
-    # Gather crash context from all available sources.
-    parts: list[str] = []
-
-    # 1. Piped stdin.
-    if not sys.stdin.isatty():
-        stdin_text = sys.stdin.read().strip()
-        if stdin_text:
-            parts.append(f"Error output (piped):\n{stdin_text}")
-
-    # 2. Explicit log file.
-    if log_path:
-        log_file = Path(log_path)
-        if log_file.exists():
-            parts.append(f"Error log ({log_file.name}):\n{log_file.read_text()[:5000]}")
-        else:
-            print(f"Log file not found: {log_path}", file=sys.stderr)
-
-    # 3. .mcloop/last-run.log from a previous run.
-    last_run = project_dir / ".mcloop" / "last-run.log"
-    if last_run.exists():
-        parts.append(f"Last run log:\n{last_run.read_text()[:5000]}")
-
-    # 4. macOS crash report.
-    crash = _find_crash_report(project_dir)
-    if crash:
-        # Truncate very long crash reports to keep the prompt manageable.
-        if len(crash) > 5000:
-            crash = crash[:5000] + "\n... (truncated)"
-        parts.append(f"macOS crash report:\n{crash}")
-
-    # 5. User description.
-    if description:
-        parts.append(f"User description: {description}")
-
-    if not parts:
-        print(
-            "No crash information found.\n"
-            "\n"
-            "mcloop fixbug looks for:\n"
-            "  - Piped input (command 2>&1 | mcloop fixbug)\n"
-            "  - --log <file>\n"
-            "  - .mcloop/last-run.log\n"
-            "  - ~/Library/Logs/DiagnosticReports/ (macOS crash reports)\n"
-            "  - A description argument\n"
-            "\n"
-            "Provide at least one source of crash information.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    crash_context = "\n\n".join(parts)
-    print(f"Fixing bug in {project_dir.name}...", flush=True)
-    print(f"  Sources: {len(parts)}", flush=True)
-
-    import mcloop.runner as _runner
-
-    _runner._SUPPRESS_ALL_TOOLS = False
-    result = run_fixbug(project_dir, log_dir, crash_context)
-    _runner._SUPPRESS_ALL_TOOLS = True
-    if not result.success:
-        print(f"fixbug: session exited with code {result.exit_code}", file=sys.stderr)
-        sys.exit(result.exit_code)
-
-    # Run checks.
-    check_result = run_checks(project_dir)
-    if check_result.passed:
-        _commit(project_dir, "fixbug: fix crash")
-        print("Fix applied and committed.", flush=True)
-    else:
-        print(
-            f"Fix applied but checks failed: {check_result.command}",
-            flush=True,
-        )
-        print("Changes are staged but not committed.", flush=True)
 
 
 def _dry_run(tasks) -> None:
@@ -759,8 +590,6 @@ def _print_summary(
                 f"\nTo run: {run_cmd}",
                 flush=True,
             )
-        _print_manual_verification(project_dir)
-
     if project_dir:
         _print_notes_update(
             project_dir,
@@ -768,36 +597,6 @@ def _print_summary(
         )
 
     print("=" * 40, flush=True)
-
-
-def _print_manual_verification(project_dir: Path) -> None:
-    """Print manual verification items from PLAN.md if present."""
-    plan_path = project_dir / "PLAN.md"
-    if not plan_path.exists():
-        return
-    try:
-        content = plan_path.read_text(encoding="utf-8")
-    except OSError:
-        return
-    # Find the manual verification section
-    in_section = False
-    items: list[str] = []
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("## manual verification"):
-            in_section = True
-            continue
-        if in_section:
-            if stripped.startswith("## ") or stripped == "---":
-                break
-            if stripped.startswith("- [ ] "):
-                items.append(stripped[6:])
-            elif stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
-                continue  # already done
-    if items:
-        print("\nThings to try and verify:", flush=True)
-        for item in items:
-            print(f"  - {item}", flush=True)
 
 
 SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
