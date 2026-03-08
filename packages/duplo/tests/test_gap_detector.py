@@ -231,9 +231,7 @@ class TestDetectGaps:
     def test_includes_platform_in_prompt(self):
         response = json.dumps({"missing_features": [], "missing_examples": []})
         with patch("duplo.gap_detector.query", return_value=response) as mock_query:
-            detect_gaps(
-                "# Plan", [_feat("X")], platform="macOS", language="Swift"
-            )
+            detect_gaps("# Plan", [_feat("X")], platform="macOS", language="Swift")
         prompt = mock_query.call_args[0][0]
         assert "macOS" in prompt
         assert "Swift" in prompt

@@ -23,7 +23,7 @@ from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features
 from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
 from duplo.notifier import notify_phase_complete
-from duplo.fetcher import fetch_site
+from duplo.fetcher import download_media, extract_media_urls, fetch_site
 from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
     append_test_tasks,
@@ -34,7 +34,7 @@ from duplo.planner import (
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
-from duplo.scanner import scan_directory, scan_files
+from duplo.scanner import FileRelevance, scan_directory, scan_files
 from duplo.test_generator import (
     generate_plan_test_tasks,
     generate_test_source,
@@ -96,6 +96,37 @@ class UpdateSummary:
     missing_examples: int = 0
     design_refinements: int = 0
     tasks_appended: int = 0
+
+
+def _download_site_media(
+    raw_pages: dict[str, str],
+) -> tuple[list[Path], list[Path]]:
+    """Extract and download images and videos from fetched HTML pages.
+
+    Scans each page's HTML for ``<video>``, ``<source>``, ``<img>``,
+    and ``<picture>`` tags, downloads the media files to
+    ``.duplo/site_media/``, and returns ``(images, videos)``.
+    """
+    all_image_urls: list[str] = []
+    all_video_urls: list[str] = []
+    seen: set[str] = set()
+
+    for page_url, html in raw_pages.items():
+        image_urls, video_urls = extract_media_urls(html, page_url)
+        for u in image_urls:
+            if u not in seen:
+                seen.add(u)
+                all_image_urls.append(u)
+        for u in video_urls:
+            if u not in seen:
+                seen.add(u)
+                all_video_urls.append(u)
+
+    if not all_image_urls and not all_video_urls:
+        return [], []
+
+    output_dir = Path(".duplo") / "site_media"
+    return download_media(all_image_urls, all_video_urls, output_dir)
 
 
 def main() -> None:
@@ -198,6 +229,29 @@ def _first_run() -> None:
         )
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
+
+        # Download embedded images and videos from fetched pages.
+        site_images, site_videos = _download_site_media(raw_pages)
+        if site_images:
+            scan.images.extend(site_images)
+            for img in site_images:
+                scan.relevance.append(
+                    FileRelevance(
+                        path=img, category="image", relevant=True,
+                        reason="downloaded from product site",
+                    )
+                )
+            print(f"  Downloaded {len(site_images)} image(s) from product site.")
+        if site_videos:
+            scan.videos.extend(site_videos)
+            for v in site_videos:
+                scan.relevance.append(
+                    FileRelevance(
+                        path=v, category="video", relevant=True,
+                        reason="downloaded from product site",
+                    )
+                )
+            print(f"  Downloaded {len(site_videos)} video(s) from product site.")
 
     if not saved_product:
         product_name = _confirm_product(product_name, source_url)
@@ -563,6 +617,20 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         print(f"  Updated {examples_updated} code example(s).")
     if doc_structures:
         save_doc_structures(doc_structures)
+
+    # Download embedded media from re-scraped pages.
+    if raw_pages:
+        site_images, site_videos = _download_site_media(raw_pages)
+        if site_images:
+            print(f"  Downloaded {len(site_images)} image(s) from product site.")
+        if site_videos:
+            print(f"  Downloaded {len(site_videos)} video(s) from product site.")
+            # Extract frames from downloaded videos.
+            frames_dir = Path(".duplo") / "video_frames"
+            results = extract_all_videos(site_videos, frames_dir)
+            for vr in results:
+                if vr.frames:
+                    print(f"  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
 
     return pages_updated, examples_updated, scraped_text
 

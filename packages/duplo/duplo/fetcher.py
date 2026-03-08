@@ -6,6 +6,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -25,6 +26,9 @@ class PageRecord:
 
 
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+_MIN_IMAGE_BYTES = 10_000  # skip tiny icons/favicons
 _TIMEOUT = 30.0
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -251,3 +255,112 @@ def extract_text(html: str) -> str:
     text = soup.get_text(separator="\n")
     lines = [line.strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line)
+
+
+def extract_media_urls(html: str, base_url: str) -> tuple[list[str], list[str]]:
+    """Extract image and video URLs from *html*.
+
+    Looks for ``<img>``, ``<video>``, ``<source>``, and ``<picture>``
+    tags. Returns ``(image_urls, video_urls)`` with absolute URLs.
+    Deduplicates within each list.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    images: list[str] = []
+    videos: list[str] = []
+    seen: set[str] = set()
+
+    def _add(url: str, target: list[str]) -> None:
+        absolute = urljoin(base_url, url).split("?")[0].split("#")[0]
+        if absolute not in seen:
+            seen.add(absolute)
+            target.append(absolute)
+
+    # Video sources
+    for tag in soup.find_all("video"):
+        src = tag.get("src", "")
+        if src:
+            _add(src, videos)
+        poster = tag.get("poster", "")
+        if poster:
+            _add(poster, images)
+    for tag in soup.find_all("source"):
+        src = tag.get("src", "")
+        if not src:
+            continue
+        media_type = tag.get("type", "")
+        if "video" in media_type or any(src.lower().endswith(e) for e in _VIDEO_EXTS):
+            _add(src, videos)
+
+    # Images (skip tiny icons, data URIs, SVGs)
+    for tag in soup.find_all("img"):
+        src = tag.get("src", "") or tag.get("data-src", "")
+        if not src or src.startswith("data:"):
+            continue
+        if src.lower().endswith(".svg"):
+            continue
+        _add(src, images)
+    for tag in soup.find_all("picture"):
+        for source in tag.find_all("source"):
+            srcset = source.get("srcset", "")
+            if srcset:
+                # Take the first URL from srcset
+                first = srcset.split(",")[0].strip().split()[0]
+                if not first.lower().endswith(".svg"):
+                    _add(first, images)
+
+    return images, videos
+
+
+def download_media(
+    image_urls: list[str],
+    video_urls: list[str],
+    output_dir: Path,
+) -> tuple[list[Path], list[Path]]:
+    """Download images and videos to *output_dir*.
+
+    Skips images smaller than ``_MIN_IMAGE_BYTES``. Returns
+    ``(downloaded_images, downloaded_videos)``.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    downloaded_images: list[Path] = []
+    downloaded_videos: list[Path] = []
+
+    for url in video_urls:
+        path = _download_file(url, output_dir)
+        if path:
+            downloaded_videos.append(path)
+
+    for url in image_urls:
+        path = _download_file(url, output_dir)
+        if path and path.stat().st_size >= _MIN_IMAGE_BYTES:
+            downloaded_images.append(path)
+        elif path:
+            # Too small, likely icon
+            path.unlink(missing_ok=True)
+
+    return downloaded_images, downloaded_videos
+
+
+def _download_file(url: str, output_dir: Path) -> Path | None:
+    """Download a single file. Returns the local path or None on failure."""
+    parsed = urlparse(url)
+    filename = Path(parsed.path).name
+    if not filename:
+        return None
+    # Avoid collisions by prefixing with domain
+    domain = parsed.netloc.replace(".", "_")
+    dest = output_dir / f"{domain}_{filename}"
+    if dest.exists():
+        return dest
+    try:
+        with httpx.stream(
+            "GET", url, follow_redirects=True, timeout=60.0, headers=_HEADERS
+        ) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=8192):
+                    f.write(chunk)
+        return dest
+    except Exception:
+        dest.unlink(missing_ok=True)
+        return None

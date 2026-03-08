@@ -68,26 +68,33 @@ it, test, add more reference material if needed, run duplo again.
    code examples as input/expected output pairs, plus feature tables,
    operation lists, and function references.
 
-8. **Extracts features.** Uses Claude to analyze all collected text
+8. **Downloads embedded media.** Scans fetched HTML pages for
+   ``<video>``, ``<source>``, ``<img>``, and ``<picture>`` tags.
+   Downloads product screenshots and demo videos to
+   ``.duplo/site_media/``. Downloaded videos are frame-extracted
+   the same way as user-provided videos. Downloaded images are
+   used for design extraction alongside user-provided screenshots.
+
+9. **Extracts features.** Uses Claude to analyze all collected text
    and produce a structured feature list grouped by category.
 
-9. **Interactive selection.** Presents the features and asks which to
+10. **Interactive selection.** Presents the features and asks which to
    include. Then asks about platform, language, constraints, and
    preferences.
 
-10. **Generates a phased roadmap.** Breaks the selected features into
+11. **Generates a phased roadmap.** Breaks the selected features into
     phases, starting with the smallest end-to-end working thing. Each
     phase has a title, goal, feature list, and test criteria.
 
-11. **Generates test cases from documentation.** Every code example
+12. **Generates test cases from documentation.** Every code example
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-12. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
+13. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
     CLAUDE.md, and mcloop.json. Prints "Run mcloop to start
     building." and exits. You run mcloop separately.
 
-13. **Cleans up.** Moves processed reference files to
+14. **Cleans up.** Moves processed reference files to
     `.duplo/references/` and saves a file hash manifest for detecting
     changes on subsequent runs.
 
@@ -194,6 +201,10 @@ ruff check .              # Lint
 ruff format --check .     # Format check
 pytest                    # Tests
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Author
 
