@@ -79,6 +79,33 @@ def test_no_subcommand_command_is_none():
     assert args.command is None
 
 
+def test_investigate_subcommand():
+    args = _parse("investigate")
+    assert args.command == "investigate"
+    assert args.description is None
+    assert args.log is None
+
+
+def test_investigate_with_description():
+    args = _parse("investigate", "app crashes on startup")
+    assert args.command == "investigate"
+    assert args.description == "app crashes on startup"
+
+
+def test_investigate_with_log():
+    args = _parse("investigate", "--log", "/tmp/crash.log")
+    assert args.command == "investigate"
+    assert args.log == "/tmp/crash.log"
+    assert args.description is None
+
+
+def test_investigate_with_description_and_log():
+    args = _parse("investigate", "segfault in parser", "--log", "err.txt")
+    assert args.command == "investigate"
+    assert args.description == "segfault in parser"
+    assert args.log == "err.txt"
+
+
 def test_invalid_subcommand_exits():
     with pytest.raises(SystemExit):
         _parse("bogus")

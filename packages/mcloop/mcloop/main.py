@@ -449,6 +449,11 @@ def _parse_args() -> argparse.Namespace:
         "--dry-run", action="store_true", help="Show changes without modifying PLAN.md"
     )
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
+    inv_parser = subparsers.add_parser("investigate", help="Investigate a bug in a worktree")
+    inv_parser.add_argument(
+        "description", nargs="?", default=None, help="Short description of the bug"
+    )
+    inv_parser.add_argument("--log", default=None, help="Path to a log file with error output")
     return parser.parse_args()
 
 
