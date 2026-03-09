@@ -14,6 +14,7 @@ from mcloop.main import (
     _handle_user_task,
     _investigation_failed,
     _investigation_passed,
+    _launch_app_verification,
     _parse_args,
     _run_audit_fix_cycle,
     _run_single_audit_round,
@@ -959,6 +960,137 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
     mock_failed.assert_called_once_with(wt_path, "investigate-bug")
 
 
+# --- _launch_app_verification ---
+
+
+def test_launch_app_verification_no_run_cmd(tmp_path, capsys):
+    """When no run command is detected, does nothing."""
+    with patch("mcloop.main.detect_run", return_value=None):
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_launch_app_verification_gui_ok(tmp_path, capsys):
+    """GUI app that starts OK is reported and then killed."""
+    gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
+    with (
+        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = [1234]
+        _launch_app_verification(tmp_path)
+    mock_pm.run_gui.assert_called_once_with("swift run MyApp", "MyApp", timeout_seconds=15)
+    mock_pm.kill.assert_called_once_with(1234)
+    captured = capsys.readouterr()
+    assert "running OK" in captured.out
+
+
+def test_launch_app_verification_gui_crashed(tmp_path, capsys):
+    """GUI app that crashes is reported."""
+    gui_result = MagicMock(
+        crashed=True, hung=False, duration=2.0, crash_report="crash info\nline2"
+    )
+    with (
+        patch("mcloop.main.detect_run", return_value="open Foo.app"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = []
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "CRASHED" in captured.out
+
+
+def test_launch_app_verification_gui_hung(tmp_path, capsys):
+    """GUI app that hangs is reported."""
+    gui_result = MagicMock(crashed=False, hung=True, duration=15.0)
+    with (
+        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = [5678]
+        _launch_app_verification(tmp_path)
+    mock_pm.kill.assert_called_once_with(5678)
+    captured = capsys.readouterr()
+    assert "HUNG" in captured.out
+
+
+def test_launch_app_verification_cli_ok(tmp_path, capsys):
+    """CLI app that exits 0 is reported as OK."""
+    cli_result = MagicMock(hung=False, exit_code=0, duration=1.5, output="")
+    with (
+        patch("mcloop.main.detect_run", return_value="cargo run"),
+        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_cli.return_value = cli_result
+        _launch_app_verification(tmp_path)
+    mock_pm.run_cli.assert_called_once_with(
+        "cargo run", cwd=str(tmp_path), timeout_seconds=15, hang_seconds=10
+    )
+    captured = capsys.readouterr()
+    assert "exited OK" in captured.out
+
+
+def test_launch_app_verification_cli_crash(tmp_path, capsys):
+    """CLI app with non-zero exit is reported."""
+    cli_result = MagicMock(hung=False, exit_code=1, duration=0.5, output="error: segfault")
+    with (
+        patch("mcloop.main.detect_run", return_value="./myapp"),
+        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_cli.return_value = cli_result
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "exited with code 1" in captured.out
+
+
+def test_launch_app_verification_cli_hung(tmp_path, capsys):
+    """CLI app that hangs is reported."""
+    cli_result = MagicMock(hung=True, exit_code=None, duration=10.0, output="")
+    with (
+        patch("mcloop.main.detect_run", return_value="./myapp"),
+        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_cli.return_value = cli_result
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "HUNG" in captured.out
+
+
+def test_launch_app_verification_web_skipped(tmp_path, capsys):
+    """Web apps are skipped (no server launch)."""
+    with (
+        patch("mcloop.main.detect_run", return_value="npm start"),
+        patch("mcloop.main.detect_app_type", return_value="web"),
+    ):
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "Skipping launch for web app" in captured.out
+
+
+def test_launch_app_verification_gui_process_name_from_app_bundle(tmp_path, capsys):
+    """Process name is extracted from .app bundle path."""
+    gui_result = MagicMock(crashed=False, hung=False, duration=3.0)
+    with (
+        patch("mcloop.main.detect_run", return_value="open MyApp.app"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = []
+        _launch_app_verification(tmp_path)
+    mock_pm.run_gui.assert_called_once_with("open MyApp.app", "MyApp", timeout_seconds=15)
+
+
 # --- _investigation_passed ---
 
 
@@ -968,6 +1100,7 @@ def test_investigation_passed_merges_on_yes(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
+        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run") as mock_run,
         patch("builtins.input", return_value="y"),
@@ -997,6 +1130,7 @@ def test_investigation_passed_skips_merge_on_no(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
+        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run") as mock_run,
         patch("builtins.input", return_value="n"),
@@ -1017,6 +1151,7 @@ def test_investigation_passed_skips_merge_on_eof(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
+        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", side_effect=EOFError),
@@ -1035,6 +1170,7 @@ def test_investigation_passed_merge_failure(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
+        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
@@ -1057,6 +1193,7 @@ def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
+        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),

@@ -120,6 +120,92 @@ def _kill_active_process() -> None:
         _runner._active_process = None
 
 
+def _launch_app_verification(wt_path: Path) -> None:
+    """Launch the app from the worktree to verify the fix works.
+
+    Uses the process monitor to run the app and reports whether it
+    starts successfully, crashes, or hangs.
+    """
+    from mcloop import process_monitor
+
+    run_cmd = detect_run(wt_path)
+    if not run_cmd:
+        return
+
+    app_type = detect_app_type(wt_path)
+    print(
+        formatting.system_msg(f"Verifying fix: {run_cmd}"),
+        flush=True,
+    )
+
+    if app_type == "gui":
+        # Extract process name from run command for pgrep.
+        parts = shlex.split(run_cmd)
+        # "swift run AppName" -> "AppName", "open Foo.app" -> "Foo"
+        process_name = parts[-1]
+        if process_name.endswith(".app"):
+            process_name = process_name.rsplit("/", 1)[-1][: -len(".app")]
+        result = process_monitor.run_gui(
+            run_cmd,
+            process_name,
+            timeout_seconds=15,
+        )
+        if result.crashed:
+            print(
+                formatting.error_msg("Verification: app CRASHED"),
+                flush=True,
+            )
+            if result.crash_report:
+                lines = result.crash_report.splitlines()[:20]
+                print("\n".join(lines), file=sys.stderr)
+        elif result.hung:
+            print(
+                formatting.error_msg("Verification: app HUNG"),
+                flush=True,
+            )
+        else:
+            print(
+                formatting.system_msg(f"Verification: app running OK ({result.duration:.1f}s)"),
+                flush=True,
+            )
+        # Clean up: kill the launched GUI app.
+        pids = process_monitor.pgrep(process_name)
+        for pid in pids:
+            process_monitor.kill(pid)
+    elif app_type == "cli":
+        result = process_monitor.run_cli(
+            run_cmd,
+            cwd=str(wt_path),
+            timeout_seconds=15,
+            hang_seconds=10,
+        )
+        if result.hung:
+            print(
+                formatting.error_msg("Verification: app HUNG"),
+                flush=True,
+            )
+        elif result.exit_code != 0:
+            print(
+                formatting.error_msg(f"Verification: app exited with code {result.exit_code}"),
+                flush=True,
+            )
+            if result.output:
+                tail = result.output.strip().splitlines()[-10:]
+                for line in tail:
+                    print(f"  {line}", file=sys.stderr)
+        else:
+            print(
+                formatting.system_msg(f"Verification: app exited OK ({result.duration:.1f}s)"),
+                flush=True,
+            )
+    else:
+        # Web apps: just note the run command, don't launch a server
+        print(
+            formatting.system_msg(f"Skipping launch for web app: {run_cmd}"),
+            flush=True,
+        )
+
+
 def _investigation_passed(
     wt_path: Path,
     branch: str,
@@ -127,6 +213,9 @@ def _investigation_passed(
 ) -> None:
     """All investigation tasks passed. Show diff and offer to merge back."""
     print("\n--- Investigation complete (all tasks passed) ---", file=sys.stderr)
+
+    # Launch the app to verify the fix actually works
+    _launch_app_verification(wt_path)
 
     source_branch = worktree.current_branch(cwd=project_dir)
 
