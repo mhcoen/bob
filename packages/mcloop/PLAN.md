@@ -182,11 +182,11 @@ The debugging playbook this enforces:
   - [x] Run mcloop as a subprocess in the worktree directory with --no-audit
   - [x] After mcloop completes: if all tasks passed, offer to merge back (show diff, ask confirmation). If tasks failed, print the investigation state (what was learned, what remains) and leave the worktree for the user to resume or review.
 
-- [ ] Interactive investigation loop
+- [x] Interactive investigation loop
   - [x] When an investigation task requires user observation (the plan generator marks these with a keyword like `[USER]`), pause and print clearly formatted instructions for the user: what to do, what to look for, how to provide the result
   - [x] Accept free-form text input from the user at the terminal, incorporate it into the next session's context
   - [x] When the system can perform the observation itself (via process monitor or app interaction), do so automatically and feed the result into the next session
-  - [ ] Visual formatting: use clear visual separators to distinguish system actions from user prompts. User prompts should be impossible to miss in a scrolling terminal.
+  - [x] Visual formatting: use clear visual separators to distinguish system actions from user prompts. User prompts should be impossible to miss in a scrolling terminal.
 
 - [ ] Automated verification after fix
   - [ ] After the investigation produces a fix, automatically launch the app using the process monitor
