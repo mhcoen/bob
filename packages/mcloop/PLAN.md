@@ -196,7 +196,7 @@ The debugging playbook this enforces:
   - [x] If verification passes, proceed to merge
 
 - [ ] Integration with existing infrastructure
-  - [ ] Share bug context gathering code between investigate and any future fixbug command (same sources: DiagnosticReports, logs, piped input, description)
+  - [x] Share bug context gathering code between investigate and any future fixbug command (same sources: DiagnosticReports, logs, piped input, description)
   - [ ] Enable WebFetch and WebSearch tools for investigation sessions so the agent can research APIs and find working examples
   - [ ] Enhanced testing instruction for investigation sessions: write tests that exercise real code with real inputs, do not mock core logic, test threading/async for deadlocks, handle system API permission cases gracefully
   - [ ] Enhanced debugging instruction for investigation sessions: decompose before patching, search web for working examples, question assumptions when repeated approaches fail
