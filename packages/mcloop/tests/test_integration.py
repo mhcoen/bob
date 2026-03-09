@@ -513,7 +513,7 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
 
     _checkpoint(tmp_path)
 
-    assert mock_run.call_count == 4
+    assert mock_run.call_count == 5
     assert mock_run.call_args_list[0] == call(
         ["git", "status", "--porcelain"],
         cwd=tmp_path,
@@ -527,12 +527,18 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
         text=True,
     )
     assert mock_run.call_args_list[2] == call(
-        ["git", "add", "-A"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
     )
     assert mock_run.call_args_list[3] == call(
+        ["git", "add", "--", "src/foo.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert mock_run.call_args_list[4] == call(
         ["git", "commit", "-m", "mcloop: checkpoint"],
         cwd=tmp_path,
         capture_output=True,

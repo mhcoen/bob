@@ -7,6 +7,7 @@ import difflib
 import hashlib
 import json as _json
 import os
+import re
 import select
 import shlex
 import shutil
@@ -1223,7 +1224,8 @@ def _dispatch_auto_action(action: str, args: str) -> str:
 
     if action == "screenshot":
         app_name = args.strip()
-        path = f"/tmp/auto_screenshot_{app_name}.png"
+        safe_name = re.sub(r"[^a-zA-Z0-9_\-.]", "_", app_name)
+        path = f"/tmp/auto_screenshot_{safe_name}.png"
         app_interact.screenshot_window(app_name, path)
         return f"screenshot saved to {path}"
 
@@ -2088,7 +2090,20 @@ def _checkpoint(
     if next_task:
         msg += f" (next: {next_task})"
     _git(["git", "add", "-u"], cwd=project_dir, label="checkpoint add -u")
-    _git(["git", "add", "-A"], cwd=project_dir, label="checkpoint add -A")
+    # Stage untracked files individually, skipping sensitive patterns
+    untracked = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="checkpoint ls untracked",
+    )
+    _sensitive = {".env", ".key", ".pem", "credentials.json", "secrets"}
+    for f in untracked.stdout.strip().splitlines():
+        f = f.strip()
+        if not f:
+            continue
+        if any(s in f for s in _sensitive):
+            continue
+        _git(["git", "add", "--", f], cwd=project_dir, label=f"checkpoint add {f}")
     _git(
         ["git", "commit", "-m", msg],
         cwd=project_dir,

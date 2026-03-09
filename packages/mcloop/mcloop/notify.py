@@ -70,7 +70,7 @@ def _send_imessage(text: str) -> None:
 
 
 def _escape_applescript(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "").replace("\r", "")
 
 
 def notify(message: str, level: str = "info") -> None:

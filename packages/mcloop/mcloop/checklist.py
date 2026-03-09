@@ -141,6 +141,7 @@ def stage_status(tasks: list[Task]) -> str:
 
     Possible values:
     - ``"no_stages"``: plan has no stage headers
+    - ``"in_progress"``: stages exist but none completed yet
     - ``"stage_complete:<name>"``: a stage just finished,
       more stages remain
     - ``"all_complete"``: all stages are done
@@ -156,7 +157,7 @@ def stage_status(tasks: list[Task]) -> str:
         else:
             if last_complete:
                 return f"stage_complete:{last_complete}"
-            return "no_stages"
+            return "in_progress"
 
     return "all_complete"
 
@@ -324,7 +325,7 @@ def _auto_check_parents(path: Path) -> None:
             if task.children:
                 visit(task.children)
                 if not task.checked and all(c.checked for c in task.children):
-                    _check_line(lines, task.line_number)
+                    _check_line(lines, _find_task_line(lines, task))
                     task.checked = True
                     changed = True
 
