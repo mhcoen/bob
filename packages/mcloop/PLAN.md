@@ -188,12 +188,12 @@ The debugging playbook this enforces:
   - [x] When the system can perform the observation itself (via process monitor or app interaction), do so automatically and feed the result into the next session
   - [x] Visual formatting: use clear visual separators to distinguish system actions from user prompts. User prompts should be impossible to miss in a scrolling terminal.
 
-- [ ] Automated verification after fix
+- [x] Automated verification after fix
   - [x] After the investigation produces a fix, automatically launch the app using the process monitor
   - [x] Use the app interaction layer to repeat the actions that triggered the original bug
   - [x] Verify the app survives (no crash, no hang, expected UI state)
   - [x] If verification fails, feed the new failure information back into the investigation loop
-  - [ ] If verification passes, proceed to merge
+  - [x] If verification passes, proceed to merge
 
 - [ ] Integration with existing infrastructure
   - [ ] Share bug context gathering code between investigate and any future fixbug command (same sources: DiagnosticReports, logs, piped input, description)
