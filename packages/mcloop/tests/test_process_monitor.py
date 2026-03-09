@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -196,3 +197,63 @@ class TestReadCrashReport:
         (reports_dir / "MyApp-2024-01-01.log").write_text("not a crash")
         with patch.object(Path, "home", return_value=tmp_path):
             assert process_monitor.read_crash_report("MyApp") is None
+
+
+class TestRunCLI:
+    def test_successful_exit(self):
+        result = process_monitor.run_cli("echo hello world")
+        assert result.exit_code == 0
+        assert "hello world" in result.output
+        assert result.hung is False
+        assert result.sample_output is None
+        assert result.duration > 0
+
+    def test_crash_nonzero_exit(self):
+        result = process_monitor.run_cli(
+            f"{sys.executable} -c \"import sys; print('boom'); sys.exit(42)\""
+        )
+        assert result.exit_code == 42
+        assert "boom" in result.output
+        assert result.hung is False
+
+    def test_captures_stderr(self):
+        result = process_monitor.run_cli(
+            f"{sys.executable} -c \"import sys; sys.stderr.write('err msg\\n')\""
+        )
+        assert result.exit_code == 0
+        assert "err msg" in result.output
+
+    def test_hang_detected(self):
+        with patch("mcloop.process_monitor.sample", return_value="sampled"):
+            result = process_monitor.run_cli(
+                "sleep 60",
+                hang_seconds=0.3,
+                timeout_seconds=5,
+                poll_interval=0.05,
+            )
+        assert result.hung is True
+        assert result.exit_code is None
+        assert result.sample_output == "sampled"
+
+    def test_wall_clock_timeout(self):
+        # Process that produces output continuously but never exits.
+        script = (
+            "import time, sys\nwhile True:\n    print('.', flush=True)\n    time.sleep(0.05)\n"
+        )
+        with patch("mcloop.process_monitor.sample", return_value="sampled"):
+            result = process_monitor.run_cli(
+                f'{sys.executable} -c "{script}"',
+                timeout_seconds=0.5,
+                hang_seconds=60,
+                poll_interval=0.05,
+            )
+        assert result.hung is True
+        assert result.exit_code is None
+        assert "." in result.output
+
+    def test_multiline_output(self):
+        script = "for i in range(5): print(f'line {i}')"
+        result = process_monitor.run_cli(f'{sys.executable} -c "{script}"')
+        assert result.exit_code == 0
+        for i in range(5):
+            assert f"line {i}" in result.output

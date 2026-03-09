@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import os
+import select
 import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+@dataclass
+class CLIResult:
+    """Result of running a CLI app to completion."""
+
+    exit_code: int | None  # None if killed due to hang
+    output: str  # Combined stdout/stderr
+    hung: bool  # True if killed due to no-output timeout
+    duration: float  # Wall-clock seconds
+    sample_output: str | None = None  # macOS sample if hung
 
 
 @dataclass
@@ -67,8 +79,6 @@ def is_hung(proc: LaunchedProcess, timeout_seconds: float) -> bool:
     stdout = proc.process.stdout
     if stdout is not None:
         fd = stdout.fileno()
-        import select
-
         readable, _, _ = select.select([fd], [], [], 0)
         if readable:
             data = os.read(fd, 65536)
@@ -152,3 +162,94 @@ def read_crash_report(process_name: str) -> str | None:
         return newest.read_text()
     except OSError:
         return None
+
+
+def run_cli(
+    command: str,
+    cwd: str | Path | None = None,
+    timeout_seconds: float = 30.0,
+    hang_seconds: float = 10.0,
+    poll_interval: float = 0.1,
+) -> CLIResult:
+    """Launch a CLI app, capture output, detect crash or hang.
+
+    Runs the command and monitors it until it exits or hangs.
+    A crash is a non-zero exit code. A hang is detected when
+    the process produces no output for hang_seconds.
+
+    Args:
+        command: Shell command to run.
+        cwd: Working directory.
+        timeout_seconds: Max wall-clock time before killing.
+        hang_seconds: No-output duration that triggers hang detection.
+        poll_interval: How often to check for output/status.
+
+    Returns:
+        CLIResult with exit code, output, and hang/crash info.
+    """
+    proc = launch(command, cwd=cwd)
+    chunks: list[bytes] = []
+    start = time.monotonic()
+    stdout_fd = proc.process.stdout.fileno() if proc.process.stdout else -1
+
+    while True:
+        # Check wall-clock timeout.
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout_seconds:
+            sample_out = sample(proc.pid)
+            kill(proc.pid)
+            # Drain remaining output.
+            if proc.process.stdout:
+                rest = proc.process.stdout.read()
+                if rest:
+                    chunks.append(rest)
+            proc.process.wait()
+            return CLIResult(
+                exit_code=None,
+                output=b"".join(chunks).decode("utf-8", errors="replace"),
+                hung=True,
+                duration=time.monotonic() - start,
+                sample_output=sample_out,
+            )
+
+        # Read available output without blocking.
+        if stdout_fd >= 0:
+            readable, _, _ = select.select([stdout_fd], [], [], poll_interval)
+            if readable:
+                data = os.read(stdout_fd, 65536)
+                if data:
+                    chunks.append(data)
+                    proc.last_output_at = time.monotonic()
+
+        # Check if process exited.
+        ret = proc.process.poll()
+        if ret is not None:
+            # Drain any remaining output.
+            if proc.process.stdout:
+                rest = proc.process.stdout.read()
+                if rest:
+                    chunks.append(rest)
+            return CLIResult(
+                exit_code=ret,
+                output=b"".join(chunks).decode("utf-8", errors="replace"),
+                hung=False,
+                duration=time.monotonic() - start,
+            )
+
+        # Check for hang (no output for hang_seconds).
+        silence = time.monotonic() - proc.last_output_at
+        if silence >= hang_seconds:
+            sample_out = sample(proc.pid)
+            kill(proc.pid)
+            if proc.process.stdout:
+                rest = proc.process.stdout.read()
+                if rest:
+                    chunks.append(rest)
+            proc.process.wait()
+            return CLIResult(
+                exit_code=None,
+                output=b"".join(chunks).decode("utf-8", errors="replace"),
+                hung=True,
+                duration=time.monotonic() - start,
+                sample_output=sample_out,
+            )
