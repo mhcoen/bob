@@ -18,6 +18,7 @@ from mcloop.runner import (
     build_audit_prompt,
     build_bug_fix_prompt,
     build_bug_verify_prompt,
+    build_investigation_plan_description,
     build_post_fix_review_prompt,
     build_sync_prompt,
     gather_audit_context,
@@ -863,3 +864,35 @@ def test_run_task_accessibility_instruction_present_for_non_ui_task(tmp_path):
 
     prompt = captured_prompt["prompt"]
     assert "accessibilityIdentifier" in prompt
+
+
+def test_investigation_plan_description_has_three_sections():
+    """Investigation plan description requires Observations, Hypotheses, Eliminated."""
+    desc = build_investigation_plan_description("App crashes on launch")
+    assert "## Observations" in desc
+    assert "## Hypotheses" in desc
+    assert "## Eliminated" in desc
+    assert "confirmed facts" in desc
+    assert "candidate explanations" in desc
+    assert "ruled out" in desc
+
+
+def test_investigation_plan_description_includes_bug_context():
+    """Investigation plan description includes the bug context."""
+    desc = build_investigation_plan_description("Segfault in parser")
+    assert "Segfault in parser" in desc
+
+
+def test_investigation_plan_description_includes_playbook():
+    """Investigation plan description includes the debugging playbook."""
+    desc = build_investigation_plan_description("")
+    assert "Reproduce the problem" in desc
+    assert "Isolate subsystems" in desc
+    assert "patch production code" in desc
+
+
+def test_investigation_plan_description_empty_context():
+    """Investigation plan description works with empty bug context."""
+    desc = build_investigation_plan_description("")
+    assert "Bug context" not in desc
+    assert "## Observations" in desc

@@ -920,6 +920,38 @@ def run_bug_fix(
     )
 
 
+def build_investigation_plan_description(
+    bug_context: str,
+) -> str:
+    """Build the description for an investigation PLAN.md.
+
+    This description is prepended to generated investigation plans
+    so that every investigation session enforces structured note-taking.
+    """
+    parts = [
+        "You are investigating a bug. Follow the debugging playbook:\n"
+        "1. Reproduce the problem.\n"
+        "2. Instrument at stage boundaries.\n"
+        "3. Isolate subsystems with standalone probes.\n"
+        "4. Inspect live runtime behavior.\n"
+        "5. Only then patch production code.\n"
+        "6. Clean up temporary scaffolding after the fix.",
+    ]
+    if bug_context:
+        parts.append(f"Bug context:\n{bug_context}")
+    parts.append(
+        "NOTES.md must use three sections:"
+        " ## Observations (confirmed facts from"
+        " runtime, docs, logs, or experiments),"
+        " ## Hypotheses (candidate explanations not"
+        " yet confirmed), and ## Eliminated (things"
+        " ruled out, with the experiment that ruled"
+        " them out). Place each note under the"
+        " appropriate section."
+    )
+    return "\n\n".join(parts)
+
+
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
     return slug.strip("-")[:50]
