@@ -12,6 +12,17 @@ from pathlib import Path
 
 
 @dataclass
+class GUIResult:
+    """Result of monitoring a GUI app."""
+
+    crashed: bool  # True if process disappeared unexpectedly
+    hung: bool  # True if main thread stuck in sample output
+    duration: float  # Wall-clock seconds monitored
+    sample_output: str | None = None  # macOS sample if hung
+    crash_report: str | None = None  # From DiagnosticReports
+
+
+@dataclass
 class CLIResult:
     """Result of running a CLI app to completion."""
 
@@ -253,3 +264,156 @@ def run_cli(
                 duration=time.monotonic() - start,
                 sample_output=sample_out,
             )
+
+
+def pgrep(process_name: str) -> list[int]:
+    """Find PIDs matching a process name using pgrep.
+
+    Returns a list of integer PIDs, or an empty list if none found.
+    """
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", process_name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        return []
+    except subprocess.TimeoutExpired:
+        return []
+    if result.returncode != 0:
+        return []
+    pids = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        if line.isdigit():
+            pids.append(int(line))
+    return pids
+
+
+def is_main_thread_stuck(sample_output: str) -> bool:
+    """Check if macOS sample output shows a stuck main thread.
+
+    Looks for the main thread section and checks if it is blocked
+    in common wait/hang patterns: dispatch semaphore wait,
+    mach_msg_trap, __psynch_cvwait, kevent, or similar.
+
+    Returns True if the main thread appears stuck.
+    """
+    if not sample_output:
+        return False
+
+    lines = sample_output.splitlines()
+    in_main_thread = False
+    main_thread_frames: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if "Thread_0" in stripped or "Thread 0" in stripped:
+            in_main_thread = True
+            main_thread_frames = []
+            continue
+        if in_main_thread:
+            if (
+                (stripped.startswith("Thread_") or stripped.startswith("Thread "))
+                and "Thread 0" not in stripped
+                and "Thread_0" not in stripped
+            ):
+                break
+            main_thread_frames.append(stripped)
+
+    if not main_thread_frames:
+        return False
+
+    stuck_patterns = [
+        "mach_msg_trap",
+        "mach_msg2_trap",
+        "__psynch_cvwait",
+        "__semwait_signal",
+        "dispatch_semaphore_wait",
+        "__select",
+        "__sigwait",
+        "kevent",
+        "CFRunLoopRunSpecific",
+    ]
+    frame_text = "\n".join(main_thread_frames)
+    for pattern in stuck_patterns:
+        if pattern in frame_text:
+            return True
+
+    return False
+
+
+def run_gui(
+    command: str,
+    process_name: str,
+    timeout_seconds: float = 30.0,
+    check_interval: float = 1.0,
+    settle_seconds: float = 2.0,
+) -> GUIResult:
+    """Launch a GUI app, monitor for crash or hang.
+
+    Launches the command, waits for settle_seconds for the process
+    to start, then periodically checks if the process is alive via
+    pgrep. If the process disappears, it is considered a crash.
+    If the process is alive at the end of the timeout, it is sampled
+    to check if the main thread is stuck.
+
+    Args:
+        command: Shell command to launch the app.
+        process_name: Process name for pgrep (exact match).
+        timeout_seconds: How long to monitor before concluding.
+        check_interval: How often to check alive status.
+        settle_seconds: Wait after launch for process to appear.
+
+    Returns:
+        GUIResult with crash/hang status and diagnostics.
+    """
+    subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    start = time.monotonic()
+    time.sleep(settle_seconds)
+
+    pids = pgrep(process_name)
+    if not pids:
+        crash_rpt = read_crash_report(process_name)
+        return GUIResult(
+            crashed=True,
+            hung=False,
+            duration=time.monotonic() - start,
+            crash_report=crash_rpt,
+        )
+
+    pid = pids[0]
+
+    while True:
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout_seconds:
+            break
+
+        time.sleep(check_interval)
+
+        if not is_alive(pid):
+            crash_rpt = read_crash_report(process_name)
+            return GUIResult(
+                crashed=True,
+                hung=False,
+                duration=time.monotonic() - start,
+                crash_report=crash_rpt,
+            )
+
+    sample_out = sample(pid)
+    stuck = is_main_thread_stuck(sample_out)
+
+    return GUIResult(
+        crashed=False,
+        hung=stuck,
+        duration=time.monotonic() - start,
+        sample_output=sample_out if stuck else None,
+    )

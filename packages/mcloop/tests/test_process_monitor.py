@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mcloop import process_monitor
-from mcloop.process_monitor import LaunchedProcess
+from mcloop.process_monitor import GUIResult, LaunchedProcess
 
 
 class TestLaunch:
@@ -257,3 +257,188 @@ class TestRunCLI:
         assert result.exit_code == 0
         for i in range(5):
             assert f"line {i}" in result.output
+
+
+class TestPgrep:
+    @patch("subprocess.run")
+    def test_returns_pids(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="1234\n5678\n",
+        )
+        pids = process_monitor.pgrep("MyApp")
+        assert pids == [1234, 5678]
+        mock_run.assert_called_once_with(
+            ["pgrep", "-x", "MyApp"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+    @patch("subprocess.run")
+    def test_no_matches(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        assert process_monitor.pgrep("NoSuchApp") == []
+
+    @patch("subprocess.run", side_effect=FileNotFoundError)
+    def test_pgrep_not_found(self, mock_run):
+        assert process_monitor.pgrep("MyApp") == []
+
+    @patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="pgrep", timeout=5),
+    )
+    def test_pgrep_timeout(self, mock_run):
+        assert process_monitor.pgrep("MyApp") == []
+
+
+class TestIsMainThreadStuck:
+    def test_empty_output(self):
+        assert process_monitor.is_main_thread_stuck("") is False
+
+    def test_stuck_on_mach_msg_trap(self):
+        sample_text = (
+            "Call graph:\n"
+            "  Thread 0\n"
+            "    + 100 main (in MyApp)\n"
+            "    +   50 mach_msg_trap (in libsystem)\n"
+            "  Thread 1\n"
+            "    + 100 worker (in MyApp)\n"
+        )
+        assert process_monitor.is_main_thread_stuck(sample_text) is True
+
+    def test_stuck_on_semaphore_wait(self):
+        sample_text = (
+            "Thread_0\n"
+            "  + 100 main (in MyApp)\n"
+            "  +   50 dispatch_semaphore_wait (in libdispatch)\n"
+            "Thread_1\n"
+            "  + 100 worker (in MyApp)\n"
+        )
+        assert process_monitor.is_main_thread_stuck(sample_text) is True
+
+    def test_not_stuck_active_thread(self):
+        sample_text = (
+            "Thread 0\n"
+            "  + 100 main (in MyApp)\n"
+            "  +   50 doWork (in MyApp)\n"
+            "  +   25 computeStuff (in MyApp)\n"
+            "Thread 1\n"
+            "  + 100 worker (in MyApp)\n"
+        )
+        assert process_monitor.is_main_thread_stuck(sample_text) is False
+
+    def test_no_main_thread_section(self):
+        sample_text = "Thread 5\n  + 100 worker (in MyApp)\n"
+        assert process_monitor.is_main_thread_stuck(sample_text) is False
+
+    def test_stuck_on_cfrunloop(self):
+        sample_text = (
+            "Thread 0\n"
+            "  + 100 main (in MyApp)\n"
+            "  +   50 CFRunLoopRunSpecific (in CoreFoundation)\n"
+            "Thread 1\n"
+        )
+        assert process_monitor.is_main_thread_stuck(sample_text) is True
+
+
+class TestRunGUI:
+    @patch("mcloop.process_monitor.sample", return_value="healthy output")
+    @patch("mcloop.process_monitor.is_alive", return_value=True)
+    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("mcloop.process_monitor.read_crash_report", return_value=None)
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_healthy_app(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_crash,
+        mock_pgrep,
+        mock_alive,
+        mock_sample,
+    ):
+        result = process_monitor.run_gui(
+            "open MyApp",
+            "MyApp",
+            timeout_seconds=0.01,
+            check_interval=0.005,
+            settle_seconds=0.0,
+        )
+        assert result.crashed is False
+        assert result.hung is False
+        assert result.sample_output is None
+        assert isinstance(result, GUIResult)
+
+    @patch("mcloop.process_monitor.pgrep", return_value=[])
+    @patch("mcloop.process_monitor.read_crash_report", return_value="crash!")
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_immediate_crash(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_crash,
+        mock_pgrep,
+    ):
+        result = process_monitor.run_gui(
+            "open CrashApp",
+            "CrashApp",
+            settle_seconds=0.0,
+        )
+        assert result.crashed is True
+        assert result.hung is False
+        assert result.crash_report == "crash!"
+
+    @patch("mcloop.process_monitor.read_crash_report", return_value="crash!")
+    @patch("mcloop.process_monitor.is_alive", return_value=False)
+    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_crash_during_monitoring(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_pgrep,
+        mock_alive,
+        mock_crash,
+    ):
+        result = process_monitor.run_gui(
+            "open CrashApp",
+            "CrashApp",
+            timeout_seconds=10,
+            check_interval=0.005,
+            settle_seconds=0.0,
+        )
+        assert result.crashed is True
+        assert result.hung is False
+        assert result.crash_report == "crash!"
+
+    @patch("mcloop.process_monitor.is_main_thread_stuck", return_value=True)
+    @patch(
+        "mcloop.process_monitor.sample",
+        return_value="Thread 0\n  mach_msg_trap",
+    )
+    @patch("mcloop.process_monitor.is_alive", return_value=True)
+    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_hung_app(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_pgrep,
+        mock_alive,
+        mock_sample,
+        mock_stuck,
+    ):
+        result = process_monitor.run_gui(
+            "open HungApp",
+            "HungApp",
+            timeout_seconds=0.01,
+            check_interval=0.005,
+            settle_seconds=0.0,
+        )
+        assert result.crashed is False
+        assert result.hung is True
+        assert result.sample_output is not None
