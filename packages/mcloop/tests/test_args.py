@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
     MAX_VERIFICATION_ROUNDS,
     SessionContext,
@@ -11,7 +12,6 @@ from mcloop.main import (
     _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
-    _find_recent_crash_report,
     _handle_auto_task,
     _handle_user_task,
     _investigation_failed,
@@ -23,7 +23,6 @@ from mcloop.main import (
     _run_audit_fix_cycle,
     _run_single_audit_round,
     _verify_gui_survival,
-    gather_bug_context,
     run_loop,
 )
 
@@ -363,7 +362,7 @@ def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
 
 def test_find_recent_crash_report_no_dir(tmp_path):
     """Returns empty string when DiagnosticReports dir doesn't exist."""
-    with patch("mcloop.main.Path.home", return_value=tmp_path):
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
         result = _find_recent_crash_report()
     assert result == ""
 
@@ -377,7 +376,7 @@ def test_find_recent_crash_report_no_recent(tmp_path):
     import os
 
     os.utime(old_file, (0, 0))  # very old mtime
-    with patch("mcloop.main.Path.home", return_value=tmp_path):
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
         result = _find_recent_crash_report()
     assert result == ""
 
@@ -389,7 +388,7 @@ def test_find_recent_crash_report_finds_newest(tmp_path):
     (reports_dir / "OldApp.ips").write_text("old crash")
     (reports_dir / "NewApp.ips").write_text("new crash")
     # Both are recent (just created), newest by mtime wins
-    with patch("mcloop.main.Path.home", return_value=tmp_path):
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
         result = _find_recent_crash_report()
     assert result == "new crash"
 
@@ -399,7 +398,7 @@ def test_find_recent_crash_report_ignores_non_ips(tmp_path):
     reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
     reports_dir.mkdir(parents=True)
     (reports_dir / "crash.log").write_text("not ips")
-    with patch("mcloop.main.Path.home", return_value=tmp_path):
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
         result = _find_recent_crash_report()
     assert result == ""
 
@@ -409,7 +408,7 @@ def test_find_recent_crash_report_ignores_non_ips(tmp_path):
 
 def test_gather_bug_context_description_only(tmp_path):
     """Description is set from the argument."""
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, description="app crashes")
     assert ctx.user_description == "app crashes"
     assert ctx.crash_report == ""
@@ -420,7 +419,7 @@ def test_gather_bug_context_log_file(tmp_path):
     """Reads the --log file into failure_history."""
     log_file = tmp_path / "error.log"
     log_file.write_text("Traceback: something broke\n")
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, log_path=str(log_file))
     assert "Traceback: something broke" in ctx.failure_history
     assert "From " in ctx.failure_history
@@ -428,7 +427,7 @@ def test_gather_bug_context_log_file(tmp_path):
 
 def test_gather_bug_context_stdin(tmp_path):
     """Piped stdin text is included in failure_history."""
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, stdin_text="error from pipe\n")
     assert "error from pipe" in ctx.failure_history
     assert "From stdin:" in ctx.failure_history
@@ -439,7 +438,7 @@ def test_gather_bug_context_last_run_log(tmp_path):
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     (mcloop_dir / "last-run.log").write_text("previous run failed here\n")
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path)
     assert "previous run failed here" in ctx.failure_history
     assert "From last-run.log:" in ctx.failure_history
@@ -451,8 +450,8 @@ def test_gather_bug_context_crash_report(tmp_path):
     reports_dir.mkdir(parents=True)
     (reports_dir / "MyCrash.ips").write_text("crash data here")
     with (
-        patch("mcloop.main.Path.home", return_value=tmp_path),
-        patch("mcloop.main.detect_app_type", return_value=""),
+        patch("mcloop.investigator.Path.home", return_value=tmp_path),
+        patch("mcloop.investigator.detect_app_type", return_value=""),
     ):
         ctx = gather_bug_context(tmp_path)
     assert ctx.crash_report == "crash data here"
@@ -460,7 +459,7 @@ def test_gather_bug_context_crash_report(tmp_path):
 
 def test_gather_bug_context_app_type(tmp_path):
     """Populates app_type from detect_app_type."""
-    with patch("mcloop.main.detect_app_type", return_value="gui"):
+    with patch("mcloop.investigator.detect_app_type", return_value="gui"):
         ctx = gather_bug_context(tmp_path)
     assert ctx.app_type == "gui"
 
@@ -482,8 +481,8 @@ def test_gather_bug_context_all_sources(tmp_path):
     log_file.write_text("log file output")
 
     with (
-        patch("mcloop.main.Path.home", return_value=tmp_path),
-        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.investigator.Path.home", return_value=tmp_path),
+        patch("mcloop.investigator.detect_app_type", return_value="cli"),
     ):
         ctx = gather_bug_context(
             tmp_path,
@@ -502,21 +501,21 @@ def test_gather_bug_context_all_sources(tmp_path):
 
 def test_gather_bug_context_empty_stdin_ignored(tmp_path):
     """Empty or whitespace-only stdin is not included."""
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, stdin_text="   \n  ")
     assert ctx.failure_history == ""
 
 
 def test_gather_bug_context_missing_log_file(tmp_path):
     """Non-existent --log file is silently skipped."""
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, log_path=str(tmp_path / "nonexistent.log"))
     assert ctx.failure_history == ""
 
 
 def test_gather_bug_context_no_description_is_empty(tmp_path):
     """When description is None, user_description is empty string."""
-    with patch("mcloop.main.detect_app_type", return_value=""):
+    with patch("mcloop.investigator.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, description=None)
     assert ctx.user_description == ""
 

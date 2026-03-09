@@ -1,8 +1,12 @@
-"""Generate investigation plans from bug context."""
+"""Generate investigation plans and gather bug context."""
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from pathlib import Path
+
+from mcloop.checks import detect_app_type
 
 DEBUGGING_PLAYBOOK = (
     "1. Reproduce the problem.\n"
@@ -302,3 +306,84 @@ def _verify_step(app_type: str) -> str:
     if app_type == "cli":
         return "re-run with process_monitor.run_cli() to confirm the bug no longer occurs"
     return "re-run the failing scenario to confirm the fix"
+
+
+def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
+    """Find the most recent .ips crash report from DiagnosticReports.
+
+    Returns the contents of the newest .ips file modified within
+    max_age_seconds, or an empty string if none found.
+    """
+    reports_dir = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+    if not reports_dir.is_dir():
+        return ""
+    now = time.time()
+    candidates: list[Path] = []
+    for entry in reports_dir.iterdir():
+        if entry.suffix == ".ips" and (now - entry.stat().st_mtime) < max_age_seconds:
+            candidates.append(entry)
+    if not candidates:
+        return ""
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        return newest.read_text()
+    except OSError:
+        return ""
+
+
+def gather_bug_context(
+    project_dir: Path,
+    *,
+    description: str | None = None,
+    log_path: str | None = None,
+    stdin_text: str = "",
+) -> BugContext:
+    """Collect bug context from all available sources.
+
+    Sources (in order of priority):
+    - description: user-provided bug description from CLI argument
+    - log_path: path to a log file specified via --log
+    - stdin_text: text piped via stdin
+    - .mcloop/last-run.log: log from the most recent mcloop run
+    - ~/Library/Logs/DiagnosticReports/: most recent macOS crash report
+    - detect_app_type: classify the project as gui/cli/web
+    """
+    crash_report = _find_recent_crash_report()
+
+    # Collect failure history from log sources
+    failure_parts: list[str] = []
+
+    # --log file
+    if log_path:
+        log_file = Path(log_path)
+        if log_file.is_file():
+            try:
+                content = log_file.read_text().strip()
+                if content:
+                    failure_parts.append(f"From {log_path}:\n{content}")
+            except OSError:
+                pass
+
+    # Piped stdin
+    if stdin_text.strip():
+        failure_parts.append(f"From stdin:\n{stdin_text.strip()}")
+
+    # .mcloop/last-run.log
+    last_run = project_dir / ".mcloop" / "last-run.log"
+    if last_run.is_file():
+        try:
+            content = last_run.read_text().strip()
+            if content:
+                failure_parts.append(f"From last-run.log:\n{content}")
+        except OSError:
+            pass
+
+    failure_history = "\n\n".join(failure_parts)
+    app_type = detect_app_type(project_dir)
+
+    return BugContext(
+        crash_report=crash_report,
+        user_description=description or "",
+        failure_history=failure_history,
+        app_type=app_type,
+    )
