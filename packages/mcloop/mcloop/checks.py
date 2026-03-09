@@ -195,6 +195,60 @@ def detect_build(project_dir: str | Path) -> str | None:
     return None
 
 
+def detect_app_type(project_dir: str | Path) -> str:
+    """Classify the app as 'gui', 'cli', or 'web' from the run command.
+
+    Uses the run command (from mcloop.json or auto-detected) and applies
+    pattern matching to determine the app type.
+
+    GUI patterns: ``open *.app``, ``./run.sh``
+    Web patterns: ``npm start``, ``flask run``, ``uvicorn``, ``gunicorn``,
+                  ``python -m http.server``
+    CLI: everything else (bare binaries, ``python``, ``cargo run``, etc.)
+
+    Returns 'cli' if no run command is found.
+    """
+    run_cmd = detect_run(project_dir)
+    if not run_cmd:
+        return "cli"
+    return _classify_run_command(run_cmd)
+
+
+def _classify_run_command(cmd: str) -> str:
+    """Classify a run command string as 'gui', 'cli', or 'web'."""
+    parts = shlex.split(cmd)
+    if not parts:
+        return "cli"
+
+    base = parts[0]
+
+    # GUI: open *.app
+    if base == "open" and any(p.endswith(".app") for p in parts[1:]):
+        return "gui"
+
+    # GUI: shell script launcher (./run.sh, ./launch.sh, etc.)
+    if re.match(r"^\.?/.*\.sh$", base):
+        return "gui"
+
+    # Web: flask run, uvicorn, gunicorn
+    web_commands = {"flask", "uvicorn", "gunicorn", "waitress-serve"}
+    if base in web_commands:
+        return "web"
+
+    # Web: npm start / npm run dev / npm run serve
+    if base == "npm" and len(parts) >= 2 and parts[1] in ("start", "run"):
+        return "web"
+
+    # Web: python -m http.server / python -m flask
+    if base in ("python", "python3") and len(parts) >= 3 and parts[1] == "-m":
+        web_modules = {"http.server", "flask", "uvicorn", "gunicorn"}
+        if parts[2] in web_modules:
+            return "web"
+
+    # CLI: everything else
+    return "cli"
+
+
 def detect_run(project_dir: str | Path) -> str | None:
     """Auto-detect run command, with mcloop.json override."""
     project_dir = Path(project_dir)

@@ -5,8 +5,10 @@ import subprocess
 from unittest.mock import patch
 
 from mcloop.checks import (
+    _classify_run_command,
     _detect_commands,
     _load_config,
+    detect_app_type,
     get_check_commands,
     run_checks,
 )
@@ -188,3 +190,125 @@ def test_run_checks_second_command_fails(mock_run, tmp_path):
     result = run_checks(tmp_path)
     assert not result.passed
     assert result.command == "pytest"
+
+
+# --- _classify_run_command tests ---
+
+
+def test_classify_open_app():
+    assert _classify_run_command("open MyApp.app") == "gui"
+
+
+def test_classify_open_app_with_path():
+    assert _classify_run_command("open /Applications/MyApp.app") == "gui"
+
+
+def test_classify_open_non_app():
+    """open without .app is not GUI (e.g. open a URL)."""
+    assert _classify_run_command("open http://localhost:3000") == "cli"
+
+
+def test_classify_run_sh():
+    assert _classify_run_command("./run.sh") == "gui"
+
+
+def test_classify_launch_sh():
+    assert _classify_run_command("./launch.sh") == "gui"
+
+
+def test_classify_path_sh():
+    assert _classify_run_command("/usr/local/bin/run.sh") == "gui"
+
+
+def test_classify_bare_binary():
+    assert _classify_run_command("./myapp") == "cli"
+
+
+def test_classify_build_binary():
+    assert _classify_run_command(".build/debug/MyApp") == "cli"
+
+
+def test_classify_python_script():
+    assert _classify_run_command("python main.py") == "cli"
+
+
+def test_classify_python3_script():
+    assert _classify_run_command("python3 app.py") == "cli"
+
+
+def test_classify_cargo_run():
+    assert _classify_run_command("cargo run") == "cli"
+
+
+def test_classify_go_run():
+    assert _classify_run_command("go run .") == "cli"
+
+
+def test_classify_swift_run():
+    assert _classify_run_command("swift run MyApp") == "cli"
+
+
+def test_classify_npm_start():
+    assert _classify_run_command("npm start") == "web"
+
+
+def test_classify_npm_run_dev():
+    assert _classify_run_command("npm run dev") == "web"
+
+
+def test_classify_flask_run():
+    assert _classify_run_command("flask run") == "web"
+
+
+def test_classify_uvicorn():
+    assert _classify_run_command("uvicorn app:main") == "web"
+
+
+def test_classify_gunicorn():
+    assert _classify_run_command("gunicorn app:app") == "web"
+
+
+def test_classify_python_m_flask():
+    assert _classify_run_command("python -m flask run") == "web"
+
+
+def test_classify_python_m_http_server():
+    assert _classify_run_command("python -m http.server") == "web"
+
+
+def test_classify_python_m_uvicorn():
+    assert _classify_run_command("python3 -m uvicorn app:main") == "web"
+
+
+def test_classify_empty():
+    assert _classify_run_command("") == "cli"
+
+
+# --- detect_app_type integration tests ---
+
+
+def test_detect_app_type_from_config(tmp_path):
+    config = {"run": "open MyApp.app"}
+    (tmp_path / "mcloop.json").write_text(json.dumps(config))
+    assert detect_app_type(tmp_path) == "gui"
+
+
+def test_detect_app_type_web_from_config(tmp_path):
+    config = {"run": "npm start"}
+    (tmp_path / "mcloop.json").write_text(json.dumps(config))
+    assert detect_app_type(tmp_path) == "web"
+
+
+def test_detect_app_type_cli_from_config(tmp_path):
+    config = {"run": "cargo run"}
+    (tmp_path / "mcloop.json").write_text(json.dumps(config))
+    assert detect_app_type(tmp_path) == "cli"
+
+
+def test_detect_app_type_no_run_command(tmp_path):
+    assert detect_app_type(tmp_path) == "cli"
+
+
+def test_detect_app_type_autodetected_npm(tmp_path):
+    (tmp_path / "package.json").write_text('{"scripts": {"start": "node ."}}')
+    assert detect_app_type(tmp_path) == "web"
