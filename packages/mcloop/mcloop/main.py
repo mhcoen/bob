@@ -49,25 +49,83 @@ from mcloop.runner import (
 )
 
 
+def _kill_orphan_sessions(project_dir: Path) -> None:
+    """Kill orphan claude processes from a previous mcloop run.
+
+    When mcloop is killed with kill -9, the claude subprocess
+    survives because it runs in its own session. The PID is
+    recorded in .mcloop/active-pid so the next run can kill it.
+    """
+    pid_file = project_dir / ".mcloop" / "active-pid"
+    if not pid_file.exists():
+        return
+    try:
+        content = pid_file.read_text().strip()
+        parts = content.split()
+        pid = int(parts[0])
+        pgid = int(parts[1]) if len(parts) > 1 else pid
+    except (OSError, ValueError, IndexError):
+        pid_file.unlink(missing_ok=True)
+        return
+    # Check if the process is still alive
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        # Already dead
+        pid_file.unlink(missing_ok=True)
+        return
+    except PermissionError:
+        pass  # alive but we can't signal it
+    # Kill the entire process group
+    print(
+        f"\n!!! Killing orphan claude process (pid={pid}) from previous run",
+        flush=True,
+    )
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    pid_file.unlink(missing_ok=True)
+
+
+def _kill_active_process() -> None:
+    """Kill any active claude subprocess and its process group.
+
+    Called by both the signal handler and the atexit handler
+    so orphan claude processes cannot survive mcloop exiting.
+    """
+    import mcloop.runner as _runner
+
+    proc = _runner._active_process
+    if proc is not None:
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        _runner._active_process = None
+
+
 def main() -> None:
+    import atexit
+
+    atexit.register(_kill_active_process)
+
     def _handle_sigint(sig, frame):
         print("\nInterrupted.", flush=True)
-        import mcloop.runner as _runner
-
-        proc = _runner._active_process
-        if proc is not None:
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
+        _kill_active_process()
         os._exit(130)
 
     signal.signal(signal.SIGINT, _handle_sigint)
     signal.signal(signal.SIGTSTP, _handle_sigint)
+    signal.signal(signal.SIGTERM, _handle_sigint)
+    signal.signal(signal.SIGHUP, _handle_sigint)
     _main()
 
 
@@ -116,7 +174,7 @@ def run_loop(
 
     project_checks = get_check_commands(project_dir)
 
-    print(f">>> DEBUG: run_loop started, no_audit={no_audit}", flush=True)
+    _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     _checkpoint(project_dir)
 
@@ -295,8 +353,6 @@ def run_loop(
     # Check if we stopped at a stage boundary
     final_tasks = parse(checklist_path)
     status = stage_status(final_tasks)
-    print(f"\n>>> DEBUG: stage_status={status}", flush=True)
-    print(f">>> DEBUG: completed={len(completed)} tasks", flush=True)
 
     if status.startswith("stage_complete:"):
         done_stage = status.split(":", 1)[1]
@@ -350,7 +406,6 @@ def run_loop(
         return False
 
     has_unchecked = _any_unchecked(final_for_audit)
-    print(f">>> DEBUG: has_unchecked={has_unchecked} no_audit={no_audit}", flush=True)
     if has_unchecked:
         print(
             "\n>>> Audit skipped (unchecked tasks remain)",
@@ -400,6 +455,7 @@ def _parse_args() -> argparse.Namespace:
 def _cmd_audit(checklist_path: Path) -> None:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
     project_dir = checklist_path.parent
+    _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     log_dir = project_dir / "logs"
     bugs_path = project_dir / "BUGS.md"
@@ -418,6 +474,7 @@ def _cmd_audit(checklist_path: Path) -> None:
 def _cmd_sync(checklist_path: Path, *, dry_run: bool = False) -> None:
     """Launch a Claude Code session with full project context for sync analysis."""
     project_dir = checklist_path.parent
+    _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     log_dir = project_dir / "logs"
     mode = "(dry run)" if dry_run else ""
@@ -1002,14 +1059,11 @@ def _run_audit_fix_cycle(
         if not fixed:
             # No bugs found or fixed — no need for another round
             if round_num == 1:
-                print(">>> DEBUG: audit round 1, no bugs, sending notify", flush=True)
                 notify("Audit complete: no bugs found.")
             else:
-                print(">>> DEBUG: audit round 2, no new bugs, sending notify", flush=True)
                 notify("Audit complete: fixes verified, no new bugs.")
             break
         if round_num == max_rounds:
-            print(">>> DEBUG: audit max rounds, sending notify", flush=True)
             notify("Audit complete: bugs fixed.")
 
     _save_audit_hash(project_dir)

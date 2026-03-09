@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from mcloop.investigator import (
+    _DEBUGGING_PLAYBOOK,
+    _PROBES_INSTRUCTION,
+    _WEB_SEARCH_INSTRUCTION,
+)
+
 
 @dataclass
 class RunResult:
@@ -239,6 +245,32 @@ def _run_session(
         start_new_session=True,
     )
     _active_process = process
+    _reclaim_foreground()
+    # Write PID file so orphans can be killed on next startup
+    pid_dir = cwd / ".mcloop"
+    pid_dir.mkdir(exist_ok=True)
+    pid_file = pid_dir / "active-pid"
+    try:
+        pgid = os.getpgid(process.pid)
+        pid_file.write_text(f"{process.pid} {pgid}\n")
+    except OSError:
+        pgid = process.pid
+        pid_file.write_text(f"{process.pid} {process.pid}\n")
+    # Watchdog: a tiny shell process that kills claude if mcloop dies.
+    # Survives kill -9 on mcloop because it's in its own session.
+    # Polls every 2 seconds. When mcloop's PID disappears, kills
+    # claude's entire process group.
+    _watchdog = subprocess.Popen(
+        [
+            "sh", "-c",
+            f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 2; done; "
+            f"kill -9 -{pgid} 2>/dev/null; "
+            f"rm -f '{pid_file}'",
+        ],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     if stdin_text and process.stdin:
         process.stdin.write(stdin_text)
         process.stdin.close()
@@ -286,6 +318,10 @@ def _run_session(
                         )
                         process.kill()
                         process.wait()
+                        try:
+                            _watchdog.kill()
+                        except OSError:
+                            pass
                         return "\n".join(output_lines), 1
                     if not shown_waiting:
                         try:
@@ -320,10 +356,24 @@ def _run_session(
     except KeyboardInterrupt:
         process.kill()
         process.wait()
+        try:
+            _watchdog.kill()
+        except OSError:
+            pass
         raise
 
     t.join(timeout=5)
     process.wait()
+    _active_process = None
+    # Kill the watchdog and clean up PID file on normal exit
+    try:
+        _watchdog.kill()
+    except OSError:
+        pass
+    try:
+        (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
+    except OSError:
+        pass
     return "".join(output_lines), process.returncode
 
 
@@ -930,28 +980,10 @@ def build_investigation_plan_description(
     so that every investigation session enforces structured note-taking.
     """
     parts = [
-        "You are investigating a bug. Follow the debugging playbook:\n"
-        "1. Reproduce the problem.\n"
-        "2. Instrument at stage boundaries.\n"
-        "3. Isolate subsystems with standalone probes.\n"
-        "4. Inspect live runtime behavior.\n"
-        "5. Only then patch production code.\n"
-        "6. Clean up temporary scaffolding after the fix.",
+        "You are investigating a bug. Follow the debugging playbook:\n" + _DEBUGGING_PLAYBOOK,
     ]
-    parts.append(
-        "For any subsystem whose behavior is unclear,"
-        " create a standalone probe script that exercises"
-        " just that subsystem in isolation. The probe"
-        " should print or log enough to confirm or rule"
-        " out the hypothesis. Delete probe scripts after"
-        " the investigation."
-    )
-    parts.append(
-        "Before writing code to fix or work around the"
-        " issue, search the web for known issues, working"
-        " examples, and upstream fixes. Prefer proven"
-        " solutions over ad-hoc patches."
-    )
+    parts.append(_PROBES_INSTRUCTION)
+    parts.append(_WEB_SEARCH_INSTRUCTION)
     if bug_context:
         parts.append(f"Bug context:\n{bug_context}")
     if failure_history:
