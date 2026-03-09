@@ -142,11 +142,11 @@ The debugging playbook this enforces:
   - [x] Add instruction to the investigation plan description requiring three sections in NOTES.md: Observations (confirmed facts from runtime, docs, logs, or experiments), Hypotheses (candidate explanations not yet confirmed), and Eliminated (things ruled out, with the experiment that ruled them out)
   - [x] The investigation prompt must instruct the agent to check Eliminated before proposing any approach and refuse to repeat an eliminated approach unless new evidence contradicts the elimination
 
-- [ ] Process monitor module
+- [x] Process monitor module
   - [x] Create `mcloop/process_monitor.py` with functions to: launch a process from a run command, check if a process is alive by PID, detect a hung process (alive but not producing output for N seconds), sample a hung process on macOS (`sample <pid>`), kill a process, read the most recent crash report from `~/Library/Logs/DiagnosticReports/` matching a process name
   - [x] For CLI apps: launch with subprocess, capture stdout/stderr, detect crash (non-zero exit) or hang (no output timeout)
   - [x] For GUI apps: launch, check alive with pgrep, detect crash (process disappears) or hang (process alive but sample shows stuck main thread)
-  - [ ] Add tests with mock subprocesses
+  - [x] Add tests with mock subprocesses
 
 - [ ] App interaction layer
   - [ ] Create `mcloop/app_interact.py` with functions for macOS GUI app interaction via osascript/System Events: click button by accessibility label, select menu item by path, type text into focused field, read value of UI element by label, list all UI elements in a window, check if a window exists, take a screenshot of a specific window
