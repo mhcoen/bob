@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -275,7 +276,7 @@ def _run_session(
             "-c",
             f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 2; done; "
             f"kill -9 -{pgid} 2>/dev/null; "
-            f"rm -f '{pid_file}'",
+            f"rm -f {shlex.quote(str(pid_file))}",
         ],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
@@ -337,7 +338,7 @@ def _run_session(
                             _watchdog.kill()
                         except OSError:
                             pass
-                        return "\n".join(output_lines), 1
+                        return "".join(output_lines), 1
                     if not shown_waiting:
                         try:
                             pending = list(pending_dir.iterdir())

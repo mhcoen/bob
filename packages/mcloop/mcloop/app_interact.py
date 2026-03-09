@@ -5,6 +5,11 @@ from __future__ import annotations
 import subprocess
 
 
+def _esc(s: str) -> str:
+    """Escape a string for embedding in AppleScript double quotes."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _run_osascript(script: str, timeout: float = 10.0) -> str:
     """Run an AppleScript via osascript and return stdout.
 
@@ -31,8 +36,8 @@ def click_button(app_name: str, button_label: str) -> None:
     """Click a button by its accessibility label in an app's front window."""
     script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
-        f'    click button "{button_label}" of window 1\n'
+        f'  tell process "{_esc(app_name)}"\n'
+        f'    click button "{_esc(button_label)}" of window 1\n'
         f"  end tell\n"
         f"end tell"
     )
@@ -48,18 +53,19 @@ def select_menu_item(app_name: str, *menu_path: str) -> None:
         raise ValueError("menu_path must have at least 2 elements (menu, item)")
     parts = ["menu bar 1"]
     for i, name in enumerate(menu_path):
+        escaped = _esc(name)
         if i == 0:
-            parts.append(f'menu bar item "{name}"')
-            parts.append(f'menu "{name}"')
+            parts.append(f'menu bar item "{escaped}"')
+            parts.append(f'menu "{escaped}"')
         elif i < len(menu_path) - 1:
-            parts.append(f'menu item "{name}"')
-            parts.append(f'menu "{name}"')
+            parts.append(f'menu item "{escaped}"')
+            parts.append(f'menu "{escaped}"')
         else:
-            parts.append(f'menu item "{name}"')
+            parts.append(f'menu item "{escaped}"')
     chain = " of ".join(reversed(parts))
     script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
+        f'  tell process "{_esc(app_name)}"\n'
         f"    click {chain}\n"
         f"  end tell\n"
         f"end tell"
@@ -69,7 +75,7 @@ def select_menu_item(app_name: str, *menu_path: str) -> None:
 
 def type_text(text: str) -> None:
     """Type text into the currently focused field via System Events."""
-    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = _esc(text)
     script = f'tell application "System Events"\n  keystroke "{escaped}"\nend tell'
     _run_osascript(script)
 
@@ -81,8 +87,8 @@ def read_value(app_name: str, element_type: str, label: str) -> str:
     """
     script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
-        f'    get value of {element_type} "{label}" of window 1\n'
+        f'  tell process "{_esc(app_name)}"\n'
+        f'    get value of {element_type} "{_esc(label)}" of window 1\n'
         f"  end tell\n"
         f"end tell"
     )
@@ -96,7 +102,7 @@ def list_elements(app_name: str) -> str:
     """
     script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
+        f'  tell process "{_esc(app_name)}"\n'
         f"    entire contents of window 1\n"
         f"  end tell\n"
         f"end tell"
@@ -108,7 +114,7 @@ def window_exists(app_name: str) -> bool:
     """Check if an app has at least one window open."""
     script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
+        f'  tell process "{_esc(app_name)}"\n'
         f"    count of windows\n"
         f"  end tell\n"
         f"end tell"
@@ -128,7 +134,7 @@ def screenshot_window(app_name: str, output_path: str) -> None:
     """
     wid_script = (
         f'tell application "System Events"\n'
-        f'  tell process "{app_name}"\n'
+        f'  tell process "{_esc(app_name)}"\n'
         f"    set wid to id of window 1\n"
         f"  end tell\n"
         f"end tell\n"

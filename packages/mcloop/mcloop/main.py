@@ -1031,10 +1031,11 @@ def _cmd_sync(checklist_path: Path, *, dry_run: bool = False) -> None:
     mode = "(dry run)" if dry_run else ""
     print(f"Syncing PLAN.md with codebase {mode}...".strip(), flush=True)
     original = checklist_path.read_text() if checklist_path.exists() else ""
-    global _SUPPRESS_ALL_TOOLS
-    _SUPPRESS_ALL_TOOLS = False
+    import mcloop.runner as _runner
+
+    _runner._SUPPRESS_ALL_TOOLS = False
     result = run_sync(project_dir, log_dir)
-    _SUPPRESS_ALL_TOOLS = True
+    _runner._SUPPRESS_ALL_TOOLS = True
     if not result.success:
         print(f"sync: session exited with code {result.exit_code}", file=sys.stderr)
         sys.exit(result.exit_code)
