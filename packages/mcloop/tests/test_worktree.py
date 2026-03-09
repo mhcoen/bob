@@ -257,3 +257,130 @@ class TestRemove:
             with patch.object(worktree, "_run_git", return_value=result):
                 with pytest.raises(RuntimeError, match="Failed to remove"):
                     worktree.remove("investigate-fix")
+
+    def test_branch_delete_failure(self):
+        """If worktree removes OK but branch delete fails, raise."""
+        wts = [{"path": "/repo-investigate-fix", "branch": "investigate-fix"}]
+
+        def mock_git(*args, **kwargs):
+            if args[0] == "worktree":
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+            # branch -d fails
+            return subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="error: not merged"
+            )
+
+        with patch.object(worktree, "list_worktrees", return_value=wts):
+            with patch.object(worktree, "_run_git", side_effect=mock_git):
+                with pytest.raises(RuntimeError, match="Failed to delete branch"):
+                    worktree.remove("investigate-fix")
+
+
+class TestCreateGitCommands:
+    """Verify create() passes the right arguments to git."""
+
+    def test_passes_current_branch_to_worktree_add(self):
+        """The source branch should be passed as the start point."""
+        calls = []
+
+        def mock_git(*args, **kwargs):
+            calls.append(args)
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse" and "--abbrev-ref" in args:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/dev\n")
+            if cmd == "rev-parse" and "--show-toplevel" in args:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="/repo\n")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=mock_git):
+                worktree.create("some bug")
+
+        # Find the worktree add call
+        wt_call = [c for c in calls if c[0] == "worktree"][0]
+        assert wt_call == (
+            "worktree",
+            "add",
+            "-b",
+            "investigate-some-bug",
+            "/repo-investigate-some-bug",
+            "feature/dev",
+        )
+
+    def test_repo_root_failure(self):
+        """If git rev-parse --show-toplevel fails, raise."""
+
+        def mock_git(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse" and "--abbrev-ref" in args:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="main\n")
+            if cmd == "rev-parse" and "--show-toplevel" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=128, stdout="", stderr="fatal: bad"
+                )
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=mock_git):
+                with pytest.raises(RuntimeError, match="fatal: bad"):
+                    worktree.create("some bug")
+
+    def test_cwd_passed_through(self):
+        """The cwd kwarg should be forwarded to all git calls."""
+        calls_kwargs = []
+
+        def mock_git(*args, **kwargs):
+            calls_kwargs.append(kwargs)
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse" and "--abbrev-ref" in args:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="main\n")
+            if cmd == "rev-parse" and "--show-toplevel" in args:
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="/repo\n")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=mock_git):
+                worktree.create("bug", cwd="/custom")
+
+        for kw in calls_kwargs:
+            assert kw.get("cwd") == "/custom"
+
+
+class TestListMultiple:
+    def test_multiple_investigation_worktrees(self):
+        porcelain = (
+            "worktree /repo\n"
+            "HEAD aaa\n"
+            "branch refs/heads/main\n"
+            "\n"
+            "worktree /repo-investigate-bug-a\n"
+            "HEAD bbb\n"
+            "branch refs/heads/investigate-bug-a\n"
+            "\n"
+            "worktree /repo-investigate-bug-b\n"
+            "HEAD ccc\n"
+            "branch refs/heads/investigate-bug-b\n"
+            "\n"
+        )
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout=porcelain)
+        with patch.object(worktree, "_run_git", return_value=result):
+            wts = worktree.list_worktrees()
+
+        assert len(wts) == 2
+        assert wts[0]["branch"] == "investigate-bug-a"
+        assert wts[1]["branch"] == "investigate-bug-b"
+
+    def test_detached_head_worktree_skipped(self):
+        """Worktrees with detached HEAD (no branch line) are skipped."""
+        porcelain = "worktree /repo-investigate-detached\nHEAD abc123\ndetached\n\n"
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout=porcelain)
+        with patch.object(worktree, "_run_git", return_value=result):
+            assert worktree.list_worktrees() == []
+
+
+class TestMergeCwd:
+    def test_cwd_forwarded(self):
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+        with patch.object(worktree, "_run_git", return_value=result) as mock:
+            worktree.merge("investigate-fix", cwd="/custom")
+        mock.assert_called_once_with("merge", "investigate-fix", cwd="/custom")
