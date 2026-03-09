@@ -891,6 +891,15 @@ def test_investigation_plan_description_includes_playbook():
     assert "patch production code" in desc
 
 
+def test_investigation_plan_description_checks_eliminated_before_proposing():
+    """Investigation plan description requires checking Eliminated before proposing."""
+    desc = build_investigation_plan_description("App crashes")
+    assert "read the ## Eliminated section" in desc
+    assert "Do not repeat an eliminated approach" in desc
+    assert "new evidence" in desc
+    assert "contradicts" in desc
+
+
 def test_investigation_plan_description_empty_context():
     """Investigation plan description works with empty bug context."""
     desc = build_investigation_plan_description("")

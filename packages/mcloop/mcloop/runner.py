@@ -949,6 +949,16 @@ def build_investigation_plan_description(
         " them out). Place each note under the"
         " appropriate section."
     )
+    parts.append(
+        "Before proposing any approach, read the"
+        " ## Eliminated section of NOTES.md. Do not"
+        " repeat an eliminated approach unless you"
+        " have new evidence that contradicts the"
+        " original elimination. If you find yourself"
+        " about to try something already eliminated,"
+        " stop and explain what new evidence would"
+        " justify revisiting it."
+    )
     return "\n\n".join(parts)
 
 
