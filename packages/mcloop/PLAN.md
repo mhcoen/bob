@@ -117,6 +117,10 @@ over-abstraction. This is a simple tool and should stay that way.
 - [x] Reduce Telegram notification frequency: only send notifications for events that require attention or mark real progress. Do not notify on individual retry failures (attempt 1/3, 2/3). Only notify when a task genuinely fails after all retries are exhausted, when a stage or the full run completes, when a session limit is hit, and when the audit cycle finishes. Combine stage completion and next stage start into a single message. Goal: no more than one notification every few minutes during normal operation.
 - [x] Targeted testing: after each task, only run tests corresponding to changed files (e.g., changes to hasher.py runs test_hasher.py). Map source files to test files by naming convention. Run the full test suite only at stage boundaries and at the end of the run. This avoids running the entire test suite after every single task.
 - [x] Skip Telegram permission hook for interactive sessions: the hook should check for the MCLOOP_TASK_LABEL environment variable (already set by runner.py) and exit 0 immediately if it's absent. This lets interactive Claude Code sessions use the normal terminal permission flow instead of sending Telegram approvals.
+- [x] `--model` flag to select which Claude model to use (e.g., `--model opus`)
+- [x] Sync `--dry-run` flag: show proposed PLAN.md changes without writing them
+- [x] Standalone `audit` subcommand: run a bug audit without running the task loop
+- [x] Permission denial kill: when a Telegram permission request is denied, immediately kill the running session and move on
 
 ## Stage 2: Investigation system (`mcloop investigate`)
 
@@ -151,11 +155,11 @@ The debugging playbook this enforces:
   - [x] Add tests with mock subprocesses
 
 - [ ] App interaction layer
-  - [ ] Create `mcloop/app_interact.py` with functions for macOS GUI app interaction via osascript/System Events: click button by accessibility label, select menu item by path, type text into focused field, read value of UI element by label, list all UI elements in a window, check if a window exists, take a screenshot of a specific window
+  - [x] Create `mcloop/app_interact.py` with functions for macOS GUI app interaction via osascript/System Events: click button by accessibility label, select menu item by path, type text into focused field, read value of UI element by label, list all UI elements in a window, check if a window exists, take a screenshot of a specific window
   - [ ] For CLI apps: send input to stdin, read stdout/stderr, send signals
   - [ ] For web apps: detect if Playwright is available, launch headless browser, navigate to URL, click element, read page content, take screenshot
   - [ ] Detect app type from mcloop.json (run command patterns: `open *.app` or `./run.sh` for GUI, bare binary or `python` for CLI, `npm start` or `flask run` for web)
-  - [ ] Add tests for each interaction type with mock targets
+  - [x] Add tests for each interaction type with mock targets
 
 - [ ] Investigation plan generator
   - [ ] Create `mcloop/investigator.py` with a function that takes bug context (crash report, user description, failure history, source code summary) and produces an investigation PLAN.md following the debugging playbook
