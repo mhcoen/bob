@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-_DEBUGGING_PLAYBOOK = (
+DEBUGGING_PLAYBOOK = (
     "1. Reproduce the problem.\n"
     "2. Instrument at stage boundaries.\n"
     "3. Isolate subsystems with standalone probes.\n"
@@ -13,14 +13,14 @@ _DEBUGGING_PLAYBOOK = (
     "6. Clean up temporary scaffolding after the fix."
 )
 
-_PROBES_INSTRUCTION = (
+PROBES_INSTRUCTION = (
     "For any subsystem whose behavior is unclear, create a standalone"
     " probe script that exercises just that subsystem in isolation."
     " The probe should print or log enough to confirm or rule out"
     " the hypothesis. Delete probe scripts after the investigation."
 )
 
-_WEB_SEARCH_INSTRUCTION = (
+WEB_SEARCH_INSTRUCTION = (
     "Before writing code to fix or work around the issue, search the"
     " web for known issues, working examples, and upstream fixes."
     " Prefer proven solutions over ad-hoc patches."
@@ -49,10 +49,10 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
 
     parts.append(
         "You are generating an investigation plan for a bug."
-        " Follow this debugging playbook strictly:\n\n" + _DEBUGGING_PLAYBOOK
+        " Follow this debugging playbook strictly:\n\n" + DEBUGGING_PLAYBOOK
     )
-    parts.append(_PROBES_INSTRUCTION)
-    parts.append(_WEB_SEARCH_INSTRUCTION)
+    parts.append(PROBES_INSTRUCTION)
+    parts.append(WEB_SEARCH_INSTRUCTION)
 
     if ctx.user_description:
         parts.append(f"Bug description: {ctx.user_description}")
@@ -108,11 +108,11 @@ def generate_plan(ctx: BugContext) -> str:
     lines.append("")
     lines.append("## Debugging Playbook")
     lines.append("")
-    lines.append(_DEBUGGING_PLAYBOOK)
+    lines.append(DEBUGGING_PLAYBOOK)
     lines.append("")
-    lines.append(_PROBES_INSTRUCTION)
+    lines.append(PROBES_INSTRUCTION)
     lines.append("")
-    lines.append(_WEB_SEARCH_INSTRUCTION)
+    lines.append(WEB_SEARCH_INSTRUCTION)
     lines.append("")
 
     # Bug description section

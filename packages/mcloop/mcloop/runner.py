@@ -13,9 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 from mcloop.investigator import (
-    _DEBUGGING_PLAYBOOK,
-    _PROBES_INSTRUCTION,
-    _WEB_SEARCH_INSTRUCTION,
+    DEBUGGING_PLAYBOOK,
+    PROBES_INSTRUCTION,
+    WEB_SEARCH_INSTRUCTION,
 )
 
 
@@ -303,6 +303,9 @@ def _run_session(
                     timeout=PROGRESS_DOT_INTERVAL,
                 )
             except queue.Empty:
+                # Re-assert foreground so ctrl-c reaches mcloop,
+                # not the child which may have stolen it.
+                _reclaim_foreground()
                 # Silence. Check for pending approvals.
                 if pending_dir.exists():
                     # Check if a permission was denied
@@ -981,10 +984,10 @@ def build_investigation_plan_description(
     so that every investigation session enforces structured note-taking.
     """
     parts = [
-        "You are investigating a bug. Follow the debugging playbook:\n" + _DEBUGGING_PLAYBOOK,
+        "You are investigating a bug. Follow the debugging playbook:\n" + DEBUGGING_PLAYBOOK,
     ]
-    parts.append(_PROBES_INSTRUCTION)
-    parts.append(_WEB_SEARCH_INSTRUCTION)
+    parts.append(PROBES_INSTRUCTION)
+    parts.append(WEB_SEARCH_INSTRUCTION)
     if bug_context:
         parts.append(f"Bug context:\n{bug_context}")
     if failure_history:
