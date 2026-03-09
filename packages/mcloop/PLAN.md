@@ -176,7 +176,7 @@ The debugging playbook this enforces:
 
 - [ ] The `investigate` subcommand
   - [x] Add `investigate` subcommand to argument parser with optional positional description argument and --log flag
-  - [ ] Gather bug context from multiple sources (DiagnosticReports, .mcloop/last-run.log, piped stdin, --log file, description argument)
+  - [x] Gather bug context from multiple sources (DiagnosticReports, .mcloop/last-run.log, piped stdin, --log file, description argument)
   - [ ] Create or resume a git worktree for the investigation
   - [ ] If new: generate investigation PLAN.md via the plan generator, copy mcloop.json and .claude/ settings from the parent project
   - [ ] Run mcloop as a subprocess in the worktree directory with --no-audit
