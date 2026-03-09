@@ -154,11 +154,11 @@ The debugging playbook this enforces:
   - [x] For GUI apps: launch, check alive with pgrep, detect crash (process disappears) or hang (process alive but sample shows stuck main thread)
   - [x] Add tests with mock subprocesses
 
-- [ ] App interaction layer
+- [x] App interaction layer
   - [x] Create `mcloop/app_interact.py` with functions for macOS GUI app interaction via osascript/System Events: click button by accessibility label, select menu item by path, type text into focused field, read value of UI element by label, list all UI elements in a window, check if a window exists, take a screenshot of a specific window
   - [x] For CLI apps: send input to stdin, read stdout/stderr, send signals
   - [x] For web apps: detect if Playwright is available, launch headless browser, navigate to URL, click element, read page content, take screenshot
-  - [ ] Detect app type from mcloop.json (run command patterns: `open *.app` or `./run.sh` for GUI, bare binary or `python` for CLI, `npm start` or `flask run` for web)
+  - [x] Detect app type from mcloop.json (run command patterns: `open *.app` or `./run.sh` for GUI, bare binary or `python` for CLI, `npm start` or `flask run` for web)
   - [x] Add tests for each interaction type with mock targets
 
 - [ ] Investigation plan generator
