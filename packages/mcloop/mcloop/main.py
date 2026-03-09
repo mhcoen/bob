@@ -334,7 +334,25 @@ def run_loop(
         )
         _print_error_tail(full_check.output)
 
-    if not no_audit:
+    # Only audit if every task in every stage is complete
+    final_for_audit = parse(checklist_path)
+    has_unchecked = False
+
+    def _any_unchecked(task_list: list[Task]) -> bool:
+        for t in task_list:
+            if not t.checked and not t.failed:
+                return True
+            if _any_unchecked(t.children):
+                return True
+        return False
+
+    has_unchecked = _any_unchecked(final_for_audit)
+    if has_unchecked:
+        print(
+            "\n>>> Audit skipped (unchecked tasks remain)",
+            flush=True,
+        )
+    elif not no_audit:
         _run_audit_fix_cycle(
             project_dir,
             log_dir,
