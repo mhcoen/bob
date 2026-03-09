@@ -65,29 +65,30 @@ class TestCreate:
         return side_effect
 
     def test_returns_path_and_branch(self):
-        with patch.object(worktree, "_run_git", side_effect=self._mock_git()):
-            path, branch = worktree.create("Fix crash on startup")
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=self._mock_git()):
+                path, branch, resumed = worktree.create("Fix crash on startup")
         assert branch == "investigate-fix-crash-on-startup"
         assert path == Path("/repo-investigate-fix-crash-on-startup")
+        assert resumed is False
 
     def test_worktree_is_sibling_of_project(self):
         """Worktree dir is ../<project>-investigate-<slug>/ relative to repo."""
         root = "/home/user/projects/myapp"
-        with patch.object(worktree, "_run_git", side_effect=self._mock_git(root=root)):
-            path, _ = worktree.create("memory leak")
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=self._mock_git(root=root)):
+                path, _, resumed = worktree.create("memory leak")
         # Should be a sibling directory, not inside the repo
         assert path.parent == Path(root).parent
         assert path == Path("/home/user/projects/myapp-investigate-memory-leak")
+        assert resumed is False
 
     def test_empty_slug_raises(self):
         with pytest.raises(ValueError, match="empty slug"):
             worktree.create("!!!")
 
     def test_worktree_add_failure(self):
-        call_count = 0
-
         def side_effect(*args, **kwargs):
-            nonlocal call_count
             cmd = args[0] if args else ""
             if cmd == "rev-parse" and "--abbrev-ref" in args:
                 return subprocess.CompletedProcess(args=[], returncode=0, stdout="main\n")
@@ -102,9 +103,39 @@ class TestCreate:
                 )
             return subprocess.CompletedProcess(args=[], returncode=0, stdout="")
 
-        with patch.object(worktree, "_run_git", side_effect=side_effect):
-            with pytest.raises(RuntimeError, match="Failed to create worktree"):
-                worktree.create("some bug")
+        with patch.object(worktree, "list_worktrees", return_value=[]):
+            with patch.object(worktree, "_run_git", side_effect=side_effect):
+                with pytest.raises(RuntimeError, match="Failed to create worktree"):
+                    worktree.create("some bug")
+
+    def test_resumes_existing_worktree(self):
+        """When a worktree already exists, return it with resumed=True."""
+        existing = [
+            {
+                "path": "/repo-investigate-fix-crash",
+                "branch": "investigate-fix-crash",
+                "commit": "abc123",
+            }
+        ]
+        with patch.object(worktree, "list_worktrees", return_value=existing):
+            path, branch, resumed = worktree.create("Fix crash")
+        assert path == Path("/repo-investigate-fix-crash")
+        assert branch == "investigate-fix-crash"
+        assert resumed is True
+
+    def test_resume_does_not_call_git(self):
+        """Resuming should not call _run_git (no new worktree/branch)."""
+        existing = [
+            {
+                "path": "/repo-investigate-memory-leak",
+                "branch": "investigate-memory-leak",
+                "commit": "def456",
+            }
+        ]
+        with patch.object(worktree, "list_worktrees", return_value=existing):
+            with patch.object(worktree, "_run_git") as mock_git:
+                worktree.create("memory leak")
+        mock_git.assert_not_called()
 
 
 class TestExists:

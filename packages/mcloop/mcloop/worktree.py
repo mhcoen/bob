@@ -40,21 +40,29 @@ def current_branch(cwd: str | Path | None = None) -> str:
 def create(
     description: str,
     cwd: str | Path | None = None,
-) -> tuple[Path, str]:
-    """Create a worktree for an investigation.
+) -> tuple[Path, str, bool]:
+    """Create a worktree for an investigation, or resume an existing one.
 
-    Returns (worktree_path, branch_name).
+    Returns (worktree_path, branch_name, resumed) where *resumed* is
+    ``True`` when an existing worktree was found instead of creating a
+    new one.
+
     The worktree is created as a sibling directory of the repo root,
     named ``<repo>-investigate-<slug>``. The branch is named
     ``investigate-<slug>``.
     """
-    branch = current_branch(cwd=cwd)
-
     slug = _slugify(description)
     if not slug:
         raise ValueError("Description produced an empty slug")
 
     branch_name = f"investigate-{slug}"
+
+    # Check for an existing worktree with this investigation
+    for wt in list_worktrees(cwd=cwd):
+        if wt.get("branch") == branch_name:
+            return Path(wt["path"]), branch_name, True
+
+    branch = current_branch(cwd=cwd)
 
     # Find repo root
     root_result = _run_git(
@@ -80,7 +88,7 @@ def create(
     if result.returncode != 0:
         raise RuntimeError(f"Failed to create worktree: {result.stderr.strip()}")
 
-    return worktree_path, branch_name
+    return worktree_path, branch_name, False
 
 
 def exists(description: str, cwd: str | Path | None = None) -> bool:
