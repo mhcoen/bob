@@ -8,6 +8,7 @@ from pathlib import Path
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
+_USER_TAG = "[USER]"
 
 
 @dataclass
@@ -264,6 +265,24 @@ def _check_line(lines: list[str], line_number: int) -> None:
     """Replace `- [ ]` with `- [x]` on the given line."""
     line = lines[line_number]
     lines[line_number] = line.replace("- [ ]", "- [x]", 1)
+
+
+def is_user_task(task: Task) -> bool:
+    """Return True if the task requires user observation.
+
+    Tasks marked with [USER] in their text require the user to
+    perform an action and report back what they observed.
+    """
+    return _USER_TAG in task.text
+
+
+def user_task_instructions(task: Task) -> str:
+    """Extract the instruction text from a [USER] task.
+
+    Removes the [USER] tag and returns the remaining text,
+    which describes what the user should do and observe.
+    """
+    return task.text.replace(_USER_TAG, "").strip()
 
 
 def _auto_check_parents(path: Path) -> None:

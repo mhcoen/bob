@@ -7,6 +7,7 @@ import pytest
 from mcloop.main import (
     _copy_project_settings,
     _find_recent_crash_report,
+    _handle_user_task,
     _investigation_failed,
     _investigation_passed,
     _parse_args,
@@ -1141,3 +1142,84 @@ def test_investigation_failed_all_completed(tmp_path, capsys):
     assert "Completed: 1 tasks" in captured.err
     assert "Remaining:" not in captured.err
     assert "Failed:" not in captured.err
+
+
+# --- _handle_user_task ---
+
+
+def test_handle_user_task_collects_response(capsys):
+    """Prints instructions and collects user response."""
+    inputs = iter(["I see the window", "it has a blue icon", ""])
+    with patch("builtins.input", side_effect=inputs):
+        response = _handle_user_task("3", "Launch the app and check the icon")
+
+    assert response == "I see the window\nit has a blue icon"
+    captured = capsys.readouterr()
+    assert "USER ACTION REQUIRED" in captured.out
+    assert "Launch the app and check the icon" in captured.out
+    assert "observation recorded" in captured.out
+
+
+def test_handle_user_task_empty_response(capsys):
+    """Handles EOF with no input."""
+    with patch("builtins.input", side_effect=EOFError):
+        response = _handle_user_task("1", "Check the screen")
+
+    assert response == ""
+    captured = capsys.readouterr()
+    assert "No observation provided" in captured.out
+
+
+def test_handle_user_task_keyboard_interrupt(capsys):
+    """Handles Ctrl-C gracefully."""
+    with patch("builtins.input", side_effect=KeyboardInterrupt):
+        response = _handle_user_task("1", "Check the screen")
+
+    assert response == ""
+
+
+# --- run_loop with [USER] tasks ---
+
+
+def test_run_loop_user_task_skips_claude(tmp_path):
+    """[USER] tasks pause for input and skip Claude Code session."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        "- [ ] [USER] Launch the app and verify the window appears\n- [ ] Fix the bug\n"
+    )
+    (tmp_path / ".git").mkdir()
+
+    inputs = iter(["Window is visible", ""])
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch("mcloop.main.run_task") as mock_run_task,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+    ):
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output = ""
+        mock_result.exit_code = 0
+        mock_run_task.return_value = mock_result
+
+        mock_check_result = MagicMock()
+        mock_check_result.passed = True
+        mock_checks.return_value = mock_check_result
+
+        run_loop(plan, no_audit=True)
+
+    # run_task should only be called for the second task, not the [USER] task
+    assert mock_run_task.call_count == 1
+    call_args = mock_run_task.call_args
+    assert "Fix the bug" in call_args[0][0]
+
+    # The [USER] task should be checked off
+    tasks = __import__("mcloop.checklist", fromlist=["parse"]).parse(plan)
+    assert tasks[0].checked

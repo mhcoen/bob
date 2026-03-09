@@ -22,10 +22,12 @@ from mcloop.checklist import (
     current_stage,
     find_next,
     get_stages,
+    is_user_task,
     mark_failed,
     parse,
     parse_description,
     stage_status,
+    user_task_instructions,
 )
 from mcloop.checks import detect_app_type, detect_build, detect_run, get_check_commands, run_checks
 from mcloop.investigator import BugContext, generate_plan
@@ -379,11 +381,25 @@ def run_loop(
             check_off(checklist_path, task)
             continue
 
+        label = _task_label(tasks, task)
+
+        # Handle [USER] tasks: pause for human observation
+        if is_user_task(task):
+            has_subtasks = "." in label
+            ctx.update_group(label, has_subtasks)
+            instructions = user_task_instructions(task)
+            response = _handle_user_task(label, instructions)
+            check_off(checklist_path, task)
+            elapsed = _format_elapsed(time.monotonic() - run_start)
+            completed.append(f"{label}) {task.text}")
+            ctx.add(label, task.text, "0s", response)
+            notify(f"[USER] {instructions[:80]}")
+            continue
+
         cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
         if cli is None:
             cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
 
-        label = _task_label(tasks, task)
         has_subtasks = "." in label
         ctx.update_group(label, has_subtasks)
         _checkpoint(
@@ -838,6 +854,45 @@ def _dry_run(tasks) -> None:
         print("\nAll stages complete.")
     else:
         print("\nNo unchecked tasks remaining.")
+
+
+def _handle_user_task(label: str, instructions: str) -> str:
+    """Pause for a [USER] task and collect the user's observation.
+
+    Prints clearly formatted instructions and waits for the user
+    to type their observation. Returns the user's response text.
+    """
+    print(f"\n{'=' * 60}", flush=True)
+    print(f"  USER ACTION REQUIRED  (Task {label})", flush=True)
+    print(f"{'=' * 60}", flush=True)
+    print(flush=True)
+    print(f"  {instructions}", flush=True)
+    print(flush=True)
+    print("-" * 60, flush=True)
+    print(
+        "When done, type what you observed below.",
+        flush=True,
+    )
+    print(
+        "Press Enter on an empty line to finish:",
+        flush=True,
+    )
+    print("-" * 60, flush=True)
+    lines: list[str] = []
+    try:
+        while True:
+            line = input()
+            if line == "" and lines:
+                break
+            lines.append(line)
+    except (EOFError, KeyboardInterrupt):
+        pass
+    response = "\n".join(lines).strip()
+    if response:
+        print(f"\n>>> User observation recorded ({len(response)} chars)")
+    else:
+        print("\n>>> No observation provided, continuing.")
+    return response
 
 
 def _format_elapsed(seconds: float) -> str:

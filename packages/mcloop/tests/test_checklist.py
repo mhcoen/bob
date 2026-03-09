@@ -1,6 +1,14 @@
 """Tests for loop.checklist."""
 
-from mcloop.checklist import check_off, find_next, mark_failed, parse, parse_description
+from mcloop.checklist import (
+    check_off,
+    find_next,
+    is_user_task,
+    mark_failed,
+    parse,
+    parse_description,
+    user_task_instructions,
+)
 
 SAMPLE = """\
 - [ ] Add user authentication
@@ -334,3 +342,35 @@ def test_check_off_does_not_auto_check_parent_with_failed_child(tmp_path):
     tasks2 = parse(f)
     assert not tasks2[0].checked  # parent should NOT auto-check
     assert tasks2[0].children[1].checked
+
+
+def test_is_user_task_with_tag(tmp_path):
+    md = "- [ ] [USER] Launch the app and check the menu bar\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert is_user_task(tasks[0])
+
+
+def test_is_user_task_without_tag(tmp_path):
+    md = "- [ ] Fix the crash on startup\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not is_user_task(tasks[0])
+
+
+def test_is_user_task_tag_mid_text(tmp_path):
+    md = "- [ ] Verify [USER] the window appears\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert is_user_task(tasks[0])
+
+
+def test_user_task_instructions_strips_tag(tmp_path):
+    md = "- [ ] [USER] Launch the app and check if the icon appears\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert user_task_instructions(tasks[0]) == ("Launch the app and check if the icon appears")
