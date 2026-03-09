@@ -262,7 +262,8 @@ def _run_session(
     # claude's entire process group.
     _watchdog = subprocess.Popen(
         [
-            "sh", "-c",
+            "sh",
+            "-c",
             f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 2; done; "
             f"kill -9 -{pgid} 2>/dev/null; "
             f"rm -f '{pid_file}'",
