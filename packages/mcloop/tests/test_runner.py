@@ -955,6 +955,17 @@ def test_investigation_plan_description_nothing_tried_when_no_history():
     assert "Nothing yet." in desc
 
 
+def test_investigation_plan_description_includes_testing_instruction():
+    """Investigation plan description instructs real-code testing."""
+    desc = build_investigation_plan_description("")
+    assert "exercise real code" in desc
+    assert "Do not mock the core logic" in desc
+    assert "deadlocks" in desc
+    assert "timeout" in desc
+    assert "permission" in desc.lower()
+    assert "gracefully" in desc
+
+
 def test_run_task_passes_allowed_tools(tmp_path):
     """run_task forwards allowed_tools to _build_command."""
     log_dir = tmp_path / "logs"

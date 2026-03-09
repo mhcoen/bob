@@ -41,6 +41,17 @@ PROGRAMMATIC_STEPS_INSTRUCTION = (
     " app_interact, or web_interact to do it programmatically."
 )
 
+TESTING_INSTRUCTION = (
+    "When writing tests during an investigation, exercise real code"
+    " with real inputs. Do not mock the core logic under test — only"
+    " mock external boundaries (network, filesystem, system APIs)."
+    " For threaded or async code, write tests that detect deadlocks"
+    " by running with a timeout. For system APIs that may fail due"
+    " to permissions (e.g., macOS accessibility, screen recording),"
+    " handle the permission-denied case gracefully in tests: skip"
+    " or assert the expected error rather than letting the test crash."
+)
+
 REPRO_STEPS_INSTRUCTION = (
     "When you successfully reproduce the bug, save the reproduction"
     " steps to .mcloop/repro-steps.json as a JSON array. Each entry"
