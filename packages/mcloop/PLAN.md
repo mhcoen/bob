@@ -167,12 +167,12 @@ The debugging playbook this enforces:
   - [x] The generated plan should include steps that use the process monitor and app interaction layer where applicable (e.g., "Launch the app and verify the menu bar icon appears" becomes a step that programmatically checks for the window/element)
   - [x] Add tests with sample bug descriptions verifying the generated plan contains research steps, isolation steps, and verification steps
 
-- [ ] Git worktree management
+- [x] Git worktree management
   - [x] Create `mcloop/worktree.py` with functions to: create a worktree from the current branch with a descriptive name and branch, check if a worktree already exists for a given investigation, list active investigation worktrees, merge an investigation branch back to the source branch, remove a worktree after successful merge
   - [x] Branch naming convention: `investigate-<slug>` where slug is derived from the bug description
   - [x] Directory naming convention: `../<project>-investigate-<slug>/` (sibling of the project directory)
   - [x] Handle the case where a worktree already exists (resume the investigation rather than creating a new one)
-  - [ ] Add tests for worktree creation, merge, and cleanup
+  - [x] Add tests for worktree creation, merge, and cleanup
 
 - [ ] The `investigate` subcommand
   - [ ] Add `investigate` subcommand to argument parser with optional positional description argument and --log flag
