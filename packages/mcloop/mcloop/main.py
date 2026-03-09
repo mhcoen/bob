@@ -25,7 +25,8 @@ from mcloop.checklist import (
     parse_description,
     stage_status,
 )
-from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
+from mcloop.checks import detect_app_type, detect_build, detect_run, get_check_commands, run_checks
+from mcloop.investigator import BugContext
 from mcloop.notify import notify
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
@@ -143,6 +144,29 @@ def _main() -> None:
 
     if args.command == "audit":
         _cmd_audit(checklist_path)
+        return
+
+    if args.command == "investigate":
+        project_dir = checklist_path.parent
+        stdin_text = ""
+        if not sys.stdin.isatty():
+            stdin_text = sys.stdin.read()
+        ctx = gather_bug_context(
+            project_dir,
+            description=args.description,
+            log_path=args.log,
+            stdin_text=stdin_text,
+        )
+        print("Bug context gathered:", file=sys.stderr)
+        if ctx.user_description:
+            print(f"  description: {ctx.user_description}", file=sys.stderr)
+        if ctx.crash_report:
+            print("  crash report: found", file=sys.stderr)
+        if ctx.failure_history:
+            sources = ctx.failure_history.count("From ")
+            print(f"  log sources: {sources}", file=sys.stderr)
+        if ctx.app_type:
+            print(f"  app type: {ctx.app_type}", file=sys.stderr)
         return
 
     if args.dry_run:
@@ -474,6 +498,87 @@ def _cmd_audit(checklist_path: Path) -> None:
         print(bugs_path.read_text())
     else:
         print("audit: BUGS.md was not written", file=sys.stderr)
+
+
+def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
+    """Find the most recent .ips crash report from DiagnosticReports.
+
+    Returns the contents of the newest .ips file modified within
+    max_age_seconds, or an empty string if none found.
+    """
+    reports_dir = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+    if not reports_dir.is_dir():
+        return ""
+    now = time.time()
+    candidates: list[Path] = []
+    for entry in reports_dir.iterdir():
+        if entry.suffix == ".ips" and (now - entry.stat().st_mtime) < max_age_seconds:
+            candidates.append(entry)
+    if not candidates:
+        return ""
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        return newest.read_text()
+    except OSError:
+        return ""
+
+
+def gather_bug_context(
+    project_dir: Path,
+    *,
+    description: str | None = None,
+    log_path: str | None = None,
+    stdin_text: str = "",
+) -> BugContext:
+    """Collect bug context from all available sources.
+
+    Sources (in order of priority):
+    - description: user-provided bug description from CLI argument
+    - log_path: path to a log file specified via --log
+    - stdin_text: text piped via stdin
+    - .mcloop/last-run.log: log from the most recent mcloop run
+    - ~/Library/Logs/DiagnosticReports/: most recent macOS crash report
+    - detect_app_type: classify the project as gui/cli/web
+    """
+    crash_report = _find_recent_crash_report()
+
+    # Collect failure history from log sources
+    failure_parts: list[str] = []
+
+    # --log file
+    if log_path:
+        log_file = Path(log_path)
+        if log_file.is_file():
+            try:
+                content = log_file.read_text().strip()
+                if content:
+                    failure_parts.append(f"From {log_path}:\n{content}")
+            except OSError:
+                pass
+
+    # Piped stdin
+    if stdin_text.strip():
+        failure_parts.append(f"From stdin:\n{stdin_text.strip()}")
+
+    # .mcloop/last-run.log
+    last_run = project_dir / ".mcloop" / "last-run.log"
+    if last_run.is_file():
+        try:
+            content = last_run.read_text().strip()
+            if content:
+                failure_parts.append(f"From last-run.log:\n{content}")
+        except OSError:
+            pass
+
+    failure_history = "\n\n".join(failure_parts)
+    app_type = detect_app_type(project_dir)
+
+    return BugContext(
+        crash_report=crash_report,
+        user_description=description or "",
+        failure_history=failure_history,
+        app_type=app_type,
+    )
 
 
 def _cmd_sync(checklist_path: Path, *, dry_run: bool = False) -> None:
