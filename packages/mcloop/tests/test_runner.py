@@ -905,3 +905,33 @@ def test_investigation_plan_description_empty_context():
     desc = build_investigation_plan_description("")
     assert "Bug context" not in desc
     assert "## Observations" in desc
+
+
+def test_investigation_plan_description_includes_probes_instruction():
+    """Investigation plan description instructs creating standalone probes."""
+    desc = build_investigation_plan_description("")
+    assert "standalone probe script" in desc
+    assert "exercises just that subsystem" in desc
+
+
+def test_investigation_plan_description_includes_web_search():
+    """Investigation plan description instructs searching the web."""
+    desc = build_investigation_plan_description("")
+    assert "search the web" in desc
+    assert "working examples" in desc
+
+
+def test_investigation_plan_description_includes_failure_history():
+    """Investigation plan description populates What has been tried."""
+    desc = build_investigation_plan_description(
+        "App crashes", failure_history="Tried null check, still crashes"
+    )
+    assert "## What has been tried" in desc
+    assert "Tried null check, still crashes" in desc
+
+
+def test_investigation_plan_description_nothing_tried_when_no_history():
+    """Investigation plan description says nothing tried when empty."""
+    desc = build_investigation_plan_description("")
+    assert "## What has been tried" in desc
+    assert "Nothing yet." in desc

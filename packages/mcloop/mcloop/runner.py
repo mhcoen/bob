@@ -922,6 +922,7 @@ def run_bug_fix(
 
 def build_investigation_plan_description(
     bug_context: str,
+    failure_history: str = "",
 ) -> str:
     """Build the description for an investigation PLAN.md.
 
@@ -937,8 +938,26 @@ def build_investigation_plan_description(
         "5. Only then patch production code.\n"
         "6. Clean up temporary scaffolding after the fix.",
     ]
+    parts.append(
+        "For any subsystem whose behavior is unclear,"
+        " create a standalone probe script that exercises"
+        " just that subsystem in isolation. The probe"
+        " should print or log enough to confirm or rule"
+        " out the hypothesis. Delete probe scripts after"
+        " the investigation."
+    )
+    parts.append(
+        "Before writing code to fix or work around the"
+        " issue, search the web for known issues, working"
+        " examples, and upstream fixes. Prefer proven"
+        " solutions over ad-hoc patches."
+    )
     if bug_context:
         parts.append(f"Bug context:\n{bug_context}")
+    if failure_history:
+        parts.append(f"## What has been tried\n\n{failure_history}")
+    else:
+        parts.append("## What has been tried\n\nNothing yet.")
     parts.append(
         "NOTES.md must use three sections:"
         " ## Observations (confirmed facts from"
