@@ -11,6 +11,8 @@ pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
 over-abstraction. This is a simple tool and should stay that way.
 
+## Stage 1: Core
+
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)
 - [x] Markdown checklist parser
   - [x] Parse tasks from markdown checkboxes, including nested subtasks
@@ -116,7 +118,7 @@ over-abstraction. This is a simple tool and should stay that way.
 - [x] Targeted testing: after each task, only run tests corresponding to changed files (e.g., changes to hasher.py runs test_hasher.py). Map source files to test files by naming convention. Run the full test suite only at stage boundaries and at the end of the run. This avoids running the entire test suite after every single task.
 - [x] Skip Telegram permission hook for interactive sessions: the hook should check for the MCLOOP_TASK_LABEL environment variable (already set by runner.py) and exit 0 immediately if it's absent. This lets interactive Claude Code sessions use the normal terminal permission flow instead of sending Telegram approvals.
 
-## Stage: Investigation system (`mcloop investigate`)
+## Stage 2: Investigation system (`mcloop investigate`)
 
 Adds an interactive debugging mode for hard runtime bugs that survive
 the build/test/audit cycle. The system creates a git worktree for
