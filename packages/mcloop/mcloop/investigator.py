@@ -26,6 +26,17 @@ WEB_SEARCH_INSTRUCTION = (
     " Prefer proven solutions over ad-hoc patches."
 )
 
+PROGRAMMATIC_STEPS_INSTRUCTION = (
+    "Every plan step that involves launching, observing, or verifying"
+    " the app MUST use the programmatic tools instead of manual"
+    " actions. For example, 'Launch the app and verify the menu bar"
+    " icon appears' becomes 'Launch the app with"
+    " process_monitor.run_gui() and verify the window exists with"
+    " app_interact.window_exists()'. Never write steps that assume a"
+    " human will click, look, or type — use process_monitor,"
+    " app_interact, or web_interact to do it programmatically."
+)
+
 
 @dataclass
 class BugContext:
@@ -54,6 +65,9 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
     parts.append(PROBES_INSTRUCTION)
     parts.append(WEB_SEARCH_INSTRUCTION)
 
+    if ctx.app_type:
+        parts.append(PROGRAMMATIC_STEPS_INSTRUCTION)
+
     if ctx.user_description:
         parts.append(f"Bug description: {ctx.user_description}")
     if ctx.crash_report:
@@ -70,18 +84,41 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
     app_guidance = ""
     if ctx.app_type == "gui":
         app_guidance = (
-            "This is a GUI app. Use process_monitor.run_gui() to launch,"
-            " app_interact for UI interaction, and screenshot_window()"
-            " for visual verification."
+            "This is a GUI app. Available programmatic tools:\n"
+            "- process_monitor.run_gui(): launch and monitor for crash/hang\n"
+            "- process_monitor.is_alive(pid): check process is running\n"
+            "- process_monitor.sample(pid): capture call graph\n"
+            "- process_monitor.read_crash_report(name): find crash logs\n"
+            "- app_interact.window_exists(app): verify window appeared\n"
+            "- app_interact.list_elements(app): inspect UI element tree\n"
+            "- app_interact.click_button(app, label): click by label\n"
+            "- app_interact.select_menu_item(app, path): navigate menus\n"
+            "- app_interact.type_text(app, text): type into focused field\n"
+            "- app_interact.read_value(app, type, label): read element value\n"
+            "- app_interact.screenshot_window(app, path): capture screenshot"
         )
     elif ctx.app_type == "web":
         app_guidance = (
-            "This is a web app. Use process_monitor.launch() to start"
-            " the server and web_interact for browser interaction."
+            "This is a web app. Available programmatic tools:\n"
+            "- process_monitor.launch(cmd): start the server\n"
+            "- process_monitor.is_alive(pid): check server is running\n"
+            "- process_monitor.read_output(proc): read server logs\n"
+            "- web_interact.launch_browser(): open headless browser\n"
+            "- browser.navigate(url): go to a page\n"
+            "- browser.click(selector): click an element\n"
+            "- browser.text(): read visible page text\n"
+            "- browser.content(): read page HTML\n"
+            "- browser.screenshot(path): capture screenshot"
         )
     elif ctx.app_type == "cli":
         app_guidance = (
-            "This is a CLI app. Use process_monitor.run_cli() for execution and output capture."
+            "This is a CLI app. Available programmatic tools:\n"
+            "- process_monitor.run_cli(cmd): run and capture output/exit code\n"
+            "- process_monitor.launch(cmd): start long-running process\n"
+            "- process_monitor.read_output(proc): read stdout\n"
+            "- process_monitor.send_input(proc, text): write to stdin\n"
+            "- process_monitor.is_hung(proc): detect stuck process\n"
+            "- process_monitor.sample(pid): capture call graph"
         )
     if app_guidance:
         parts.append(app_guidance)

@@ -188,11 +188,32 @@ def test_prompt_gui_app_type():
     assert "app_interact" in prompt
 
 
+def test_prompt_gui_lists_available_tools():
+    """GUI prompt enumerates specific app_interact and process_monitor functions."""
+    ctx = BugContext(app_type="gui")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "app_interact.window_exists(" in prompt
+    assert "app_interact.list_elements(" in prompt
+    assert "app_interact.click_button(" in prompt
+    assert "app_interact.screenshot_window(" in prompt
+    assert "process_monitor.read_crash_report(" in prompt
+
+
 def test_prompt_cli_app_type():
     """Plan generation prompt includes CLI-specific guidance."""
     ctx = BugContext(app_type="cli")
     prompt = build_plan_generation_prompt(ctx)
-    assert "process_monitor.run_cli()" in prompt
+    assert "process_monitor.run_cli(" in prompt
+
+
+def test_prompt_cli_lists_available_tools():
+    """CLI prompt enumerates specific process_monitor functions."""
+    ctx = BugContext(app_type="cli")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "process_monitor.launch(" in prompt
+    assert "process_monitor.read_output(" in prompt
+    assert "process_monitor.send_input(" in prompt
+    assert "process_monitor.is_hung(" in prompt
 
 
 def test_prompt_web_app_type():
@@ -201,6 +222,33 @@ def test_prompt_web_app_type():
     prompt = build_plan_generation_prompt(ctx)
     assert "web_interact" in prompt
     assert "process_monitor" in prompt
+
+
+def test_prompt_web_lists_available_tools():
+    """Web prompt enumerates specific web_interact and process_monitor functions."""
+    ctx = BugContext(app_type="web")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "browser.navigate(" in prompt
+    assert "browser.click(" in prompt
+    assert "browser.text()" in prompt
+    assert "browser.screenshot(" in prompt
+    assert "process_monitor.launch(" in prompt
+
+
+def test_prompt_includes_programmatic_instruction_for_app_types():
+    """Prompt includes programmatic steps instruction when app_type is set."""
+    for app_type in ("gui", "cli", "web"):
+        ctx = BugContext(app_type=app_type)
+        prompt = build_plan_generation_prompt(ctx)
+        assert "programmatic tools" in prompt.lower(), (
+            f"Missing programmatic instruction for {app_type}"
+        )
+
+
+def test_prompt_omits_programmatic_instruction_without_app_type():
+    """Prompt omits programmatic steps instruction when no app_type."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "programmatic tools" not in prompt.lower()
 
 
 def test_prompt_requests_checklist_format():
