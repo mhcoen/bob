@@ -9,7 +9,7 @@ Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
 pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
-over-abstraction. This is a simple tool and should stay that way.
+over-abstraction.
 
 ## Stage 1: Core
 

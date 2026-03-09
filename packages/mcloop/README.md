@@ -122,7 +122,7 @@ Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
 pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
-over-abstraction. This is a simple tool and should stay that way.
+over-abstraction.
 
 - [ ] Project scaffolding (pyproject.toml, .gitignore, loop package, __main__.py)
 - [ ] Markdown checklist parser (parse tasks, find next unchecked, check off items)
@@ -133,8 +133,9 @@ over-abstraction. This is a simple tool and should stay that way.
 - [ ] Main loop: parse, execute, verify, commit, notify, repeat
 ```
 
-This is the PLAN.md that was used to build McLoop itself. See
-[PLAN.EXAMPLE.md](PLAN.EXAMPLE.md) for the full version with subtasks.
+This is the PLAN.md that was used to bootstrap the initial version
+of McLoop. See [PLAN.EXAMPLE.md](PLAN.EXAMPLE.md) for the current
+version with subtasks.
 
 The description runs from the top of the file down to the first checkbox. It's
 included in every CLI invocation, so every session has context about what the

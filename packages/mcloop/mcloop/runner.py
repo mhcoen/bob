@@ -6,6 +6,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -132,6 +133,15 @@ def run_task(
         " setAccessibleName() in Qt. This makes the"
         " app programmatically testable."
     )
+    if shutil.which("rtk"):
+        parts.append(
+            "Prefix test runners, linters, and build tools"
+            " with `rtk proxy` to compress their output."
+            " For example: `rtk proxy pytest`, `rtk proxy"
+            " ruff check .`, `rtk proxy swift build`."
+            " Do not prefix short commands like cat, ls,"
+            " head, grep, git, echo, or cd."
+        )
     parts.append(
         "Never install tools or dependencies via brew,"
         " cargo, pip, npm, apt, or any other package"
