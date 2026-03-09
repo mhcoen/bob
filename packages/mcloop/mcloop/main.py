@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from mcloop import worktree
+from mcloop import formatting, worktree
 from mcloop.checklist import (
     Task,
     check_off,
@@ -86,7 +86,7 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
         pass  # alive but we can't signal it
     # Kill the entire process group
     print(
-        f"\n!!! Killing orphan claude process (pid={pid}) from previous run",
+        formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),
         flush=True,
     )
     try:
@@ -423,7 +423,7 @@ def run_loop(
         if user_input:
             ctx.add_user_input(user_input)
             print(
-                f"\n>>> User input received ({len(user_input)} chars)",
+                formatting.system_msg(f"User input received ({len(user_input)} chars)"),
                 flush=True,
             )
 
@@ -431,7 +431,7 @@ def run_loop(
             project_dir,
             next_task=f"{label}) {task.text}",
         )
-        print(f"\n>>> Task {label}) {task.text} (using {cli})")
+        print(formatting.task_header(label, task.text, cli), flush=True)
 
         task_start = time.monotonic()
         success = False
@@ -462,9 +462,11 @@ def run_loop(
                     level="warning",
                 )
                 print(
-                    "\n>>> Session limit reached."
-                    f" Polling every {SESSION_LIMIT_POLL // 60}m."
-                    " Press Ctrl-C to exit.",
+                    formatting.system_msg(
+                        "Session limit reached."
+                        f" Polling every {SESSION_LIMIT_POLL // 60}m."
+                        " Press Ctrl-C to exit."
+                    ),
                     flush=True,
                 )
                 try:
@@ -498,7 +500,7 @@ def run_loop(
             if not result.success:
                 last_error = _tail(result.output, 50)
                 print(
-                    f"\n!!! Task failed (attempt {attempt}/{max_retries})",
+                    formatting.error_msg(f"Task failed (attempt {attempt}/{max_retries})"),
                     flush=True,
                 )
                 print(
@@ -511,7 +513,9 @@ def run_loop(
             if not _has_meaningful_changes(project_dir):
                 last_error = "Task produced no file changes"
                 print(
-                    f"\n!!! No-op task (attempt {attempt}/{max_retries}): {task.text}",
+                    formatting.error_msg(
+                        f"No-op task (attempt {attempt}/{max_retries}): {task.text}"
+                    ),
                     flush=True,
                 )
                 continue
@@ -523,10 +527,7 @@ def run_loop(
                 check_off(checklist_path, task)
                 elapsed = _format_elapsed(time.monotonic() - task_start)
                 completed.append(f"{label}) {task.text}")
-                print(
-                    f"\n>>> Completed {label}) [{elapsed}]",
-                    flush=True,
-                )
+                print(formatting.task_complete(label, elapsed), flush=True)
                 ctx.add(
                     label,
                     task.text,
@@ -539,9 +540,9 @@ def run_loop(
             else:
                 last_error = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
                 print(
-                    f"\n!!! Checks failed "
-                    f"(attempt {attempt}/{max_retries}): "
-                    f"{check_result.command}",
+                    formatting.error_msg(
+                        f"Checks failed (attempt {attempt}/{max_retries}): {check_result.command}"
+                    ),
                     flush=True,
                 )
                 _print_error_tail(check_result.output)
@@ -575,11 +576,11 @@ def run_loop(
     if status.startswith("stage_complete:"):
         done_stage = status.split(":", 1)[1]
         next_stg = current_stage(parse(checklist_path))
-        print("\n>>> Running full test suite (stage boundary)...", flush=True)
+        print(formatting.system_msg("Running full test suite (stage boundary)..."), flush=True)
         full_check = run_checks(project_dir)
         if not full_check.passed:
             print(
-                f"\n!!! Full suite failed at stage boundary: {full_check.command}",
+                formatting.error_msg(f"Full suite failed at stage boundary: {full_check.command}"),
                 flush=True,
             )
             _print_error_tail(full_check.output)
@@ -602,11 +603,11 @@ def run_loop(
         return []
 
     # Full test suite at end of run
-    print("\n>>> Running full test suite (end of run)...", flush=True)
+    print(formatting.system_msg("Running full test suite (end of run)..."), flush=True)
     full_check = run_checks(project_dir)
     if not full_check.passed:
         print(
-            f"\n!!! Full suite failed at end of run: {full_check.command}",
+            formatting.error_msg(f"Full suite failed at end of run: {full_check.command}"),
             flush=True,
         )
         _print_error_tail(full_check.output)
@@ -626,7 +627,7 @@ def run_loop(
     has_unchecked = _any_unchecked(final_for_audit)
     if has_unchecked:
         print(
-            "\n>>> Audit skipped (unchecked tasks remain)",
+            formatting.system_msg("Audit skipped (unchecked tasks remain)"),
             flush=True,
         )
     elif not no_audit:
@@ -887,22 +888,7 @@ def _handle_user_task(label: str, instructions: str) -> str:
     Prints clearly formatted instructions and waits for the user
     to type their observation. Returns the user's response text.
     """
-    print(f"\n{'=' * 60}", flush=True)
-    print(f"  USER ACTION REQUIRED  (Task {label})", flush=True)
-    print(f"{'=' * 60}", flush=True)
-    print(flush=True)
-    print(f"  {instructions}", flush=True)
-    print(flush=True)
-    print("-" * 60, flush=True)
-    print(
-        "When done, type what you observed below.",
-        flush=True,
-    )
-    print(
-        "Press Enter on an empty line to finish:",
-        flush=True,
-    )
-    print("-" * 60, flush=True)
+    print(formatting.user_banner(label, instructions), flush=True)
     lines: list[str] = []
     try:
         while True:
@@ -914,9 +900,9 @@ def _handle_user_task(label: str, instructions: str) -> str:
         pass
     response = "\n".join(lines).strip()
     if response:
-        print(f"\n>>> User observation recorded ({len(response)} chars)")
+        print(formatting.system_msg(f"User observation recorded ({len(response)} chars)"))
     else:
-        print("\n>>> No observation provided, continuing.")
+        print(formatting.system_msg("No observation provided, continuing."))
     return response
 
 
@@ -939,12 +925,7 @@ def _handle_auto_task(label: str, action: str, args: str) -> str:
         navigate     - Navigate a browser to a URL
         page_text    - Read visible text from the current browser page
     """
-    print(f"\n{'=' * 60}", flush=True)
-    print(f"  AUTO OBSERVATION  (Task {label})", flush=True)
-    print(f"{'=' * 60}", flush=True)
-    print(f"  Action: {action}", flush=True)
-    print(f"  Args: {args}", flush=True)
-    print(flush=True)
+    print(formatting.auto_banner(label, action, args), flush=True)
 
     try:
         result = _dispatch_auto_action(action, args)
@@ -956,7 +937,7 @@ def _handle_auto_task(label: str, action: str, args: str) -> str:
     # Truncate very long results for display
     display = result[:500] + "..." if len(result) > 500 else result
     print(f"  Result: {display}", flush=True)
-    print(f"\n>>> Auto observation complete ({len(result)} chars)")
+    print(formatting.system_msg(f"Auto observation complete ({len(result)} chars)"))
     return result
 
 
@@ -1107,9 +1088,7 @@ def _print_summary(
     completed_stage: str = "",
 ) -> None:
     """Print a summary of what McLoop did."""
-    print("\n" + "=" * 40, flush=True)
-    print("McLoop Summary", flush=True)
-    print("=" * 40, flush=True)
+    print(formatting.summary_header(), flush=True)
     if total_seconds > 0:
         print(
             f"Total time: {_format_elapsed(total_seconds)}",
@@ -1148,7 +1127,9 @@ def _print_summary(
 
     if completed_stage:
         print(
-            f"\n>>> {completed_stage} complete. Run mcloop again for the next stage.",
+            formatting.system_msg(
+                f"{completed_stage} complete. Run mcloop again for the next stage."
+            ),
             flush=True,
         )
     elif not completed and not failed_task:
@@ -1191,7 +1172,7 @@ def _print_summary(
             notes_snapshot,
         )
 
-    print("=" * 40, flush=True)
+    print(formatting.summary_footer(), flush=True)
 
 
 SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
@@ -1407,7 +1388,7 @@ def _run_build(project_dir: Path) -> None:
     if not build_cmd:
         return
     print(
-        f"\n>>> Building: {build_cmd}",
+        formatting.system_msg(f"Building: {build_cmd}"),
         flush=True,
     )
     try:
@@ -1419,15 +1400,15 @@ def _run_build(project_dir: Path) -> None:
             timeout=600,
         )
         if result.returncode == 0:
-            print(">>> Build succeeded", flush=True)
+            print(formatting.system_msg("Build succeeded"), flush=True)
         else:
             print(
-                f"!!! Build failed (exit {result.returncode})",
+                formatting.error_msg(f"Build failed (exit {result.returncode})"),
                 flush=True,
             )
             _print_error_tail(result.stdout + result.stderr)
     except Exception as e:
-        print(f"!!! Build error: {e}", flush=True)
+        print(formatting.error_msg(f"Build error: {e}"), flush=True)
 
 
 MAX_FLAT_CONTEXT_ENTRIES = 5
@@ -1550,7 +1531,7 @@ def _run_audit_fix_cycle(
     """Run two rounds of audit/verify/fix to catch bugs introduced by fixes."""
     if _should_skip_audit(project_dir):
         print(
-            "\n>>> Audit skipped (no changes since last audit)",
+            formatting.system_msg("Audit skipped (no changes since last audit)"),
             flush=True,
         )
         return
@@ -1558,15 +1539,7 @@ def _run_audit_fix_cycle(
     max_rounds = 2
     for round_num in range(1, max_rounds + 1):
         print(
-            f"\n{'=' * 40}",
-            flush=True,
-        )
-        print(
-            f">>> Audit round {round_num}/{max_rounds}",
-            flush=True,
-        )
-        print(
-            f"{'=' * 40}",
+            formatting.system_msg(f"Audit round {round_num}/{max_rounds}"),
             flush=True,
         )
         fixed = _run_single_audit_round(
@@ -1600,18 +1573,18 @@ def _run_single_audit_round(
         bugs_content = bugs_path.read_text()
         if bugs_md_has_bugs(bugs_content):
             print(
-                "\n>>> Found existing BUGS.md, resuming fix cycle...",
+                formatting.system_msg("Found existing BUGS.md, resuming fix cycle..."),
                 flush=True,
             )
         else:
             print(
-                "\n>>> Existing BUGS.md has no bugs",
+                formatting.system_msg("Existing BUGS.md has no bugs"),
                 flush=True,
             )
             bugs_path.unlink()
             return False
     else:
-        print("\n>>> Running bug audit...", flush=True)
+        print(formatting.system_msg("Running bug audit..."), flush=True)
         audit_result = run_audit(
             project_dir,
             log_dir,
@@ -1643,7 +1616,7 @@ def _run_single_audit_round(
     parsed_bugs = parse_bugs_md(bugs_content)
     if parsed_bugs:
         print(
-            f"\n>>> Verifying {len(parsed_bugs)} bugs...",
+            formatting.system_msg(f"Verifying {len(parsed_bugs)} bugs..."),
             flush=True,
         )
         verify_result = run_bug_verify(
@@ -1680,7 +1653,7 @@ def _run_single_audit_round(
                 ]
                 if not confirmed_bugs:
                     print(
-                        "\n>>> All reported bugs were false positives.",
+                        formatting.system_msg("All reported bugs were false positives."),
                         flush=True,
                     )
                     bugs_path.unlink(missing_ok=True)
@@ -1695,7 +1668,7 @@ def _run_single_audit_round(
     max_fix_attempts = 3
     for attempt in range(1, max_fix_attempts + 1):
         print(
-            f"\n>>> Fixing bugs (attempt {attempt}/{max_fix_attempts})...",
+            formatting.system_msg(f"Fixing bugs (attempt {attempt}/{max_fix_attempts})..."),
             flush=True,
         )
         fix_result = run_bug_fix(
@@ -1724,7 +1697,7 @@ def _run_single_audit_round(
             diff = _get_diff(project_dir)
             if diff:
                 print(
-                    "\n>>> Post-fix review...",
+                    formatting.system_msg("Post-fix review..."),
                     flush=True,
                 )
                 review_result = run_post_fix_review(
@@ -1740,7 +1713,7 @@ def _run_single_audit_round(
                     )
                     if found:
                         print(
-                            "\n!!! Post-fix review found problems",
+                            formatting.error_msg("Post-fix review found problems"),
                             flush=True,
                         )
                         for line in desc.splitlines()[:10]:
@@ -1749,7 +1722,7 @@ def _run_single_audit_round(
                         bugs_path.write_text(bugs_content)
                         continue
                     print(
-                        ">>> Post-fix review: LGTM",
+                        formatting.system_msg("Post-fix review: LGTM"),
                         flush=True,
                     )
 
@@ -1759,7 +1732,7 @@ def _run_single_audit_round(
 
         error_ctx = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
         print(
-            f"\n!!! Bug fix checks failed (attempt {attempt}/{max_fix_attempts})",
+            formatting.error_msg(f"Bug fix checks failed (attempt {attempt}/{max_fix_attempts})"),
             flush=True,
         )
         _print_error_tail(check_result.output)
@@ -1788,7 +1761,7 @@ def _ensure_git(project_dir: Path) -> None:
     if git_dir.exists():
         return
     print(
-        "\n!!! No git repository found. Initializing one now...",
+        formatting.error_msg("No git repository found. Initializing one now..."),
         flush=True,
     )
     try:
@@ -1800,7 +1773,7 @@ def _ensure_git(project_dir: Path) -> None:
         )
         if result.returncode != 0:
             msg = f"CRITICAL: git init failed: {result.stderr.strip()}"
-            print(f"\n!!! {msg}", flush=True)
+            print(formatting.error_msg(msg), flush=True)
             notify(msg, level="error")
             sys.exit(1)
         # Create .gitignore if missing
@@ -1817,10 +1790,10 @@ def _ensure_git(project_dir: Path) -> None:
             cwd=project_dir,
             capture_output=True,
         )
-        print(">>> Git repository initialized.", flush=True)
+        print(formatting.system_msg("Git repository initialized."), flush=True)
     except FileNotFoundError:
         msg = "CRITICAL: git is not installed or not on PATH. Mcloop cannot run without git."
-        print(f"\n!!! {msg}", flush=True)
+        print(formatting.error_msg(msg), flush=True)
         notify(msg, level="error")
         sys.exit(1)
 
@@ -1850,7 +1823,7 @@ def _git(
         msg = f"git error{context}: `{cmd_str}` exited {result.returncode}"
         if stderr:
             msg += f"\n    {stderr}"
-        print(f"\n!!! {msg}", flush=True)
+        print(formatting.error_msg(msg), flush=True)
         # Only notify for real git failures, not missing repos
         if "not a git repository" not in stderr:
             notify(msg, level="error")
@@ -1869,7 +1842,7 @@ def _checkpoint(
     """
     if not (project_dir / ".git").exists():
         print(
-            "\n!!! Git checkpoint skipped: no .git directory",
+            formatting.error_msg("Git checkpoint skipped: no .git directory"),
             flush=True,
         )
         return
@@ -1896,7 +1869,7 @@ def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     if not (project_dir / ".git").exists():
         print(
-            "\n!!! Git commit skipped: no .git directory",
+            formatting.error_msg("Git commit skipped: no .git directory"),
             flush=True,
         )
         return

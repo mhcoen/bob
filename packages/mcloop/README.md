@@ -544,9 +544,12 @@ pytest                    # Tests
 
 ## Best practices
 
-McLoop does not require its own API key or tokens. It runs through
-your existing Claude Code installation, using whatever plan you
-already have (Pro, Max, etc.). There is nothing extra to provision.
+McLoop does not require its own API key or tokens, does not extract
+or borrow OAuth tokens from Claude Code, and does not violate
+Anthropic's Terms of Service. It iteratively runs Claude Code in a
+controlled way through the public `claude -p` CLI, using whatever
+plan you already have (Pro, Max, etc.). There is nothing extra to
+provision.
 
 That said, McLoop will use your plan allowance aggressively. A single
 McLoop run can consume in a few hours what you would normally spread
