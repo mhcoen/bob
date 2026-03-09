@@ -9,6 +9,7 @@ from pathlib import Path
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
 _USER_TAG = "[USER]"
+_AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
 
 
 @dataclass
@@ -283,6 +284,32 @@ def user_task_instructions(task: Task) -> str:
     which describes what the user should do and observe.
     """
     return task.text.replace(_USER_TAG, "").strip()
+
+
+def is_auto_task(task: Task) -> bool:
+    """Return True if the task is an automated observation.
+
+    Tasks marked with [AUTO:<action>] in their text are performed
+    automatically by mcloop using process_monitor, app_interact,
+    or web_interact, without pausing for user input.
+    """
+    return bool(_AUTO_TAG_RE.search(task.text))
+
+
+def parse_auto_task(task: Task) -> tuple[str, str]:
+    """Parse an [AUTO:<action>] task into (action, args).
+
+    Returns (action, args) where action is the keyword after AUTO:
+    (e.g. 'run_cli', 'run_gui', 'screenshot') and args is the
+    remaining text after the tag.
+    """
+    m = _AUTO_TAG_RE.search(task.text)
+    if not m:
+        return ("", "")
+    action = m.group(1)
+    # Everything after the [AUTO:action] tag is the argument
+    after_tag = task.text[m.end() :].strip()
+    return (action, after_tag)
 
 
 def _auto_check_parents(path: Path) -> None:

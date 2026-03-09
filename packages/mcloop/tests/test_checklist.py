@@ -3,9 +3,11 @@
 from mcloop.checklist import (
     check_off,
     find_next,
+    is_auto_task,
     is_user_task,
     mark_failed,
     parse,
+    parse_auto_task,
     parse_description,
     user_task_instructions,
 )
@@ -374,3 +376,68 @@ def test_user_task_instructions_strips_tag(tmp_path):
     f.write_text(md)
     tasks = parse(f)
     assert user_task_instructions(tasks[0]) == ("Launch the app and check if the icon appears")
+
+
+def test_is_auto_task_with_tag(tmp_path):
+    md = "- [ ] [AUTO:run_cli] ./my_app --flag\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert is_auto_task(tasks[0])
+
+
+def test_is_auto_task_without_tag(tmp_path):
+    md = "- [ ] Fix the crash on startup\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not is_auto_task(tasks[0])
+
+
+def test_is_auto_task_not_user_task(tmp_path):
+    md = "- [ ] [AUTO:run_cli] ./my_app\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert is_auto_task(tasks[0])
+    assert not is_user_task(tasks[0])
+
+
+def test_parse_auto_task_run_cli(tmp_path):
+    md = "- [ ] [AUTO:run_cli] ./my_app --flag\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    action, args = parse_auto_task(tasks[0])
+    assert action == "run_cli"
+    assert args == "./my_app --flag"
+
+
+def test_parse_auto_task_run_gui(tmp_path):
+    md = "- [ ] [AUTO:run_gui] open .build/debug/MyApp | MyApp\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    action, args = parse_auto_task(tasks[0])
+    assert action == "run_gui"
+    assert args == "open .build/debug/MyApp | MyApp"
+
+
+def test_parse_auto_task_window_exists(tmp_path):
+    md = "- [ ] [AUTO:window_exists] MyApp\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    action, args = parse_auto_task(tasks[0])
+    assert action == "window_exists"
+    assert args == "MyApp"
+
+
+def test_parse_auto_task_no_tag(tmp_path):
+    md = "- [ ] Normal task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    action, args = parse_auto_task(tasks[0])
+    assert action == ""
+    assert args == ""

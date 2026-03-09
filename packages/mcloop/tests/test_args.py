@@ -8,7 +8,9 @@ from mcloop.main import (
     SessionContext,
     _check_user_input,
     _copy_project_settings,
+    _dispatch_auto_action,
     _find_recent_crash_report,
+    _handle_auto_task,
     _handle_user_task,
     _investigation_failed,
     _investigation_passed,
@@ -1351,3 +1353,220 @@ def test_run_loop_picks_up_user_input(tmp_path):
     assert "use the v2 API" in first_call.kwargs.get(
         "session_context", first_call[1].get("session_context", "")
     )
+
+
+# --- _handle_auto_task ---
+
+
+def test_handle_auto_task_prints_and_returns(capsys):
+    """Auto task prints observation header and result."""
+    with patch(
+        "mcloop.main._dispatch_auto_action",
+        return_value="window_exists(MyApp): True",
+    ):
+        result = _handle_auto_task("3", "window_exists", "MyApp")
+
+    assert result == "window_exists(MyApp): True"
+    captured = capsys.readouterr()
+    assert "AUTO OBSERVATION" in captured.out
+    assert "Task 3" in captured.out
+    assert "window_exists" in captured.out
+
+
+def test_handle_auto_task_exception(capsys):
+    """Auto task catches exceptions and returns error string."""
+    with patch(
+        "mcloop.main._dispatch_auto_action",
+        side_effect=RuntimeError("osascript failed"),
+    ):
+        result = _handle_auto_task("1", "screenshot", "MyApp")
+
+    assert "ERROR" in result
+    assert "osascript failed" in result
+
+
+def test_handle_auto_task_truncates_long_result(capsys):
+    """Long results are truncated in display but not in return value."""
+    long_result = "x" * 1000
+    with patch(
+        "mcloop.main._dispatch_auto_action",
+        return_value=long_result,
+    ):
+        result = _handle_auto_task("1", "list_elements", "MyApp")
+
+    assert result == long_result  # full result returned
+    captured = capsys.readouterr()
+    assert "..." in captured.out  # truncated in display
+
+
+# --- _dispatch_auto_action ---
+
+
+def test_dispatch_run_cli():
+    """run_cli action dispatches to process_monitor.run_cli."""
+    mock_result = MagicMock()
+    mock_result.exit_code = 0
+    mock_result.hung = False
+    mock_result.output = "hello world"
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
+        result = _dispatch_auto_action("run_cli", "./my_app --flag")
+
+    mock.assert_called_once_with("./my_app --flag")
+    assert "OK" in result
+    assert "hello world" in result
+
+
+def test_dispatch_run_cli_crash():
+    """run_cli reports CRASHED on non-zero exit."""
+    mock_result = MagicMock()
+    mock_result.exit_code = 1
+    mock_result.hung = False
+    mock_result.output = "segfault"
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result):
+        result = _dispatch_auto_action("run_cli", "./my_app")
+
+    assert "CRASHED" in result
+
+
+def test_dispatch_run_cli_hung():
+    """run_cli reports HUNG when process was killed."""
+    mock_result = MagicMock()
+    mock_result.exit_code = None
+    mock_result.hung = True
+    mock_result.output = ""
+    mock_result.sample_output = "main thread stuck"
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result):
+        result = _dispatch_auto_action("run_cli", "./my_app")
+
+    assert "HUNG" in result
+    assert "main thread stuck" in result
+
+
+def test_dispatch_run_gui():
+    """run_gui action parses 'command | process_name' format."""
+    mock_result = MagicMock()
+    mock_result.crashed = False
+    mock_result.hung = False
+    mock_result.duration = 5.0
+    mock_result.crash_report = None
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_gui", return_value=mock_result) as mock:
+        result = _dispatch_auto_action(
+            "run_gui",
+            "open .build/debug/MyApp | MyApp",
+        )
+
+    mock.assert_called_once_with("open .build/debug/MyApp", "MyApp")
+    assert "OK" in result
+
+
+def test_dispatch_run_gui_missing_pipe():
+    """run_gui returns error if pipe separator is missing."""
+    result = _dispatch_auto_action("run_gui", "open .build/debug/MyApp")
+    assert "ERROR" in result
+
+
+def test_dispatch_window_exists():
+    """window_exists action checks via app_interact."""
+    with patch("mcloop.app_interact.window_exists", return_value=True) as mock:
+        result = _dispatch_auto_action("window_exists", "MyApp")
+
+    mock.assert_called_once_with("MyApp")
+    assert "True" in result
+
+
+def test_dispatch_screenshot():
+    """screenshot action captures via app_interact."""
+    with patch("mcloop.app_interact.screenshot_window") as mock:
+        result = _dispatch_auto_action("screenshot", "MyApp")
+
+    mock.assert_called_once_with("MyApp", "/tmp/auto_screenshot_MyApp.png")
+    assert "screenshot saved" in result
+
+
+def test_dispatch_list_elements():
+    """list_elements action returns UI tree."""
+    with patch(
+        "mcloop.app_interact.list_elements",
+        return_value="button OK, text field Name",
+    ) as mock:
+        result = _dispatch_auto_action("list_elements", "MyApp")
+
+    mock.assert_called_once_with("MyApp")
+    assert "button OK" in result
+
+
+def test_dispatch_click_button():
+    """click_button parses 'app_name | button_label' format."""
+    with patch("mcloop.app_interact.click_button") as mock:
+        result = _dispatch_auto_action("click_button", "MyApp | OK")
+
+    mock.assert_called_once_with("MyApp", "OK")
+    assert "clicked" in result
+
+
+def test_dispatch_click_button_missing_pipe():
+    """click_button returns error if pipe separator is missing."""
+    result = _dispatch_auto_action("click_button", "MyApp")
+    assert "ERROR" in result
+
+
+def test_dispatch_unknown_action():
+    """Unknown action returns error."""
+    result = _dispatch_auto_action("fly_to_moon", "please")
+    assert "ERROR" in result
+    assert "unknown auto action" in result
+
+
+# --- run_loop with [AUTO] tasks ---
+
+
+def test_run_loop_auto_task_skips_claude(tmp_path):
+    """[AUTO] tasks execute automatically and skip Claude Code session."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    (tmp_path / ".git").mkdir()
+
+    with (
+        patch("mcloop.main._dispatch_auto_action", return_value="STATUS: OK") as mock_dispatch,
+        patch("mcloop.main.run_task") as mock_run_task,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+    ):
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output = ""
+        mock_result.exit_code = 0
+        mock_run_task.return_value = mock_result
+
+        mock_check_result = MagicMock()
+        mock_check_result.passed = True
+        mock_checks.return_value = mock_check_result
+
+        run_loop(plan, no_audit=True)
+
+    # _dispatch_auto_action called for the AUTO task
+    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test")
+
+    # run_task only called for the second task
+    assert mock_run_task.call_count == 1
+    call_args = mock_run_task.call_args
+    assert "Fix the bug" in call_args[0][0]
+
+    # The AUTO task should be checked off
+    from mcloop.checklist import parse as parse_checklist
+
+    tasks = parse_checklist(plan)
+    assert tasks[0].checked

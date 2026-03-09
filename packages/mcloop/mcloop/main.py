@@ -23,9 +23,11 @@ from mcloop.checklist import (
     current_stage,
     find_next,
     get_stages,
+    is_auto_task,
     is_user_task,
     mark_failed,
     parse,
+    parse_auto_task,
     parse_description,
     stage_status,
     user_task_instructions,
@@ -383,6 +385,18 @@ def run_loop(
             continue
 
         label = _task_label(tasks, task)
+
+        # Handle [AUTO] tasks: automated observation
+        if is_auto_task(task):
+            has_subtasks = "." in label
+            ctx.update_group(label, has_subtasks)
+            action, args = parse_auto_task(task)
+            response = _handle_auto_task(label, action, args)
+            check_off(checklist_path, task)
+            completed.append(f"{label}) {task.text}")
+            ctx.add(label, task.text, "0s", response)
+            notify(f"[AUTO:{action}] {args[:60]}")
+            continue
 
         # Handle [USER] tasks: pause for human observation
         if is_user_task(task):
@@ -904,6 +918,141 @@ def _handle_user_task(label: str, instructions: str) -> str:
     else:
         print("\n>>> No observation provided, continuing.")
     return response
+
+
+def _handle_auto_task(label: str, action: str, args: str) -> str:
+    """Execute an [AUTO] task and return the observation result.
+
+    Dispatches to process_monitor, app_interact, or web_interact
+    based on the action keyword. Returns a formatted string
+    describing the observation result.
+
+    Supported actions:
+        run_cli      - Run a CLI command and capture output/crash/hang
+        run_gui      - Launch a GUI app and check for crash/hang
+                       (args: "command | process_name")
+        window_exists - Check if an app has a window open
+        screenshot   - Capture a screenshot of an app window
+        list_elements - List UI elements of an app window
+        click_button - Click a button in an app window
+                       (args: "app_name | button_label")
+        navigate     - Navigate a browser to a URL
+        page_text    - Read visible text from the current browser page
+    """
+    print(f"\n{'=' * 60}", flush=True)
+    print(f"  AUTO OBSERVATION  (Task {label})", flush=True)
+    print(f"{'=' * 60}", flush=True)
+    print(f"  Action: {action}", flush=True)
+    print(f"  Args: {args}", flush=True)
+    print(flush=True)
+
+    try:
+        result = _dispatch_auto_action(action, args)
+    except Exception as exc:
+        result = f"ERROR: {action} failed: {exc}"
+        print(f"  {result}", flush=True)
+        return result
+
+    # Truncate very long results for display
+    display = result[:500] + "..." if len(result) > 500 else result
+    print(f"  Result: {display}", flush=True)
+    print(f"\n>>> Auto observation complete ({len(result)} chars)")
+    return result
+
+
+def _dispatch_auto_action(action: str, args: str) -> str:
+    """Dispatch an auto task action to the appropriate module.
+
+    Returns the observation result as a string.
+    """
+    from mcloop import app_interact, process_monitor
+
+    if action == "run_cli":
+        cli_result = process_monitor.run_cli(args)
+        parts = [f"exit_code: {cli_result.exit_code}"]
+        if cli_result.hung:
+            parts.append("STATUS: HUNG (killed)")
+        elif cli_result.exit_code != 0:
+            parts.append("STATUS: CRASHED")
+        else:
+            parts.append("STATUS: OK")
+        if cli_result.output:
+            parts.append(f"output:\n{cli_result.output}")
+        if cli_result.sample_output:
+            parts.append(f"sample:\n{cli_result.sample_output}")
+        return "\n".join(parts)
+
+    if action == "run_gui":
+        # Format: "command | process_name"
+        if "|" not in args:
+            return f"ERROR: run_gui requires 'command | process_name', got: {args}"
+        command, process_name = args.split("|", 1)
+        gui_result = process_monitor.run_gui(
+            command.strip(),
+            process_name.strip(),
+        )
+        parts = []
+        if gui_result.crashed:
+            parts.append("STATUS: CRASHED")
+        elif gui_result.hung:
+            parts.append("STATUS: HUNG")
+        else:
+            parts.append("STATUS: OK")
+        parts.append(f"duration: {gui_result.duration:.1f}s")
+        if gui_result.crash_report:
+            parts.append(f"crash_report:\n{gui_result.crash_report}")
+        if gui_result.sample_output:
+            parts.append(f"sample:\n{gui_result.sample_output}")
+        return "\n".join(parts)
+
+    if action == "window_exists":
+        exists = app_interact.window_exists(args.strip())
+        return f"window_exists({args.strip()}): {exists}"
+
+    if action == "screenshot":
+        app_name = args.strip()
+        path = f"/tmp/auto_screenshot_{app_name}.png"
+        app_interact.screenshot_window(app_name, path)
+        return f"screenshot saved to {path}"
+
+    if action == "list_elements":
+        elements = app_interact.list_elements(args.strip())
+        return f"UI elements:\n{elements}"
+
+    if action == "click_button":
+        if "|" not in args:
+            return f"ERROR: click_button requires 'app_name | button_label', got: {args}"
+        app_name, button_label = args.split("|", 1)
+        app_interact.click_button(app_name.strip(), button_label.strip())
+        return f"clicked button '{button_label.strip()}' in {app_name.strip()}"
+
+    if action == "navigate":
+        from mcloop import web_interact
+
+        if not web_interact.is_playwright_available():
+            return "ERROR: Playwright is not installed"
+        browser = web_interact.launch_browser()
+        try:
+            browser.navigate(args.strip())
+            text = browser.text()
+            return f"navigated to {args.strip()}\npage text:\n{text}"
+        finally:
+            browser.close()
+
+    if action == "page_text":
+        from mcloop import web_interact
+
+        if not web_interact.is_playwright_available():
+            return "ERROR: Playwright is not installed"
+        browser = web_interact.launch_browser()
+        try:
+            if args.strip():
+                browser.navigate(args.strip())
+            return f"page text:\n{browser.text()}"
+        finally:
+            browser.close()
+
+    return f"ERROR: unknown auto action: {action}"
 
 
 def _check_user_input() -> str:
