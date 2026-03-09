@@ -621,6 +621,11 @@ def _main() -> None:
 
             _append_verification_failure(wt_path, failure, verify_round)
 
+        print(
+            formatting.system_msg("Verification passed."),
+            flush=True,
+        )
+        notify("Investigation verified: fix works. Ready to merge.")
         _investigation_passed(wt_path, branch, project_dir)
         return
 

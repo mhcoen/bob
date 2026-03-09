@@ -965,6 +965,130 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
     mock_failed.assert_called_once_with(wt_path, "investigate-bug")
 
 
+def test_investigate_verification_passes_calls_merge(tmp_path, capsys):
+    """When verification passes, _investigation_passed is called."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="crash")
+    mock_result = MagicMock(returncode=0)
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch("mcloop.main._launch_app_verification", return_value=None) as mock_verify,
+        patch("mcloop.main._investigation_passed") as mock_passed,
+        patch("mcloop.main.notify") as mock_notify,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-crash", False)
+
+        from mcloop.main import main
+
+        main()
+
+    mock_verify.assert_called_once_with(wt_path)
+    mock_passed.assert_called_once_with(wt_path, "investigate-crash", tmp_path)
+    # Notification sent on successful verification
+    mock_notify.assert_called_once()
+    assert "verified" in mock_notify.call_args[0][0].lower()
+    captured = capsys.readouterr()
+    assert "Verification passed" in captured.out
+
+
+def test_investigate_verification_fails_then_passes(tmp_path, capsys):
+    """Verification fails first round, passes second — merges."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n- [ ] Fix bug\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+    (wt_path / "PLAN.md").write_text("# Project\n- [ ] Fix bug\n")
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="crash")
+    mock_result = MagicMock(returncode=0)
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch(
+            "mcloop.main._launch_app_verification",
+            side_effect=["App crashed", None],
+        ) as mock_verify,
+        patch("mcloop.main._append_verification_failure") as mock_append,
+        patch("mcloop.main._investigation_passed") as mock_passed,
+        patch("mcloop.main.notify"),
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-crash", False)
+
+        from mcloop.main import main
+
+        main()
+
+    assert mock_verify.call_count == 2
+    mock_append.assert_called_once_with(wt_path, "App crashed", 1)
+    mock_passed.assert_called_once()
+    captured = capsys.readouterr()
+    assert "Verification passed" in captured.out
+
+
+def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
+    """Verification fails all rounds — _investigation_failed is called."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n- [ ] Fix bug\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+    (wt_path / "PLAN.md").write_text("# Project\n- [ ] Fix bug\n")
+
+    from mcloop.investigator import BugContext
+    from mcloop.main import MAX_VERIFICATION_ROUNDS
+
+    ctx = BugContext(user_description="crash")
+    mock_result = MagicMock(returncode=0)
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch(
+            "mcloop.main._launch_app_verification",
+            return_value="App crashed",
+        ),
+        patch("mcloop.main._append_verification_failure"),
+        patch("mcloop.main._investigation_failed") as mock_failed,
+        patch("mcloop.main.notify"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-crash", False)
+
+        from mcloop.main import main
+
+        main()
+
+    assert exc_info.value.code == 1
+    mock_failed.assert_called_once()
+    captured = capsys.readouterr()
+    assert f"{MAX_VERIFICATION_ROUNDS} rounds" in captured.out
+
+
 # --- _launch_app_verification ---
 
 
