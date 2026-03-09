@@ -190,7 +190,7 @@ The debugging playbook this enforces:
 
 - [ ] Automated verification after fix
   - [x] After the investigation produces a fix, automatically launch the app using the process monitor
-  - [ ] Use the app interaction layer to repeat the actions that triggered the original bug
+  - [x] Use the app interaction layer to repeat the actions that triggered the original bug
   - [ ] Verify the app survives (no crash, no hang, expected UI state)
   - [ ] If verification fails, feed the new failure information back into the investigation loop
   - [ ] If verification passes, proceed to merge
