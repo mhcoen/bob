@@ -161,11 +161,11 @@ The debugging playbook this enforces:
   - [x] Detect app type from mcloop.json (run command patterns: `open *.app` or `./run.sh` for GUI, bare binary or `python` for CLI, `npm start` or `flask run` for web)
   - [x] Add tests for each interaction type with mock targets
 
-- [ ] Investigation plan generator
+- [x] Investigation plan generator
   - [x] Create `mcloop/investigator.py` with a function that takes bug context (crash report, user description, failure history, source code summary) and produces an investigation PLAN.md following the debugging playbook
   - [x] The prompt for plan generation must include: the debugging playbook (reproduce, instrument, isolate, inspect, fix, clean up), instruction to create standalone probes for unclear subsystems, instruction to search the web for working examples before writing code, the "What has been tried" section populated from any available failure history
   - [x] The generated plan should include steps that use the process monitor and app interaction layer where applicable (e.g., "Launch the app and verify the menu bar icon appears" becomes a step that programmatically checks for the window/element)
-  - [ ] Add tests with sample bug descriptions verifying the generated plan contains research steps, isolation steps, and verification steps
+  - [x] Add tests with sample bug descriptions verifying the generated plan contains research steps, isolation steps, and verification steps
 
 - [ ] Git worktree management
   - [ ] Create `mcloop/worktree.py` with functions to: create a worktree from the current branch with a descriptive name and branch, check if a worktree already exists for a given investigation, list active investigation worktrees, merge an investigation branch back to the source branch, remove a worktree after successful merge
