@@ -378,6 +378,7 @@ def _parse_args() -> argparse.Namespace:
 def _cmd_audit(checklist_path: Path) -> None:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
     project_dir = checklist_path.parent
+    _ensure_git(project_dir)
     log_dir = project_dir / "logs"
     bugs_path = project_dir / "BUGS.md"
     existing = bugs_path.read_text() if bugs_path.exists() else ""
@@ -395,6 +396,7 @@ def _cmd_audit(checklist_path: Path) -> None:
 def _cmd_sync(checklist_path: Path, *, dry_run: bool = False) -> None:
     """Launch a Claude Code session with full project context for sync analysis."""
     project_dir = checklist_path.parent
+    _ensure_git(project_dir)
     log_dir = project_dir / "logs"
     mode = "(dry run)" if dry_run else ""
     print(f"Syncing PLAN.md with codebase {mode}...".strip(), flush=True)
@@ -901,6 +903,8 @@ AUDIT_HASH_FILE = ".mcloop-last-audit"
 
 def _get_git_hash(project_dir: Path) -> str:
     """Return current HEAD commit hash."""
+    if not (project_dir / ".git").exists():
+        return ""
     result = _git(
         ["git", "rev-parse", "HEAD"],
         cwd=project_dir,
@@ -911,6 +915,8 @@ def _get_git_hash(project_dir: Path) -> str:
 
 def _should_skip_audit(project_dir: Path) -> bool:
     """Skip audit if no source files changed since last audit."""
+    if not (project_dir / ".git").exists():
+        return False
     hash_file = project_dir / AUDIT_HASH_FILE
     if not hash_file.exists():
         return False
@@ -1248,7 +1254,9 @@ def _git(
         if stderr:
             msg += f"\n    {stderr}"
         print(f"\n!!! {msg}", flush=True)
-        notify(msg, level="error")
+        # Only notify for real git failures, not missing repos
+        if "not a git repository" not in stderr:
+            notify(msg, level="error")
     return result
 
 
