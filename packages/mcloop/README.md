@@ -102,6 +102,8 @@ mcloop --no-audit         # Skip the post-completion bug audit
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
+mcloop investigate "crash on wake from sleep"  # Debug a specific bug
+mcloop investigate --log crash.log             # Debug from a log file
 ```
 
 ## Writing a PLAN.md
@@ -449,6 +451,77 @@ On the next run, if no source files have changed since that hash, the
 audit is skipped. Delete `.mcloop-last-audit` to force a re-audit, or
 run `mcloop audit` for a standalone audit at any time.
 
+## Investigating bugs
+
+The build/test/audit cycle catches most defects, but some bugs only
+appear at runtime: a menu bar icon that vanishes after sleep, a
+crash triggered by specific user input, a deadlock under load.
+These require a different approach. You need to reproduce the
+problem, observe what happens, form hypotheses, and eliminate them
+one by one. `mcloop investigate` does this.
+
+```bash
+mcloop investigate "menu bar icon disappears after wake from sleep"
+mcloop investigate --log ~/Library/Logs/DiagnosticReports/MyApp-*.ips
+cat traceback.txt | mcloop investigate "segfault on resize"
+```
+
+McLoop gathers bug context from every source it can find: the
+description you provide, macOS crash reports from
+`~/Library/Logs/DiagnosticReports/`, the most recent mcloop task
+log, a log file you point to with `--log`, and anything piped to
+stdin. It then searches the web for the specific errors, stack
+traces, and symptoms in the bug report. If the crash log mentions
+`EXC_BAD_ACCESS` in `NSStatusBarButton`, it searches for that. If
+the traceback shows a specific framework API failing, it searches
+for known issues with that API. This is how a person would debug:
+start by understanding what other people have encountered with the
+same symptoms before writing any code.
+
+From this context, McLoop generates an investigation plan that
+follows a strict debugging playbook:
+
+1. **Reproduce** the problem with a minimal trigger.
+2. **Instrument** at stage boundaries to narrow the location.
+3. **Isolate** subsystems with standalone probes.
+4. **Inspect** live runtime behavior (process sampling, crash
+   reports, UI state).
+5. **Fix** the production code only after the cause is confirmed.
+6. **Clean up** temporary scaffolding.
+
+The investigation runs in an isolated git worktree
+(`../project-investigate-slug/`) so it cannot damage the main
+codebase. McLoop creates a branch, copies your project settings,
+generates the investigation PLAN.md, and runs it.
+
+Some investigation steps require human observation: "Launch the
+app, put the machine to sleep for 10 seconds, wake it, and
+describe what you see." These are marked `[USER]` in the plan.
+When McLoop reaches one, it pauses with clearly formatted
+instructions and waits for you to type your observation at the
+terminal. Your response is fed into the next session's context.
+
+Other steps can be performed automatically. McLoop includes a
+process monitor that can launch apps, detect crashes and hangs
+(via macOS `sample`), and read crash reports. It also includes
+an app interaction layer that can click buttons, read UI elements,
+and take screenshots using macOS accessibility APIs. Every app
+built by McLoop is instrumented with accessibility identifiers
+from the start, which makes this programmatic interaction
+possible.
+
+After the investigation produces a fix, McLoop automatically
+launches the app, replays the reproduction steps, and verifies
+the app survives without crashing or hanging. If verification
+fails, it feeds the new failure back into the investigation for
+another round (up to three). If it passes, McLoop shows the diff
+and offers to merge the investigation branch back into main.
+
+If the investigation does not fully resolve the bug, McLoop
+prints what was learned (from NOTES.md), what tasks remain, and
+leaves the worktree in place. Run `mcloop investigate` again
+with the same description to resume where it left off.
+
 ## Syncing PLAN.md
 
 Run `mcloop sync` to reconcile PLAN.md with the actual codebase. This
@@ -525,6 +598,7 @@ Each log captures the full CLI output and exit code.
 - `claude` CLI on PATH
 - `gh` CLI on PATH (for automatic GitHub repo creation)
 - macOS for iMessage notifications (Telegram works anywhere)
+- Playwright (optional, for web app investigation only)
 
 ## Development
 

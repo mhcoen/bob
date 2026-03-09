@@ -884,7 +884,7 @@ def build_post_fix_review_prompt(
         "understand the surrounding context.\n\n"
         "If the fix looks correct, print exactly:\n"
         "--- REVIEW RESULT ---\n"
-        "LGTM\n"
+        "NO_PROBLEMS\n"
         "--- END REVIEW ---\n\n"
         "If you find problems, print:\n"
         "--- REVIEW RESULT ---\n"
@@ -913,6 +913,7 @@ def review_found_problems(output: str) -> tuple[bool, str]:
     content = after.strip()
     if content.startswith("PROBLEMS FOUND"):
         return True, content
+    # Accept both NO_PROBLEMS and legacy LGTM
     return False, ""
 
 

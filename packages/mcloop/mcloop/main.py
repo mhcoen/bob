@@ -1955,7 +1955,7 @@ def _run_single_audit_round(
                         bugs_path.write_text(bugs_content)
                         continue
                     print(
-                        formatting.system_msg("Post-fix review: LGTM"),
+                        formatting.system_msg("Post-fix review: no new bugs introduced"),
                         flush=True,
                     )
 
