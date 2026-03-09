@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mcloop import process_monitor
 from mcloop.process_monitor import GUIResult, LaunchedProcess
 
@@ -552,6 +554,7 @@ class TestLaunchMocked:
         mock_popen.assert_called_once_with(
             "echo hi",
             shell=True,
+            stdin=None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd="/some/dir",
@@ -568,6 +571,7 @@ class TestLaunchMocked:
         mock_popen.assert_called_once_with(
             "ls",
             shell=True,
+            stdin=None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=None,
@@ -670,3 +674,208 @@ class TestIsHungMocked:
             last_output_at=time.monotonic() - 20,
         )
         assert process_monitor.is_hung(lp, timeout_seconds=5) is True
+
+
+class TestSendInput:
+    def test_send_string(self):
+        script = "import sys; line = sys.stdin.readline(); print('got:' + line.strip())"
+        proc = process_monitor.launch(
+            f'{sys.executable} -c "{script}"',
+            stdin=True,
+        )
+        try:
+            process_monitor.send_input(proc, "hello\n", close=True)
+            stdout, _ = proc.process.communicate(timeout=5)
+            assert b"got:hello" in stdout
+        finally:
+            if proc.process.poll() is None:
+                proc.process.kill()
+
+    def test_send_bytes(self):
+        proc = process_monitor.launch(
+            f'{sys.executable} -c "import sys; data = sys.stdin.buffer.read(3); print(data)"',
+            stdin=True,
+        )
+        try:
+            process_monitor.send_input(proc, b"\x00\x01\x02", close=True)
+            stdout, _ = proc.process.communicate(timeout=5)
+            assert b"\\x00\\x01\\x02" in stdout
+        finally:
+            if proc.process.poll() is None:
+                proc.process.kill()
+
+    def test_send_multiple_lines(self):
+        script = (
+            "import sys\nfor line in sys.stdin:\n    print('echo:' + line.strip(), flush=True)\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        lp = LaunchedProcess(pid=proc.pid, process=proc)
+        try:
+            process_monitor.send_input(lp, "line1\nline2\n", close=True)
+            stdout, _ = proc.communicate(timeout=5)
+            assert b"echo:line1" in stdout
+            assert b"echo:line2" in stdout
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+    def test_send_without_stdin_raises(self):
+        proc = process_monitor.launch("echo nope")
+        try:
+            proc.process.wait(timeout=5)
+            with pytest.raises(ValueError, match="stdin"):
+                process_monitor.send_input(proc, "data")
+        finally:
+            if proc.process.poll() is None:
+                proc.process.kill()
+
+    def test_close_sends_eof(self):
+        script = "import sys\ndata = sys.stdin.read()\nprint(f'total:{len(data)}')\n"
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        lp = LaunchedProcess(pid=proc.pid, process=proc)
+        try:
+            process_monitor.send_input(lp, "abc")
+            process_monitor.send_input(lp, "def", close=True)
+            stdout, _ = proc.communicate(timeout=5)
+            assert b"total:6" in stdout
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
+class TestReadOutput:
+    def test_reads_available_data(self):
+        proc = process_monitor.launch(f"{sys.executable} -c \"print('hello')\"")
+        try:
+            proc.process.wait(timeout=5)
+            time.sleep(0.1)
+            data = process_monitor.read_output(proc, timeout_seconds=1.0)
+            assert b"hello" in data
+        finally:
+            if proc.process.poll() is None:
+                proc.process.kill()
+
+    def test_returns_empty_when_no_data(self):
+        proc = process_monitor.launch("sleep 10")
+        try:
+            data = process_monitor.read_output(proc, timeout_seconds=0.1)
+            assert data == b""
+        finally:
+            proc.process.kill()
+            proc.process.wait()
+
+    def test_updates_last_output_at(self):
+        proc = process_monitor.launch(f"{sys.executable} -c \"print('x')\"")
+        try:
+            proc.process.wait(timeout=5)
+            time.sleep(0.1)
+            proc.last_output_at = time.monotonic() - 100
+            data = process_monitor.read_output(proc, timeout_seconds=1.0)
+            if data:
+                assert proc.last_output_at > time.monotonic() - 1
+        finally:
+            if proc.process.poll() is None:
+                proc.process.kill()
+
+    def test_no_stdout_returns_empty(self):
+        mock_proc = MagicMock()
+        mock_proc.stdout = None
+        lp = LaunchedProcess(pid=300, process=mock_proc)
+        assert process_monitor.read_output(lp) == b""
+
+
+class TestSendSignal:
+    def test_send_sigint(self):
+        proc = subprocess.Popen(
+            ["sleep", "60"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            assert process_monitor.send_signal(proc.pid, signal.SIGINT)
+            proc.wait(timeout=5)
+            assert proc.poll() is not None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    def test_send_sigusr1(self):
+        script = (
+            "import signal, sys, time\n"
+            "got = []\n"
+            "def handler(s, f):\n"
+            "    got.append(1)\n"
+            "    print('caught', flush=True)\n"
+            "signal.signal(signal.SIGUSR1, handler)\n"
+            "print('ready', flush=True)\n"
+            "time.sleep(5)\n"
+            "print(f'count:{len(got)}', flush=True)\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            line = proc.stdout.readline()
+            assert b"ready" in line
+            assert process_monitor.send_signal(proc.pid, signal.SIGUSR1)
+            line = proc.stdout.readline()
+            assert b"caught" in line
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_send_to_dead_process(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        result = process_monitor.send_signal(proc.pid, signal.SIGTERM)
+        assert result is False
+
+    @patch("os.kill", side_effect=PermissionError)
+    def test_permission_denied(self, mock_kill):
+        result = process_monitor.send_signal(99999, signal.SIGTERM)
+        assert result is False
+
+
+class TestLaunchWithStdin:
+    @patch("subprocess.Popen")
+    def test_stdin_true_passes_pipe(self, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.pid = 50
+        mock_popen.return_value = mock_proc
+        process_monitor.launch("cat", stdin=True)
+        mock_popen.assert_called_once_with(
+            "cat",
+            shell=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=None,
+        )
+
+    @patch("subprocess.Popen")
+    def test_stdin_false_passes_none(self, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.pid = 51
+        mock_popen.return_value = mock_proc
+        process_monitor.launch("echo hi", stdin=False)
+        mock_popen.assert_called_once_with(
+            "echo hi",
+            shell=True,
+            stdin=None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=None,
+        )

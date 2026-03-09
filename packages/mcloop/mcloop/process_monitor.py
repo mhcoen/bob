@@ -43,14 +43,20 @@ class LaunchedProcess:
     last_output_at: float = field(default_factory=time.monotonic)
 
 
-def launch(command: str, cwd: str | Path | None = None) -> LaunchedProcess:
+def launch(
+    command: str,
+    cwd: str | Path | None = None,
+    stdin: bool = False,
+) -> LaunchedProcess:
     """Launch a process from a shell command string.
 
     Returns a LaunchedProcess with stdout/stderr merged into stdout.
+    If stdin is True, a stdin pipe is opened for sending input.
     """
     proc = subprocess.Popen(
         command,
         shell=True,
+        stdin=subprocess.PIPE if stdin else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=cwd,
@@ -99,6 +105,75 @@ def is_hung(proc: LaunchedProcess, timeout_seconds: float) -> bool:
 
     elapsed = time.monotonic() - proc.last_output_at
     return elapsed >= timeout_seconds
+
+
+def send_input(proc: LaunchedProcess, data: str | bytes, close: bool = False) -> None:
+    """Send data to a process's stdin.
+
+    Args:
+        proc: A LaunchedProcess with stdin piped (launched with stdin=True).
+        data: String or bytes to write. Strings are encoded as UTF-8.
+        close: If True, close stdin after writing (sends EOF).
+
+    Raises:
+        ValueError: If the process was not launched with stdin=True.
+        OSError: If the process has already exited or stdin is closed.
+    """
+    if proc.process.stdin is None:
+        raise ValueError("Process was not launched with stdin=True")
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    proc.process.stdin.write(data)
+    proc.process.stdin.flush()
+    if close:
+        proc.process.stdin.close()
+
+
+def read_output(proc: LaunchedProcess, timeout_seconds: float = 0.0) -> bytes:
+    """Non-blocking read of available output from a process.
+
+    Waits up to timeout_seconds for data to become available on stdout.
+    Returns whatever bytes are available, or empty bytes if nothing is
+    ready within the timeout.
+
+    Args:
+        proc: A LaunchedProcess with stdout piped.
+        timeout_seconds: Max seconds to wait for data (0 = non-blocking).
+
+    Returns:
+        Bytes read from stdout, possibly empty.
+    """
+    stdout = proc.process.stdout
+    if stdout is None:
+        return b""
+    fd = stdout.fileno()
+    readable, _, _ = select.select([fd], [], [], timeout_seconds)
+    if readable:
+        data = os.read(fd, 65536)
+        if data:
+            proc.last_output_at = time.monotonic()
+        return data
+    return b""
+
+
+def send_signal(pid: int, sig: int) -> bool:
+    """Send a signal to a process by PID.
+
+    Args:
+        pid: Process ID.
+        sig: Signal number (e.g. signal.SIGINT, signal.SIGUSR1).
+
+    Returns:
+        True if the signal was sent, False if the process does not
+        exist or permission was denied.
+    """
+    try:
+        os.kill(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
 
 
 def sample(pid: int, duration_seconds: float = 1.0) -> str:
