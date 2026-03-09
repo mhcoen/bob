@@ -70,6 +70,15 @@ class TestCreate:
         assert branch == "investigate-fix-crash-on-startup"
         assert path == Path("/repo-investigate-fix-crash-on-startup")
 
+    def test_worktree_is_sibling_of_project(self):
+        """Worktree dir is ../<project>-investigate-<slug>/ relative to repo."""
+        root = "/home/user/projects/myapp"
+        with patch.object(worktree, "_run_git", side_effect=self._mock_git(root=root)):
+            path, _ = worktree.create("memory leak")
+        # Should be a sibling directory, not inside the repo
+        assert path.parent == Path(root).parent
+        assert path == Path("/home/user/projects/myapp-investigate-memory-leak")
+
     def test_empty_slug_raises(self):
         with pytest.raises(ValueError, match="empty slug"):
             worktree.create("!!!")
