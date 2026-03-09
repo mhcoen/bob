@@ -20,6 +20,7 @@ from mcloop.main import (
     _replay_repro_steps,
     _run_audit_fix_cycle,
     _run_single_audit_round,
+    _verify_gui_survival,
     gather_bug_context,
     run_loop,
 )
@@ -1256,6 +1257,107 @@ def test_launch_app_verification_cli_replays_repro_steps(tmp_path, capsys):
         _launch_app_verification(tmp_path)
     captured = capsys.readouterr()
     assert "Replaying 1 reproduction step" in captured.out
+
+
+# --- _verify_gui_survival ---
+
+
+def test_verify_gui_survival_app_alive_and_responsive(capsys):
+    """Reports success when process is alive, not hung, and has a window."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = [1234]
+    mock_pm.sample.return_value = "sample output"
+    mock_pm.is_main_thread_stuck.return_value = False
+    with patch("mcloop.app_interact.window_exists", return_value=True):
+        _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "alive, responsive, window present" in captured.out
+
+
+def test_verify_gui_survival_app_crashed(capsys):
+    """Reports crash when process disappears after replay."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = []
+    mock_pm.read_crash_report.return_value = None
+    _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "Post-replay: app CRASHED" in captured.out
+
+
+def test_verify_gui_survival_app_crashed_with_report(capsys):
+    """Prints crash report excerpt when available."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = []
+    mock_pm.read_crash_report.return_value = "crash line 1\ncrash line 2"
+    _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "Post-replay: app CRASHED" in captured.out
+    assert "crash line 1" in captured.err
+
+
+def test_verify_gui_survival_app_hung(capsys):
+    """Reports hung when main thread is stuck."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = [1234]
+    mock_pm.sample.return_value = "sample output"
+    mock_pm.is_main_thread_stuck.return_value = True
+    _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "Post-replay: app HUNG" in captured.out
+
+
+def test_verify_gui_survival_no_window(capsys):
+    """Reports no windows when app is alive but has no window."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = [1234]
+    mock_pm.sample.return_value = "sample output"
+    mock_pm.is_main_thread_stuck.return_value = False
+    with patch("mcloop.app_interact.window_exists", return_value=False):
+        _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "Post-replay: app has no windows" in captured.out
+
+
+def test_verify_gui_survival_window_check_fails(capsys):
+    """Falls back gracefully when window_exists raises."""
+    mock_pm = MagicMock()
+    mock_pm.pgrep.return_value = [1234]
+    mock_pm.sample.return_value = "sample output"
+    mock_pm.is_main_thread_stuck.return_value = False
+    with patch(
+        "mcloop.app_interact.window_exists",
+        side_effect=RuntimeError("osascript failed"),
+    ):
+        _verify_gui_survival("MyApp", mock_pm)
+    captured = capsys.readouterr()
+    assert "alive and responsive" in captured.out
+    assert "window present" not in captured.out
+
+
+def test_launch_verification_gui_survival_check_after_replay(tmp_path, capsys):
+    """GUI verification runs survival check after replaying repro steps."""
+    import json
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    steps = [{"action": "window_exists", "args": "MyApp"}]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+
+    gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
+    with (
+        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+        patch("mcloop.app_interact.window_exists", return_value=True),
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = [1234]
+        mock_pm.sample.return_value = "sample"
+        mock_pm.is_main_thread_stuck.return_value = False
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "Replaying" in captured.out
+    assert "alive, responsive, window present" in captured.out
 
 
 # --- _investigation_passed ---

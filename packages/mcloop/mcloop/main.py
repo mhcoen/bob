@@ -159,6 +159,57 @@ def _replay_repro_steps(steps: list[dict]) -> list[str]:
     return results
 
 
+def _verify_gui_survival(process_name: str, pm) -> None:
+    """Check that a GUI app survived repro-step replay.
+
+    Verifies the process is still alive, not hung (via sample),
+    and has at least one window open.
+    """
+    from mcloop import app_interact
+
+    pids = pm.pgrep(process_name)
+    if not pids:
+        crash_rpt = pm.read_crash_report(process_name)
+        print(
+            formatting.error_msg("Post-replay: app CRASHED"),
+            flush=True,
+        )
+        if crash_rpt:
+            lines = crash_rpt.splitlines()[:20]
+            print("\n".join(lines), file=sys.stderr)
+        return
+
+    pid = pids[0]
+    sample_out = pm.sample(pid)
+    if pm.is_main_thread_stuck(sample_out):
+        print(
+            formatting.error_msg("Post-replay: app HUNG"),
+            flush=True,
+        )
+        return
+
+    try:
+        has_window = app_interact.window_exists(process_name)
+    except Exception:
+        has_window = None
+
+    if has_window is False:
+        print(
+            formatting.error_msg("Post-replay: app has no windows"),
+            flush=True,
+        )
+    elif has_window is True:
+        print(
+            formatting.system_msg("Post-replay: app alive, responsive, window present"),
+            flush=True,
+        )
+    else:
+        print(
+            formatting.system_msg("Post-replay: app alive and responsive"),
+            flush=True,
+        )
+
+
 def _launch_app_verification(wt_path: Path) -> None:
     """Launch the app from the worktree to verify the fix works.
 
@@ -223,6 +274,8 @@ def _launch_app_verification(wt_path: Path) -> None:
                         print(formatting.error_msg(msg), flush=True)
                     else:
                         print(formatting.system_msg(msg), flush=True)
+                # Post-replay survival check.
+                _verify_gui_survival(process_name, process_monitor)
         # Clean up: kill the launched GUI app.
         pids = process_monitor.pgrep(process_name)
         for pid in pids:
