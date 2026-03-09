@@ -164,7 +164,7 @@ The debugging playbook this enforces:
 - [ ] Investigation plan generator
   - [x] Create `mcloop/investigator.py` with a function that takes bug context (crash report, user description, failure history, source code summary) and produces an investigation PLAN.md following the debugging playbook
   - [x] The prompt for plan generation must include: the debugging playbook (reproduce, instrument, isolate, inspect, fix, clean up), instruction to create standalone probes for unclear subsystems, instruction to search the web for working examples before writing code, the "What has been tried" section populated from any available failure history
-  - [ ] The generated plan should include steps that use the process monitor and app interaction layer where applicable (e.g., "Launch the app and verify the menu bar icon appears" becomes a step that programmatically checks for the window/element)
+  - [x] The generated plan should include steps that use the process monitor and app interaction layer where applicable (e.g., "Launch the app and verify the menu bar icon appears" becomes a step that programmatically checks for the window/element)
   - [ ] Add tests with sample bug descriptions verifying the generated plan contains research steps, isolation steps, and verification steps
 
 - [ ] Git worktree management
