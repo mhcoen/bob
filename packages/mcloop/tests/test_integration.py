@@ -373,6 +373,7 @@ def test_commit_stages_all_files(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_commits_with_task_message(mock_run, tmp_path):
     """_commit creates a commit with the task text in the message."""
+    (tmp_path / ".git").mkdir()
     mock_run.return_value = MagicMock()
 
     _commit(tmp_path, "my task description")
@@ -385,6 +386,7 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_pushes_after_commit(mock_run, tmp_path):
     """_commit calls git push after committing when a remote exists."""
+    (tmp_path / ".git").mkdir()
     remote_result = MagicMock()
     remote_result.stdout = "origin\n"
     mock_run.return_value = remote_result
@@ -402,6 +404,7 @@ def test_commit_pushes_after_commit(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_skips_push_when_no_remote(mock_run, tmp_path):
     """_commit skips git push silently when no remote is configured."""
+    (tmp_path / ".git").mkdir()
     no_remote_result = MagicMock()
     no_remote_result.stdout = ""
     mock_run.return_value = no_remote_result
@@ -415,6 +418,7 @@ def test_commit_skips_push_when_no_remote(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_calls_gh_create_when_no_remote(mock_run, tmp_path):
     """_commit calls gh repo create when no remote is configured."""
+    (tmp_path / ".git").mkdir()
     no_remote = MagicMock()
     no_remote.stdout = ""
     mock_run.return_value = no_remote
@@ -431,6 +435,7 @@ def test_commit_calls_gh_create_when_no_remote(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_pushes_after_gh_create_succeeds(mock_run, tmp_path):
     """_commit pushes after gh repo create adds a remote."""
+    (tmp_path / ".git").mkdir()
     remote_call_count = {"n": 0}
 
     def side_effect(cmd, **kwargs):
@@ -453,6 +458,7 @@ def test_commit_pushes_after_gh_create_succeeds(mock_run, tmp_path):
 @patch("mcloop.main.subprocess.run")
 def test_commit_skips_push_when_gh_create_fails(mock_run, tmp_path):
     """_commit skips push when gh repo create fails to add a remote."""
+    (tmp_path / ".git").mkdir()
     no_remote = MagicMock()
     no_remote.stdout = ""
     mock_run.return_value = no_remote
@@ -464,9 +470,13 @@ def test_commit_skips_push_when_gh_create_fails(mock_run, tmp_path):
 
 
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
-def test_commit_ignores_errors(mock_run, tmp_path):
-    """_commit swallows exceptions and does not propagate them."""
-    _commit(tmp_path, "task")  # should not raise
+def test_commit_propagates_errors(mock_run, tmp_path):
+    """_commit propagates exceptions from subprocess calls."""
+    import pytest
+
+    (tmp_path / ".git").mkdir()
+    with pytest.raises(OSError):
+        _commit(tmp_path, "task")
 
 
 @patch("mcloop.main.notify")
@@ -495,8 +505,10 @@ def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock
 @patch("mcloop.main.subprocess.run")
 def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
     """_checkpoint stages and commits when tracked files are modified."""
-    dirty_result = MagicMock()
+    (tmp_path / ".git").mkdir()
+    dirty_result = MagicMock(returncode=0)
     dirty_result.stdout = "src/foo.py\n"
+    dirty_result.stderr = ""
     mock_run.return_value = dirty_result
 
     _checkpoint(tmp_path)
@@ -512,24 +524,29 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
         ["git", "add", "-u"],
         cwd=tmp_path,
         capture_output=True,
+        text=True,
     )
     assert mock_run.call_args_list[2] == call(
         ["git", "add", "-A"],
         cwd=tmp_path,
         capture_output=True,
+        text=True,
     )
     assert mock_run.call_args_list[3] == call(
         ["git", "commit", "-m", "mcloop: checkpoint"],
         cwd=tmp_path,
         capture_output=True,
+        text=True,
     )
 
 
 @patch("mcloop.main.subprocess.run")
 def test_checkpoint_skips_when_clean(mock_run, tmp_path):
     """_checkpoint does nothing when there are no tracked modified files."""
-    clean_result = MagicMock()
+    (tmp_path / ".git").mkdir()
+    clean_result = MagicMock(returncode=0)
     clean_result.stdout = ""
+    clean_result.stderr = ""
     mock_run.return_value = clean_result
 
     _checkpoint(tmp_path)
@@ -538,9 +555,13 @@ def test_checkpoint_skips_when_clean(mock_run, tmp_path):
 
 
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))
-def test_checkpoint_ignores_errors(mock_run, tmp_path):
-    """_checkpoint swallows exceptions and does not propagate them."""
-    _checkpoint(tmp_path)  # should not raise
+def test_checkpoint_propagates_errors(mock_run, tmp_path):
+    """_checkpoint propagates exceptions from subprocess calls."""
+    import pytest
+
+    (tmp_path / ".git").mkdir()
+    with pytest.raises(OSError):
+        _checkpoint(tmp_path)
 
 
 @patch("mcloop.main.notify")

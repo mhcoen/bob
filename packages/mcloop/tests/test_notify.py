@@ -75,7 +75,8 @@ def test_imessage_mode_does_not_send_telegram(mock_imsg, mock_tg):
     "mcloop.notify._get_config",
     return_value=("", "", "mhcoen@gmail.com"),
 )
-def test_imessage_uses_chat_id_format(mock_config, mock_run):
+def test_imessage_uses_chat_id_format(mock_config, mock_run, monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     from mcloop.notify import _send_imessage
 
     _send_imessage("hello")
@@ -99,7 +100,8 @@ def test_imessage_skips_when_no_id(mock_config, mock_run):
     "mcloop.notify._get_config",
     return_value=("fake-token", "12345", ""),
 )
-def test_telegram_sends_to_correct_url(mock_config, mock_urlopen):
+def test_telegram_sends_to_correct_url(mock_config, mock_urlopen, monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     from mcloop.notify import _send_telegram
 
     _send_telegram("hello")

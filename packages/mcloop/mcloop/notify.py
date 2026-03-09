@@ -34,6 +34,8 @@ def _get_config() -> tuple[str, str, str]:
 
 
 def _send_telegram(text: str) -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
     bot_token, chat_id, _ = _get_config()
     if not bot_token or not chat_id:
         return
@@ -50,6 +52,8 @@ def _send_telegram(text: str) -> None:
 
 
 def _send_imessage(text: str) -> None:
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
     _, _, imessage_id = _get_config()
     if not imessage_id:
         return
