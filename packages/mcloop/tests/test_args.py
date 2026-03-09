@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcloop.main import (
+    MAX_VERIFICATION_ROUNDS,
     SessionContext,
+    _append_verification_failure,
     _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
@@ -967,15 +969,16 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
 
 
 def test_launch_app_verification_no_run_cmd(tmp_path, capsys):
-    """When no run command is detected, does nothing."""
+    """When no run command is detected, returns None."""
     with patch("mcloop.main.detect_run", return_value=None):
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is None
     captured = capsys.readouterr()
     assert captured.out == ""
 
 
 def test_launch_app_verification_gui_ok(tmp_path, capsys):
-    """GUI app that starts OK is reported and then killed."""
+    """GUI app that starts OK is reported, killed, and returns None."""
     gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
     with (
         patch("mcloop.main.detect_run", return_value="swift run MyApp"),
@@ -984,7 +987,8 @@ def test_launch_app_verification_gui_ok(tmp_path, capsys):
     ):
         mock_pm.run_gui.return_value = gui_result
         mock_pm.pgrep.return_value = [1234]
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is None
     mock_pm.run_gui.assert_called_once_with("swift run MyApp", "MyApp", timeout_seconds=15)
     mock_pm.kill.assert_called_once_with(1234)
     captured = capsys.readouterr()
@@ -992,7 +996,7 @@ def test_launch_app_verification_gui_ok(tmp_path, capsys):
 
 
 def test_launch_app_verification_gui_crashed(tmp_path, capsys):
-    """GUI app that crashes is reported."""
+    """GUI app that crashes returns failure description."""
     gui_result = MagicMock(
         crashed=True, hung=False, duration=2.0, crash_report="crash info\nline2"
     )
@@ -1003,13 +1007,15 @@ def test_launch_app_verification_gui_crashed(tmp_path, capsys):
     ):
         mock_pm.run_gui.return_value = gui_result
         mock_pm.pgrep.return_value = []
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is not None
+    assert "crashed" in result.lower()
     captured = capsys.readouterr()
     assert "CRASHED" in captured.out
 
 
 def test_launch_app_verification_gui_hung(tmp_path, capsys):
-    """GUI app that hangs is reported."""
+    """GUI app that hangs returns failure description."""
     gui_result = MagicMock(crashed=False, hung=True, duration=15.0)
     with (
         patch("mcloop.main.detect_run", return_value="swift run MyApp"),
@@ -1018,14 +1024,16 @@ def test_launch_app_verification_gui_hung(tmp_path, capsys):
     ):
         mock_pm.run_gui.return_value = gui_result
         mock_pm.pgrep.return_value = [5678]
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is not None
+    assert "hung" in result.lower()
     mock_pm.kill.assert_called_once_with(5678)
     captured = capsys.readouterr()
     assert "HUNG" in captured.out
 
 
 def test_launch_app_verification_cli_ok(tmp_path, capsys):
-    """CLI app that exits 0 is reported as OK."""
+    """CLI app that exits 0 returns None."""
     cli_result = MagicMock(hung=False, exit_code=0, duration=1.5, output="")
     with (
         patch("mcloop.main.detect_run", return_value="cargo run"),
@@ -1033,7 +1041,8 @@ def test_launch_app_verification_cli_ok(tmp_path, capsys):
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is None
     mock_pm.run_cli.assert_called_once_with(
         "cargo run", cwd=str(tmp_path), timeout_seconds=15, hang_seconds=10
     )
@@ -1042,7 +1051,7 @@ def test_launch_app_verification_cli_ok(tmp_path, capsys):
 
 
 def test_launch_app_verification_cli_crash(tmp_path, capsys):
-    """CLI app with non-zero exit is reported."""
+    """CLI app with non-zero exit returns failure description."""
     cli_result = MagicMock(hung=False, exit_code=1, duration=0.5, output="error: segfault")
     with (
         patch("mcloop.main.detect_run", return_value="./myapp"),
@@ -1050,13 +1059,15 @@ def test_launch_app_verification_cli_crash(tmp_path, capsys):
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is not None
+    assert "exited with code 1" in result
     captured = capsys.readouterr()
     assert "exited with code 1" in captured.out
 
 
 def test_launch_app_verification_cli_hung(tmp_path, capsys):
-    """CLI app that hangs is reported."""
+    """CLI app that hangs returns failure description."""
     cli_result = MagicMock(hung=True, exit_code=None, duration=10.0, output="")
     with (
         patch("mcloop.main.detect_run", return_value="./myapp"),
@@ -1064,18 +1075,21 @@ def test_launch_app_verification_cli_hung(tmp_path, capsys):
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is not None
+    assert "hung" in result.lower()
     captured = capsys.readouterr()
     assert "HUNG" in captured.out
 
 
 def test_launch_app_verification_web_skipped(tmp_path, capsys):
-    """Web apps are skipped (no server launch)."""
+    """Web apps are skipped and return None."""
     with (
         patch("mcloop.main.detect_run", return_value="npm start"),
         patch("mcloop.main.detect_app_type", return_value="web"),
     ):
-        _launch_app_verification(tmp_path)
+        result = _launch_app_verification(tmp_path)
+    assert result is None
     captured = capsys.readouterr()
     assert "Skipping launch for web app" in captured.out
 
@@ -1191,7 +1205,7 @@ def test_replay_repro_steps_catches_exceptions():
 
 
 def test_launch_app_verification_gui_replays_repro_steps(tmp_path, capsys):
-    """GUI app that runs OK replays repro-steps.json."""
+    """GUI app that runs OK replays repro-steps.json and returns None."""
     import json
 
     mcloop_dir = tmp_path / ".mcloop"
@@ -1208,8 +1222,12 @@ def test_launch_app_verification_gui_replays_repro_steps(tmp_path, capsys):
     ):
         mock_pm.run_gui.return_value = gui_result
         mock_pm.pgrep.return_value = [1234]
-        _launch_app_verification(tmp_path)
-    mock_we.assert_called_once_with("MyApp")
+        mock_pm.sample.return_value = "sample"
+        mock_pm.is_main_thread_stuck.return_value = False
+        result = _launch_app_verification(tmp_path)
+    assert result is None
+    # window_exists is called twice: once during repro replay, once during survival check
+    assert mock_we.call_count == 2
     captured = capsys.readouterr()
     assert "Replaying 1 reproduction step" in captured.out
     assert "Step 1" in captured.out
@@ -1263,63 +1281,72 @@ def test_launch_app_verification_cli_replays_repro_steps(tmp_path, capsys):
 
 
 def test_verify_gui_survival_app_alive_and_responsive(capsys):
-    """Reports success when process is alive, not hung, and has a window."""
+    """Returns None when process is alive, not hung, and has a window."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = [1234]
     mock_pm.sample.return_value = "sample output"
     mock_pm.is_main_thread_stuck.return_value = False
     with patch("mcloop.app_interact.window_exists", return_value=True):
-        _verify_gui_survival("MyApp", mock_pm)
+        result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is None
     captured = capsys.readouterr()
     assert "alive, responsive, window present" in captured.out
 
 
 def test_verify_gui_survival_app_crashed(capsys):
-    """Reports crash when process disappears after replay."""
+    """Returns failure description when process disappears after replay."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = []
     mock_pm.read_crash_report.return_value = None
-    _verify_gui_survival("MyApp", mock_pm)
+    result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is not None
+    assert "crashed" in result.lower()
     captured = capsys.readouterr()
     assert "Post-replay: app CRASHED" in captured.out
 
 
 def test_verify_gui_survival_app_crashed_with_report(capsys):
-    """Prints crash report excerpt when available."""
+    """Returns failure with crash report when available."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = []
     mock_pm.read_crash_report.return_value = "crash line 1\ncrash line 2"
-    _verify_gui_survival("MyApp", mock_pm)
+    result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is not None
+    assert "crash line 1" in result
     captured = capsys.readouterr()
     assert "Post-replay: app CRASHED" in captured.out
     assert "crash line 1" in captured.err
 
 
 def test_verify_gui_survival_app_hung(capsys):
-    """Reports hung when main thread is stuck."""
+    """Returns failure description when main thread is stuck."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = [1234]
     mock_pm.sample.return_value = "sample output"
     mock_pm.is_main_thread_stuck.return_value = True
-    _verify_gui_survival("MyApp", mock_pm)
+    result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is not None
+    assert "hung" in result.lower()
     captured = capsys.readouterr()
     assert "Post-replay: app HUNG" in captured.out
 
 
 def test_verify_gui_survival_no_window(capsys):
-    """Reports no windows when app is alive but has no window."""
+    """Returns failure when app is alive but has no window."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = [1234]
     mock_pm.sample.return_value = "sample output"
     mock_pm.is_main_thread_stuck.return_value = False
     with patch("mcloop.app_interact.window_exists", return_value=False):
-        _verify_gui_survival("MyApp", mock_pm)
+        result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is not None
+    assert "no windows" in result
     captured = capsys.readouterr()
     assert "Post-replay: app has no windows" in captured.out
 
 
 def test_verify_gui_survival_window_check_fails(capsys):
-    """Falls back gracefully when window_exists raises."""
+    """Returns None when window_exists raises (alive and responsive)."""
     mock_pm = MagicMock()
     mock_pm.pgrep.return_value = [1234]
     mock_pm.sample.return_value = "sample output"
@@ -1328,7 +1355,8 @@ def test_verify_gui_survival_window_check_fails(capsys):
         "mcloop.app_interact.window_exists",
         side_effect=RuntimeError("osascript failed"),
     ):
-        _verify_gui_survival("MyApp", mock_pm)
+        result = _verify_gui_survival("MyApp", mock_pm)
+    assert result is None
     captured = capsys.readouterr()
     assert "alive and responsive" in captured.out
     assert "window present" not in captured.out
@@ -1369,7 +1397,6 @@ def test_investigation_passed_merges_on_yes(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run") as mock_run,
         patch("builtins.input", return_value="y"),
@@ -1399,7 +1426,6 @@ def test_investigation_passed_skips_merge_on_no(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run") as mock_run,
         patch("builtins.input", return_value="n"),
@@ -1420,7 +1446,6 @@ def test_investigation_passed_skips_merge_on_eof(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", side_effect=EOFError),
@@ -1439,7 +1464,6 @@ def test_investigation_passed_merge_failure(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
@@ -1462,7 +1486,6 @@ def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main._launch_app_verification"),
         patch("mcloop.main.worktree.current_branch", return_value="main"),
         patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
@@ -1476,6 +1499,48 @@ def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert "Cleanup warning" in captured.err
+
+
+# --- _append_verification_failure ---
+
+
+def test_append_verification_failure_creates_notes(tmp_path, capsys):
+    """Creates NOTES.md with observations header when it doesn't exist."""
+    _append_verification_failure(tmp_path, "App crashed on launch", 1)
+    notes = (tmp_path / "NOTES.md").read_text()
+    assert "## Observations" in notes
+    assert "Verification round 1 failed" in notes
+    assert "App crashed on launch" in notes
+
+
+def test_append_verification_failure_appends_to_existing_notes(tmp_path, capsys):
+    """Appends to existing NOTES.md without duplicating header."""
+    (tmp_path / "NOTES.md").write_text("## Observations\n\n- Prior note\n")
+    _append_verification_failure(tmp_path, "App hung", 2)
+    notes = (tmp_path / "NOTES.md").read_text()
+    assert notes.count("## Observations") == 1
+    assert "Prior note" in notes
+    assert "Verification round 2 failed" in notes
+
+
+def test_append_verification_failure_adds_plan_tasks(tmp_path, capsys):
+    """Appends new fix tasks to PLAN.md."""
+    (tmp_path / "PLAN.md").write_text("# Plan\n\n- [x] Fix the bug\n")
+    _append_verification_failure(tmp_path, "App crashed", 1)
+    plan = (tmp_path / "PLAN.md").read_text()
+    assert "## Verification fix (round 1)" in plan
+    assert "- [ ] Investigate and fix verification failure" in plan
+    assert "App crashed" in plan
+    assert "- [ ] Verify the fix resolves the issue" in plan
+
+
+def test_append_verification_failure_prints_status(tmp_path, capsys):
+    """Prints a status message about the retry."""
+    (tmp_path / "PLAN.md").write_text("# Plan\n")
+    _append_verification_failure(tmp_path, "App hung", 1)
+    captured = capsys.readouterr()
+    assert "Verification failed" in captured.out
+    assert f"round 1/{MAX_VERIFICATION_ROUNDS}" in captured.out
 
 
 # --- _investigation_failed ---

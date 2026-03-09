@@ -159,11 +159,13 @@ def _replay_repro_steps(steps: list[dict]) -> list[str]:
     return results
 
 
-def _verify_gui_survival(process_name: str, pm) -> None:
+def _verify_gui_survival(process_name: str, pm) -> str | None:
     """Check that a GUI app survived repro-step replay.
 
     Verifies the process is still alive, not hung (via sample),
     and has at least one window open.
+
+    Returns a failure description string, or None if the app survived.
     """
     from mcloop import app_interact
 
@@ -177,7 +179,7 @@ def _verify_gui_survival(process_name: str, pm) -> None:
         if crash_rpt:
             lines = crash_rpt.splitlines()[:20]
             print("\n".join(lines), file=sys.stderr)
-        return
+        return f"App crashed after repro-step replay. Crash report: {crash_rpt or 'none'}"
 
     pid = pids[0]
     sample_out = pm.sample(pid)
@@ -186,7 +188,7 @@ def _verify_gui_survival(process_name: str, pm) -> None:
             formatting.error_msg("Post-replay: app HUNG"),
             flush=True,
         )
-        return
+        return "App hung after repro-step replay (main thread stuck)"
 
     try:
         has_window = app_interact.window_exists(process_name)
@@ -198,6 +200,7 @@ def _verify_gui_survival(process_name: str, pm) -> None:
             formatting.error_msg("Post-replay: app has no windows"),
             flush=True,
         )
+        return "App has no windows after repro-step replay"
     elif has_window is True:
         print(
             formatting.system_msg("Post-replay: app alive, responsive, window present"),
@@ -208,20 +211,23 @@ def _verify_gui_survival(process_name: str, pm) -> None:
             formatting.system_msg("Post-replay: app alive and responsive"),
             flush=True,
         )
+    return None
 
 
-def _launch_app_verification(wt_path: Path) -> None:
+def _launch_app_verification(wt_path: Path) -> str | None:
     """Launch the app from the worktree to verify the fix works.
 
     Uses the process monitor to run the app and reports whether it
     starts successfully, crashes, or hangs. If .mcloop/repro-steps.json
     exists, replays the reproduction steps after a successful launch.
+
+    Returns a failure description string, or None if verification passed.
     """
     from mcloop import process_monitor
 
     run_cmd = detect_run(wt_path)
     if not run_cmd:
-        return
+        return None
 
     app_type = detect_app_type(wt_path)
     print(
@@ -241,6 +247,7 @@ def _launch_app_verification(wt_path: Path) -> None:
             process_name,
             timeout_seconds=15,
         )
+        failure = None
         if result.crashed:
             print(
                 formatting.error_msg("Verification: app CRASHED"),
@@ -249,11 +256,13 @@ def _launch_app_verification(wt_path: Path) -> None:
             if result.crash_report:
                 lines = result.crash_report.splitlines()[:20]
                 print("\n".join(lines), file=sys.stderr)
+            failure = f"App crashed on launch. Crash report: {result.crash_report or 'none'}"
         elif result.hung:
             print(
                 formatting.error_msg("Verification: app HUNG"),
                 flush=True,
             )
+            failure = "App hung on launch (not responding)"
         else:
             print(
                 formatting.system_msg(f"Verification: app running OK ({result.duration:.1f}s)"),
@@ -267,19 +276,26 @@ def _launch_app_verification(wt_path: Path) -> None:
                     flush=True,
                 )
                 repro_results = _replay_repro_steps(repro_steps)
+                repro_errors = []
                 for i, res in enumerate(repro_results, 1):
                     failed = res.startswith("ERROR:")
                     msg = f"  Step {i}: {res.splitlines()[0]}"
                     if failed:
                         print(formatting.error_msg(msg), flush=True)
+                        repro_errors.append(msg.strip())
                     else:
                         print(formatting.system_msg(msg), flush=True)
                 # Post-replay survival check.
-                _verify_gui_survival(process_name, process_monitor)
+                survival_failure = _verify_gui_survival(process_name, process_monitor)
+                if survival_failure:
+                    failure = survival_failure
+                elif repro_errors:
+                    failure = "Repro-step replay had errors: " + "; ".join(repro_errors)
         # Clean up: kill the launched GUI app.
         pids = process_monitor.pgrep(process_name)
         for pid in pids:
             process_monitor.kill(pid)
+        return failure
     elif app_type == "cli":
         result = process_monitor.run_cli(
             run_cmd,
@@ -292,15 +308,21 @@ def _launch_app_verification(wt_path: Path) -> None:
                 formatting.error_msg("Verification: app HUNG"),
                 flush=True,
             )
+            return "App hung during CLI verification"
         elif result.exit_code != 0:
             print(
                 formatting.error_msg(f"Verification: app exited with code {result.exit_code}"),
                 flush=True,
             )
+            output_tail = ""
             if result.output:
                 tail = result.output.strip().splitlines()[-10:]
                 for line in tail:
                     print(f"  {line}", file=sys.stderr)
+                output_tail = "\n".join(tail)
+            return f"App exited with code {result.exit_code}." + (
+                f" Output:\n{output_tail}" if output_tail else ""
+            )
         else:
             print(
                 formatting.system_msg(f"Verification: app exited OK ({result.duration:.1f}s)"),
@@ -314,19 +336,64 @@ def _launch_app_verification(wt_path: Path) -> None:
                     flush=True,
                 )
                 repro_results = _replay_repro_steps(repro_steps)
+                repro_errors = []
                 for i, res in enumerate(repro_results, 1):
                     failed = res.startswith("ERROR:")
                     msg = f"  Step {i}: {res.splitlines()[0]}"
                     if failed:
                         print(formatting.error_msg(msg), flush=True)
+                        repro_errors.append(msg.strip())
                     else:
                         print(formatting.system_msg(msg), flush=True)
+                if repro_errors:
+                    return "Repro-step replay had errors: " + "; ".join(repro_errors)
+            return None
     else:
         # Web apps: just note the run command, don't launch a server
         print(
             formatting.system_msg(f"Skipping launch for web app: {run_cmd}"),
             flush=True,
         )
+        return None
+
+
+MAX_VERIFICATION_ROUNDS = 3
+
+
+def _append_verification_failure(
+    wt_path: Path,
+    failure: str,
+    round_num: int,
+) -> None:
+    """Append verification failure info to the worktree for the next run.
+
+    Adds an observation to NOTES.md and appends new tasks to PLAN.md
+    so mcloop can pick them up in the next run.
+    """
+    # Append to NOTES.md
+    notes_path = wt_path / "NOTES.md"
+    notes_header = ""
+    if not notes_path.exists():
+        notes_header = "## Observations\n\n"
+    with open(notes_path, "a") as f:
+        if notes_header:
+            f.write(notes_header)
+        f.write(f"- Verification round {round_num} failed: {failure}\n")
+
+    # Append new fix tasks to PLAN.md
+    plan_path = wt_path / "PLAN.md"
+    with open(plan_path, "a") as f:
+        f.write(f"\n## Verification fix (round {round_num})\n\n")
+        f.write(f"- [ ] Investigate and fix verification failure: {failure}\n")
+        f.write("- [ ] Verify the fix resolves the issue\n")
+
+    print(
+        formatting.system_msg(
+            f"Verification failed (round {round_num}/{MAX_VERIFICATION_ROUNDS})."
+            " Feeding failure back into investigation..."
+        ),
+        flush=True,
+    )
 
 
 def _investigation_passed(
@@ -336,9 +403,6 @@ def _investigation_passed(
 ) -> None:
     """All investigation tasks passed. Show diff and offer to merge back."""
     print("\n--- Investigation complete (all tasks passed) ---", file=sys.stderr)
-
-    # Launch the app to verify the fix actually works
-    _launch_app_verification(wt_path)
 
     source_branch = worktree.current_branch(cwd=project_dir)
 
@@ -525,18 +589,39 @@ def _main() -> None:
 
         print(f"  branch: {branch}", file=sys.stderr)
 
-        # Run mcloop in the worktree directory with --no-audit
+        # Run mcloop in the worktree directory with --no-audit,
+        # retrying if post-fix verification fails.
         cmd = [sys.executable, "-m", "mcloop", "--no-audit"]
         if args.model:
             cmd.extend(["--model", args.model])
-        print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
-        result = subprocess.run(cmd, cwd=str(wt_path))
 
-        if result.returncode == 0:
-            _investigation_passed(wt_path, branch, project_dir)
-        else:
-            _investigation_failed(wt_path, branch)
-            sys.exit(result.returncode)
+        for verify_round in range(1, MAX_VERIFICATION_ROUNDS + 1):
+            print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
+            result = subprocess.run(cmd, cwd=str(wt_path))
+
+            if result.returncode != 0:
+                _investigation_failed(wt_path, branch)
+                sys.exit(result.returncode)
+
+            # All tasks passed — verify the fix actually works
+            failure = _launch_app_verification(wt_path)
+            if failure is None:
+                break
+
+            # Verification failed — feed failure back and retry
+            if verify_round >= MAX_VERIFICATION_ROUNDS:
+                print(
+                    formatting.error_msg(
+                        f"Verification failed after {MAX_VERIFICATION_ROUNDS} rounds. Giving up."
+                    ),
+                    flush=True,
+                )
+                _investigation_failed(wt_path, branch)
+                sys.exit(1)
+
+            _append_verification_failure(wt_path, failure, verify_round)
+
+        _investigation_passed(wt_path, branch, project_dir)
         return
 
     if args.dry_run:

@@ -562,9 +562,8 @@ Practical advice for getting the most out of your allowance:
 
 **Use [RTK](https://github.com/rtk-ai/rtk).**  RTK is a CLI proxy
 that compresses command output before it reaches Claude Code's
-context, reducing token consumption by 60-90%. Install it, run
-`rtk init --global`, and register the hook in your
-`~/.claude/settings.json`. McLoop's Telegram permission hook already
+context, reducing token consumption by 60-90%. Install it and run
+`rtk init --global`. McLoop's Telegram permission hook already
 handles RTK-wrapped commands, so no additional configuration is
 needed. This is one of the most effective ways to extend your plan
 usage.
