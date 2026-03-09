@@ -307,6 +307,7 @@ def _run_session(
                 # Re-assert foreground so ctrl-c reaches mcloop,
                 # not the child which may have stolen it.
                 _reclaim_foreground()
+                last_reclaim = time.monotonic()
                 # Silence. Check for pending approvals.
                 if pending_dir.exists():
                     # Check if a permission was denied

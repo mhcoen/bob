@@ -46,7 +46,7 @@ def create(
     Returns (worktree_path, branch_name).
     The worktree is created as a sibling directory of the repo root,
     named ``<repo>-investigate-<slug>``. The branch is named
-    ``investigate/<slug>``.
+    ``investigate-<slug>``.
     """
     branch = current_branch(cwd=cwd)
 
@@ -54,7 +54,7 @@ def create(
     if not slug:
         raise ValueError("Description produced an empty slug")
 
-    branch_name = f"investigate/{slug}"
+    branch_name = f"investigate-{slug}"
 
     # Find repo root
     root_result = _run_git(
@@ -101,7 +101,7 @@ def list_worktrees(
     """List active investigation worktrees.
 
     Returns a list of dicts with 'path', 'branch', and 'commit' keys.
-    Only includes worktrees whose branch starts with ``investigate/``.
+    Only includes worktrees whose branch starts with ``investigate-``.
     """
     result = _run_git("worktree", "list", "--porcelain", cwd=cwd)
     if result.returncode != 0:
@@ -121,12 +121,12 @@ def list_worktrees(
             branch = ref.removeprefix("refs/heads/")
             current["branch"] = branch
         elif line == "" and current:
-            if current.get("branch", "").startswith("investigate/"):
+            if current.get("branch", "").startswith("investigate-"):
                 worktrees.append(current)
             current = {}
 
     # Handle last entry (no trailing blank line)
-    if current and current.get("branch", "").startswith("investigate/"):
+    if current and current.get("branch", "").startswith("investigate-"):
         worktrees.append(current)
 
     return worktrees
@@ -138,10 +138,10 @@ def merge(
 ) -> None:
     """Merge an investigation branch back to the source branch.
 
-    The investigation branch must start with ``investigate/``.
+    The investigation branch must start with ``investigate-``.
     Merges into the currently checked-out branch.
     """
-    if not branch_name.startswith("investigate/"):
+    if not branch_name.startswith("investigate-"):
         raise ValueError(f"Not an investigation branch: {branch_name}")
 
     result = _run_git("merge", branch_name, cwd=cwd)
@@ -158,7 +158,7 @@ def remove(
     Finds the worktree path from the branch name, removes the worktree,
     then deletes the branch.
     """
-    if not branch_name.startswith("investigate/"):
+    if not branch_name.startswith("investigate-"):
         raise ValueError(f"Not an investigation branch: {branch_name}")
 
     # Find the worktree path for this branch

@@ -67,7 +67,7 @@ class TestCreate:
     def test_returns_path_and_branch(self):
         with patch.object(worktree, "_run_git", side_effect=self._mock_git()):
             path, branch = worktree.create("Fix crash on startup")
-        assert branch == "investigate/fix-crash-on-startup"
+        assert branch == "investigate-fix-crash-on-startup"
         assert path == Path("/repo-investigate-fix-crash-on-startup")
 
     def test_empty_slug_raises(self):
@@ -100,7 +100,7 @@ class TestCreate:
 
 class TestExists:
     def test_exists_true(self):
-        wts = [{"path": "/repo-investigate-fix-crash", "branch": "investigate/fix-crash"}]
+        wts = [{"path": "/repo-investigate-fix-crash", "branch": "investigate-fix-crash"}]
         with patch.object(worktree, "list_worktrees", return_value=wts):
             assert worktree.exists("Fix crash") is True
 
@@ -121,7 +121,7 @@ class TestListWorktrees:
             "\n"
             "worktree /repo-investigate-fix-crash\n"
             "HEAD def456\n"
-            "branch refs/heads/investigate/fix-crash\n"
+            "branch refs/heads/investigate-fix-crash\n"
             "\n"
         )
         result = subprocess.CompletedProcess(args=[], returncode=0, stdout=porcelain)
@@ -130,7 +130,7 @@ class TestListWorktrees:
 
         assert len(wts) == 1
         assert wts[0]["path"] == "/repo-investigate-fix-crash"
-        assert wts[0]["branch"] == "investigate/fix-crash"
+        assert wts[0]["branch"] == "investigate-fix-crash"
         assert wts[0]["commit"] == "def456"
 
     def test_filters_non_investigation(self):
@@ -146,7 +146,7 @@ class TestListWorktrees:
 
     def test_no_trailing_blank_line(self):
         porcelain = (
-            "worktree /repo-investigate-bug\nHEAD abc123\nbranch refs/heads/investigate/bug"
+            "worktree /repo-investigate-bug\nHEAD abc123\nbranch refs/heads/investigate-bug"
         )
         result = subprocess.CompletedProcess(args=[], returncode=0, stdout=porcelain)
         with patch.object(worktree, "_run_git", return_value=result):
@@ -158,8 +158,8 @@ class TestMerge:
     def test_successful_merge(self):
         result = subprocess.CompletedProcess(args=[], returncode=0, stdout="")
         with patch.object(worktree, "_run_git", return_value=result) as mock:
-            worktree.merge("investigate/fix-crash")
-        mock.assert_called_once_with("merge", "investigate/fix-crash", cwd=None)
+            worktree.merge("investigate-fix-crash")
+        mock.assert_called_once_with("merge", "investigate-fix-crash", cwd=None)
 
     def test_not_investigation_branch(self):
         with pytest.raises(ValueError, match="Not an investigation branch"):
@@ -169,12 +169,12 @@ class TestMerge:
         result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="CONFLICT")
         with patch.object(worktree, "_run_git", return_value=result):
             with pytest.raises(RuntimeError, match="Merge failed"):
-                worktree.merge("investigate/fix-crash")
+                worktree.merge("investigate-fix-crash")
 
 
 class TestRemove:
     def test_removes_worktree_and_branch(self):
-        wts = [{"path": "/repo-investigate-fix", "branch": "investigate/fix"}]
+        wts = [{"path": "/repo-investigate-fix", "branch": "investigate-fix"}]
         calls = []
 
         def mock_git(*args, **kwargs):
@@ -183,11 +183,11 @@ class TestRemove:
 
         with patch.object(worktree, "list_worktrees", return_value=wts):
             with patch.object(worktree, "_run_git", side_effect=mock_git):
-                worktree.remove("investigate/fix")
+                worktree.remove("investigate-fix")
 
         # Should call worktree remove, then branch -d
         assert calls[0] == ("worktree", "remove", "/repo-investigate-fix")
-        assert calls[1] == ("branch", "-d", "investigate/fix")
+        assert calls[1] == ("branch", "-d", "investigate-fix")
 
     def test_no_worktree_still_deletes_branch(self):
         """If worktree is already gone, still delete the branch."""
@@ -199,21 +199,21 @@ class TestRemove:
 
         with patch.object(worktree, "list_worktrees", return_value=[]):
             with patch.object(worktree, "_run_git", side_effect=mock_git):
-                worktree.remove("investigate/fix")
+                worktree.remove("investigate-fix")
 
         assert len(calls) == 1
-        assert calls[0] == ("branch", "-d", "investigate/fix")
+        assert calls[0] == ("branch", "-d", "investigate-fix")
 
     def test_not_investigation_branch(self):
         with pytest.raises(ValueError, match="Not an investigation branch"):
             worktree.remove("main")
 
     def test_worktree_remove_failure(self):
-        wts = [{"path": "/repo-investigate-fix", "branch": "investigate/fix"}]
+        wts = [{"path": "/repo-investigate-fix", "branch": "investigate-fix"}]
         result = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="error: dirty"
         )
         with patch.object(worktree, "list_worktrees", return_value=wts):
             with patch.object(worktree, "_run_git", return_value=result):
                 with pytest.raises(RuntimeError, match="Failed to remove"):
-                    worktree.remove("investigate/fix")
+                    worktree.remove("investigate-fix")
