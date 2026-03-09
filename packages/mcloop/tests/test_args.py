@@ -512,7 +512,7 @@ def test_gather_bug_context_no_description_is_empty(tmp_path):
 
 
 def test_investigate_creates_worktree(tmp_path, capsys):
-    """investigate creates a new worktree when none exists."""
+    """investigate creates a new worktree and runs mcloop subprocess."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
     wt_path = tmp_path / "worktree"
@@ -521,6 +521,7 @@ def test_investigate_creates_worktree(tmp_path, capsys):
     from mcloop.investigator import BugContext
 
     ctx = BugContext(user_description="app crashes")
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "app crashes"]),
@@ -528,6 +529,8 @@ def test_investigate_creates_worktree(tmp_path, capsys):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
+        pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-app-crashes", False)
@@ -536,7 +539,13 @@ def test_investigate_creates_worktree(tmp_path, capsys):
 
         main()
 
+    assert exc_info.value.code == 0
     mock_create.assert_called_once_with("app crashes", cwd=tmp_path)
+    # Verify subprocess was called with --no-audit in the worktree
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][0]
+    assert "--no-audit" in cmd
+    assert mock_run.call_args[1]["cwd"] == str(wt_path)
     captured = capsys.readouterr()
     assert "Created investigation worktree" in captured.err
     assert "investigate-app-crashes" in captured.err
@@ -547,7 +556,7 @@ def test_investigate_creates_worktree(tmp_path, capsys):
 
 
 def test_investigate_resumes_existing_worktree(tmp_path, capsys):
-    """investigate resumes an existing worktree instead of creating new."""
+    """investigate resumes an existing worktree and runs mcloop subprocess."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
     wt_path = tmp_path / "worktree"
@@ -556,12 +565,15 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
     from mcloop.investigator import BugContext
 
     ctx = BugContext(user_description="segfault")
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "segfault"]),
         patch("sys.stdin") as mock_stdin,
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
+        pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -570,6 +582,9 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
 
         main()
 
+    assert exc_info.value.code == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["cwd"] == str(wt_path)
     captured = capsys.readouterr()
     assert "Resuming investigation" in captured.err
     assert "investigate-segfault" in captured.err
@@ -585,6 +600,7 @@ def test_investigate_no_description_uses_fallback(tmp_path):
     from mcloop.investigator import BugContext
 
     ctx = BugContext()
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate"]),
@@ -592,6 +608,8 @@ def test_investigate_no_description_uses_fallback(tmp_path):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        pytest.raises(SystemExit),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (
@@ -715,6 +733,7 @@ def test_investigate_generates_plan_with_context(tmp_path, capsys):
         crash_report="EXC_BAD_ACCESS",
         app_type="gui",
     )
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch(
@@ -725,6 +744,8 @@ def test_investigate_generates_plan_with_context(tmp_path, capsys):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        pytest.raises(SystemExit),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash-on-save", False)
@@ -753,6 +774,7 @@ def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
     from mcloop.investigator import BugContext
 
     ctx = BugContext(user_description="segfault")
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch(
@@ -763,6 +785,8 @@ def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings") as mock_copy,
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        pytest.raises(SystemExit),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -793,6 +817,7 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
     from mcloop.investigator import BugContext
 
     ctx = BugContext(user_description="bug")
+    mock_result = MagicMock(returncode=0)
 
     with (
         patch(
@@ -802,6 +827,8 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
         patch("sys.stdin") as mock_stdin,
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        pytest.raises(SystemExit),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-bug", False)
@@ -815,3 +842,110 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "copied mcloop.json" in captured.err
     assert "copied .claude/" in captured.err
+
+
+# --- investigate subprocess launch ---
+
+
+def test_investigate_runs_mcloop_with_no_audit(tmp_path):
+    """investigate runs mcloop as subprocess with --no-audit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="crash")
+    mock_result = MagicMock(returncode=0)
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-crash", False)
+
+        from mcloop.main import main
+
+        main()
+
+    assert exc_info.value.code == 0
+    cmd = mock_run.call_args[0][0]
+    assert cmd[-1] == "--no-audit"
+    assert "-m" in cmd
+    assert "mcloop" in cmd
+    assert mock_run.call_args[1]["cwd"] == str(wt_path)
+
+
+def test_investigate_passes_model_to_subprocess(tmp_path):
+    """--model flag is forwarded to the mcloop subprocess."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="bug")
+    mock_result = MagicMock(returncode=0)
+
+    with (
+        patch(
+            "sys.argv",
+            ["mcloop", "--file", str(plan), "--model", "opus", "investigate", "bug"],
+        ),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
+        pytest.raises(SystemExit),
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-bug", False)
+
+        from mcloop.main import main
+
+        main()
+
+    cmd = mock_run.call_args[0][0]
+    assert "--model" in cmd
+    model_idx = cmd.index("--model")
+    assert cmd[model_idx + 1] == "opus"
+
+
+def test_investigate_propagates_nonzero_returncode(tmp_path):
+    """Nonzero subprocess returncode is propagated via sys.exit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="bug")
+    mock_result = MagicMock(returncode=1)
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "bug"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-bug", False)
+
+        from mcloop.main import main
+
+        main()
+
+    assert exc_info.value.code == 1

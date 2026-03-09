@@ -194,7 +194,14 @@ def _main() -> None:
             _copy_project_settings(project_dir, wt_path)
 
         print(f"  branch: {branch}", file=sys.stderr)
-        return
+
+        # Run mcloop in the worktree directory with --no-audit
+        cmd = [sys.executable, "-m", "mcloop", "--no-audit"]
+        if args.model:
+            cmd.extend(["--model", args.model])
+        print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
+        result = subprocess.run(cmd, cwd=str(wt_path))
+        sys.exit(result.returncode)
 
     if args.dry_run:
         _dry_run(parse(checklist_path))
