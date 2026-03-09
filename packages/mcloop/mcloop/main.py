@@ -120,11 +120,51 @@ def _kill_active_process() -> None:
         _runner._active_process = None
 
 
+def _read_repro_steps(wt_path: Path) -> list[dict]:
+    """Read reproduction steps from .mcloop/repro-steps.json.
+
+    Returns a list of {"action": ..., "args": ...} dicts, or an
+    empty list if the file does not exist or is malformed.
+    """
+    repro_file = wt_path / ".mcloop" / "repro-steps.json"
+    if not repro_file.is_file():
+        return []
+    try:
+        data = _json.loads(repro_file.read_text())
+    except (OSError, _json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    steps = []
+    for entry in data:
+        if isinstance(entry, dict) and "action" in entry and "args" in entry:
+            steps.append(entry)
+    return steps
+
+
+def _replay_repro_steps(steps: list[dict]) -> list[str]:
+    """Replay reproduction steps via _dispatch_auto_action.
+
+    Returns a list of result strings from each step.
+    """
+    results: list[str] = []
+    for step in steps:
+        action = step["action"]
+        args = step["args"]
+        try:
+            result = _dispatch_auto_action(action, str(args))
+        except Exception as exc:
+            result = f"ERROR: {action}({args}) raised {exc}"
+        results.append(result)
+    return results
+
+
 def _launch_app_verification(wt_path: Path) -> None:
     """Launch the app from the worktree to verify the fix works.
 
     Uses the process monitor to run the app and reports whether it
-    starts successfully, crashes, or hangs.
+    starts successfully, crashes, or hangs. If .mcloop/repro-steps.json
+    exists, replays the reproduction steps after a successful launch.
     """
     from mcloop import process_monitor
 
@@ -168,6 +208,21 @@ def _launch_app_verification(wt_path: Path) -> None:
                 formatting.system_msg(f"Verification: app running OK ({result.duration:.1f}s)"),
                 flush=True,
             )
+            # Replay reproduction steps while the app is still running.
+            repro_steps = _read_repro_steps(wt_path)
+            if repro_steps:
+                print(
+                    formatting.system_msg(f"Replaying {len(repro_steps)} reproduction step(s)..."),
+                    flush=True,
+                )
+                repro_results = _replay_repro_steps(repro_steps)
+                for i, res in enumerate(repro_results, 1):
+                    failed = res.startswith("ERROR:")
+                    msg = f"  Step {i}: {res.splitlines()[0]}"
+                    if failed:
+                        print(formatting.error_msg(msg), flush=True)
+                    else:
+                        print(formatting.system_msg(msg), flush=True)
         # Clean up: kill the launched GUI app.
         pids = process_monitor.pgrep(process_name)
         for pid in pids:
@@ -198,6 +253,21 @@ def _launch_app_verification(wt_path: Path) -> None:
                 formatting.system_msg(f"Verification: app exited OK ({result.duration:.1f}s)"),
                 flush=True,
             )
+            # Replay reproduction steps (e.g. re-run with specific args).
+            repro_steps = _read_repro_steps(wt_path)
+            if repro_steps:
+                print(
+                    formatting.system_msg(f"Replaying {len(repro_steps)} reproduction step(s)..."),
+                    flush=True,
+                )
+                repro_results = _replay_repro_steps(repro_steps)
+                for i, res in enumerate(repro_results, 1):
+                    failed = res.startswith("ERROR:")
+                    msg = f"  Step {i}: {res.splitlines()[0]}"
+                    if failed:
+                        print(formatting.error_msg(msg), flush=True)
+                    else:
+                        print(formatting.system_msg(msg), flush=True)
     else:
         # Web apps: just note the run command, don't launch a server
         print(

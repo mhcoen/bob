@@ -16,6 +16,8 @@ from mcloop.main import (
     _investigation_passed,
     _launch_app_verification,
     _parse_args,
+    _read_repro_steps,
+    _replay_repro_steps,
     _run_audit_fix_cycle,
     _run_single_audit_round,
     gather_bug_context,
@@ -1089,6 +1091,171 @@ def test_launch_app_verification_gui_process_name_from_app_bundle(tmp_path, caps
         mock_pm.pgrep.return_value = []
         _launch_app_verification(tmp_path)
     mock_pm.run_gui.assert_called_once_with("open MyApp.app", "MyApp", timeout_seconds=15)
+
+
+# --- _read_repro_steps ---
+
+
+def test_read_repro_steps_no_file(tmp_path):
+    """Returns empty list when repro-steps.json does not exist."""
+    assert _read_repro_steps(tmp_path) == []
+
+
+def test_read_repro_steps_valid(tmp_path):
+    """Reads and returns valid steps."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    import json
+
+    steps = [
+        {"action": "window_exists", "args": "MyApp"},
+        {"action": "click_button", "args": "MyApp | Start"},
+    ]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+    result = _read_repro_steps(tmp_path)
+    assert len(result) == 2
+    assert result[0]["action"] == "window_exists"
+    assert result[1]["args"] == "MyApp | Start"
+
+
+def test_read_repro_steps_malformed_json(tmp_path):
+    """Returns empty list on invalid JSON."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "repro-steps.json").write_text("not json")
+    assert _read_repro_steps(tmp_path) == []
+
+
+def test_read_repro_steps_not_a_list(tmp_path):
+    """Returns empty list when JSON is not a list."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "repro-steps.json").write_text('{"action": "x"}')
+    assert _read_repro_steps(tmp_path) == []
+
+
+def test_read_repro_steps_skips_bad_entries(tmp_path):
+    """Skips entries missing action or args keys."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    import json
+
+    steps = [
+        {"action": "window_exists", "args": "MyApp"},
+        {"bad": "entry"},
+        "not a dict",
+        {"action": "click_button"},  # missing args
+    ]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+    result = _read_repro_steps(tmp_path)
+    assert len(result) == 1
+    assert result[0]["action"] == "window_exists"
+
+
+# --- _replay_repro_steps ---
+
+
+def test_replay_repro_steps_dispatches_actions():
+    """Dispatches each step and collects results."""
+    steps = [
+        {"action": "window_exists", "args": "MyApp"},
+        {"action": "list_elements", "args": "MyApp"},
+    ]
+    with (
+        patch("mcloop.app_interact.window_exists", return_value=True),
+        patch(
+            "mcloop.app_interact.list_elements",
+            return_value="button 1, button 2",
+        ),
+    ):
+        results = _replay_repro_steps(steps)
+    assert len(results) == 2
+    assert "True" in results[0]
+    assert "button 1" in results[1]
+
+
+def test_replay_repro_steps_catches_exceptions():
+    """Exceptions in dispatch are caught and reported."""
+    steps = [{"action": "click_button", "args": "App | BadBtn"}]
+    with patch(
+        "mcloop.app_interact.click_button",
+        side_effect=RuntimeError("no such button"),
+    ):
+        results = _replay_repro_steps(steps)
+    assert len(results) == 1
+    assert results[0].startswith("ERROR:")
+
+
+# --- _launch_app_verification with repro steps ---
+
+
+def test_launch_app_verification_gui_replays_repro_steps(tmp_path, capsys):
+    """GUI app that runs OK replays repro-steps.json."""
+    import json
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    steps = [{"action": "window_exists", "args": "MyApp"}]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+
+    gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
+    with (
+        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+        patch("mcloop.app_interact.window_exists", return_value=True) as mock_we,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = [1234]
+        _launch_app_verification(tmp_path)
+    mock_we.assert_called_once_with("MyApp")
+    captured = capsys.readouterr()
+    assert "Replaying 1 reproduction step" in captured.out
+    assert "Step 1" in captured.out
+
+
+def test_launch_app_verification_gui_no_repro_on_crash(tmp_path, capsys):
+    """GUI app that crashes does not replay repro steps."""
+    import json
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    steps = [{"action": "window_exists", "args": "MyApp"}]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+
+    gui_result = MagicMock(crashed=True, hung=False, duration=2.0, crash_report=None)
+    with (
+        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_gui.return_value = gui_result
+        mock_pm.pgrep.return_value = []
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "Replaying" not in captured.out
+
+
+def test_launch_app_verification_cli_replays_repro_steps(tmp_path, capsys):
+    """CLI app that exits OK replays repro-steps.json."""
+    import json
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    steps = [{"action": "run_cli", "args": "./myapp --check"}]
+    (mcloop_dir / "repro-steps.json").write_text(json.dumps(steps))
+
+    cli_result = MagicMock(hung=False, exit_code=0, duration=1.5, output="")
+    repro_cli = MagicMock(exit_code=0, hung=False, output="ok", sample_output=None)
+    with (
+        patch("mcloop.main.detect_run", return_value="./myapp"),
+        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.process_monitor") as mock_pm,
+    ):
+        mock_pm.run_cli.side_effect = [cli_result, repro_cli]
+        _launch_app_verification(tmp_path)
+    captured = capsys.readouterr()
+    assert "Replaying 1 reproduction step" in captured.out
 
 
 # --- _investigation_passed ---

@@ -37,6 +37,20 @@ PROGRAMMATIC_STEPS_INSTRUCTION = (
     " app_interact, or web_interact to do it programmatically."
 )
 
+REPRO_STEPS_INSTRUCTION = (
+    "When you successfully reproduce the bug, save the reproduction"
+    " steps to .mcloop/repro-steps.json as a JSON array. Each entry"
+    " must have 'action' and 'args' keys matching the AUTO action"
+    " format. Supported actions: run_cli, run_gui (args:"
+    " 'command | process_name'), window_exists, screenshot,"
+    " list_elements, click_button (args: 'app | label'), navigate,"
+    " page_text. Example:\n"
+    ' [{"action": "window_exists", "args": "MyApp"},'
+    ' {"action": "click_button", "args": "MyApp | Start"}]\n'
+    "This file is replayed automatically after the fix to verify"
+    " the bug no longer occurs."
+)
+
 
 @dataclass
 class BugContext:
@@ -67,6 +81,7 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
 
     if ctx.app_type:
         parts.append(PROGRAMMATIC_STEPS_INSTRUCTION)
+        parts.append(REPRO_STEPS_INSTRUCTION)
 
     if ctx.user_description:
         parts.append(f"Bug description: {ctx.user_description}")

@@ -245,6 +245,20 @@ def test_prompt_includes_programmatic_instruction_for_app_types():
         )
 
 
+def test_prompt_includes_repro_steps_instruction_for_app_types():
+    """Prompt includes repro-steps.json instruction when app_type is set."""
+    for app_type in ("gui", "cli", "web"):
+        ctx = BugContext(app_type=app_type)
+        prompt = build_plan_generation_prompt(ctx)
+        assert "repro-steps.json" in prompt, f"Missing repro-steps instruction for {app_type}"
+
+
+def test_prompt_omits_repro_steps_instruction_without_app_type():
+    """Prompt omits repro-steps.json instruction when no app_type."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "repro-steps.json" not in prompt
+
+
 def test_prompt_omits_programmatic_instruction_without_app_type():
     """Prompt omits programmatic steps instruction when no app_type."""
     prompt = build_plan_generation_prompt(BugContext())
