@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+from mcloop import worktree
 from mcloop.checklist import (
     Task,
     check_off,
@@ -167,6 +168,20 @@ def _main() -> None:
             print(f"  log sources: {sources}", file=sys.stderr)
         if ctx.app_type:
             print(f"  app type: {ctx.app_type}", file=sys.stderr)
+
+        # Create or resume a git worktree for the investigation
+        wt_description = ctx.user_description or "investigation"
+        try:
+            wt_path, branch, resumed = worktree.create(wt_description, cwd=project_dir)
+        except (ValueError, RuntimeError) as exc:
+            print(f"Error creating worktree: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if resumed:
+            print(f"Resuming investigation in {wt_path}", file=sys.stderr)
+        else:
+            print(f"Created investigation worktree at {wt_path}", file=sys.stderr)
+        print(f"  branch: {branch}", file=sys.stderr)
         return
 
     if args.dry_run:

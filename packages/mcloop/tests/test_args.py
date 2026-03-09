@@ -1,5 +1,6 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -505,3 +506,126 @@ def test_gather_bug_context_no_description_is_empty(tmp_path):
     with patch("mcloop.main.detect_app_type", return_value=""):
         ctx = gather_bug_context(tmp_path, description=None)
     assert ctx.user_description == ""
+
+
+# --- investigate worktree creation ---
+
+
+def test_investigate_creates_worktree(tmp_path, capsys):
+    """investigate creates a new worktree when none exists."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = Path("/fake/repo-investigate-app-crashes")
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "app crashes"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.worktree.create") as mock_create,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_gather.return_value = MagicMock(
+            user_description="app crashes",
+            crash_report="",
+            failure_history="",
+            app_type="",
+        )
+        mock_create.return_value = (wt_path, "investigate-app-crashes", False)
+
+        from mcloop.main import main
+
+        main()
+
+    mock_create.assert_called_once_with("app crashes", cwd=tmp_path)
+    captured = capsys.readouterr()
+    assert "Created investigation worktree" in captured.err
+    assert "investigate-app-crashes" in captured.err
+
+
+def test_investigate_resumes_existing_worktree(tmp_path, capsys):
+    """investigate resumes an existing worktree instead of creating new."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = Path("/fake/repo-investigate-segfault")
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "segfault"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.worktree.create") as mock_create,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_gather.return_value = MagicMock(
+            user_description="segfault",
+            crash_report="",
+            failure_history="",
+            app_type="",
+        )
+        mock_create.return_value = (wt_path, "investigate-segfault", True)
+
+        from mcloop.main import main
+
+        main()
+
+    captured = capsys.readouterr()
+    assert "Resuming investigation" in captured.err
+    assert "investigate-segfault" in captured.err
+
+
+def test_investigate_no_description_uses_fallback(tmp_path):
+    """When no description is provided, uses 'investigation' as fallback."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.worktree.create") as mock_create,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_gather.return_value = MagicMock(
+            user_description="",
+            crash_report="",
+            failure_history="",
+            app_type="",
+        )
+        mock_create.return_value = (
+            Path("/fake/repo-investigate-investigation"),
+            "investigate-investigation",
+            False,
+        )
+
+        from mcloop.main import main
+
+        main()
+
+    mock_create.assert_called_once_with("investigation", cwd=tmp_path)
+
+
+def test_investigate_worktree_error_exits(tmp_path):
+    """When worktree creation fails, exits with error message."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+
+    with (
+        patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "bug"]),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.worktree.create") as mock_create,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_gather.return_value = MagicMock(
+            user_description="bug",
+            crash_report="",
+            failure_history="",
+            app_type="",
+        )
+        mock_create.side_effect = RuntimeError("branch already exists")
+
+        from mcloop.main import main
+
+        main()
+
+    assert exc_info.value.code == 1
