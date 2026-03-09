@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcloop.main import (
+    SessionContext,
+    _check_user_input,
     _copy_project_settings,
     _find_recent_crash_report,
     _handle_user_task,
@@ -1223,3 +1225,129 @@ def test_run_loop_user_task_skips_claude(tmp_path):
     # The [USER] task should be checked off
     tasks = __import__("mcloop.checklist", fromlist=["parse"]).parse(plan)
     assert tasks[0].checked
+
+
+# --- _check_user_input ---
+
+
+def test_check_user_input_reads_pending_lines():
+    """Reads lines available on stdin without blocking."""
+    lines = ["fix the alignment\n", "use blue not red\n"]
+    call_count = 0
+
+    def fake_select(rlist, wlist, xlist, timeout):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= len(lines):
+            return (rlist, [], [])
+        return ([], [], [])
+
+    line_idx = 0
+
+    def fake_readline():
+        nonlocal line_idx
+        if line_idx < len(lines):
+            result = lines[line_idx]
+            line_idx += 1
+            return result
+        return ""
+
+    with (
+        patch("mcloop.main.sys.stdin") as mock_stdin,
+        patch("mcloop.main.select.select", side_effect=fake_select),
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_stdin.readline = fake_readline
+        result = _check_user_input()
+    assert result == "fix the alignment\nuse blue not red"
+
+
+def test_check_user_input_empty_when_nothing_typed():
+    """Returns empty string when no input is pending."""
+    with (
+        patch("mcloop.main.sys.stdin") as mock_stdin,
+        patch("mcloop.main.select.select", return_value=([], [], [])),
+    ):
+        mock_stdin.isatty.return_value = True
+        result = _check_user_input()
+    assert result == ""
+
+
+def test_check_user_input_not_a_tty():
+    """Returns empty string when stdin is not a tty."""
+    with patch("mcloop.main.sys.stdin") as mock_stdin:
+        mock_stdin.isatty.return_value = False
+        result = _check_user_input()
+    assert result == ""
+
+
+# --- SessionContext.add_user_input ---
+
+
+def test_session_context_add_user_input():
+    """User input appears in session context text."""
+    ctx = SessionContext()
+    ctx.add_user_input("please use the new API instead")
+    text = ctx.text()
+    assert "[user] please use the new API instead" in text
+
+
+def test_session_context_user_input_interleaved():
+    """User input is interleaved with task entries."""
+    ctx = SessionContext()
+    ctx.add("1", "First task", "5s", "done")
+    ctx.add_user_input("try a different approach")
+    ctx.add("2", "Second task", "3s", "done")
+    text = ctx.text()
+    lines = text.splitlines()
+    assert any("[user]" in line for line in lines)
+    assert lines.index(next(line for line in lines if "[user]" in line)) == 1
+
+
+# --- run_loop picks up user input ---
+
+
+def test_run_loop_picks_up_user_input(tmp_path):
+    """User input typed between tasks is passed to session context."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] First task\n- [ ] Second task\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_check_user_input():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return "use the v2 API"
+        return ""
+
+    with (
+        patch("mcloop.main._check_user_input", side_effect=fake_check_user_input),
+        patch("mcloop.main.run_task") as mock_run_task,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+    ):
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output = ""
+        mock_result.exit_code = 0
+        mock_run_task.return_value = mock_result
+
+        mock_check_result = MagicMock()
+        mock_check_result.passed = True
+        mock_checks.return_value = mock_check_result
+
+        run_loop(plan, no_audit=True)
+
+    # First task should have user input in session_context
+    first_call = mock_run_task.call_args_list[0]
+    assert "use the v2 API" in first_call.kwargs.get(
+        "session_context", first_call[1].get("session_context", "")
+    )

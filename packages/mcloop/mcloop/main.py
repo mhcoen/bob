@@ -7,6 +7,7 @@ import difflib
 import hashlib
 import json as _json
 import os
+import select
 import shlex
 import shutil
 import signal
@@ -402,6 +403,16 @@ def run_loop(
 
         has_subtasks = "." in label
         ctx.update_group(label, has_subtasks)
+
+        # Pick up any text the user typed while the last task ran
+        user_input = _check_user_input()
+        if user_input:
+            ctx.add_user_input(user_input)
+            print(
+                f"\n>>> User input received ({len(user_input)} chars)",
+                flush=True,
+            )
+
         _checkpoint(
             project_dir,
             next_task=f"{label}) {task.text}",
@@ -895,6 +906,26 @@ def _handle_user_task(label: str, instructions: str) -> str:
     return response
 
 
+def _check_user_input() -> str:
+    """Non-blocking check for user input typed between tasks.
+
+    Reads any lines the user typed while a task was running.
+    Returns the collected text, or empty string if nothing was typed.
+    """
+    if not sys.stdin.isatty():
+        return ""
+    lines: list[str] = []
+    try:
+        while select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            lines.append(line.rstrip("\n"))
+    except (OSError, ValueError):
+        return ""
+    return "\n".join(lines).strip()
+
+
 def _format_elapsed(seconds: float) -> str:
     """Format seconds into human-readable elapsed time."""
     if seconds < 60:
@@ -1305,6 +1336,10 @@ class SessionContext:
         if changed_files:
             entry += f"\n  Files: {', '.join(changed_files)}"
         self._entries.append(entry)
+
+    def add_user_input(self, text: str) -> None:
+        """Append free-form user input to context."""
+        self._entries.append(f"[user] {text}")
 
     def text(self) -> str:
         """Return context string for inclusion in prompts."""
