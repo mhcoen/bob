@@ -184,7 +184,7 @@ The debugging playbook this enforces:
 
 - [ ] Interactive investigation loop
   - [x] When an investigation task requires user observation (the plan generator marks these with a keyword like `[USER]`), pause and print clearly formatted instructions for the user: what to do, what to look for, how to provide the result
-  - [ ] Accept free-form text input from the user at the terminal, incorporate it into the next session's context
+  - [x] Accept free-form text input from the user at the terminal, incorporate it into the next session's context
   - [ ] When the system can perform the observation itself (via process monitor or app interaction), do so automatically and feed the result into the next session
   - [ ] Visual formatting: use clear visual separators to distinguish system actions from user prompts. User prompts should be impossible to miss in a scrolling terminal.
 
