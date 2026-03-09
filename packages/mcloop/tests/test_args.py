@@ -1,11 +1,11 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mcloop.main import (
+    _copy_project_settings,
     _find_recent_crash_report,
     _parse_args,
     _run_audit_fix_cycle,
@@ -515,21 +515,21 @@ def test_investigate_creates_worktree(tmp_path, capsys):
     """investigate creates a new worktree when none exists."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
-    wt_path = Path("/fake/repo-investigate-app-crashes")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="app crashes")
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "app crashes"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
     ):
         mock_stdin.isatty.return_value = True
-        mock_gather.return_value = MagicMock(
-            user_description="app crashes",
-            crash_report="",
-            failure_history="",
-            app_type="",
-        )
         mock_create.return_value = (wt_path, "investigate-app-crashes", False)
 
         from mcloop.main import main
@@ -540,27 +540,30 @@ def test_investigate_creates_worktree(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Created investigation worktree" in captured.err
     assert "investigate-app-crashes" in captured.err
+    # PLAN.md should be generated in the worktree
+    assert (wt_path / "PLAN.md").exists()
+    plan_text = (wt_path / "PLAN.md").read_text()
+    assert "Investigation Plan" in plan_text
 
 
 def test_investigate_resumes_existing_worktree(tmp_path, capsys):
     """investigate resumes an existing worktree instead of creating new."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
-    wt_path = Path("/fake/repo-investigate-segfault")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="segfault")
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "segfault"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
     ):
         mock_stdin.isatty.return_value = True
-        mock_gather.return_value = MagicMock(
-            user_description="segfault",
-            crash_report="",
-            failure_history="",
-            app_type="",
-        )
         mock_create.return_value = (wt_path, "investigate-segfault", True)
 
         from mcloop.main import main
@@ -576,22 +579,23 @@ def test_investigate_no_description_uses_fallback(tmp_path):
     """When no description is provided, uses 'investigation' as fallback."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext()
 
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context") as mock_gather,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
     ):
         mock_stdin.isatty.return_value = True
-        mock_gather.return_value = MagicMock(
-            user_description="",
-            crash_report="",
-            failure_history="",
-            app_type="",
-        )
         mock_create.return_value = (
-            Path("/fake/repo-investigate-investigation"),
+            wt_path,
             "investigate-investigation",
             False,
         )
@@ -629,3 +633,185 @@ def test_investigate_worktree_error_exits(tmp_path):
         main()
 
     assert exc_info.value.code == 1
+
+
+# --- _copy_project_settings ---
+
+
+def test_copy_project_settings_mcloop_json(tmp_path):
+    """Copies mcloop.json when it exists."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / "mcloop.json").write_text('{"checks": ["pytest"]}')
+
+    _copy_project_settings(src, dst)
+
+    assert (dst / "mcloop.json").exists()
+    assert (dst / "mcloop.json").read_text() == '{"checks": ["pytest"]}'
+
+
+def test_copy_project_settings_claude_dir(tmp_path):
+    """Copies .claude/ directory when it exists."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    claude_dir = src / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text('{"key": "val"}')
+
+    _copy_project_settings(src, dst)
+
+    assert (dst / ".claude" / "settings.json").exists()
+    assert (dst / ".claude" / "settings.json").read_text() == '{"key": "val"}'
+
+
+def test_copy_project_settings_nothing_to_copy(tmp_path):
+    """No error when neither mcloop.json nor .claude/ exist."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    _copy_project_settings(src, dst)
+
+    assert not (dst / "mcloop.json").exists()
+    assert not (dst / ".claude").exists()
+
+
+def test_copy_project_settings_replaces_existing_claude_dir(tmp_path):
+    """Existing .claude/ in dst is replaced."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / ".claude").mkdir()
+    (src / ".claude" / "new.json").write_text("new")
+    (dst / ".claude").mkdir()
+    (dst / ".claude" / "old.json").write_text("old")
+
+    _copy_project_settings(src, dst)
+
+    assert (dst / ".claude" / "new.json").exists()
+    assert not (dst / ".claude" / "old.json").exists()
+
+
+# --- investigate plan generation ---
+
+
+def test_investigate_generates_plan_with_context(tmp_path, capsys):
+    """New investigation generates PLAN.md with bug context."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(
+        user_description="crash on save",
+        crash_report="EXC_BAD_ACCESS",
+        app_type="gui",
+    )
+
+    with (
+        patch(
+            "sys.argv",
+            ["mcloop", "--file", str(plan), "investigate", "crash on save"],
+        ),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings"),
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-crash-on-save", False)
+
+        from mcloop.main import main
+
+        main()
+
+    plan_text = (wt_path / "PLAN.md").read_text()
+    assert "Investigation Plan" in plan_text
+    assert "crash on save" in plan_text
+    assert "EXC_BAD_ACCESS" in plan_text
+    captured = capsys.readouterr()
+    assert "generated PLAN.md" in captured.err
+
+
+def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
+    """Resuming does not regenerate PLAN.md or copy settings."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+    existing_plan = wt_path / "PLAN.md"
+    existing_plan.write_text("# Existing plan\n")
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="segfault")
+
+    with (
+        patch(
+            "sys.argv",
+            ["mcloop", "--file", str(plan), "investigate", "segfault"],
+        ),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.main._copy_project_settings") as mock_copy,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-segfault", True)
+
+        from mcloop.main import main
+
+        main()
+
+    # Existing PLAN.md should not be overwritten
+    assert existing_plan.read_text() == "# Existing plan\n"
+    mock_copy.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Resuming investigation" in captured.err
+
+
+def test_investigate_copies_settings_on_new(tmp_path, capsys):
+    """New investigation copies mcloop.json and .claude/ to worktree."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n")
+    (tmp_path / "mcloop.json").write_text('{"checks": ["ruff"]}')
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text("{}")
+
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    from mcloop.investigator import BugContext
+
+    ctx = BugContext(user_description="bug")
+
+    with (
+        patch(
+            "sys.argv",
+            ["mcloop", "--file", str(plan), "investigate", "bug"],
+        ),
+        patch("sys.stdin") as mock_stdin,
+        patch("mcloop.main.gather_bug_context", return_value=ctx),
+        patch("mcloop.main.worktree.create") as mock_create,
+    ):
+        mock_stdin.isatty.return_value = True
+        mock_create.return_value = (wt_path, "investigate-bug", False)
+
+        from mcloop.main import main
+
+        main()
+
+    assert (wt_path / "mcloop.json").exists()
+    assert (wt_path / ".claude" / "settings.json").exists()
+    captured = capsys.readouterr()
+    assert "copied mcloop.json" in captured.err
+    assert "copied .claude/" in captured.err

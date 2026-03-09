@@ -8,6 +8,7 @@ import hashlib
 import json as _json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from mcloop.checklist import (
     stage_status,
 )
 from mcloop.checks import detect_app_type, detect_build, detect_run, get_check_commands, run_checks
-from mcloop.investigator import BugContext
+from mcloop.investigator import BugContext, generate_plan
 from mcloop.notify import notify
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
@@ -180,7 +181,18 @@ def _main() -> None:
         if resumed:
             print(f"Resuming investigation in {wt_path}", file=sys.stderr)
         else:
-            print(f"Created investigation worktree at {wt_path}", file=sys.stderr)
+            print(
+                f"Created investigation worktree at {wt_path}",
+                file=sys.stderr,
+            )
+            # Generate investigation PLAN.md
+            plan_content = generate_plan(ctx)
+            (wt_path / "PLAN.md").write_text(plan_content)
+            print("  generated PLAN.md", file=sys.stderr)
+
+            # Copy mcloop.json and .claude/ settings from parent project
+            _copy_project_settings(project_dir, wt_path)
+
         print(f"  branch: {branch}", file=sys.stderr)
         return
 
@@ -536,6 +548,22 @@ def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
         return newest.read_text()
     except OSError:
         return ""
+
+
+def _copy_project_settings(src: Path, dst: Path) -> None:
+    """Copy mcloop.json and .claude/ settings from src to dst."""
+    mcloop_json = src / "mcloop.json"
+    if mcloop_json.is_file():
+        shutil.copy2(mcloop_json, dst / "mcloop.json")
+        print("  copied mcloop.json", file=sys.stderr)
+
+    claude_dir = src / ".claude"
+    if claude_dir.is_dir():
+        dst_claude = dst / ".claude"
+        if dst_claude.exists():
+            shutil.rmtree(dst_claude)
+        shutil.copytree(claude_dir, dst_claude)
+        print("  copied .claude/", file=sys.stderr)
 
 
 def gather_bug_context(
