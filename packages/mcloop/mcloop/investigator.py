@@ -52,6 +52,21 @@ TESTING_INSTRUCTION = (
     " or assert the expected error rather than letting the test crash."
 )
 
+DEBUGGING_INSTRUCTION = (
+    "When debugging, decompose the problem before patching."
+    " Break the symptom into smaller questions: what changed,"
+    " what subsystem is involved, what are the inputs and outputs"
+    " at the boundary. Answer each question with evidence (logs,"
+    " probes, tests) before writing a fix."
+    " Search the web for working examples of the API or pattern"
+    " you are using — do not assume your mental model of the API"
+    " is correct. When the same approach fails twice, stop and"
+    " question your assumptions: re-read the documentation, check"
+    " version differences, and verify that the environment matches"
+    " what you expect. Three failed attempts at the same strategy"
+    " means the strategy is wrong, not the execution."
+)
+
 REPRO_STEPS_INSTRUCTION = (
     "When you successfully reproduce the bug, save the reproduction"
     " steps to .mcloop/repro-steps.json as a JSON array. Each entry"
@@ -93,6 +108,7 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
     )
     parts.append(PROBES_INSTRUCTION)
     parts.append(WEB_SEARCH_INSTRUCTION)
+    parts.append(DEBUGGING_INSTRUCTION)
 
     if ctx.app_type:
         parts.append(PROGRAMMATIC_STEPS_INSTRUCTION)

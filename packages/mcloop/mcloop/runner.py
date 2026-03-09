@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from mcloop.investigator import (
+    DEBUGGING_INSTRUCTION,
     DEBUGGING_PLAYBOOK,
     PROBES_INSTRUCTION,
     TESTING_INSTRUCTION,
@@ -1003,6 +1004,7 @@ def build_investigation_plan_description(
     parts.append(PROBES_INSTRUCTION)
     parts.append(WEB_SEARCH_INSTRUCTION)
     parts.append(TESTING_INSTRUCTION)
+    parts.append(DEBUGGING_INSTRUCTION)
     if bug_context:
         parts.append(f"Bug context:\n{bug_context}")
     if failure_history:

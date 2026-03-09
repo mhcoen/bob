@@ -151,6 +151,15 @@ def test_prompt_includes_web_search_instruction():
     assert "search the web" in prompt.lower()
 
 
+def test_prompt_includes_debugging_instruction():
+    """Plan generation prompt instructs decompose-first debugging."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "decompose the problem before patching" in prompt
+    assert "working examples" in prompt
+    assert "question your assumptions" in prompt
+    assert "Three failed attempts" in prompt
+
+
 def test_prompt_includes_failure_history():
     """Plan generation prompt populates What has been tried."""
     ctx = BugContext(failure_history="Tried null check, still crashes")

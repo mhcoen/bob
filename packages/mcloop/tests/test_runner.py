@@ -966,6 +966,16 @@ def test_investigation_plan_description_includes_testing_instruction():
     assert "gracefully" in desc
 
 
+def test_investigation_plan_description_includes_debugging_instruction():
+    """Investigation plan description instructs decompose-first debugging."""
+    desc = build_investigation_plan_description("")
+    assert "decompose the problem before patching" in desc
+    assert "working examples" in desc
+    assert "question your assumptions" in desc
+    assert "Three failed attempts" in desc
+    assert "strategy is wrong" in desc
+
+
 def test_run_task_passes_allowed_tools(tmp_path):
     """run_task forwards allowed_tools to _build_command."""
     log_dir = tmp_path / "logs"
