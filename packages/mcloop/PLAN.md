@@ -178,7 +178,7 @@ The debugging playbook this enforces:
   - [x] Add `investigate` subcommand to argument parser with optional positional description argument and --log flag
   - [x] Gather bug context from multiple sources (DiagnosticReports, .mcloop/last-run.log, piped stdin, --log file, description argument)
   - [x] Create or resume a git worktree for the investigation
-  - [ ] If new: generate investigation PLAN.md via the plan generator, copy mcloop.json and .claude/ settings from the parent project
+  - [x] If new: generate investigation PLAN.md via the plan generator, copy mcloop.json and .claude/ settings from the parent project
   - [ ] Run mcloop as a subprocess in the worktree directory with --no-audit
   - [ ] After mcloop completes: if all tasks passed, offer to merge back (show diff, ask confirmation). If tasks failed, print the investigation state (what was learned, what remains) and leave the worktree for the user to resume or review.
 
