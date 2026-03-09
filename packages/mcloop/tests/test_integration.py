@@ -361,6 +361,7 @@ def test_noop_with_max_retries_one(
 @patch("mcloop.main.subprocess.run")
 def test_commit_stages_all_files(mock_run, tmp_path):
     """_commit uses git add -A to include new and tracked files."""
+    (tmp_path / ".git").mkdir()
     mock_run.return_value = MagicMock()
 
     _commit(tmp_path, "some task")
