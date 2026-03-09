@@ -44,6 +44,7 @@ from mcloop.ratelimit import (
     wait_for_reset,
 )
 from mcloop.runner import (
+    INVESTIGATION_TOOLS,
     bugs_md_has_bugs,
     parse_bugs_md,
     parse_verification_output,
@@ -591,7 +592,7 @@ def _main() -> None:
 
         # Run mcloop in the worktree directory with --no-audit,
         # retrying if post-fix verification fails.
-        cmd = [sys.executable, "-m", "mcloop", "--no-audit"]
+        cmd = [sys.executable, "-m", "mcloop", "--no-audit", "--allow-web-tools"]
         if args.model:
             cmd.extend(["--model", args.model])
 
@@ -638,6 +639,7 @@ def _main() -> None:
         max_retries=args.max_retries,
         model=args.model,
         no_audit=args.no_audit,
+        allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
     )
 
 
@@ -647,6 +649,7 @@ def run_loop(
     enabled_clis: tuple[str, ...] = ("claude",),
     model: str | None = None,
     no_audit: bool = False,
+    allowed_tools: str | None = None,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
     project_dir = checklist_path.parent
@@ -752,6 +755,7 @@ def run_loop(
                 prior_errors=last_error,
                 session_context=ctx.text(),
                 check_commands=project_checks,
+                allowed_tools=allowed_tools,
             )
 
             if is_session_limited(
@@ -963,6 +967,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
     parser.add_argument(
         "--no-audit", action="store_true", help="Skip the post-completion bug audit cycle"
+    )
+    parser.add_argument(
+        "--allow-web-tools",
+        action="store_true",
+        help="Enable WebFetch and WebSearch tools for sessions",
     )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")

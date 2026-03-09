@@ -8,6 +8,7 @@ import pytest
 
 from mcloop.runner import (
     _SUPPRESS_ALL_TOOLS,
+    INVESTIGATION_TOOLS,
     _build_command,
     _extract_status,
     _print_stream_event,
@@ -46,6 +47,23 @@ def test_build_command_codex():
 def test_build_command_unknown():
     with pytest.raises(ValueError, match="Unknown CLI"):
         _build_command("unknown", "task")
+
+
+def test_build_command_custom_allowed_tools():
+    cmd = _build_command("claude", "task", allowed_tools=INVESTIGATION_TOOLS)
+    idx = cmd.index("--allowedTools")
+    assert cmd[idx + 1] == INVESTIGATION_TOOLS
+
+
+def test_build_command_default_allowed_tools():
+    cmd = _build_command("claude", "task")
+    idx = cmd.index("--allowedTools")
+    assert cmd[idx + 1] == "Edit,Write,Bash,Read,Glob,Grep"
+
+
+def test_investigation_tools_includes_web():
+    assert "WebFetch" in INVESTIGATION_TOOLS
+    assert "WebSearch" in INVESTIGATION_TOOLS
 
 
 def test_slugify():
@@ -935,3 +953,56 @@ def test_investigation_plan_description_nothing_tried_when_no_history():
     desc = build_investigation_plan_description("")
     assert "## What has been tried" in desc
     assert "Nothing yet." in desc
+
+
+def test_run_task_passes_allowed_tools(tmp_path):
+    """run_task forwards allowed_tools to _build_command."""
+    log_dir = tmp_path / "logs"
+    captured_kwargs = {}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_kwargs.update(kwargs)
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        from mcloop.runner import run_task
+
+        run_task(
+            task_text="Fix the bug",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+            allowed_tools=INVESTIGATION_TOOLS,
+        )
+
+    assert captured_kwargs["allowed_tools"] == INVESTIGATION_TOOLS
+
+
+def test_run_task_default_tools_not_passed(tmp_path):
+    """run_task does not pass allowed_tools when not specified."""
+    log_dir = tmp_path / "logs"
+    captured_kwargs = {}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_kwargs.update(kwargs)
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        from mcloop.runner import run_task
+
+        run_task(
+            task_text="Fix the bug",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+        )
+
+    assert "allowed_tools" not in captured_kwargs

@@ -888,7 +888,8 @@ def test_investigate_runs_mcloop_with_no_audit(tmp_path):
         main()
 
     cmd = mock_run.call_args[0][0]
-    assert cmd[-1] == "--no-audit"
+    assert "--no-audit" in cmd
+    assert "--allow-web-tools" in cmd
     assert "-m" in cmd
     assert "mcloop" in cmd
     assert mock_run.call_args[1]["cwd"] == str(wt_path)

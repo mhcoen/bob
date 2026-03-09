@@ -27,6 +27,9 @@ class RunResult:
     log_path: Path
 
 
+INVESTIGATION_TOOLS = "Edit,Write,Bash,Read,Glob,Grep,WebFetch,WebSearch"
+
+
 def run_task(
     task_text: str,
     cli: str,
@@ -38,6 +41,7 @@ def run_task(
     prior_errors: str = "",
     session_context: str = "",
     check_commands: list[str] | None = None,
+    allowed_tools: str | None = None,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -138,7 +142,10 @@ def run_task(
             "IMPORTANT: A previous attempt at this task failed. Fix these errors:\n" + prior_errors
         )
     prompt = "\n\n".join(parts)
-    cmd = _build_command(cli, prompt, model=model)
+    build_kwargs: dict = {"model": model}
+    if allowed_tools:
+        build_kwargs["allowed_tools"] = allowed_tools
+    cmd = _build_command(cli, prompt, **build_kwargs)
     env = dict(os.environ)
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
