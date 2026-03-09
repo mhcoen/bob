@@ -115,6 +115,119 @@ def _kill_active_process() -> None:
         _runner._active_process = None
 
 
+def _investigation_passed(
+    wt_path: Path,
+    branch: str,
+    project_dir: Path,
+) -> None:
+    """All investigation tasks passed. Show diff and offer to merge back."""
+    print("\n--- Investigation complete (all tasks passed) ---", file=sys.stderr)
+
+    source_branch = worktree.current_branch(cwd=project_dir)
+
+    # Show commits on the investigation branch
+    log_result = subprocess.run(
+        ["git", "log", "--oneline", source_branch + ".." + branch],
+        cwd=str(project_dir),
+        capture_output=True,
+        text=True,
+    )
+    if log_result.stdout.strip():
+        print("\nCommits to merge:", file=sys.stderr)
+        print(log_result.stdout.rstrip(), file=sys.stderr)
+
+    # Show changed files summary
+    diff_result = subprocess.run(
+        ["git", "diff", "--stat", source_branch + "..." + branch],
+        cwd=str(project_dir),
+        capture_output=True,
+        text=True,
+    )
+    if diff_result.stdout.strip():
+        print("\nChanged files:", file=sys.stderr)
+        print(diff_result.stdout.rstrip(), file=sys.stderr)
+
+    # Ask for confirmation
+    print("", file=sys.stderr)
+    try:
+        answer = input(f"Merge {branch} back into main? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+
+    if answer.strip().lower() not in ("y", "yes"):
+        print(
+            f"Skipped merge. Worktree remains at {wt_path}",
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        worktree.merge(branch, cwd=project_dir)
+        print(f"Merged {branch} into main.", file=sys.stderr)
+    except RuntimeError as exc:
+        print(f"Merge failed: {exc}", file=sys.stderr)
+        print(f"Worktree remains at {wt_path}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        worktree.remove(branch, cwd=project_dir)
+        print("Cleaned up worktree and branch.", file=sys.stderr)
+    except RuntimeError as exc:
+        print(f"Cleanup warning: {exc}", file=sys.stderr)
+
+
+def _investigation_failed(wt_path: Path, branch: str) -> None:
+    """Investigation had failures. Print state and leave worktree."""
+    print(
+        "\n--- Investigation incomplete (some tasks failed) ---",
+        file=sys.stderr,
+    )
+
+    # Show what was learned from NOTES.md
+    notes_path = wt_path / "NOTES.md"
+    if notes_path.exists():
+        notes = notes_path.read_text().strip()
+        if notes:
+            print("\nWhat was learned (NOTES.md):", file=sys.stderr)
+            print(notes, file=sys.stderr)
+
+    # Show what remains from PLAN.md
+    plan_path = wt_path / "PLAN.md"
+    if plan_path.exists():
+        tasks = parse(plan_path)
+        completed = []
+        remaining = []
+        failed = []
+
+        def _collect(task_list: list[Task]) -> None:
+            for task in task_list:
+                if task.children:
+                    _collect(task.children)
+                elif task.failed:
+                    failed.append(task.text)
+                elif task.checked:
+                    completed.append(task.text)
+                else:
+                    remaining.append(task.text)
+
+        _collect(tasks)
+
+        if completed:
+            print(f"\nCompleted: {len(completed)} tasks", file=sys.stderr)
+        if failed:
+            print(f"Failed: {len(failed)} tasks", file=sys.stderr)
+            for text in failed:
+                print(f"  [!] {text}", file=sys.stderr)
+        if remaining:
+            print(f"Remaining: {len(remaining)} tasks", file=sys.stderr)
+            for text in remaining:
+                print(f"  [ ] {text}", file=sys.stderr)
+
+    print(f"\nWorktree: {wt_path}", file=sys.stderr)
+    print(f"Branch:   {branch}", file=sys.stderr)
+    print("Resume with: mcloop investigate", file=sys.stderr)
+
+
 def main() -> None:
     import atexit
 
@@ -201,7 +314,13 @@ def _main() -> None:
             cmd.extend(["--model", args.model])
         print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
         result = subprocess.run(cmd, cwd=str(wt_path))
-        sys.exit(result.returncode)
+
+        if result.returncode == 0:
+            _investigation_passed(wt_path, branch, project_dir)
+        else:
+            _investigation_failed(wt_path, branch)
+            sys.exit(result.returncode)
+        return
 
     if args.dry_run:
         _dry_run(parse(checklist_path))

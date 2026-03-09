@@ -7,6 +7,8 @@ import pytest
 from mcloop.main import (
     _copy_project_settings,
     _find_recent_crash_report,
+    _investigation_failed,
+    _investigation_passed,
     _parse_args,
     _run_audit_fix_cycle,
     _run_single_audit_round,
@@ -530,7 +532,7 @@ def test_investigate_creates_worktree(tmp_path, capsys):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        pytest.raises(SystemExit) as exc_info,
+        patch("mcloop.main._investigation_passed") as mock_passed,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-app-crashes", False)
@@ -539,13 +541,13 @@ def test_investigate_creates_worktree(tmp_path, capsys):
 
         main()
 
-    assert exc_info.value.code == 0
     mock_create.assert_called_once_with("app crashes", cwd=tmp_path)
     # Verify subprocess was called with --no-audit in the worktree
     mock_run.assert_called_once()
     cmd = mock_run.call_args[0][0]
     assert "--no-audit" in cmd
     assert mock_run.call_args[1]["cwd"] == str(wt_path)
+    mock_passed.assert_called_once_with(wt_path, "investigate-app-crashes", tmp_path)
     captured = capsys.readouterr()
     assert "Created investigation worktree" in captured.err
     assert "investigate-app-crashes" in captured.err
@@ -573,7 +575,7 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        pytest.raises(SystemExit) as exc_info,
+        patch("mcloop.main._investigation_passed") as mock_passed,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -582,9 +584,9 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
 
         main()
 
-    assert exc_info.value.code == 0
     mock_run.assert_called_once()
     assert mock_run.call_args[1]["cwd"] == str(wt_path)
+    mock_passed.assert_called_once()
     captured = capsys.readouterr()
     assert "Resuming investigation" in captured.err
     assert "investigate-segfault" in captured.err
@@ -609,7 +611,7 @@ def test_investigate_no_description_uses_fallback(tmp_path):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result),
-        pytest.raises(SystemExit),
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (
@@ -745,7 +747,7 @@ def test_investigate_generates_plan_with_context(tmp_path, capsys):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result),
-        pytest.raises(SystemExit),
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash-on-save", False)
@@ -786,7 +788,7 @@ def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings") as mock_copy,
         patch("mcloop.main.subprocess.run", return_value=mock_result),
-        pytest.raises(SystemExit),
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -828,7 +830,7 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
         patch("mcloop.main.gather_bug_context", return_value=ctx),
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main.subprocess.run", return_value=mock_result),
-        pytest.raises(SystemExit),
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-bug", False)
@@ -866,7 +868,7 @@ def test_investigate_runs_mcloop_with_no_audit(tmp_path):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        pytest.raises(SystemExit) as exc_info,
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash", False)
@@ -875,7 +877,6 @@ def test_investigate_runs_mcloop_with_no_audit(tmp_path):
 
         main()
 
-    assert exc_info.value.code == 0
     cmd = mock_run.call_args[0][0]
     assert cmd[-1] == "--no-audit"
     assert "-m" in cmd
@@ -905,7 +906,7 @@ def test_investigate_passes_model_to_subprocess(tmp_path):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        pytest.raises(SystemExit),
+        patch("mcloop.main._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-bug", False)
@@ -921,7 +922,7 @@ def test_investigate_passes_model_to_subprocess(tmp_path):
 
 
 def test_investigate_propagates_nonzero_returncode(tmp_path):
-    """Nonzero subprocess returncode is propagated via sys.exit."""
+    """Nonzero subprocess returncode calls _investigation_failed and exits."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n")
     wt_path = tmp_path / "worktree"
@@ -939,6 +940,7 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
         patch("mcloop.main.worktree.create") as mock_create,
         patch("mcloop.main._copy_project_settings"),
         patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch("mcloop.main._investigation_failed") as mock_failed,
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
@@ -949,3 +951,193 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
         main()
 
     assert exc_info.value.code == 1
+    mock_failed.assert_called_once_with(wt_path, "investigate-bug")
+
+
+# --- _investigation_passed ---
+
+
+def test_investigation_passed_merges_on_yes(tmp_path, capsys):
+    """When user confirms, merges branch and cleans up worktree."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    with (
+        patch("mcloop.main.worktree.current_branch", return_value="main"),
+        patch("mcloop.main.subprocess.run") as mock_run,
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.worktree.merge") as mock_merge,
+        patch("mcloop.main.worktree.remove") as mock_remove,
+    ):
+        # git log and git diff --stat
+        mock_run.side_effect = [
+            MagicMock(stdout="abc123 Fix the bug\n"),
+            MagicMock(stdout=" src/main.py | 5 ++---\n"),
+        ]
+        _investigation_passed(wt_path, "investigate-bug", tmp_path)
+
+    mock_merge.assert_called_once_with("investigate-bug", cwd=tmp_path)
+    mock_remove.assert_called_once_with("investigate-bug", cwd=tmp_path)
+    captured = capsys.readouterr()
+    assert "Commits to merge:" in captured.err
+    assert "abc123" in captured.err
+    assert "Changed files:" in captured.err
+    assert "Merged investigate-bug" in captured.err
+    assert "Cleaned up worktree" in captured.err
+
+
+def test_investigation_passed_skips_merge_on_no(tmp_path, capsys):
+    """When user declines, worktree is left in place."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    with (
+        patch("mcloop.main.worktree.current_branch", return_value="main"),
+        patch("mcloop.main.subprocess.run") as mock_run,
+        patch("builtins.input", return_value="n"),
+        patch("mcloop.main.worktree.merge") as mock_merge,
+    ):
+        mock_run.return_value = MagicMock(stdout="")
+        _investigation_passed(wt_path, "investigate-bug", tmp_path)
+
+    mock_merge.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Skipped merge" in captured.err
+    assert str(wt_path) in captured.err
+
+
+def test_investigation_passed_skips_merge_on_eof(tmp_path, capsys):
+    """When input raises EOFError, merge is skipped."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    with (
+        patch("mcloop.main.worktree.current_branch", return_value="main"),
+        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("builtins.input", side_effect=EOFError),
+        patch("mcloop.main.worktree.merge") as mock_merge,
+    ):
+        _investigation_passed(wt_path, "investigate-bug", tmp_path)
+
+    mock_merge.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Skipped merge" in captured.err
+
+
+def test_investigation_passed_merge_failure(tmp_path, capsys):
+    """When merge fails, prints error and exits 1."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    with (
+        patch("mcloop.main.worktree.current_branch", return_value="main"),
+        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("builtins.input", return_value="y"),
+        patch(
+            "mcloop.main.worktree.merge",
+            side_effect=RuntimeError("conflict"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _investigation_passed(wt_path, "investigate-bug", tmp_path)
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Merge failed" in captured.err
+
+
+def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
+    """When cleanup fails after merge, prints warning but doesn't exit."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    with (
+        patch("mcloop.main.worktree.current_branch", return_value="main"),
+        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.worktree.merge"),
+        patch(
+            "mcloop.main.worktree.remove",
+            side_effect=RuntimeError("locked"),
+        ),
+    ):
+        _investigation_passed(wt_path, "investigate-bug", tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Cleanup warning" in captured.err
+
+
+# --- _investigation_failed ---
+
+
+def test_investigation_failed_with_notes_and_plan(tmp_path, capsys):
+    """Prints NOTES.md content and PLAN.md task summary."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    (wt_path / "NOTES.md").write_text("## Observations\n- The crash is in parser.py\n")
+    (wt_path / "PLAN.md").write_text(
+        "# Investigation Plan\n\n"
+        "- [x] Reproduce the crash\n"
+        "- [!] Fix the parser\n"
+        "- [ ] Add regression test\n"
+        "- [ ] Clean up\n"
+    )
+
+    _investigation_failed(wt_path, "investigate-crash")
+
+    captured = capsys.readouterr()
+    assert "Investigation incomplete" in captured.err
+    assert "What was learned (NOTES.md):" in captured.err
+    assert "The crash is in parser.py" in captured.err
+    assert "Completed: 1 tasks" in captured.err
+    assert "Failed: 1 tasks" in captured.err
+    assert "[!] Fix the parser" in captured.err
+    assert "Remaining: 2 tasks" in captured.err
+    assert "[ ] Add regression test" in captured.err
+    assert "[ ] Clean up" in captured.err
+    assert str(wt_path) in captured.err
+    assert "investigate-crash" in captured.err
+    assert "Resume with: mcloop investigate" in captured.err
+
+
+def test_investigation_failed_no_notes(tmp_path, capsys):
+    """Works without NOTES.md."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    (wt_path / "PLAN.md").write_text("# Plan\n\n- [ ] First task\n")
+
+    _investigation_failed(wt_path, "investigate-bug")
+
+    captured = capsys.readouterr()
+    assert "Investigation incomplete" in captured.err
+    assert "NOTES.md" not in captured.err
+    assert "Remaining: 1 tasks" in captured.err
+
+
+def test_investigation_failed_no_plan(tmp_path, capsys):
+    """Works without PLAN.md."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    _investigation_failed(wt_path, "investigate-bug")
+
+    captured = capsys.readouterr()
+    assert "Investigation incomplete" in captured.err
+    assert str(wt_path) in captured.err
+
+
+def test_investigation_failed_all_completed(tmp_path, capsys):
+    """When all tasks are checked, shows completed count only."""
+    wt_path = tmp_path / "worktree"
+    wt_path.mkdir()
+
+    (wt_path / "PLAN.md").write_text("# Plan\n\n- [x] Done task\n")
+
+    _investigation_failed(wt_path, "investigate-bug")
+
+    captured = capsys.readouterr()
+    assert "Completed: 1 tasks" in captured.err
+    assert "Remaining:" not in captured.err
+    assert "Failed:" not in captured.err
