@@ -274,3 +274,111 @@ def test_full_context_plan():
     assert "Tried disabling animation" in plan
     assert "SwiftUI app" in plan
     assert "process_monitor.run_gui()" in plan
+
+
+# --- Sample bug description scenarios ---
+
+
+def test_crash_on_startup_has_research_step():
+    """Startup crash bug plan includes a web research step."""
+    ctx = BugContext(
+        user_description="App crashes immediately on launch with SIGABRT",
+        crash_report="SIGABRT in dyld: missing symbol _NSWindowDidBecomeKeyNotification",
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "SIGABRT" in plan
+
+
+def test_crash_on_startup_has_isolation_step():
+    """Startup crash bug plan includes isolation via standalone probe."""
+    ctx = BugContext(
+        user_description="App crashes immediately on launch with SIGABRT",
+        crash_report="SIGABRT in dyld: missing symbol _NSWindowDidBecomeKeyNotification",
+    )
+    plan = generate_plan(ctx)
+    assert "standalone probe script" in plan
+
+
+def test_crash_on_startup_has_verification_step():
+    """Startup crash bug plan includes post-fix verification."""
+    ctx = BugContext(
+        user_description="App crashes immediately on launch with SIGABRT",
+        crash_report="SIGABRT in dyld: missing symbol _NSWindowDidBecomeKeyNotification",
+    )
+    plan = generate_plan(ctx)
+    assert "Verify the fix" in plan
+
+
+def test_gui_hang_plan_steps():
+    """GUI hang bug plan has research, isolation, and verification steps."""
+    ctx = BugContext(
+        user_description="Menu bar app freezes after clicking Preferences",
+        app_type="gui",
+        source_summary="SwiftUI menu bar app with a settings window",
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "standalone probe script" in plan
+    assert "Verify the fix" in plan
+    assert "process_monitor.run_gui()" in plan
+    assert "app_interact" in plan
+
+
+def test_cli_segfault_plan_steps():
+    """CLI segfault bug plan has research, isolation, and verification steps."""
+    ctx = BugContext(
+        user_description="CLI tool segfaults when given a file larger than 2GB",
+        app_type="cli",
+        failure_history="Tried increasing stack size with ulimit, no effect",
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "standalone probe script" in plan
+    assert "Verify the fix" in plan
+    assert "process_monitor.run_cli()" in plan
+    assert "Tried increasing stack size" in plan
+
+
+def test_web_500_error_plan_steps():
+    """Web server 500 error bug plan has research, isolation, and verification."""
+    ctx = BugContext(
+        user_description="API returns 500 on POST /api/upload with multipart form",
+        app_type="web",
+        source_summary="Express.js server with multer for file uploads",
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "standalone probe script" in plan
+    assert "Verify the fix" in plan
+    assert "web_interact" in plan
+    assert "process_monitor" in plan
+
+
+def test_data_corruption_plan_steps():
+    """Data corruption bug plan has research, isolation, and verification steps."""
+    ctx = BugContext(
+        user_description="Database entries contain garbled UTF-8 after import",
+        source_summary="Python script reads CSV and writes to SQLite",
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "standalone probe script" in plan
+    assert "Verify the fix" in plan
+    assert "re-run the failing scenario" in plan
+
+
+def test_intermittent_failure_with_history():
+    """Intermittent failure bug plan includes failure history and all step types."""
+    ctx = BugContext(
+        user_description="Test suite fails randomly with 'connection reset by peer'",
+        failure_history=(
+            "Added retry logic, failures still happen.\nIncreased timeout to 30s, no improvement."
+        ),
+    )
+    plan = generate_plan(ctx)
+    assert "Search the web for known issues" in plan
+    assert "standalone probe script" in plan
+    assert "Verify the fix" in plan
+    assert "Added retry logic" in plan
+    assert "Increased timeout" in plan
