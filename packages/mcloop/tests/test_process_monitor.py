@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 import time
@@ -442,3 +443,230 @@ class TestRunGUI:
         assert result.crashed is False
         assert result.hung is True
         assert result.sample_output is not None
+
+
+class TestRunCLIMocked:
+    """run_cli tests using mock subprocesses for deterministic behavior."""
+
+    def _make_mock_proc(self, poll_returns, read_data=b"", pid=100):
+        """Build a mock Popen with controlled poll() and stdout."""
+        mock_proc = MagicMock()
+        mock_proc.pid = pid
+        mock_proc.poll = MagicMock(side_effect=poll_returns)
+        mock_stdout = MagicMock()
+        mock_stdout.fileno.return_value = 99
+        mock_stdout.read.return_value = read_data
+        mock_proc.stdout = mock_stdout
+        mock_proc.wait.return_value = None
+        return mock_proc
+
+    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.sample", return_value="sample text")
+    @patch("select.select", return_value=([], [], []))
+    @patch("mcloop.process_monitor.launch")
+    def test_hang_calls_sample_and_kill(self, mock_launch, mock_select, mock_sample, mock_kill):
+        mock_proc = self._make_mock_proc([None] * 200)
+        mock_launch.return_value = LaunchedProcess(
+            pid=100,
+            process=mock_proc,
+            started_at=time.monotonic(),
+            last_output_at=time.monotonic() - 20,
+        )
+        result = process_monitor.run_cli(
+            "fake", hang_seconds=0.01, timeout_seconds=60, poll_interval=0
+        )
+        assert result.hung is True
+        assert result.exit_code is None
+        assert result.sample_output == "sample text"
+        mock_sample.assert_called_once_with(100)
+        mock_kill.assert_called_once_with(100)
+
+    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.sample", return_value="timeout sample")
+    @patch("select.select", return_value=([99], [], []))
+    @patch("os.read", return_value=b"output ")
+    @patch("mcloop.process_monitor.launch")
+    def test_wall_timeout_kills_process(
+        self, mock_launch, mock_os_read, mock_select, mock_sample, mock_kill
+    ):
+        mock_proc = self._make_mock_proc([None] * 200)
+        mock_launch.return_value = LaunchedProcess(
+            pid=101,
+            process=mock_proc,
+            started_at=time.monotonic() - 100,
+            last_output_at=time.monotonic(),
+        )
+        result = process_monitor.run_cli(
+            "fake", timeout_seconds=0.0, hang_seconds=999, poll_interval=0
+        )
+        assert result.hung is True
+        assert result.exit_code is None
+        mock_kill.assert_called_once_with(101)
+
+    @patch("select.select", return_value=([99], [], []))
+    @patch("os.read", return_value=b"all output")
+    @patch("mcloop.process_monitor.launch")
+    def test_normal_exit_returns_code(self, mock_launch, mock_os_read, mock_select):
+        mock_proc = self._make_mock_proc([None, None, 0], read_data=b" rest")
+        mock_launch.return_value = LaunchedProcess(
+            pid=102,
+            process=mock_proc,
+            started_at=time.monotonic(),
+            last_output_at=time.monotonic(),
+        )
+        result = process_monitor.run_cli(
+            "fake", timeout_seconds=60, hang_seconds=60, poll_interval=0
+        )
+        assert result.hung is False
+        assert result.exit_code == 0
+        assert "all output" in result.output
+
+    @patch("select.select", return_value=([99], [], []))
+    @patch("os.read", return_value=b"error output")
+    @patch("mcloop.process_monitor.launch")
+    def test_crash_exit_code(self, mock_launch, mock_os_read, mock_select):
+        mock_proc = self._make_mock_proc([None, 137], read_data=b"")
+        mock_launch.return_value = LaunchedProcess(
+            pid=103,
+            process=mock_proc,
+            started_at=time.monotonic(),
+            last_output_at=time.monotonic(),
+        )
+        result = process_monitor.run_cli(
+            "fake", timeout_seconds=60, hang_seconds=60, poll_interval=0
+        )
+        assert result.hung is False
+        assert result.exit_code == 137
+        assert "error output" in result.output
+
+
+class TestLaunchMocked:
+    """launch() with mock subprocess to verify argument passing."""
+
+    @patch("subprocess.Popen")
+    def test_passes_cwd(self, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        mock_popen.return_value = mock_proc
+        result = process_monitor.launch("echo hi", cwd="/some/dir")
+        mock_popen.assert_called_once_with(
+            "echo hi",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd="/some/dir",
+        )
+        assert result.pid == 42
+        assert result.process is mock_proc
+
+    @patch("subprocess.Popen")
+    def test_defaults_cwd_none(self, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.pid = 43
+        mock_popen.return_value = mock_proc
+        process_monitor.launch("ls")
+        mock_popen.assert_called_once_with(
+            "ls",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=None,
+        )
+
+
+class TestKillMocked:
+    """kill() with mocks to test SIGTERM→SIGKILL escalation."""
+
+    @patch("time.sleep")
+    @patch("mcloop.process_monitor.is_alive")
+    @patch("os.kill")
+    def test_sigterm_succeeds(self, mock_kill, mock_alive, mock_sleep):
+        mock_alive.return_value = False
+        result = process_monitor.kill(555, graceful_timeout=1.0)
+        assert result is True
+        mock_kill.assert_called_once_with(555, signal.SIGTERM)
+
+    @patch("time.sleep")
+    @patch("mcloop.process_monitor.is_alive", return_value=True)
+    @patch("os.kill")
+    def test_escalates_to_sigkill(self, mock_kill, mock_alive, mock_sleep):
+        result = process_monitor.kill(556, graceful_timeout=0.0)
+        assert result is True
+        calls = mock_kill.call_args_list
+        assert calls[0] == ((556, signal.SIGTERM),)
+        assert calls[1] == ((556, signal.SIGKILL),)
+
+    @patch("os.kill", side_effect=ProcessLookupError)
+    def test_already_dead_on_sigterm(self, mock_kill):
+        result = process_monitor.kill(557)
+        assert result is True
+
+
+class TestIsHungMocked:
+    """is_hung() with mock to test stdout-is-None branch."""
+
+    def test_no_stdout(self):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.stdout = None
+        lp = LaunchedProcess(
+            pid=200,
+            process=mock_proc,
+            last_output_at=time.monotonic() - 100,
+        )
+        assert process_monitor.is_hung(lp, timeout_seconds=5) is True
+
+    def test_no_stdout_within_timeout(self):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.stdout = None
+        lp = LaunchedProcess(
+            pid=201,
+            process=mock_proc,
+            last_output_at=time.monotonic(),
+        )
+        assert process_monitor.is_hung(lp, timeout_seconds=60) is False
+
+    @patch("select.select", return_value=([], [], []))
+    def test_no_readable_data_past_timeout(self, mock_select):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_stdout = MagicMock()
+        mock_stdout.fileno.return_value = 88
+        mock_proc.stdout = mock_stdout
+        lp = LaunchedProcess(
+            pid=202,
+            process=mock_proc,
+            last_output_at=time.monotonic() - 20,
+        )
+        assert process_monitor.is_hung(lp, timeout_seconds=5) is True
+
+    @patch("os.read", return_value=b"data")
+    @patch("select.select", return_value=([88], [], []))
+    def test_readable_data_resets_timeout(self, mock_select, mock_read):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_stdout = MagicMock()
+        mock_stdout.fileno.return_value = 88
+        mock_proc.stdout = mock_stdout
+        lp = LaunchedProcess(
+            pid=203,
+            process=mock_proc,
+            last_output_at=time.monotonic() - 20,
+        )
+        assert process_monitor.is_hung(lp, timeout_seconds=5) is False
+
+    @patch("os.read", return_value=b"")
+    @patch("select.select", return_value=([88], [], []))
+    def test_empty_read_does_not_reset(self, mock_select, mock_read):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_stdout = MagicMock()
+        mock_stdout.fileno.return_value = 88
+        mock_proc.stdout = mock_stdout
+        lp = LaunchedProcess(
+            pid=204,
+            process=mock_proc,
+            last_output_at=time.monotonic() - 20,
+        )
+        assert process_monitor.is_hung(lp, timeout_seconds=5) is True
