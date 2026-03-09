@@ -1,6 +1,6 @@
 """Tests for mcloop.investigator."""
 
-from mcloop.investigator import BugContext, generate_plan
+from mcloop.investigator import BugContext, build_plan_generation_prompt, generate_plan
 
 
 def test_plan_contains_debugging_playbook():
@@ -123,6 +123,91 @@ def test_generic_app_type_no_specific_tooling():
     ctx = BugContext(app_type="")
     plan = generate_plan(ctx)
     assert "re-run the failing scenario" in plan
+
+
+# --- build_plan_generation_prompt ---
+
+
+def test_prompt_includes_debugging_playbook():
+    """Plan generation prompt includes the full debugging playbook."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "Reproduce the problem" in prompt
+    assert "Instrument at stage boundaries" in prompt
+    assert "Isolate subsystems" in prompt
+    assert "Inspect live runtime behavior" in prompt
+    assert "patch production code" in prompt
+    assert "Clean up temporary scaffolding" in prompt
+
+
+def test_prompt_includes_probe_instruction():
+    """Plan generation prompt instructs creating standalone probes."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "standalone probe script" in prompt.lower() or "standalone probe" in prompt.lower()
+
+
+def test_prompt_includes_web_search_instruction():
+    """Plan generation prompt instructs searching the web."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "search the web" in prompt.lower()
+
+
+def test_prompt_includes_failure_history():
+    """Plan generation prompt populates What has been tried."""
+    ctx = BugContext(failure_history="Tried null check, still crashes")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "## What has been tried" in prompt
+    assert "Tried null check, still crashes" in prompt
+
+
+def test_prompt_says_nothing_tried_when_no_history():
+    """Plan generation prompt says nothing tried when history is empty."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "## What has been tried" in prompt
+    assert "Nothing yet." in prompt
+
+
+def test_prompt_includes_bug_description():
+    """Plan generation prompt includes the user's bug description."""
+    ctx = BugContext(user_description="App crashes on startup")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "App crashes on startup" in prompt
+
+
+def test_prompt_includes_crash_report():
+    """Plan generation prompt includes the crash report."""
+    ctx = BugContext(crash_report="EXC_BAD_ACCESS at 0x0")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "EXC_BAD_ACCESS at 0x0" in prompt
+
+
+def test_prompt_gui_app_type():
+    """Plan generation prompt includes GUI-specific guidance."""
+    ctx = BugContext(app_type="gui")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "process_monitor.run_gui()" in prompt
+    assert "app_interact" in prompt
+
+
+def test_prompt_cli_app_type():
+    """Plan generation prompt includes CLI-specific guidance."""
+    ctx = BugContext(app_type="cli")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "process_monitor.run_cli()" in prompt
+
+
+def test_prompt_web_app_type():
+    """Plan generation prompt includes web-specific guidance."""
+    ctx = BugContext(app_type="web")
+    prompt = build_plan_generation_prompt(ctx)
+    assert "web_interact" in prompt
+    assert "process_monitor" in prompt
+
+
+def test_prompt_requests_checklist_format():
+    """Plan generation prompt asks for checklist items."""
+    prompt = build_plan_generation_prompt(BugContext())
+    assert "- [ ]" in prompt
+    assert "PLAN.md" in prompt
 
 
 def test_full_context_plan():

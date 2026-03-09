@@ -101,12 +101,16 @@ def get_stages(tasks: list[Task]) -> list[str]:
 
 
 def _stage_complete(tasks: list[Task], stage: str) -> bool:
-    """Return True if all tasks in the given stage are checked."""
+    """Return True if all tasks in the given stage are checked.
+
+    Failed tasks ([!]) do NOT count as complete. A stage with
+    failed tasks is stuck, not done.
+    """
 
     def _check(task_list: list[Task]) -> bool:
         for task in task_list:
             if task.stage == stage:
-                if not task.checked and not task.failed:
+                if not task.checked:
                     return False
             if not _check(task.children):
                 return False

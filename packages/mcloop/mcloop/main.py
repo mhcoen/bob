@@ -116,6 +116,7 @@ def run_loop(
 
     project_checks = get_check_commands(project_dir)
 
+    print(f">>> DEBUG: run_loop started, no_audit={no_audit}", flush=True)
     _ensure_git(project_dir)
     _checkpoint(project_dir)
 
@@ -294,6 +295,8 @@ def run_loop(
     # Check if we stopped at a stage boundary
     final_tasks = parse(checklist_path)
     status = stage_status(final_tasks)
+    print(f"\n>>> DEBUG: stage_status={status}", flush=True)
+    print(f">>> DEBUG: completed={len(completed)} tasks", flush=True)
 
     if status.startswith("stage_complete:"):
         done_stage = status.split(":", 1)[1]
@@ -347,6 +350,7 @@ def run_loop(
         return False
 
     has_unchecked = _any_unchecked(final_for_audit)
+    print(f">>> DEBUG: has_unchecked={has_unchecked} no_audit={no_audit}", flush=True)
     if has_unchecked:
         print(
             "\n>>> Audit skipped (unchecked tasks remain)",
@@ -998,11 +1002,14 @@ def _run_audit_fix_cycle(
         if not fixed:
             # No bugs found or fixed — no need for another round
             if round_num == 1:
+                print(">>> DEBUG: audit round 1, no bugs, sending notify", flush=True)
                 notify("Audit complete: no bugs found.")
             else:
+                print(">>> DEBUG: audit round 2, no new bugs, sending notify", flush=True)
                 notify("Audit complete: fixes verified, no new bugs.")
             break
         if round_num == max_rounds:
+            print(">>> DEBUG: audit max rounds, sending notify", flush=True)
             notify("Audit complete: bugs fixed.")
 
     _save_audit_hash(project_dir)

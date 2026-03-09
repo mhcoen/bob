@@ -38,6 +38,63 @@ class BugContext:
     app_type: str = ""  # "gui", "cli", "web", or ""
 
 
+def build_plan_generation_prompt(ctx: BugContext) -> str:
+    """Build the prompt sent to a Claude Code session to generate an investigation plan.
+
+    The prompt includes the debugging playbook, standalone-probe instruction,
+    web-search instruction, and the "What has been tried" section populated
+    from ctx.failure_history.
+    """
+    parts: list[str] = []
+
+    parts.append(
+        "You are generating an investigation plan for a bug."
+        " Follow this debugging playbook strictly:\n\n" + _DEBUGGING_PLAYBOOK
+    )
+    parts.append(_PROBES_INSTRUCTION)
+    parts.append(_WEB_SEARCH_INSTRUCTION)
+
+    if ctx.user_description:
+        parts.append(f"Bug description: {ctx.user_description}")
+    if ctx.crash_report:
+        parts.append(f"Crash report:\n```\n{ctx.crash_report}\n```")
+    if ctx.source_summary:
+        parts.append(f"Source summary: {ctx.source_summary}")
+
+    parts.append("## What has been tried\n")
+    if ctx.failure_history:
+        parts.append(ctx.failure_history)
+    else:
+        parts.append("Nothing yet.")
+
+    app_guidance = ""
+    if ctx.app_type == "gui":
+        app_guidance = (
+            "This is a GUI app. Use process_monitor.run_gui() to launch,"
+            " app_interact for UI interaction, and screenshot_window()"
+            " for visual verification."
+        )
+    elif ctx.app_type == "web":
+        app_guidance = (
+            "This is a web app. Use process_monitor.launch() to start"
+            " the server and web_interact for browser interaction."
+        )
+    elif ctx.app_type == "cli":
+        app_guidance = (
+            "This is a CLI app. Use process_monitor.run_cli() for execution and output capture."
+        )
+    if app_guidance:
+        parts.append(app_guidance)
+
+    parts.append(
+        "Generate a PLAN.md with markdown checklist items (- [ ])"
+        " following the playbook order: research, reproduce,"
+        " instrument, isolate, inspect, fix, verify, clean up."
+    )
+
+    return "\n\n".join(parts)
+
+
 def generate_plan(ctx: BugContext) -> str:
     """Produce an investigation PLAN.md from bug context.
 
