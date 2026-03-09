@@ -174,13 +174,13 @@ The debugging playbook this enforces:
   - [x] Handle the case where a worktree already exists (resume the investigation rather than creating a new one)
   - [x] Add tests for worktree creation, merge, and cleanup
 
-- [ ] The `investigate` subcommand
+- [x] The `investigate` subcommand
   - [x] Add `investigate` subcommand to argument parser with optional positional description argument and --log flag
   - [x] Gather bug context from multiple sources (DiagnosticReports, .mcloop/last-run.log, piped stdin, --log file, description argument)
   - [x] Create or resume a git worktree for the investigation
   - [x] If new: generate investigation PLAN.md via the plan generator, copy mcloop.json and .claude/ settings from the parent project
   - [x] Run mcloop as a subprocess in the worktree directory with --no-audit
-  - [ ] After mcloop completes: if all tasks passed, offer to merge back (show diff, ask confirmation). If tasks failed, print the investigation state (what was learned, what remains) and leave the worktree for the user to resume or review.
+  - [x] After mcloop completes: if all tasks passed, offer to merge back (show diff, ask confirmation). If tasks failed, print the investigation state (what was learned, what remains) and leave the worktree for the user to resume or review.
 
 - [ ] Interactive investigation loop
   - [ ] When an investigation task requires user observation (the plan generator marks these with a keyword like `[USER]`), pause and print clearly formatted instructions for the user: what to do, what to look for, how to provide the result
