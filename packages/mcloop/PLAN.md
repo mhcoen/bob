@@ -138,9 +138,9 @@ The debugging playbook this enforces:
   - [x] Add instruction to the task prompt in runner.py: when building UI (SwiftUI, HTML, React, Qt, etc.), add accessibility identifiers to every interactive element (buttons, text fields, menu items, toggles). This makes every app mcloop builds programmatically testable.
   - [x] Add tests verifying the instruction is present in the prompt
 
-- [ ] Investigation NOTES.md structure
+- [x] Investigation NOTES.md structure
   - [x] Add instruction to the investigation plan description requiring three sections in NOTES.md: Observations (confirmed facts from runtime, docs, logs, or experiments), Hypotheses (candidate explanations not yet confirmed), and Eliminated (things ruled out, with the experiment that ruled them out)
-  - [ ] The investigation prompt must instruct the agent to check Eliminated before proposing any approach and refuse to repeat an eliminated approach unless new evidence contradicts the elimination
+  - [x] The investigation prompt must instruct the agent to check Eliminated before proposing any approach and refuse to repeat an eliminated approach unless new evidence contradicts the elimination
 
 - [ ] Process monitor module
   - [ ] Create `mcloop/process_monitor.py` with functions to: launch a process from a run command, check if a process is alive by PID, detect a hung process (alive but not producing output for N seconds), sample a hung process on macOS (`sample <pid>`), kill a process, read the most recent crash report from `~/Library/Logs/DiagnosticReports/` matching a process name
