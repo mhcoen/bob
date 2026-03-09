@@ -296,6 +296,7 @@ def _run_session(
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
+    last_reclaim = time.monotonic()
     try:
         while True:
             try:
@@ -356,7 +357,11 @@ def _run_session(
             output_lines.append(line)
             _print_stream_event(line)
             shown_waiting = False
-            last_dot = time.monotonic()
+            now = time.monotonic()
+            last_dot = now
+            if now - last_reclaim >= PROGRESS_DOT_INTERVAL:
+                _reclaim_foreground()
+                last_reclaim = now
     except KeyboardInterrupt:
         process.kill()
         process.wait()
