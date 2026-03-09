@@ -2,11 +2,11 @@
 
 McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
 
-Because McLoop fully automates Claude Code invocation, it will consume
-your plan allowance faster than you have ever experienced. See
-[Best practices](#best-practices) for how to manage this effectively.
+Because McLoop runs Claude Code sessions continuously, it will use
+your plan allowance faster than if you used it interactively. See
+[Best practices](#best-practices) for how to get the most from it.
 
-Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
+Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. This also keeps token usage low, since each session pays only for the current task's context rather than accumulating conversation history from every previous task. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
 McLoop creates a few files in the project that serve as shared memory
 between sessions:
