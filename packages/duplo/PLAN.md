@@ -54,7 +54,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Implement next-phase flow with feature selection
   - [x] Re-scrape the product site, re-extract features, merge new ones into `duplo.json` (already works)
   - [x] Partition features into implemented and remaining based on `status` field
-  - [ ] If roadmap is missing or consumed, generate a new one from remaining features (previous item)
+  - [x] If roadmap is missing or consumed, generate a new one from remaining features (previous item)
   - [ ] Use the next phase entry from the roadmap as the default recommendation during feature selection
   - [ ] Present remaining features to the user using `select_features` (numbered, grouped by category), with the roadmap recommendation labeled (e.g. "Recommended for Phase 2: 3, 7, 12, 15")
   - [ ] Show open issues from `duplo.json` and ask which should be addressed in this phase (same numbered selection pattern)
