@@ -799,7 +799,7 @@ def _subsequent_run() -> None:
         status_data = json.loads(duplo_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         status_data = {}
-    _print_status(status_data)
+    _print_status(status_data, plan_exists=Path("PLAN.md").exists())
 
     summary = UpdateSummary()
 
@@ -1054,7 +1054,7 @@ def _print_feature_status(data: dict) -> None:
             print(f"    - {f.name}{label}")
 
 
-def _print_status(data: dict) -> None:
+def _print_status(data: dict, *, plan_exists: bool = False) -> None:
     """Print current phase number, features implemented vs remaining, and open issues."""
     phases_completed = len(data.get("phases", []))
     current_phase = phases_completed + 1
@@ -1069,8 +1069,10 @@ def _print_status(data: dict) -> None:
     prefix = f"{app_name}: " if app_name else ""
     if phases_completed > 0:
         phase_part = f"Phase {phases_completed} complete"
+    elif plan_exists:
+        phase_part = f"Phase {current_phase} in progress"
     else:
-        phase_part = f"Phase {current_phase}"
+        phase_part = f"Ready to generate Phase {current_phase}"
     issue_part = f", {len(open_issues)} open issues" if open_issues else ""
     print(f"\n{prefix}{phase_part}. {len(implemented)}/{total} features implemented{issue_part}.")
 

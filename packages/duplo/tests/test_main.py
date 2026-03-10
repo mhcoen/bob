@@ -2530,9 +2530,25 @@ class TestPrintStatus:
     def test_empty_data(self, capsys):
         _print_status({})
         out = capsys.readouterr().out
-        assert "Phase 1. 0/0 features implemented." in out
+        assert "Ready to generate Phase 1. 0/0 features implemented." in out
 
-    def test_no_phases_completed(self, capsys):
+    def test_no_phases_plan_exists(self, capsys):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Find",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        }
+        _print_status(data, plan_exists=True)
+        out = capsys.readouterr().out
+        assert "Phase 1 in progress. 0/1 features implemented." in out
+
+    def test_no_phases_no_plan(self, capsys):
         data = {
             "features": [
                 {
@@ -2546,7 +2562,7 @@ class TestPrintStatus:
         }
         _print_status(data)
         out = capsys.readouterr().out
-        assert "Phase 1. 0/1 features implemented." in out
+        assert "Ready to generate Phase 1. 0/1 features implemented." in out
 
     def test_issues_without_status_field_count_as_open(self, capsys):
         data = {
