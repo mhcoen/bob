@@ -687,7 +687,11 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
     except json.JSONDecodeError:
         return 0, 0, 0, 0
 
-    features = [Feature(**f) for f in data.get("features", [])]
+    _feature_keys = {f.name for f in dataclasses.fields(Feature)}
+    features = [
+        Feature(**{k: v for k, v in f.items() if k in _feature_keys})
+        for f in data.get("features", [])
+    ]
     if not features:
         return 0, 0, 0, 0
 
@@ -844,6 +848,7 @@ def _subsequent_run() -> None:
             summary.text_files_read = analysis.text_files_read
             summary.urls_fetched = analysis.urls_fetched
             summary.video_frames_extracted = analysis.video_frames_extracted
+            summary.collected_text = analysis.collected_text
 
     # Re-scrape the product URL to pick up site changes.
     pages, examples, scraped_text = _rescrape_product_url()
@@ -991,7 +996,10 @@ def _subsequent_run() -> None:
 
     # Generate plan for current phase.
     source_url = data.get("source_url", "")
-    features = [Feature(**f) for f in data.get("features", [])]
+    _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
+    features = [
+        Feature(**{k: v for k, v in f.items() if k in _fkeys}) for f in data.get("features", [])
+    ]
     prefs_data = data.get("preferences", {})
     preferences = BuildPreferences(
         platform=prefs_data.get("platform", ""),
@@ -1036,7 +1044,8 @@ def _partition_features(
     implemented: list[Feature] = []
     remaining: list[Feature] = []
     for f in data.get("features", []):
-        feat = Feature(**f)
+        _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
+        feat = Feature(**{k: v for k, v in f.items() if k in _fkeys})
         if f.get("status", "pending") == "implemented":
             implemented.append(feat)
         else:
@@ -1332,7 +1341,11 @@ def _complete_phase(
             data = json.loads(duplo_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             data = {}
-        features = [Feature(**f) for f in data.get("features", [])]
+        _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
+        features = [
+            Feature(**{k: v for k, v in f.items() if k in _fkeys})
+            for f in data.get("features", [])
+        ]
         if features:
             unannotated = [t for t in tasks if not t.features and not t.fixes]
             if unannotated:

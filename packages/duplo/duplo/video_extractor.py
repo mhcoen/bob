@@ -72,14 +72,18 @@ def extract_scene_frames(
     # If we got too few frames, retry with a lower threshold.
     if len(frames) < min_frames and threshold > 0.1:
         lower = max(0.1, threshold - 0.15)
+        # Save original frame paths before retry (which deletes them from disk).
+        original_frames = list(frames)
         retry = _run_ffmpeg_scene_detect(video, output_dir, stem, lower, max_frames)
-        if isinstance(retry, list) and len(retry) > len(frames):
-            # Clean up old frames that aren't in the new set.
-            new_set = set(retry)
-            for old in frames:
-                if old not in new_set and old.exists():
-                    old.unlink()
+        if isinstance(retry, list) and len(retry) > len(original_frames):
             frames = retry
+        else:
+            # Retry didn't improve; original files were deleted by retry's
+            # cleanup, so use whatever retry produced (or re-run original).
+            if isinstance(retry, list):
+                frames = retry
+            else:
+                frames = []
 
     before = len(frames)
     frames = deduplicate_frames(frames)

@@ -532,7 +532,8 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                main()
+                with patch("duplo.main.extract_features", return_value=[]):
+                    main()
 
         out = capsys.readouterr().out
         assert "File changes detected" in out
@@ -584,7 +585,8 @@ class TestSubsequentRunFileChanges:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                main()
+                with patch("duplo.main.extract_features", return_value=[]):
+                    main()
 
         # Verify hashes reflect post-move state (new.txt moved to .duplo/references/).
         from duplo.hasher import load_hashes
@@ -1492,7 +1494,8 @@ class TestSubsequentRunSummary:
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
             with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                main()
+                with patch("duplo.main.extract_features", return_value=[]):
+                    main()
 
         out = capsys.readouterr().out
         assert "Update summary" in out

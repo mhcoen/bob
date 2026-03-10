@@ -109,13 +109,6 @@ A brief bullet list of items deliberately deferred to later phases.
 
 _PLAN_FILENAME = "PLAN.md"
 
-_ANNOTATION_RE = re.compile(
-    r"\[(feat|fix):\s*"
-    r"\"([^\"]+)\""
-    r"(?:,\s*\"([^\"]+)\")*"
-    r"\]\s*$"
-)
-
 
 @dataclasses.dataclass
 class CompletedTask:
