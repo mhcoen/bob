@@ -13,6 +13,7 @@ from duplo.extractor import Feature
 from duplo.main import (
     UpdateSummary,
     _analyze_new_files,
+    _complete_phase,
     _detect_and_append_gaps,
     _init_project,
     _print_summary,
@@ -1668,3 +1669,56 @@ class TestSubsequentRunReextractsFeatures:
         _print_summary(summary)
         out = capsys.readouterr().out
         assert "New features extracted: 3" in out
+
+
+class TestCompletePhaseIssues:
+    """Issues collected at phase completion are saved to duplo.json."""
+
+    def test_issues_saved_with_user_source_and_phase(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"current_phase": 1, "roadmap": [{"phase": 1}]})
+        (tmp_path / "PLAN.md").write_text("- [x] task\n")
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.clear_in_progress"),
+            patch("duplo.main.notify_phase_complete"),
+            patch(
+                "duplo.main.collect_issues",
+                return_value=[
+                    "Button misaligned",
+                    "Color wrong",
+                ],
+            ),
+        ):
+            _complete_phase("- [x] task\n", "", "Phase 1")
+
+        data = _read_duplo_json(tmp_path)
+        issues = data["issues"]
+        assert len(issues) == 2
+        assert issues[0]["description"] == "Button misaligned"
+        assert issues[0]["source"] == "user"
+        assert issues[0]["phase"] == "Phase 1"
+        assert issues[0]["status"] == "open"
+        assert issues[1]["description"] == "Color wrong"
+        assert issues[1]["source"] == "user"
+        assert issues[1]["phase"] == "Phase 1"
+
+    def test_no_issues_saves_nothing(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"current_phase": 1})
+        (tmp_path / "PLAN.md").write_text("- [x] task\n")
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.clear_in_progress"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_issues", return_value=[]),
+        ):
+            _complete_phase("- [x] task\n", "", "Phase 2")
+
+        data = _read_duplo_json(tmp_path)
+        assert data.get("issues", []) == []
+        assert "No issues reported." in capsys.readouterr().out

@@ -1219,7 +1219,7 @@ def _complete_phase(
     issues = collect_issues()
     if issues:
         for desc in issues:
-            save_issue(desc, source="user report", phase=phase_label)
+            save_issue(desc, source="user", phase=phase_label)
         print(f"Recorded {len(issues)} issue(s) in duplo.json.")
     else:
         print("No issues reported.")
