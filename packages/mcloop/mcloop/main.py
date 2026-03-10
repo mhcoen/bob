@@ -544,6 +544,10 @@ def _main() -> None:
         _cmd_audit(checklist_path)
         return
 
+    if args.command == "wrap":
+        _cmd_wrap(checklist_path)
+        return
+
     if args.command == "investigate":
         project_dir = checklist_path.parent
         stdin_text = ""
@@ -1061,12 +1065,27 @@ def _parse_args() -> argparse.Namespace:
         "--dry-run", action="store_true", help="Show changes without modifying PLAN.md"
     )
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
+    subparsers.add_parser("wrap", help="Instrument source files with error-catching hooks")
     inv_parser = subparsers.add_parser("investigate", help="Investigate a bug in a worktree")
     inv_parser.add_argument(
         "description", nargs="?", default=None, help="Short description of the bug"
     )
     inv_parser.add_argument("--log", default=None, help="Path to a log file with error output")
     return parser.parse_args()
+
+
+def _cmd_wrap(checklist_path: Path) -> None:
+    """Instrument the project's source files with error-catching hooks."""
+    from mcloop.wrap import wrap_project
+
+    project_dir = checklist_path.parent
+    try:
+        language, entry = wrap_project(project_dir)
+    except ValueError as exc:
+        print(f"wrap: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Instrumented {entry.relative_to(project_dir)} ({language})")
+    print("Canonical wrappers saved to .mcloop/wrap/")
 
 
 def _cmd_audit(checklist_path: Path) -> None:
