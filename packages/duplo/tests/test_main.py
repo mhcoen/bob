@@ -331,20 +331,6 @@ class TestSubsequentRunResume:
 
         mock_gen.assert_not_called()
 
-    def test_in_progress_cleared_when_incomplete(self, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "in_progress": {"label": "Phase 0", "mcloop_done": False},
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Task\n", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        main()
-
-        result = _read_duplo_json(tmp_path)
-        assert "in_progress" not in result
-
     def test_incomplete_plan_prints_run_mcloop(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
         (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Task\n", encoding="utf-8")
@@ -357,8 +343,8 @@ class TestSubsequentRunResume:
         assert "Run mcloop" in out
 
 
-class TestAdvanceToNext:
-    """Tests for advancing to the next phase (feedback collection)."""
+class TestPhaseCompletionFlow:
+    """Tests for the phase-completion-then-advance flow."""
 
     _BASE_DATA = {
         "source_url": "https://example.com",
@@ -376,170 +362,70 @@ class TestAdvanceToNext:
         "current_phase": 0,
     }
 
-    def test_collects_feedback_and_generates_next(self, capsys, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
+    def test_complete_plan_advances_and_generates_next(self, capsys, tmp_path, monkeypatch):
+        """When PLAN.md is all checked, complete phase and generate next plan."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
-        ):
-            with patch("duplo.main.collect_feedback", return_value="some feedback"):
-                with patch(
-                    "duplo.main.generate_next_phase_plan",
-                    return_value="# Phase 1: Features\n",
-                ) as mock_gen:
-                    with patch(
-                        "duplo.main.save_plan",
-                        return_value=tmp_path / "PLAN.md",
-                    ):
-                        with patch("duplo.main.notify_phase_complete"):
-                            main()
-
-        out = capsys.readouterr().out
-        assert "next phase" in out.lower()
-        mock_gen.assert_called_once()
-
-    def test_generates_next_plan(self, capsys, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
-        ):
-            with patch("duplo.main.collect_feedback", return_value="feedback"):
-                with patch(
-                    "duplo.main.generate_next_phase_plan",
-                    return_value="# Phase 1: Next\n",
-                ) as mock_gen:
-                    with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                        main()
-
-        mock_gen.assert_called_once()
-        out = capsys.readouterr().out
-        assert "Run mcloop to start building" in out
-
-    def test_loads_issues_when_present(self, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
-        (tmp_path / "ISSUES.md").write_text("# Visual Issues\n- Layout broken\n", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
-        ):
-            with patch("duplo.main.collect_feedback", return_value="feedback"):
-                with patch(
-                    "duplo.main.generate_next_phase_plan",
-                    return_value="# Phase 1\n",
-                ) as mock_gen:
-                    with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                        with patch("duplo.main.notify_phase_complete"):
-                            main()
-
-        args = mock_gen.call_args.args
-        issues_text = (
-            args[2] if len(args) > 2 else mock_gen.call_args.kwargs.get("issues_text", "")
-        )
-        assert "Layout broken" in issues_text
-
-    def test_all_phases_complete_no_plan(self, capsys, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        monkeypatch.chdir(tmp_path)
-
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.notify_phase_complete"),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 1: Next\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
         out = capsys.readouterr().out
-        assert "complete" in out.lower()
+        assert "Completing Phase 0: Core" in out
+        assert "Run mcloop to start building" in out
+        mock_gen.assert_called_once()
 
-    def test_prefixed_heading_extracts_phase_label(self, capsys, tmp_path, monkeypatch):
-        """Phase label is extracted from headings like '# McWhisper — Phase 0: Core'."""
-        data = {
-            **self._BASE_DATA,
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# McWhisper — Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# McWhisper — Phase 0: Core\n", encoding="utf-8")
+    def test_feedback_collected_during_completion(self, tmp_path, monkeypatch):
+        """Feedback is collected and saved when a phase completes."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.collect_feedback", return_value="great work"),
+            patch("duplo.main.save_feedback") as mock_save_fb,
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 1\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
-            with patch("duplo.main.collect_feedback", return_value="feedback"):
-                with patch(
-                    "duplo.main.generate_next_phase_plan",
-                    return_value="# McWhisper — Phase 1: Search\n",
-                ):
-                    with patch(
-                        "duplo.main.save_plan",
-                        return_value=tmp_path / "PLAN.md",
-                    ):
-                        with patch("duplo.main.save_feedback") as mock_save_fb:
-                            with patch("duplo.main.notify_phase_complete"):
-                                main()
+            main()
 
         mock_save_fb.assert_called_once()
         assert mock_save_fb.call_args.kwargs["after_phase"] == "Phase 0: Core"
 
-        out = capsys.readouterr().out
-        assert "Run mcloop to start building" in out
+    def test_no_plan_generates_current_phase(self, capsys, tmp_path, monkeypatch):
+        """When no PLAN.md exists, generate plan for current phase."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
 
-    def test_appends_test_tasks(self, tmp_path, monkeypatch):
+        with (
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 0: Core\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "Generating Phase 0: Core PLAN.md" in out
+        assert "Run mcloop to start building" in out
+        mock_gen.assert_called_once()
+
+    def test_appends_test_tasks_to_generated_plan(self, tmp_path, monkeypatch):
         data = {
             **self._BASE_DATA,
             "code_examples": [
@@ -550,33 +436,21 @@ class TestAdvanceToNext:
                     "language": "python",
                 }
             ],
-            "phases": [
-                {
-                    "phase": "Phase 0: Core",
-                    "plan": "# Phase 0: Core\n",
-                    "completed_at": "2026-01-01T00:00:00+00:00",
-                }
-            ],
         }
         _write_duplo_json(tmp_path, data)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch(
-            "duplo.main.get_current_phase",
-            return_value=(0, {"title": "Core"}),
+        with (
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 0\n- [ ] Task",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ) as mock_save,
         ):
-            with patch("duplo.main.collect_feedback", return_value="feedback"):
-                with patch(
-                    "duplo.main.generate_next_phase_plan",
-                    return_value="# Phase 1\n- [ ] Task",
-                ):
-                    with patch(
-                        "duplo.main.save_plan",
-                        return_value=tmp_path / "PLAN.md",
-                    ) as mock_save:
-                        with patch("duplo.main.notify_phase_complete"):
-                            main()
+            main()
 
         saved_content = mock_save.call_args.args[0]
         assert "Wire up" in saved_content
@@ -1717,8 +1591,8 @@ class TestCompletePhaseIssues:
         with (
             patch("duplo.main.append_phase_to_history"),
             patch("duplo.main.advance_phase"),
-            patch("duplo.main.clear_in_progress"),
             patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
             patch(
                 "duplo.main.collect_issues",
                 return_value=[
@@ -1748,8 +1622,8 @@ class TestCompletePhaseIssues:
         with (
             patch("duplo.main.append_phase_to_history"),
             patch("duplo.main.advance_phase"),
-            patch("duplo.main.clear_in_progress"),
             patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
             patch("duplo.main.collect_issues", return_value=[]),
         ):
             _complete_phase("- [x] task\n", "", "Phase 2")

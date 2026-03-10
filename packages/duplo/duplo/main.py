@@ -28,7 +28,6 @@ from duplo.fetcher import download_media, extract_media_urls, fetch_site
 from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
     append_test_tasks,
-    generate_next_phase_plan,
     generate_phase_plan,
     save_plan,
 )
@@ -50,7 +49,6 @@ from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
-    clear_in_progress,
     get_current_phase,
     load_product,
     move_references,
@@ -789,7 +787,13 @@ def _print_summary(summary: UpdateSummary) -> None:
 
 
 def _subsequent_run() -> None:
-    """Resume an interrupted phase or advance to the next one."""
+    """Handle a subsequent duplo run.
+
+    Three states:
+    1. PLAN.md complete → record phase, advance, fall through to generate next.
+    2. PLAN.md incomplete → tell user to run mcloop, return.
+    3. No PLAN.md → regenerate roadmap if needed, generate plan for current phase.
+    """
     summary = UpdateSummary()
 
     # Detect file changes since last run.
@@ -869,34 +873,41 @@ def _subsequent_run() -> None:
         print(f"Error: {duplo_path} contains invalid JSON. Delete or fix it.")
         return
     app_name = data.get("app_name", "")
-    in_progress = data.get("in_progress")
 
-    # Check for interrupted or completed phase.
-    if in_progress:
-        phase_label = in_progress["label"]
-        plan_path = Path("PLAN.md")
-        content = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
-        if _plan_is_complete():
-            print(f"Completing {phase_label} (all tasks done).")
-            _complete_phase(content, app_name, phase_label)
-        else:
-            clear_in_progress()
-            print(f"{phase_label} has uncompleted tasks.")
-            print("Run mcloop to continue building.")
+    plan_path = Path("PLAN.md")
+
+    # State 1: PLAN.md complete → record phase completion, then fall through.
+    if plan_path.exists() and _plan_is_complete():
+        phase_num, phase_info = get_current_phase()
+        phase_label = (
+            f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
+        )
+        content = plan_path.read_text(encoding="utf-8")
+        print(f"Completing {phase_label} (all tasks done).")
+        _complete_phase(content, app_name, phase_label)
+        # Reload data after phase completion modified duplo.json.
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+
+    # State 2: PLAN.md incomplete → tell user to continue.
+    elif plan_path.exists():
+        phase_num, phase_info = get_current_phase()
+        phase_label = (
+            f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
+        )
+        print(f"{phase_label} has uncompleted tasks in PLAN.md.")
+        print("Run mcloop to continue building.")
         return
 
+    # State 3: No PLAN.md → generate plan for current phase.
     phase_num, phase_info = get_current_phase()
 
     # If no roadmap exists or the existing one is fully consumed,
     # regenerate from remaining unimplemented features.
     roadmap = data.get("roadmap", [])
-    if not roadmap or (roadmap and phase_info is None):
+    if not roadmap or phase_info is None:
         remaining = _unimplemented_features(data)
         if not remaining:
             print("All features implemented. Nothing to do.")
-            plan_path = Path("PLAN.md")
-            if plan_path.exists():
-                plan_path.unlink()
             return
         source_url = data.get("source_url", "")
         prefs_data = data.get("preferences", {})
@@ -920,35 +931,15 @@ def _subsequent_run() -> None:
         data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
         phase_num, phase_info = get_current_phase()
 
+    if phase_info is None:
+        print("All features implemented. Nothing to do.")
+        return
+
     phase_label = (
         f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
     )
 
-    # Check if current phase is already in history.
-    history = data.get("phases", [])
-    phase_prefix = f"Phase {phase_num}"
-    if any(
-        h.get("phase", "").startswith(phase_prefix + ":") or h.get("phase", "") == phase_prefix
-        for h in history
-    ):
-        # Current phase is done — advance to next.
-        _advance_to_next(data, app_name)
-        return
-
-    plan_path = Path("PLAN.md")
-
-    # PLAN.md exists from a prior run.
-    if plan_path.exists():
-        if _plan_is_complete():
-            content = plan_path.read_text(encoding="utf-8")
-            print(f"Completing {phase_label} (all tasks done).")
-            _complete_phase(content, app_name, phase_label)
-        else:
-            print(f"{phase_label} has uncompleted tasks in PLAN.md.")
-            print("Run mcloop to continue building.")
-        return
-
-    # Generate plan for current phase and execute.
+    # Generate plan for current phase.
     source_url = data.get("source_url", "")
     features = [Feature(**f) for f in data.get("features", [])]
     prefs_data = data.get("preferences", {})
@@ -1004,50 +995,6 @@ def _build_completion_history(data: dict) -> list[dict]:
             label = f["implemented_in"]
             phase_features.setdefault(label, []).append(f["name"])
     return [{"phase": label, "features": names} for label, names in phase_features.items()]
-
-
-def _advance_to_next(data: dict, app_name: str) -> None:
-    """Collect feedback and generate the next phase plan."""
-    plan_path = Path("PLAN.md")
-    if not plan_path.exists():
-        print("All phases complete. Nothing to do.")
-        return
-
-    current_plan = plan_path.read_text(encoding="utf-8")
-
-    issues_text = ""
-    issues_path = Path("ISSUES.md")
-    if issues_path.exists():
-        issues_text = issues_path.read_text(encoding="utf-8")
-
-    try:
-        feedback = collect_feedback()
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}")
-        sys.exit(1)
-
-    print(f"\nFeedback recorded ({len(feedback)} chars).")
-
-    current_phase_match = re.search(
-        r"#\s*.*?(Phase\s+\d+[^\n]*)", current_plan, re.IGNORECASE | re.MULTILINE
-    )
-    current_phase_label = current_phase_match.group(1).strip() if current_phase_match else ""
-    save_feedback(feedback, after_phase=current_phase_label)
-
-    print("Generating next phase PLAN.md …")
-    content = generate_next_phase_plan(current_plan, feedback, issues_text)
-    doc_examples = load_code_examples()
-    test_tasks = generate_plan_test_tasks(doc_examples)
-    if test_tasks:
-        content = append_test_tasks(content, test_tasks)
-    # Remove old PLAN.md so save_plan writes fresh instead of appending.
-    plan_path.unlink()
-    saved = save_plan(content)
-    print(f"Next phase plan saved to {saved}")
-
-    match = re.search(r"#\s*.*?(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
-    phase_label = match.group(1).strip() if match else "Next Phase"
-    _plan_ready(phase_label)
 
 
 def _confirm_product(product_name: str, source_url: str) -> str:
@@ -1257,7 +1204,6 @@ def _complete_phase(
     """Record a completed phase, capture screenshots, and advance."""
     append_phase_to_history(plan_content)
     advance_phase()
-    clear_in_progress()
     plan_path = Path("PLAN.md")
     if plan_path.exists():
         plan_path.unlink()
@@ -1271,6 +1217,15 @@ def _complete_phase(
         print(f"Recorded {len(issues)} issue(s) in duplo.json.")
     else:
         print("No issues reported.")
+
+    # Collect feedback for the next phase.
+    try:
+        feedback = collect_feedback()
+    except (FileNotFoundError, ValueError):
+        feedback = ""
+    if feedback:
+        save_feedback(feedback, after_phase=phase_label)
+        print(f"Feedback recorded ({len(feedback)} chars).")
 
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"
