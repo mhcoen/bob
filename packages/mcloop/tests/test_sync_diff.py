@@ -1,6 +1,6 @@
 """Tests for sync diff and confirmation logic."""
 
-from mcloop.main import _confirm_sync_changes, _show_diff
+from mcloop.sync_cmd import _confirm_sync_changes, _show_diff
 
 
 def test_show_diff_includes_added_lines(capsys):
