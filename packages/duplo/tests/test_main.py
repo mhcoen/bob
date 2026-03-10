@@ -2492,6 +2492,7 @@ class TestPrintStatus:
 
     def test_prints_phase_features_and_issues(self, capsys):
         data = {
+            "app_name": "McWhisper",
             "phases": [{"phase": "Phase 1", "plan": "", "completed_at": ""}],
             "features": [
                 {
@@ -2524,19 +2525,12 @@ class TestPrintStatus:
         }
         _print_status(data)
         out = capsys.readouterr().out
-        assert "Phase 2" in out
-        assert "1 implemented" in out
-        assert "2 remaining" in out
-        assert "of 3" in out
-        assert "Open issues: 2" in out
+        assert "McWhisper: Phase 1 complete. 1/3 features implemented, 2 open issues." in out
 
     def test_empty_data(self, capsys):
         _print_status({})
         out = capsys.readouterr().out
-        assert "Phase 1" in out
-        assert "0 implemented" in out
-        assert "0 remaining" in out
-        assert "Open issues: 0" in out
+        assert "Phase 1. 0/0 features implemented." in out
 
     def test_no_phases_completed(self, capsys):
         data = {
@@ -2552,9 +2546,7 @@ class TestPrintStatus:
         }
         _print_status(data)
         out = capsys.readouterr().out
-        assert "Phase 1" in out
-        assert "0 implemented" in out
-        assert "1 remaining" in out
+        assert "Phase 1. 0/1 features implemented." in out
 
     def test_issues_without_status_field_count_as_open(self, capsys):
         data = {
@@ -2564,4 +2556,22 @@ class TestPrintStatus:
         }
         _print_status(data)
         out = capsys.readouterr().out
-        assert "Open issues: 1" in out
+        assert "1 open issues" in out
+
+    def test_no_app_name_omits_prefix(self, capsys):
+        data = {
+            "phases": [{"phase": "Phase 1", "plan": "", "completed_at": ""}],
+            "features": [
+                {
+                    "name": "Auth",
+                    "description": "Login",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        }
+        _print_status(data)
+        out = capsys.readouterr().out
+        assert out.strip().startswith("Phase 1 complete")
+        assert "McWhisper" not in out

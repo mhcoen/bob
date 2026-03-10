@@ -1065,9 +1065,14 @@ def _print_status(data: dict) -> None:
     issues = data.get("issues", [])
     open_issues = [i for i in issues if i.get("status", "open") == "open"]
 
-    print(f"\nPhase {current_phase}")
-    print(f"Features: {len(implemented)} implemented, {len(remaining)} remaining (of {total})")
-    print(f"Open issues: {len(open_issues)}")
+    app_name = data.get("app_name", "")
+    prefix = f"{app_name}: " if app_name else ""
+    if phases_completed > 0:
+        phase_part = f"Phase {phases_completed} complete"
+    else:
+        phase_part = f"Phase {current_phase}"
+    issue_part = f", {len(open_issues)} open issues" if open_issues else ""
+    print(f"\n{prefix}{phase_part}. {len(implemented)}/{total} features implemented{issue_part}.")
 
 
 def _build_completion_history(data: dict) -> list[dict]:
