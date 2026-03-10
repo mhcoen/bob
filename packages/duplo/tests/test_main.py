@@ -2013,3 +2013,195 @@ class TestBuildCompletionHistory:
             ]
         }
         assert _build_completion_history(data) == []
+
+
+class TestRescrapeDocStructures:
+    """_rescrape_product_url saves doc_structures when returned."""
+
+    def test_saves_doc_structures(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        doc_structs = {"feature_tables": [{"heading": "API", "rows": []}]}
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], doc_structs, [], {}),
+        ):
+            with patch("duplo.main.save_doc_structures") as mock_save_docs:
+                _rescrape_product_url()
+
+        mock_save_docs.assert_called_once_with(doc_structs)
+
+    def test_skips_when_no_doc_structures(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, [], {}),
+        ):
+            with patch("duplo.main.save_doc_structures") as mock_save_docs:
+                _rescrape_product_url()
+
+        mock_save_docs.assert_not_called()
+
+
+class TestRescrapeDownloadsSiteMedia:
+    """_rescrape_product_url downloads media from re-scraped pages."""
+
+    def test_downloads_media_from_raw_pages(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        raw_pages = {"https://example.com": "<html><img src='pic.png'/></html>"}
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, [], raw_pages),
+        ):
+            with patch(
+                "duplo.main._download_site_media",
+                return_value=([Path("a.png")], []),
+            ) as mock_dl:
+                _rescrape_product_url()
+
+        mock_dl.assert_called_once_with(raw_pages)
+        out = capsys.readouterr().out
+        assert "1 image" in out
+
+    def test_skips_media_when_no_raw_pages(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, [], {}),
+        ):
+            with patch("duplo.main._download_site_media") as mock_dl:
+                _rescrape_product_url()
+
+        mock_dl.assert_not_called()
+
+
+class TestSubsequentRunFeatureCountingIntegration:
+    """Tests the old_count/new_count diff logic during feature re-extraction."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [{"name": "Auth", "description": "Login.", "category": "core"}],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core",
+                "features": ["Auth"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 0,
+    }
+
+    def test_counts_newly_merged_features(self, capsys, tmp_path, monkeypatch):
+        """When save_features adds genuinely new features, the count is correct."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        new_feat = Feature(name="Search", description="Find.", category="core")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[new_feat]),
+            # Let save_features actually run so counting logic works
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "1 new feature(s) merged" in out
+        data = _read_duplo_json(tmp_path)
+        assert len(data["features"]) == 2
+
+    def test_reports_no_new_when_all_duplicates(self, capsys, tmp_path, monkeypatch):
+        """When all re-extracted features already exist, reports no new."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        dup_feat = Feature(name="Auth", description="Login again.", category="core")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[dup_feat]),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "No new features found" in out
+        data = _read_duplo_json(tmp_path)
+        assert len(data["features"]) == 1
+
+    def test_handles_invalid_duplo_json_during_reextraction(self, capsys, tmp_path, monkeypatch):
+        """When duplo.json is corrupted between rescrape and re-extract, exits."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        new_feat = Feature(name="Search", description="Find.", category="core")
+
+        def corrupt_json(*_a, **_k):
+            (duplo_dir / "duplo.json").write_text("NOT JSON", encoding="utf-8")
+            return [new_feat]
+
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", side_effect=corrupt_json),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "invalid JSON" in out
+
+    def test_reports_no_features_when_extraction_returns_empty(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        """When extract_features returns empty list, reports accordingly."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "No features extracted" in out
