@@ -31,11 +31,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] For checked lines without annotations (user-added tasks or pre-annotation plans), batch them into a single `claude -p` call with the full feature list. Claude matches each task to an existing feature or confirms it is genuinely new. Mark matched features as implemented. Add genuinely new items as new feature entries with `status: "implemented"` and `implemented_in` set to the current phase.
   - [x] Add tests for the annotation parser covering annotated lines, unannotated lines, and mixed plans
 
-- [ ] Prompt for issues at phase completion
+- [x] Prompt for issues at phase completion
   - [x] After status tracking, before advancing to the next phase, prompt the user for known issues with the completed phase
   - [x] Multi-line input, blank line to finish, skippable
   - [x] Each line becomes an entry in the `issues` list in `duplo.json` with `source: "user"` and the current phase label
-  - [ ] This is where the user reports bugs (e.g. "waveform shows static bars during recording") or incomplete wiring (e.g. "qwen3-asr-swift dependency is unused")
+  - [x] This is where the user reports bugs (e.g. "waveform shows static bars during recording") or incomplete wiring (e.g. "qwen3-asr-swift dependency is unused")
 
 - [ ] Generate roadmap from remaining features when missing or consumed
   - [ ] At the start of the next-phase flow, if `duplo.json` has no `roadmap` or the existing roadmap has been fully consumed (current_phase is past the last entry), generate a new one using `generate_roadmap` with only the remaining unimplemented features

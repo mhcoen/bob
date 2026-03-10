@@ -81,9 +81,10 @@ def collect_issues(
     Returns:
         List of issue description strings (may be empty).
     """
-    print_fn(
-        "Any known issues with this phase? (blank line to finish each issue, blank line to stop):"
-    )
+    print_fn("Any known issues with this phase?")
+    print_fn('  e.g. bugs ("waveform shows static bars during recording")')
+    print_fn('       incomplete wiring ("qwen3-asr-swift dependency is unused")')
+    print_fn("  Blank line to finish each issue, blank line to stop:")
     issues: list[str] = []
     lines: list[str] = []
     try:

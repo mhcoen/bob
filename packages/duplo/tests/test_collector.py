@@ -145,6 +145,13 @@ class TestCollectIssues:
         combined = "\n".join(lines)
         assert "issue" in combined.lower()
 
+    def test_prompt_includes_examples(self):
+        lines: list[str] = []
+        collect_issues(input_fn=make_input(""), print_fn=lines.append)
+        combined = "\n".join(lines)
+        assert "bug" in combined.lower()
+        assert "wiring" in combined.lower()
+
 
 class TestReadInteractive:
     def test_multi_line_input(self):
