@@ -58,6 +58,21 @@ enum _McloopState {
         defer { lock.unlock() }
         return _lastAction
     }
+
+    /// Lock-free accessors for signal handlers (async-signal-safe).
+    static func unsafeSnapshot() -> [String: String] {
+        var result: [String: String] = [:]
+        for provider in _providers {
+            for (k, v) in provider() {
+                result[k] = v
+            }
+        }
+        return result
+    }
+
+    static func unsafeLastAction() -> String {
+        return _lastAction
+    }
 }
 
 private func _mcloopSetupCrashHandlers() {
@@ -85,8 +100,8 @@ private func _mcloopSetupCrashHandlers() {
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
         signal(sig) { signum in
-            let state = _McloopState.snapshot()
-            let action = _McloopState.lastAction()
+            let state = _McloopState.unsafeSnapshot()
+            let action = _McloopState.unsafeLastAction()
             let report: [String: Any] = [
                 "timestamp": ISO8601DateFormatter().string(from: Date()),
                 "signal": signum,
@@ -118,7 +133,8 @@ private func _mcloopWriteError(_ report: [String: Any], dir: String) {
     }
     var entry = report
     let trace = (report["stack_trace"] as? String) ?? ""
-    let sig = (report["signal"] as? String) ?? (report["exception_type"] as? String) ?? ""
+    let sig = report["signal"].map { String(describing: $0) }
+        ?? (report["exception_type"] as? String) ?? ""
     var hash: UInt32 = 5381
     for c in (trace + sig).utf8 { hash = hash &* 33 &+ UInt32(c) }
     entry["id"] = String(format: "%08x", hash)
@@ -238,6 +254,12 @@ def _mcloop_setup_crash_handlers():
         if frame is not None:
             source = frame.f_code.co_filename
             lineno = frame.f_lineno
+        # Avoid calling provider closures in signal context
+        # (they may hold locks or do I/O). Read raw state only.
+        try:
+            state = dict(_McloopState.snapshot())
+        except Exception:
+            state = {}
         report = {
             "timestamp": _mcloop_datetime.now(
                 _mcloop_tz.utc
@@ -248,11 +270,14 @@ def _mcloop_setup_crash_handlers():
             "stack_trace": "".join(_mcloop_traceback.format_stack(frame)),
             "source_file": source,
             "line": lineno,
-            "app_state": _McloopState.snapshot(),
+            "app_state": state,
             "last_action": _McloopState.last_action(),
             "fix_attempts": 0,
         }
-        _write_error(report)
+        try:
+            _write_error(report)
+        except Exception:
+            pass
         _mcloop_signal.signal(signum, _mcloop_signal.SIG_DFL)
         import os
         os.kill(os.getpid(), signum)

@@ -277,7 +277,10 @@ def check_off(path: str | Path, task: Task) -> None:
         return
 
     p.write_text("\n".join(lines) + "\n")
-    _auto_check_parents(p)
+    try:
+        _auto_check_parents(p)
+    except (IndexError, ValueError):
+        pass
 
 
 def mark_failed(path: str | Path, task: Task) -> None:

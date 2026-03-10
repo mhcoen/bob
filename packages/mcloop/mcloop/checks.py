@@ -76,8 +76,17 @@ def run_checks(
     all_output: list[str] = []
     for cmd in commands:
         try:
+            parts = shlex.split(cmd)
+        except ValueError:
+            all_output.append(f"$ {cmd}\nMalformed command (unmatched quotes)")
+            return CheckResult(
+                passed=False,
+                output="\n".join(all_output),
+                command=cmd,
+            )
+        try:
             result = subprocess.run(
-                shlex.split(cmd),
+                parts,
                 shell=False,
                 cwd=project_dir,
                 capture_output=True,
@@ -216,7 +225,10 @@ def detect_app_type(project_dir: str | Path) -> str:
 
 def _classify_run_command(cmd: str) -> str:
     """Classify a run command string as 'gui', 'cli', or 'web'."""
-    parts = shlex.split(cmd)
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return "cli"
     if not parts:
         return "cli"
 

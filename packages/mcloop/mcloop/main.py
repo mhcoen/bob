@@ -950,7 +950,7 @@ def run_loop(
 
     # Check for crash errors from previous runs
     if not _check_errors_json(project_dir, model=model):
-        return
+        return []
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
@@ -2065,8 +2065,13 @@ def _run_build(project_dir: Path) -> None:
         flush=True,
     )
     try:
+        parts = shlex.split(build_cmd)
+    except ValueError:
+        print(formatting.error_msg(f"Malformed build command: {build_cmd}"), flush=True)
+        return
+    try:
         result = subprocess.run(
-            shlex.split(build_cmd),
+            parts,
             cwd=project_dir,
             capture_output=True,
             text=True,
