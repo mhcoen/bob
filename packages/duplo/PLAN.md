@@ -20,7 +20,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Add `status`, `implemented_in`, and `issues` fields to feature tracking
   - [x] Each feature dict in `duplo.json` gets two optional fields: `status` (one of `pending`, `implemented`, `partial`) and `implemented_in` (phase label string). New features default to `status: "pending"`.
   - [x] Add a `save_feature_status(name, status, implemented_in)` function to saver.py that updates a feature by name
-  - [ ] Add a top-level `issues` list to `duplo.json` for implementation problems not tied to a specific feature
+  - [x] Add a top-level `issues` list to `duplo.json` for implementation problems not tied to a specific feature
   - [ ] Add `save_issue(description, source, phase)` and `resolve_issue(description)` functions to saver.py
   - [ ] Existing features in duplo.json files that lack a `status` field should be treated as `pending` by all code that reads them
 
