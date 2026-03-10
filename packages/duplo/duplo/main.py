@@ -794,6 +794,13 @@ def _subsequent_run() -> None:
     2. PLAN.md incomplete → tell user to run mcloop, return.
     3. No PLAN.md → regenerate roadmap if needed, generate plan for current phase.
     """
+    duplo_path = Path(_DUPLO_JSON)
+    try:
+        status_data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        status_data = {}
+    _print_status(status_data)
+
     summary = UpdateSummary()
 
     # Detect file changes since last run.
@@ -1045,6 +1052,22 @@ def _print_feature_status(data: dict) -> None:
             status = f.status if f.status != "pending" else ""
             label = f" [{status}]" if status else ""
             print(f"    - {f.name}{label}")
+
+
+def _print_status(data: dict) -> None:
+    """Print current phase number, features implemented vs remaining, and open issues."""
+    phases_completed = len(data.get("phases", []))
+    current_phase = phases_completed + 1
+
+    implemented, remaining = _partition_features(data)
+    total = len(implemented) + len(remaining)
+
+    issues = data.get("issues", [])
+    open_issues = [i for i in issues if i.get("status", "open") == "open"]
+
+    print(f"\nPhase {current_phase}")
+    print(f"Features: {len(implemented)} implemented, {len(remaining)} remaining (of {total})")
+    print(f"Open issues: {len(open_issues)}")
 
 
 def _build_completion_history(data: dict) -> list[dict]:

@@ -19,6 +19,7 @@ from duplo.main import (
     _init_project,
     _partition_features,
     _print_feature_status,
+    _print_status,
     _print_summary,
     _rescrape_product_url,
     _unimplemented_features,
@@ -2484,3 +2485,83 @@ class TestSubsequentRunFeatureCountingIntegration:
 
         out = capsys.readouterr().out
         assert "No features extracted" in out
+
+
+class TestPrintStatus:
+    """Tests for _print_status display at start of subsequent runs."""
+
+    def test_prints_phase_features_and_issues(self, capsys):
+        data = {
+            "phases": [{"phase": "Phase 1", "plan": "", "completed_at": ""}],
+            "features": [
+                {
+                    "name": "Auth",
+                    "description": "Login",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Search",
+                    "description": "Find",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+            "issues": [
+                {"description": "crash on load", "status": "open"},
+                {"description": "fixed typo", "status": "resolved"},
+                {"description": "slow render", "status": "open"},
+            ],
+        }
+        _print_status(data)
+        out = capsys.readouterr().out
+        assert "Phase 2" in out
+        assert "1 implemented" in out
+        assert "2 remaining" in out
+        assert "of 3" in out
+        assert "Open issues: 2" in out
+
+    def test_empty_data(self, capsys):
+        _print_status({})
+        out = capsys.readouterr().out
+        assert "Phase 1" in out
+        assert "0 implemented" in out
+        assert "0 remaining" in out
+        assert "Open issues: 0" in out
+
+    def test_no_phases_completed(self, capsys):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Find",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        }
+        _print_status(data)
+        out = capsys.readouterr().out
+        assert "Phase 1" in out
+        assert "0 implemented" in out
+        assert "1 remaining" in out
+
+    def test_issues_without_status_field_count_as_open(self, capsys):
+        data = {
+            "issues": [
+                {"description": "old bug"},
+            ],
+        }
+        _print_status(data)
+        out = capsys.readouterr().out
+        assert "Open issues: 1" in out
