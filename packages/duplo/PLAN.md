@@ -39,7 +39,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Generate roadmap from remaining features when missing or consumed
   - [x] At the start of the next-phase flow, if `duplo.json` has no `roadmap` or the existing roadmap has been fully consumed (current_phase is past the last entry), generate a new one using `generate_roadmap` with only the remaining unimplemented features
-  - [ ] Pass the completion history (list of phase labels and what they implemented) as context so the roadmap builds on what exists rather than starting from scratch
+  - [x] Pass the completion history (list of phase labels and what they implemented) as context so the roadmap builds on what exists rather than starting from scratch
   - [ ] Save the new roadmap to `duplo.json`, resetting `current_phase` to 0 relative to the new roadmap
   - [ ] Add a test that verifies roadmap generation excludes implemented features
 
