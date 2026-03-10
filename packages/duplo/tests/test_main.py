@@ -2909,3 +2909,368 @@ class TestPhase2NotStartedRunDuplo:
 
         out = capsys.readouterr().out
         assert "1 open issues" in out
+
+
+class TestPhase2CompleteRunDuplo:
+    """After mcloop completes Phase 2 (all tasks checked), run duplo again.
+
+    Confirms:
+    1. Annotated tasks are tracked deterministically (no Claude call needed).
+    2. Issues prompt appears.
+    3. Roadmap is regenerated if consumed.
+    4. Phase 3 is ready.
+    """
+
+    _FEATURES = [
+        {
+            "name": "Auth",
+            "description": "Login",
+            "category": "core",
+            "status": "implemented",
+            "implemented_in": "Phase 1: Core",
+        },
+        {
+            "name": "Search",
+            "description": "Find things",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+        {
+            "name": "Export",
+            "description": "Export data",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+        {
+            "name": "Notifications",
+            "description": "Alerts",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+    ]
+
+    _PHASE2_PLAN_COMPLETE = (
+        "# TestApp — Phase 2: Search & Export\n\n"
+        '- [x] Implement full-text search [feat: "Search"]\n'
+        '- [x] Add export button [feat: "Export"]\n'
+        '- [x] Fix crash on empty query [fix: "empty query crash"]\n'
+    )
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "app_name": "TestApp",
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core features",
+                "features": ["Auth"],
+                "test": "ok",
+            },
+            {
+                "phase": 1,
+                "title": "Search & Export",
+                "goal": "Add search and export",
+                "features": ["Search", "Export"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 1,
+        "phases": [
+            {
+                "phase": "Phase 1: Core",
+                "plan": "- [x] Set up auth",
+                "completed_at": "2026-03-01T00:00:00",
+            },
+        ],
+        "issues": [
+            {
+                "description": "empty query crash",
+                "source": "user",
+                "phase": "Phase 1: Core",
+                "status": "open",
+            },
+        ],
+    }
+
+    def _make_data(self, **overrides):
+        data = {**self._BASE_DATA, "features": list(self._FEATURES)}
+        data.update(overrides)
+        return data
+
+    def _new_roadmap(self):
+        return [
+            {
+                "phase": 0,
+                "title": "Alerts",
+                "goal": "Notify users",
+                "features": ["Notifications"],
+                "test": "ok",
+            },
+        ]
+
+    def test_annotated_features_tracked_without_claude(self, tmp_path, monkeypatch, capsys):
+        """All tasks have [feat:]/[fix:] annotations → no Claude call."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.match_unannotated_tasks") as mock_matcher,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        # Claude matcher should NOT be called — all tasks were annotated.
+        mock_matcher.assert_not_called()
+
+        # Features should be marked as implemented.
+        result = _read_duplo_json(tmp_path)
+        search = next(f for f in result["features"] if f["name"] == "Search")
+        assert search["status"] == "implemented"
+        export = next(f for f in result["features"] if f["name"] == "Export")
+        assert export["status"] == "implemented"
+
+        out = capsys.readouterr().out
+        assert "2 annotated feature" in out
+
+    def test_fix_annotations_resolve_issues(self, tmp_path, monkeypatch, capsys):
+        """[fix:] annotations resolve matching issues in duplo.json."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        result = _read_duplo_json(tmp_path)
+        issue = next(i for i in result["issues"] if i["description"] == "empty query crash")
+        assert issue["status"] == "resolved"
+
+        out = capsys.readouterr().out
+        assert "1 annotated fix" in out
+
+    def test_issues_prompt_appears(self, tmp_path, monkeypatch, capsys):
+        """collect_issues is called during phase completion."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=["Search is slow"]) as mock_issues,
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        mock_issues.assert_called_once()
+
+        result = _read_duplo_json(tmp_path)
+        user_issues = [i for i in result["issues"] if i.get("source") == "user"]
+        descs = [i["description"] for i in user_issues]
+        assert "Search is slow" in descs
+
+    def test_roadmap_regenerated_when_consumed(self, tmp_path, monkeypatch, capsys):
+        """When roadmap is fully consumed, generate_roadmap is called."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ) as mock_roadmap,
+        ):
+            main()
+
+        mock_roadmap.assert_called_once()
+
+        out = capsys.readouterr().out
+        assert "remaining feature" in out.lower()
+
+    def test_phase3_plan_generated(self, tmp_path, monkeypatch, capsys):
+        """After completion + roadmap regen, Phase 3 PLAN.md is generated."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        phase3_plan = (
+            '# TestApp — Phase 3: Alerts\n\n- [ ] Add notifications [feat: "Notifications"]\n'
+        )
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch("duplo.main.generate_phase_plan", return_value=phase3_plan) as mock_plan,
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        mock_plan.assert_called_once()
+        call_kwargs = mock_plan.call_args
+        assert call_kwargs.kwargs.get("phase_number") == 3
+
+        plan_text = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Phase 3" in plan_text
+
+        out = capsys.readouterr().out
+        assert "Phase 3" in out
+        assert "Run mcloop to start building" in out
+
+    def test_plan_deleted_after_completion(self, tmp_path, monkeypatch):
+        """PLAN.md is deleted during phase completion, then recreated."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN_COMPLETE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        result = _read_duplo_json(tmp_path)
+        assert len(result["phases"]) == 2
+        assert "Phase 2" in result["phases"][1]["phase"]
+
+    def test_mixed_annotated_and_unannotated(self, tmp_path, monkeypatch, capsys):
+        """Annotated tracked deterministically, unannotated sent to Claude."""
+        data = self._make_data()
+        _write_duplo_json(tmp_path, data)
+        mixed_plan = (
+            "# TestApp — Phase 2: Search & Export\n\n"
+            '- [x] Implement search [feat: "Search"]\n'
+            "- [x] Set up CI pipeline\n"
+            '- [x] Add export [feat: "Export"]\n'
+        )
+        (tmp_path / "PLAN.md").write_text(mixed_plan, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.main.match_unannotated_tasks", return_value=([], [])) as mock_matcher,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 3\n- [ ] task",
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=self._new_roadmap(),
+            ),
+        ):
+            main()
+
+        result = _read_duplo_json(tmp_path)
+        search = next(f for f in result["features"] if f["name"] == "Search")
+        assert search["status"] == "implemented"
+        export = next(f for f in result["features"] if f["name"] == "Export")
+        assert export["status"] == "implemented"
+
+        mock_matcher.assert_called_once()
+
+        out = capsys.readouterr().out
+        assert "2 annotated feature" in out
+        assert "1 unannotated task" in out
