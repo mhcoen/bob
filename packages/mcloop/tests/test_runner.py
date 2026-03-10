@@ -383,7 +383,7 @@ def test_build_post_fix_review_prompt_read_only():
 
 def test_build_post_fix_review_prompt_lgtm_format():
     prompt = build_post_fix_review_prompt("bugs", "diff")
-    assert "LGTM" in prompt
+    assert "NO_PROBLEMS" in prompt
     assert "PROBLEMS FOUND" in prompt
     assert "--- REVIEW RESULT ---" in prompt
     assert "--- END REVIEW ---" in prompt

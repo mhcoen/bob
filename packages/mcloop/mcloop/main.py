@@ -900,6 +900,7 @@ def run_loop(
                             notes_snapshot,
                         )
                         sys.exit(1)
+                    _reinject_wrappers(project_dir)
                     check_off(checklist_path, task)
                     elapsed = _format_elapsed(
                         time.monotonic() - task_start,
@@ -2306,3 +2307,67 @@ def _commit(project_dir: Path, task_text: str) -> None:
                 f"git push failed (exit {push_result.returncode})."
                 f" Fix the remote and re-run mcloop."
             )
+
+
+def _reinject_wrappers(project_dir: Path) -> None:
+    """Re-inject crash handler wrappers if markers were stripped.
+
+    Called after each task commit. Checks whether .mcloop/wrap/
+    canonical wrappers exist and the entry point still has intact
+    markers. If markers are missing or damaged, re-injects from
+    the canonical source and commits the fix.
+    """
+    from mcloop.wrap import (
+        find_entry_point,
+        has_markers,
+        inject,
+    )
+
+    wrap_dir = project_dir / ".mcloop" / "wrap"
+    if not wrap_dir.is_dir():
+        return
+
+    # Determine language from which canonical wrapper exists
+    if (wrap_dir / "swift_wrapper.swift").exists():
+        language = "swift"
+    elif (wrap_dir / "python_wrapper.py").exists():
+        language = "python"
+    else:
+        return
+
+    entry = find_entry_point(project_dir, language)
+    if entry is None:
+        return
+
+    try:
+        content = entry.read_text()
+    except OSError:
+        return
+
+    if has_markers(content, language):
+        return
+
+    # Markers missing — re-inject
+    print(
+        formatting.system_msg("Re-injecting crash handler wrappers"),
+        flush=True,
+    )
+    restored = inject(content, language)
+    entry.write_text(restored)
+    _git(["git", "add", "-A"], cwd=project_dir, label="reinject add")
+    _git(
+        ["git", "commit", "-m", "Re-inject mcloop crash handlers"],
+        cwd=project_dir,
+        label="reinject commit",
+    )
+    push_result = _git(
+        ["git", "push"],
+        cwd=project_dir,
+        label="reinject push",
+        silent=True,
+    )
+    if push_result.returncode != 0:
+        print(
+            formatting.error_msg("Push after re-injection failed"),
+            flush=True,
+        )

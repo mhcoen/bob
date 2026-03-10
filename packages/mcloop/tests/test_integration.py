@@ -362,7 +362,7 @@ def test_noop_with_max_retries_one(
 def test_commit_stages_all_files(mock_run, tmp_path):
     """_commit uses git add -A to include new and tracked files."""
     (tmp_path / ".git").mkdir()
-    mock_run.return_value = MagicMock()
+    mock_run.return_value = MagicMock(returncode=0, stdout="")
 
     _commit(tmp_path, "some task")
 
@@ -374,7 +374,7 @@ def test_commit_stages_all_files(mock_run, tmp_path):
 def test_commit_commits_with_task_message(mock_run, tmp_path):
     """_commit creates a commit with the task text in the message."""
     (tmp_path / ".git").mkdir()
-    mock_run.return_value = MagicMock()
+    mock_run.return_value = MagicMock(returncode=0, stdout="")
 
     _commit(tmp_path, "my task description")
 
@@ -387,7 +387,7 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
 def test_commit_pushes_after_commit(mock_run, tmp_path):
     """_commit calls git push after committing when a remote exists."""
     (tmp_path / ".git").mkdir()
-    remote_result = MagicMock()
+    remote_result = MagicMock(returncode=0)
     remote_result.stdout = "origin\n"
     mock_run.return_value = remote_result
 
@@ -439,7 +439,7 @@ def test_commit_pushes_after_gh_create_succeeds(mock_run, tmp_path):
     remote_call_count = {"n": 0}
 
     def side_effect(cmd, **kwargs):
-        m = MagicMock()
+        m = MagicMock(returncode=0)
         if cmd == ["git", "remote"]:
             remote_call_count["n"] += 1
             m.stdout = "" if remote_call_count["n"] == 1 else "origin\n"
@@ -587,8 +587,8 @@ def test_checkpoint_called_before_loop(
 
     # Called once at start (no next_task) and once before the task
     assert mock_checkpoint.call_count >= 1
-    # First call is the initial checkpoint
-    assert mock_checkpoint.call_args_list[0] == call(tmp_path)
+    # First call is the initial checkpoint (with verbose=True at startup)
+    assert mock_checkpoint.call_args_list[0] == call(tmp_path, verbose=True)
 
 
 # --- Audit notification tests ---

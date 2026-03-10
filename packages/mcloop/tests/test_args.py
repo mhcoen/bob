@@ -19,6 +19,7 @@ from mcloop.main import (
     _launch_app_verification,
     _parse_args,
     _read_repro_steps,
+    _reinject_wrappers,
     _replay_repro_steps,
     _run_audit_fix_cycle,
     _run_single_audit_round,
@@ -2730,3 +2731,195 @@ def test_fallback_resets_per_task(tmp_path):
     assert models_used[2] == "sonnet"
     # Task 2 starts fresh with primary model
     assert models_used[3] == "opus"
+
+
+# --- _reinject_wrappers tests ---
+
+
+def test_reinject_no_wrap_dir(tmp_path):
+    """When .mcloop/wrap/ does not exist, _reinject_wrappers is a no-op."""
+    _reinject_wrappers(tmp_path)
+    # No exception, no files created
+
+
+def test_reinject_empty_wrap_dir(tmp_path):
+    """When .mcloop/wrap/ exists but has no wrapper files, no-op."""
+    (tmp_path / ".mcloop" / "wrap").mkdir(parents=True)
+    _reinject_wrappers(tmp_path)
+
+
+def test_reinject_markers_intact_swift(tmp_path):
+    """When Swift markers are present, no re-injection happens."""
+    from mcloop.wrap import SWIFT_WRAPPER, inject
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "swift_wrapper.swift").write_text(SWIFT_WRAPPER)
+
+    # Create a Swift entry point with markers intact
+    src = tmp_path / "Sources" / "MyApp"
+    src.mkdir(parents=True)
+    entry = src / "MyApp.swift"
+    original = "import SwiftUI\n\n@main\nstruct MyApp: App {\n    init() {\n    }\n}\n"
+    entry.write_text(inject(original, "swift"))
+
+    with patch("mcloop.main._git") as mock_git:
+        _reinject_wrappers(tmp_path)
+
+    mock_git.assert_not_called()
+
+
+def test_reinject_markers_stripped_swift(tmp_path):
+    """When Swift markers are stripped, re-injects and commits."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "swift_wrapper.swift").write_text(SWIFT_WRAPPER)
+
+    src = tmp_path / "Sources" / "MyApp"
+    src.mkdir(parents=True)
+    entry = src / "MyApp.swift"
+    # Write entry point WITHOUT markers
+    entry.write_text("import SwiftUI\n\n@main\nstruct MyApp: App {\n    init() {\n    }\n}\n")
+
+    git_result = MagicMock()
+    git_result.returncode = 0
+    with patch("mcloop.main._git", return_value=git_result) as mock_git:
+        _reinject_wrappers(tmp_path)
+
+    # Should have committed the re-injection
+    assert mock_git.call_count == 3  # add, commit, push
+    commit_call = mock_git.call_args_list[1]
+    assert "Re-inject mcloop crash handlers" in commit_call[0][0]
+
+    # Entry point should now have markers
+    content = entry.read_text()
+    assert "// mcloop:wrap:begin" in content
+    assert "// mcloop:wrap:end" in content
+
+
+def test_reinject_markers_intact_python(tmp_path):
+    """When Python markers are present, no re-injection happens."""
+    from mcloop.wrap import PYTHON_WRAPPER, inject
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+
+    entry = tmp_path / "main.py"
+    original = "print('hello')\n"
+    entry.write_text(inject(original, "python"))
+
+    with patch("mcloop.main._git") as mock_git:
+        _reinject_wrappers(tmp_path)
+
+    mock_git.assert_not_called()
+
+
+def test_reinject_markers_stripped_python(tmp_path):
+    """When Python markers are stripped, re-injects and commits."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+
+    entry = tmp_path / "main.py"
+    entry.write_text("print('hello')\n")
+
+    git_result = MagicMock()
+    git_result.returncode = 0
+    with patch("mcloop.main._git", return_value=git_result) as mock_git:
+        _reinject_wrappers(tmp_path)
+
+    assert mock_git.call_count == 3
+    content = entry.read_text()
+    assert "# mcloop:wrap:begin" in content
+    assert "# mcloop:wrap:end" in content
+
+
+def test_reinject_no_entry_point(tmp_path):
+    """When canonical wrapper exists but no entry point found, no-op."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+    # No main.py or __main__.py
+
+    with patch("mcloop.main._git") as mock_git:
+        _reinject_wrappers(tmp_path)
+
+    mock_git.assert_not_called()
+
+
+def test_reinject_push_failure_prints_error(tmp_path, capsys):
+    """When push fails after re-injection, prints error but doesn't raise."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+
+    entry = tmp_path / "main.py"
+    entry.write_text("print('hello')\n")
+
+    def fake_git(cmd, cwd=None, label="", silent=False):
+        result = MagicMock()
+        if "push" in cmd:
+            result.returncode = 1
+        else:
+            result.returncode = 0
+        return result
+
+    with patch("mcloop.main._git", side_effect=fake_git):
+        _reinject_wrappers(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Push after re-injection failed" in captured.out
+
+
+def test_run_loop_calls_reinject_after_commit(tmp_path):
+    """run_loop calls _reinject_wrappers after each successful commit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers") as mock_reinject,
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    mock_reinject.assert_called_once_with(tmp_path)
