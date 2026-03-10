@@ -478,6 +478,45 @@ class TestAdvanceToNext:
         out = capsys.readouterr().out
         assert "complete" in out.lower()
 
+    def test_prefixed_heading_extracts_phase_label(self, capsys, tmp_path, monkeypatch):
+        """Phase label is extracted from headings like '# McWhisper — Phase 0: Core'."""
+        data = {
+            **self._BASE_DATA,
+            "phases": [
+                {
+                    "phase": "Phase 0: Core",
+                    "plan": "# McWhisper — Phase 0: Core\n",
+                    "completed_at": "2026-01-01T00:00:00+00:00",
+                }
+            ],
+        }
+        _write_duplo_json(tmp_path, data)
+        (tmp_path / "PLAN.md").write_text("# McWhisper — Phase 0: Core\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "duplo.main.get_current_phase",
+            return_value=(0, {"title": "Core"}),
+        ):
+            with patch("duplo.main.collect_feedback", return_value="feedback"):
+                with patch(
+                    "duplo.main.generate_next_phase_plan",
+                    return_value="# McWhisper — Phase 1: Search\n",
+                ):
+                    with patch(
+                        "duplo.main.save_plan",
+                        return_value=tmp_path / "PLAN.md",
+                    ):
+                        with patch("duplo.main.save_feedback") as mock_save_fb:
+                            with patch("duplo.main.notify_phase_complete"):
+                                main()
+
+        mock_save_fb.assert_called_once()
+        assert mock_save_fb.call_args.kwargs["after_phase"] == "Phase 0: Core"
+
+        out = capsys.readouterr().out
+        assert "Run mcloop to start building" in out
+
     def test_appends_test_tasks(self, tmp_path, monkeypatch):
         data = {
             **self._BASE_DATA,
