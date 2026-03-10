@@ -8,7 +8,6 @@ from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
     _MAX_FIX_ATTEMPTS,
     MAX_VERIFICATION_ROUNDS,
-    SessionContext,
     _append_verification_failure,
     _check_errors_json,
     _check_user_input,
@@ -30,6 +29,7 @@ from mcloop.main import (
     _verify_gui_survival,
     run_loop,
 )
+from mcloop.session_context import SessionContext
 
 
 def _parse(*argv):
