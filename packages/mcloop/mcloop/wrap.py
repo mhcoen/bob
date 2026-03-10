@@ -118,8 +118,10 @@ private func _mcloopWriteError(_ report: [String: Any], dir: String) {
     }
     var entry = report
     let trace = (report["stack_trace"] as? String) ?? ""
-    let sig = report.hashValue
-    entry["id"] = String(format: "%08x", abs(trace.hashValue ^ sig))
+    let sig = (report["signal"] as? String) ?? (report["exception_type"] as? String) ?? ""
+    var hash: UInt32 = 5381
+    for c in (trace + sig).utf8 { hash = hash &* 33 &+ UInt32(c) }
+    entry["id"] = String(format: "%08x", hash)
     entries.append(entry)
     if let data = try? JSONSerialization.data(
         withJSONObject: entries, options: [.prettyPrinted])

@@ -240,10 +240,17 @@ def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
 
 def _find_task_line(lines: list[str], task: Task) -> int:
     """Find task line by text match, falling back to line_number."""
+    # Prefer unchecked match to avoid targeting an already-checked duplicate
+    fallback = None
     for i, line in enumerate(lines):
         m = CHECKBOX_RE.match(line)
         if m and m.group(3).strip() == task.text:
-            return i
+            if m.group(2) == " ":
+                return i
+            if fallback is None:
+                fallback = i
+    if fallback is not None:
+        return fallback
     if task.line_number >= len(lines):
         raise IndexError(
             f"Task line {task.line_number} out of range (file has {len(lines)} lines)"

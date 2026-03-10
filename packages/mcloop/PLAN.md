@@ -208,7 +208,7 @@ The debugging playbook this enforces:
   - [x] If the fallback model also exhausts retries, mark the task failed as normal.
   - [x] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
 
-- [ ] Runtime error capture and self-healing (`mcloop wrap`)
+- [x] Runtime error capture and self-healing (`mcloop wrap`)
   - [x] Add `mcloop wrap` subcommand that instruments a project's source files with error-catching hooks. Detects project language from PLAN.md description, file extensions, or build system. Supports Swift and Python initially.
   - [x] Swift instrumentation: inject `NSSetUncaughtExceptionHandler`, signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump that captures relevant `@Published` properties at crash time. Write structured error reports to `.mcloop/errors.json` with stack trace, app state, timestamp, and what the user was doing (last UI action if detectable).
   - [x] Python instrumentation: inject `sys.excepthook`, signal handlers, and logging integration that captures unhandled exceptions with full traceback, local variables in the crashing frame, and application state. Write to the same `.mcloop/errors.json` format.
@@ -221,4 +221,4 @@ The debugging playbook this enforces:
   - [x] Loop limit: if the same error has triggered diagnostic insertion more than 3 times (tracked by a hash of the error signature in `.mcloop/errors.json`), mark it as unresolvable, print context, and stop. Do not loop indefinitely.
   - [x] `.mcloop/errors.json` format: array of objects, each with `id` (hash of stack trace), `timestamp`, `signal` or `exception_type`, `stack_trace`, `app_state` (dict of key-value pairs), `description` (one-line summary), `source_file` and `line` (crash location), `fix_attempts` (count of previous diagnostic insertions for this error).
   - [x] Add `find_next` priority logic: if any task under a `## Bugs` heading is unchecked, return that task regardless of position in the file. Feature tasks are only returned when `## Bugs` is empty or fully checked.
-  - [ ] Add tests: wrap injection for Swift and Python (markers present, re-injection after removal), error.json parsing, find_next priority with and without bug tasks, loop limit enforcement.
+  - [x] Add tests: wrap injection for Swift and Python (markers present, re-injection after removal), error.json parsing, find_next priority with and without bug tasks, loop limit enforcement.

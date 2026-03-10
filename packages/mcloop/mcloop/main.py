@@ -949,7 +949,8 @@ def run_loop(
     _push_or_die(project_dir)
 
     # Check for crash errors from previous runs
-    _check_errors_json(project_dir, model=model)
+    if not _check_errors_json(project_dir, model=model):
+        return
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
@@ -2614,24 +2615,11 @@ def _commit(project_dir: Path, task_text: str) -> None:
         label="commit remote check",
     )
     if not result.stdout.strip():
-        subprocess.run(
-            [
-                "gh",
-                "repo",
-                "create",
-                project_dir.name,
-                "--private",
-                "--source=.",
-                "--remote=origin",
-            ],
-            cwd=project_dir,
-            capture_output=True,
+        print(
+            formatting.system_msg("No git remote configured; skipping push."),
+            flush=True,
         )
-        result = _git(
-            ["git", "remote"],
-            cwd=project_dir,
-            label="commit remote recheck",
-        )
+        return
     if result.stdout.strip():
         print(formatting.system_msg("Pushing..."), flush=True)
         push_result = _git(
