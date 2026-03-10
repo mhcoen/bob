@@ -5,19 +5,21 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from mcloop.audit import _run_audit_fix_cycle, _run_single_audit_round
+from mcloop.errors import (
+    _MAX_FIX_ATTEMPTS,
+    _check_errors_json,
+    _error_signature_hash,
+    _insert_bugs_section,
+)
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
-    _MAX_FIX_ATTEMPTS,
     MAX_VERIFICATION_ROUNDS,
     _append_verification_failure,
-    _check_errors_json,
     _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
-    _error_signature_hash,
     _handle_auto_task,
     _handle_user_task,
-    _insert_bugs_section,
     _investigation_failed,
     _investigation_passed,
     _launch_app_verification,
@@ -3023,7 +3025,7 @@ def test_check_errors_user_accepts(tmp_path, capsys):
     )
     with (
         patch("builtins.input", return_value=""),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="abc123 commit\n")
@@ -3063,7 +3065,7 @@ def test_check_errors_default_yes(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value=""),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result),
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3121,7 +3123,7 @@ def test_check_errors_no_plan_file(tmp_path, capsys):
 
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic") as mock_diag,
+        patch("mcloop.errors.run_diagnostic") as mock_diag,
     ):
         result = _check_errors_json(tmp_path)
 
@@ -3149,7 +3151,7 @@ def test_check_errors_appends_when_no_tasks(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result),
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3180,7 +3182,7 @@ def test_check_errors_diagnostic_reads_source(tmp_path):
     )
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="abc commit\n")
@@ -3202,7 +3204,7 @@ def test_check_errors_passes_model(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3251,7 +3253,7 @@ def test_check_errors_complete_format(tmp_path, capsys):
     )
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="abc commit\n")
@@ -3400,7 +3402,7 @@ def test_check_errors_mixed_resolvable_unresolvable(tmp_path, capsys):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3434,7 +3436,7 @@ def test_check_errors_increments_fix_attempts(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result),
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3461,7 +3463,7 @@ def test_check_errors_new_entry_gets_fix_attempts(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result),
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3488,7 +3490,7 @@ def test_check_errors_just_below_limit_is_resolvable(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
@@ -3536,7 +3538,7 @@ def test_check_errors_non_integer_fix_attempts_treated_as_zero(tmp_path):
     diag_result = MagicMock(success=False, output="")
     with (
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
         patch("subprocess.run") as mock_git,
     ):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
