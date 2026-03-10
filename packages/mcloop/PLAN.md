@@ -209,7 +209,7 @@ The debugging playbook this enforces:
   - [x] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
 
 - [ ] Runtime error capture and self-healing (`mcloop wrap`)
-  - [ ] Add `mcloop wrap` subcommand that instruments a project's source files with error-catching hooks. Detects project language from PLAN.md description, file extensions, or build system. Supports Swift and Python initially.
+  - [x] Add `mcloop wrap` subcommand that instruments a project's source files with error-catching hooks. Detects project language from PLAN.md description, file extensions, or build system. Supports Swift and Python initially.
   - [ ] Swift instrumentation: inject `NSSetUncaughtExceptionHandler`, signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump that captures relevant `@Published` properties at crash time. Write structured error reports to `.mcloop/errors.json` with stack trace, app state, timestamp, and what the user was doing (last UI action if detectable).
   - [ ] Python instrumentation: inject `sys.excepthook`, signal handlers, and logging integration that captures unhandled exceptions with full traceback, local variables in the crashing frame, and application state. Write to the same `.mcloop/errors.json` format.
   - [ ] Delimit all injected code with markers (`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift, `# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). Store canonical wrapper source in `.mcloop/wrap/` so it can be re-injected after edits.
