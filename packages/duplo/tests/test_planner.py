@@ -168,6 +168,55 @@ class TestGeneratePhasePlan:
         prompt = mock_query.call_args[0][0]
         assert "Known issues to fix" not in prompt
 
+    def test_phase_number_overrides_phase_dict(self):
+        phase = {
+            "phase": 0,
+            "title": "Core",
+            "goal": "Build core",
+            "features": ["Auth"],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+                phase_number=3,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Phase 3:" in prompt
+        assert "Phase 0:" not in prompt
+
+    def test_phase_number_used_without_phase_dict(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase_number=5,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Phase 5:" in prompt
+
+    def test_phase_number_defaults_to_phase_dict(self):
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "Polish it",
+            "features": ["Dashboard"],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Phase 2:" in prompt
+
 
 class TestPhaseSystemPromptAnnotations:
     def test_system_prompt_requires_feat_annotation(self):
@@ -187,6 +236,9 @@ class TestPhaseSystemPromptAnnotations:
 
     def test_system_prompt_shows_feat_example_in_format(self):
         assert '[feat: "User authentication"]' in _PHASE_SYSTEM
+
+    def test_system_prompt_heading_format(self):
+        assert "# <AppName> — Phase N: <Title>" in _PHASE_SYSTEM
 
     def test_system_prompt_shows_fix_example_in_format(self):
         assert '[fix: "email format not checked"]' in _PHASE_SYSTEM

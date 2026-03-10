@@ -425,9 +425,32 @@ class TestPhaseCompletionFlow:
             main()
 
         out = capsys.readouterr().out
-        assert "Generating Phase 0: Core PLAN.md" in out
+        assert "Generating Phase 1: Core PLAN.md" in out
         assert "Run mcloop to start building" in out
         mock_gen.assert_called_once()
+
+    def test_phase_number_from_history(self, tmp_path, monkeypatch):
+        """Phase number passed to generate_phase_plan = len(phases) + 1."""
+        data = {
+            **self._BASE_DATA,
+            "phases": [
+                {"phase": "Phase 1", "plan": "done", "completed_at": "t1"},
+                {"phase": "Phase 2", "plan": "done", "completed_at": "t2"},
+            ],
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Core\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        assert mock_gen.call_args.kwargs["phase_number"] == 3
 
     def test_appends_test_tasks_to_generated_plan(self, tmp_path, monkeypatch):
         data = {

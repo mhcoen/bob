@@ -937,8 +937,12 @@ def _subsequent_run() -> None:
         print("All features implemented. Nothing to do.")
         return
 
+    # Phase number = number of completed phases + 1.
+    history_phase_number = len(data.get("phases", [])) + 1
     phase_label = (
-        f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
+        f"Phase {history_phase_number}: {phase_info['title']}"
+        if phase_info
+        else f"Phase {history_phase_number}"
     )
 
     # Let the user confirm/adjust which features go into this phase.
@@ -986,6 +990,7 @@ def _subsequent_run() -> None:
         phase=phase_info,
         project_name=data.get("app_name", ""),
         design_section=design_section,
+        phase_number=history_phase_number,
     )
     doc_examples = load_code_examples()
     test_tasks = generate_plan_test_tasks(doc_examples)

@@ -49,7 +49,7 @@ Rules for the plan:
 Output ONLY the Markdown for PLAN.md. No explanation outside it.
 Format:
 
-# <Project name>
+# <AppName> — Phase N: <Title>
 
 <Description with platform, language, constraints, and phase goal.>
 
@@ -58,6 +58,10 @@ Format:
   - [ ] Subtask if needed
 - [ ] Fix input validation on signup [fix: "email format not checked"]
 - [ ] ...
+
+The heading MUST use the exact format shown: app name, em dash (—),
+Phase N, colon, then the phase title. Use the project name as the
+app name. The phase number and title are provided in the prompt.
 """
 
 _NEXT_PHASE_SYSTEM = """\
@@ -225,6 +229,7 @@ def generate_phase_plan(
     *,
     project_name: str = "",
     design_section: str = "",
+    phase_number: int | None = None,
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
 
@@ -238,6 +243,9 @@ def generate_phase_plan(
         project_name: Name for the project.
         design_section: Optional Markdown section with visual design
             requirements extracted from reference images.
+        phase_number: Override for the phase number in the heading.
+            When provided, this is used instead of ``phase["phase"]``.
+            Derived from the length of the ``phases`` history + 1.
 
     Returns:
         Markdown string suitable for writing to PLAN.md.
@@ -255,7 +263,7 @@ def generate_phase_plan(
     )
 
     if phase:
-        phase_num = phase["phase"]
+        phase_num = phase_number if phase_number is not None else phase["phase"]
         phase_title = phase["title"]
         phase_goal = phase["goal"]
         phase_features = phase.get("features", [])
@@ -263,7 +271,7 @@ def generate_phase_plan(
         phase_issues = phase.get("issues", [])
         features_text = "\n".join(f"- {name}" for name in phase_features) or "(scaffold only)"
     else:
-        phase_num = 1
+        phase_num = phase_number if phase_number is not None else 1
         phase_title = "Core"
         phase_goal = "Smallest end-to-end working thing"
         features_text = "\n".join(f"- {f.name}: {f.description}" for f in features)
