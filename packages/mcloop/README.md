@@ -104,6 +104,8 @@ mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
 mcloop investigate "crash on wake from sleep"  # Debug a specific bug
 mcloop investigate --log crash.log             # Debug from a log file
+mcloop wrap                                    # Instrument project for runtime error capture
+mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
 ```
 
 ## Writing a PLAN.md
@@ -242,9 +244,31 @@ the problem rather than repeating the same mistake.
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
 
-After each successful commit, McLoop pushes to the remote. If no
-remote exists, it creates a private GitHub repo with `gh repo create`
-and sets up the origin automatically.
+### Model fallback
+
+Use `--fallback-model` to automatically escalate to a stronger model
+when the primary model fails:
+
+```bash
+mcloop --model sonnet --fallback-model opus
+```
+
+When a task exhausts all retries on the primary model, McLoop retries
+it from scratch using the fallback model (with the same retry count)
+before marking it failed. This lets you run most tasks on a cheaper
+or faster model and only use the stronger model for tasks that need
+it. If no `--fallback-model` is set, behavior is unchanged.
+
+After each successful commit, McLoop pushes to the remote. If the
+push fails, McLoop stops immediately rather than continuing with
+work that has no remote safety net. If no remote exists, it creates
+a private GitHub repo with `gh repo create` and sets up the origin
+automatically.
+
+Before any tasks run, McLoop commits all pending changes and pushes
+them to the remote. If this pre-flight push fails, McLoop exits
+with an error telling you to fix the remote. This ensures the remote
+is always up to date before new work begins.
 
 ## Unattended operation
 
@@ -672,6 +696,73 @@ you are not using Claude Code interactively.
 after a McLoop session to see how many tokens were saved. This helps
 you gauge whether the compression is working and how much headroom
 you have.
+
+## Runtime error capture
+
+`mcloop wrap` instruments a project's source files with error-catching
+hooks that capture crashes and exceptions during normal use. You build
+the app with McLoop, use it yourself, and when something goes wrong
+the instrumentation captures the context and writes it to
+`.mcloop/errors.json`.
+
+The next time you run `mcloop`, it reads the error log before doing
+anything else:
+
+```
+2 runtime bugs detected:
+
+  1. SIGABRT in Qwen3ASREngine.loadModel() -- model path was nil
+     when selecting Parakeet TDT model (3 hours ago)
+
+  2. Audio levels stuck at 0.0 during push-to-talk recording,
+     waveform never animated (1 hour ago)
+
+Fix these bugs before continuing? [Y/n]
+```
+
+If you say yes, McLoop runs a diagnostic session per error, inserts
+fix tasks into a `## Bugs` section in PLAN.md, and works only those
+tasks. It does not touch feature tasks, start the next stage, or run
+the audit cycle. It fixes, verifies (by relaunching the app to
+confirm the error no longer occurs), and exits. You run `mcloop`
+again for feature work once bugs are clear.
+
+If you say no, McLoop skips the bugs and continues with normal
+feature work. The bugs stay in `.mcloop/errors.json` for next time.
+
+The `## Bugs` section in PLAN.md has absolute priority. If it
+contains unchecked items, `find_next` returns those before any
+feature tasks.
+
+### How wrapping works
+
+`mcloop wrap` analyzes the project language and injects
+error-catching code into source files, delimited with markers
+(`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift,
+`# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). The
+canonical wrapper source is stored in `.mcloop/wrap/` so McLoop
+can re-inject it if Claude Code strips the markers during a task.
+
+Swift instrumentation includes `NSSetUncaughtExceptionHandler`,
+signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump
+that captures relevant `@Published` properties at crash time.
+
+Python instrumentation includes `sys.excepthook`, signal handlers,
+and logging integration that captures unhandled exceptions with
+full tracebacks and local variables in the crashing frame.
+
+Both write structured error reports to `.mcloop/errors.json` with
+stack traces, app state, timestamps, crash location, and a one-line
+description.
+
+After every task that modifies instrumented source files, McLoop
+checks whether the markers are intact and re-injects from
+`.mcloop/wrap/` if they were removed. The wrapper survives Claude
+Code edits automatically.
+
+If the same error triggers diagnostic insertion more than 3 times,
+McLoop marks it as unresolvable, prints the context, and stops
+rather than looping indefinitely.
 
 ## License
 
