@@ -364,6 +364,60 @@ def test_python_wrapper_logging_integration():
     assert "addHandler" in PYTHON_WRAPPER
 
 
+# ---- errors.json format fields ----
+
+
+_REQUIRED_FIELDS = [
+    "timestamp",
+    "exception_type",
+    "description",
+    "stack_trace",
+    "source_file",
+    "line",
+    "app_state",
+    "last_action",
+    "fix_attempts",
+]
+
+
+def test_swift_wrapper_error_report_fields():
+    """Swift exception handler writes all required errors.json fields."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    for field in _REQUIRED_FIELDS:
+        assert f'"{field}"' in SWIFT_WRAPPER, f"missing field: {field}"
+    # Signal handler adds signal field
+    assert '"signal"' in SWIFT_WRAPPER
+    # ID is added by _mcloopWriteError
+    assert '"id"' in SWIFT_WRAPPER
+
+
+def test_python_wrapper_error_report_fields():
+    """Python exception hook writes all required errors.json fields."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    for field in _REQUIRED_FIELDS:
+        assert f'"{field}"' in PYTHON_WRAPPER, f"missing field: {field}"
+    # Signal handler adds signal field
+    assert '"signal"' in PYTHON_WRAPPER
+    # ID is added by _write_error
+    assert '"id"' in PYTHON_WRAPPER
+
+
+def test_swift_wrapper_fix_attempts_starts_zero():
+    """Swift wrapper initializes fix_attempts to 0."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    assert '"fix_attempts": 0' in SWIFT_WRAPPER
+
+
+def test_python_wrapper_fix_attempts_starts_zero():
+    """Python wrapper initializes fix_attempts to 0."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    assert '"fix_attempts": 0' in PYTHON_WRAPPER
+
+
 def test_python_wrapper_local_variables():
     """Python wrapper captures local variables from the crashing frame."""
     from mcloop.wrap import PYTHON_WRAPPER

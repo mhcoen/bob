@@ -3212,6 +3212,101 @@ def test_check_errors_passes_model(tmp_path):
     assert mock_diag.call_args.kwargs["model"] == "opus"
 
 
+def test_check_errors_complete_format(tmp_path, capsys):
+    """All documented errors.json fields are handled correctly."""
+    entries = [
+        {
+            "id": "a1b2c3d4",
+            "timestamp": "2026-03-10T10:00:00+00:00",
+            "exception_type": "ValueError",
+            "description": "invalid literal for int()",
+            "stack_trace": "Traceback...\n  File app.py, line 42\nValueError",
+            "source_file": "app.py",
+            "line": 42,
+            "app_state": {"counter": "5", "mode": "edit"},
+            "last_action": "button_click:save",
+            "fix_attempts": 0,
+        },
+        {
+            "id": "e5f6a7b8",
+            "timestamp": "2026-03-10T10:01:00+00:00",
+            "signal": 11,
+            "exception_type": "Signal",
+            "description": "Received signal 11",
+            "stack_trace": "Thread 0:\n  0x00007fff...",
+            "source_file": "core.c",
+            "line": 100,
+            "app_state": {},
+            "last_action": "",
+            "fix_attempts": 1,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+    (tmp_path / "app.py").write_text("x = int('bad')\n")
+    (tmp_path / "core.c").write_text("int main() { return 0; }\n")
+
+    diag_result = MagicMock(
+        success=True,
+        output="--- FIX DESCRIPTION ---\nValidate input\n--- END FIX ---",
+    )
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="abc commit\n")
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    assert mock_diag.call_count == 2
+
+    # Summary shows both entries with location
+    out = capsys.readouterr().out
+    assert "ValueError" in out
+    assert "Signal" in out
+    assert "app.py:42" in out
+    assert "core.c:100" in out
+
+    # fix_attempts incremented after diagnosis
+    import json
+
+    updated = json.loads((tmp_path / ".mcloop" / "errors.json").read_text())
+    for entry in updated:
+        if entry["exception_type"] == "ValueError":
+            assert entry["fix_attempts"] == 1
+        elif entry["exception_type"] == "Signal":
+            assert entry["fix_attempts"] == 2
+
+
+def test_check_errors_signal_entry_display(tmp_path, capsys):
+    """Signal entries display correctly with signal number in description."""
+    entries = [
+        {
+            "id": "deadbeef",
+            "timestamp": "2026-03-10T12:00:00+00:00",
+            "signal": 6,
+            "exception_type": "Signal",
+            "description": "Received signal 6",
+            "stack_trace": "Thread 0:\n  abort()",
+            "source_file": "main.swift",
+            "line": 55,
+            "app_state": {"view": "main"},
+            "last_action": "menu_click:quit",
+            "fix_attempts": 0,
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+
+    with patch("builtins.input", return_value="n"):
+        _check_errors_json(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "Signal" in out
+    assert "Received signal 6" in out
+    assert "main.swift:55" in out
+
+
 # --- _error_signature_hash ---
 
 
