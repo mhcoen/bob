@@ -30,7 +30,6 @@ from duplo.saver import (
     append_phase_to_history,
     resolve_issue,
     save_issue,
-    clear_in_progress,
     clear_issues,
     load_examples,
     load_issues,
@@ -50,7 +49,6 @@ from duplo.saver import (
     save_roadmap,
     save_screenshot_feature_map,
     save_selections,
-    set_in_progress,
     store_accepted_frames,
     write_claude_md,
 )
@@ -312,86 +310,6 @@ class TestAppendPhaseToHistory:
         append_phase_to_history(plan, target_dir=tmp_path)
         entry = json.loads((tmp_path / DUPLO_JSON).read_text())["phases"][0]
         assert entry["phase"] == "Phase 1: Core"
-
-
-class TestSetInProgress:
-    def test_creates_in_progress_key(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert "in_progress" in data
-
-    def test_stores_label(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 2", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["in_progress"]["label"] == "Phase 2"
-
-    def test_mcloop_done_defaults_to_false(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["in_progress"]["mcloop_done"] is False
-
-    def test_mcloop_done_can_be_set_true(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", mcloop_done=True, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["in_progress"]["mcloop_done"] is True
-
-    def test_creates_file_when_absent(self, tmp_path):
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["in_progress"]["label"] == "Phase 1"
-
-    def test_preserves_existing_fields(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["source_url"] == "https://example.com"
-
-    def test_overwrites_existing_in_progress(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        set_in_progress("Phase 2", mcloop_done=True, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["in_progress"]["label"] == "Phase 2"
-        assert data["in_progress"]["mcloop_done"] is True
-
-    def test_file_ends_with_newline(self, tmp_path):
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
-
-
-class TestClearInProgress:
-    def test_removes_in_progress_key(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        clear_in_progress(target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert "in_progress" not in data
-
-    def test_noop_when_key_absent(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        clear_in_progress(target_dir=tmp_path)  # should not raise
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert "in_progress" not in data
-
-    def test_noop_when_file_absent(self, tmp_path):
-        clear_in_progress(target_dir=tmp_path)  # should not raise
-
-    def test_preserves_other_fields(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        clear_in_progress(target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["source_url"] == "https://example.com"
-
-    def test_file_ends_with_newline(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        set_in_progress("Phase 1", target_dir=tmp_path)
-        clear_in_progress(target_dir=tmp_path)
-        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
 
 
 class TestSaveFeedback:

@@ -237,49 +237,6 @@ def save_feedback(
     return path
 
 
-def set_in_progress(
-    label: str,
-    *,
-    mcloop_done: bool = False,
-    target_dir: Path | str = ".",
-) -> None:
-    """Record the currently-running phase in *duplo.json*.
-
-    Writes ``{"in_progress": {"label": label, "mcloop_done": mcloop_done}}``
-    into *duplo.json*, creating the file if it does not exist.  This is used
-    to resume an interrupted run.
-
-    Args:
-        label: Human-readable phase label (e.g. ``"Phase 1"``).
-        mcloop_done: ``True`` once McLoop has completed successfully.
-        target_dir: Directory containing ``duplo.json``.
-    """
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["in_progress"] = {"label": label, "mcloop_done": mcloop_done}
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
-def clear_in_progress(*, target_dir: Path | str = ".") -> None:
-    """Remove the ``in_progress`` key from *duplo.json* (no-op if absent).
-
-    Args:
-        target_dir: Directory containing ``duplo.json``.
-    """
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    if not path.exists():
-        return
-    try:
-        data: dict = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return
-    if "in_progress" not in data:
-        return
-    data.pop("in_progress")
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
 def save_screenshot_feature_map(
     mapping: dict[str, list[str]],
     *,

@@ -48,8 +48,8 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
     - If PLAN.md exists and has unchecked items: print status summary and "Run mcloop to continue building." Exit.
     - If PLAN.md exists and all items are checked: run phase-completion flow (annotation parsing, status tracking, issue prompt). Delete PLAN.md. Fall through to next-phase flow.
     - If no PLAN.md: run next-phase flow.
-  - [ ] Remove the separate `_advance_to_next` code path. The single next-phase flow handles everything.
-  - [ ] Remove the dependency on `in_progress` for flow control. The `in_progress` key can be removed entirely or repurposed for crash recovery only.
+  - [x] Remove the separate `_advance_to_next` code path. The single next-phase flow handles everything.
+  - [x] Remove the dependency on `in_progress` for flow control. The `in_progress` key can be removed entirely or repurposed for crash recovery only.
 
 - [ ] Implement next-phase flow with feature selection
   - [ ] Re-scrape the product site, re-extract features, merge new ones into `duplo.json` (already works)
