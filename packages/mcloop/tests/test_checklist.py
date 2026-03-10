@@ -3,6 +3,7 @@
 from mcloop.checklist import (
     check_off,
     find_next,
+    has_unchecked_bugs,
     is_auto_task,
     is_user_task,
     mark_failed,
@@ -441,3 +442,35 @@ def test_parse_auto_task_no_tag(tmp_path):
     action, args = parse_auto_task(tasks[0])
     assert action == ""
     assert args == ""
+
+
+def test_has_unchecked_bugs_true(tmp_path):
+    md = "## Bugs\n- [ ] Fix crash\n## Stage 1: Core\n- [ ] Add feature\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert has_unchecked_bugs(tasks)
+
+
+def test_has_unchecked_bugs_false_all_checked(tmp_path):
+    md = "## Bugs\n- [x] Fix crash\n## Stage 1: Core\n- [ ] Add feature\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not has_unchecked_bugs(tasks)
+
+
+def test_has_unchecked_bugs_false_no_bugs_section(tmp_path):
+    md = "## Stage 1: Core\n- [ ] Add feature\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not has_unchecked_bugs(tasks)
+
+
+def test_has_unchecked_bugs_false_failed(tmp_path):
+    md = "## Bugs\n- [!] Fix crash\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not has_unchecked_bugs(tasks)

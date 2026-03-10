@@ -24,6 +24,7 @@ from mcloop.checklist import (
     current_stage,
     find_next,
     get_stages,
+    has_unchecked_bugs,
     is_auto_task,
     is_user_task,
     mark_failed,
@@ -883,10 +884,25 @@ def run_loop(
     failed_reason: str = ""
     current_model = model  # may switch to fallback_model on rate limit
 
+    # Bug-only mode: when ## Bugs has unchecked items, work only those
+    # tasks. Do not fall through to feature tasks, do not start the
+    # next stage, do not run the audit cycle.
+    initial_tasks = parse(checklist_path)
+    bug_only = has_unchecked_bugs(initial_tasks)
+    if bug_only:
+        print(
+            formatting.system_msg("Bug-only mode: fixing bugs before continuing"),
+            flush=True,
+        )
+
     while True:
         tasks = parse(checklist_path)
         task = find_next(tasks)
         if task is None:
+            break
+
+        # In bug-only mode, stop when no more bug tasks remain
+        if bug_only and task.stage != "Bugs":
             break
 
         # If this is a parent with all children done, just check it off
@@ -1150,6 +1166,49 @@ def run_loop(
                 notes_snapshot,
             )
             return [task.text]
+
+    # Bug-only mode: verify the fix by launching the app, then exit.
+    # Skip stage transitions, audit cycle, and build.
+    if bug_only:
+        remaining_bugs = has_unchecked_bugs(parse(checklist_path))
+        if remaining_bugs:
+            print(
+                formatting.error_msg("Bug-only mode: some bugs could not be fixed"),
+                flush=True,
+            )
+        else:
+            print(
+                formatting.system_msg("Bug-only mode: all bugs fixed"),
+                flush=True,
+            )
+            # Verify the fix by launching the app
+            failure = _launch_app_verification(project_dir)
+            if failure:
+                print(
+                    formatting.error_msg(f"Bug verification failed: {failure}"),
+                    flush=True,
+                )
+            else:
+                print(
+                    formatting.system_msg("Bug verification passed"),
+                    flush=True,
+                )
+        total = time.monotonic() - run_start
+        _print_summary(
+            completed,
+            None,
+            "",
+            parse(checklist_path),
+            total,
+            project_dir,
+            notes_snapshot,
+        )
+        stuck = [
+            t.text
+            for t in parse(checklist_path)
+            if t.stage == "Bugs" and not t.checked and not t.failed
+        ]
+        return stuck
 
     # Check if we stopped at a stage boundary
     final_tasks = parse(checklist_path)

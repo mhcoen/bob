@@ -169,6 +169,11 @@ def stage_status(tasks: list[Task]) -> str:
     return "all_complete"
 
 
+def has_unchecked_bugs(tasks: list[Task]) -> bool:
+    """Return True if there are unchecked tasks in the ``## Bugs`` section."""
+    return _search_in_stage(tasks, "Bugs") is not None
+
+
 def find_next(tasks: list[Task]) -> Task | None:
     """Depth-first search for the next unchecked leaf task.
 
