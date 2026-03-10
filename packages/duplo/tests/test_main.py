@@ -2122,6 +2122,86 @@ class TestRoadmapRegeneration:
         assert saved["current_phase"] == 0
         assert saved["roadmap"] == fake_roadmap
 
+    def test_prints_feature_status_before_regenerating(self, capsys, tmp_path, monkeypatch):
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search items",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export data",
+                    "category": "extra",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "ok",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "1/2 implemented" in out
+        assert "Search" in out
+        assert "Export" in out
+
+    def test_prints_feature_status_when_all_implemented(self, capsys, tmp_path, monkeypatch):
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0",
+                },
+            ],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.generate_roadmap") as mock_gen:
+            main()
+
+        mock_gen.assert_not_called()
+        out = capsys.readouterr().out
+        assert "1/1 implemented" in out
+        assert "All features implemented" in out
+
 
 class TestBuildCompletionHistory:
     """Tests for _build_completion_history."""

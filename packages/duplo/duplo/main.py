@@ -906,6 +906,7 @@ def _subsequent_run() -> None:
     # regenerate from remaining unimplemented features.
     roadmap = data.get("roadmap", [])
     if not roadmap or phase_info is None:
+        _print_feature_status(data)
         remaining = _unimplemented_features(data)
         if not remaining:
             print("All features implemented. Nothing to do.")
