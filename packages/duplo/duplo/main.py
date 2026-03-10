@@ -29,6 +29,7 @@ from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
     append_test_tasks,
     generate_phase_plan,
+    parse_completed_tasks,
     save_plan,
 )
 from duplo.questioner import BuildPreferences, ask_preferences
@@ -51,7 +52,9 @@ from duplo.saver import (
     append_phase_to_history,
     get_current_phase,
     load_product,
+    mark_implemented_features,
     move_references,
+    resolve_completed_fixes,
     save_design_requirements,
     save_doc_structures,
     save_examples,
@@ -67,6 +70,7 @@ from duplo.saver import (
     store_accepted_frames,
     write_claude_md,
 )
+from duplo.task_matcher import match_unannotated_tasks
 from duplo.screenshotter import map_screenshots_to_features, save_reference_screenshots
 from duplo.selector import select_features, select_issues
 
@@ -1297,6 +1301,42 @@ def _complete_phase(
     phase_label: str,
 ) -> None:
     """Record a completed phase, capture screenshots, and advance."""
+    # Parse completed tasks and mark features before recording history.
+    tasks = parse_completed_tasks(plan_content)
+    if tasks:
+        # Mark features from annotated tasks [feat: "..."].
+        marked = mark_implemented_features(tasks, phase_label)
+        if marked:
+            print(f"Marked {len(marked)} annotated feature(s) as implemented.")
+
+        # Resolve issues from annotated tasks [fix: "..."].
+        resolved = resolve_completed_fixes(tasks)
+        if resolved:
+            print(f"Resolved {len(resolved)} annotated fix(es).")
+
+        # Match unannotated tasks to features via Claude.
+        duplo_path = Path(_DUPLO_JSON)
+        try:
+            data = json.loads(duplo_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
+        features = [Feature(**f) for f in data.get("features", [])]
+        if features:
+            unannotated = [t for t in tasks if not t.features and not t.fixes]
+            if unannotated:
+                print(f"Matching {len(unannotated)} unannotated task(s) to features …")
+                matched, new = match_unannotated_tasks(tasks, features, phase_label)
+                if matched:
+                    print(f"  Matched {len(matched)} existing feature(s):")
+                    for name in matched:
+                        print(f"    - {name}")
+                if new:
+                    print(f"  Discovered {len(new)} new feature(s):")
+                    for name in new:
+                        print(f"    - {name}")
+                if not matched and not new:
+                    print("  No feature matches found.")
+
     append_phase_to_history(plan_content)
     advance_phase()
     plan_path = Path("PLAN.md")

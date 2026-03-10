@@ -2591,3 +2591,163 @@ class TestPrintStatus:
         out = capsys.readouterr().out
         assert out.strip().startswith("Phase 1 complete")
         assert "McWhisper" not in out
+
+
+class TestCompletePhaseTaskMatching:
+    """Phase completion marks features via annotated and unannotated tasks."""
+
+    _FEATURES = [
+        {
+            "name": "Search",
+            "description": "Full-text search",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+        {
+            "name": "Export",
+            "description": "Export data",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+    ]
+
+    def _plan_with_annotations(self):
+        return (
+            '- [x] Add search bar [feat: "Search"]\n'
+            "- [x] Scaffold project\n"
+            '- [x] Fix crash on export [fix: "Export button crash"]\n'
+        )
+
+    def test_annotated_features_marked(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "features": self._FEATURES,
+                "issues": [
+                    {
+                        "description": "Export button crash",
+                        "source": "user",
+                        "phase": "Phase 1",
+                        "status": "open",
+                    },
+                ],
+            },
+        )
+
+        plan_content = self._plan_with_annotations()
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+                return_value=(["Export"], []),
+            ) as mock_match,
+        ):
+            _complete_phase(plan_content, "", "Phase 1")
+
+        # Check that Search was marked via annotation.
+        data = _read_duplo_json(tmp_path)
+        search = next(f for f in data["features"] if f["name"] == "Search")
+        assert search["status"] == "implemented"
+        assert search["implemented_in"] == "Phase 1"
+
+        # Check that fix annotation resolved the issue.
+        issue = data["issues"][0]
+        assert issue["status"] == "resolved"
+
+        # Unannotated matcher was called with the scaffold task.
+        mock_match.assert_called_once()
+        out = capsys.readouterr().out
+        assert "1 annotated feature" in out
+        assert "1 annotated fix" in out
+        assert "Matched 1 existing feature" in out
+
+    def test_unannotated_tasks_matched_via_claude(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"features": self._FEATURES})
+
+        plan_content = "- [x] Build search UI\n- [x] Wire export button\n"
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+                return_value=(["Search", "Export"], ["Custom theme"]),
+            ),
+        ):
+            _complete_phase(plan_content, "", "Phase 1")
+
+        out = capsys.readouterr().out
+        assert "2 unannotated task(s)" in out
+        assert "Matched 2 existing feature" in out
+        assert "Discovered 1 new feature" in out
+        assert "Custom theme" in out
+
+    def test_no_features_skips_unannotated_matching(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"features": []})
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+            ) as mock_match,
+        ):
+            _complete_phase("- [x] task\n", "", "Phase 1")
+
+        mock_match.assert_not_called()
+
+    def test_all_tasks_annotated_skips_unannotated_matching(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"features": self._FEATURES})
+
+        plan_content = '- [x] Add search [feat: "Search"]\n'
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+            ) as mock_match,
+        ):
+            _complete_phase(plan_content, "", "Phase 1")
+
+        mock_match.assert_not_called()
+
+    def test_no_matches_prints_message(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"features": self._FEATURES})
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+                return_value=([], []),
+            ),
+        ):
+            _complete_phase("- [x] setup\n", "", "Phase 1")
+
+        out = capsys.readouterr().out
+        assert "No feature matches found" in out
