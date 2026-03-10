@@ -109,22 +109,34 @@ private func _mcloopSetupCrashHandlers() {
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
         signal(sig) { signum in
-            let state = _McloopState.unsafeSnapshot()
-            let action = _McloopState.unsafeLastAction()
-            let report: [String: Any] = [
-                "timestamp": ISO8601DateFormatter().string(from: Date()),
-                "signal": signum,
-                "exception_type": "Signal",
-                "description": "Received signal \\(signum)",
-                "stack_trace": Thread.callStackSymbols.joined(
-                    separator: "\\n"),
-                "source_file": "",
-                "line": 0,
-                "app_state": state,
-                "last_action": action,
-                "fix_attempts": 0,
-            ]
-            _mcloopWriteError(report, dir: errorDir)
+            // fork() is async-signal-safe. The child process gets its
+            // own address space and can safely use Foundation/JSON to
+            // write the crash report without risking deadlock.
+            let pid = fork()
+            if pid == 0 {
+                let state = _McloopState.unsafeSnapshot()
+                let action = _McloopState.unsafeLastAction()
+                let report: [String: Any] = [
+                    "timestamp": ISO8601DateFormatter().string(
+                        from: Date()),
+                    "signal": signum,
+                    "exception_type": "Signal",
+                    "description": "Received signal \\(signum)",
+                    "stack_trace": Thread.callStackSymbols.joined(
+                        separator: "\\n"),
+                    "source_file": "",
+                    "line": 0,
+                    "app_state": state,
+                    "last_action": action,
+                    "fix_attempts": 0,
+                ]
+                _mcloopWriteError(report, dir: errorDir)
+                _exit(0)
+            } else if pid > 0 {
+                var status: Int32 = 0
+                waitpid(pid, &status, 0)
+            }
+            // write() and fputs to stderr are async-signal-safe
             fputs(
                 "[McLoop] Crash captured: Signal \\(signum)."
                 + " Run mcloop from __MCLOOP_PROJECT_DIR__"

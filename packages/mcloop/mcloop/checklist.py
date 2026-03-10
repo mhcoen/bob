@@ -231,8 +231,7 @@ def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
                     return child
             if task.stage != stage:
                 continue
-            if not task.children:
-                return task
+            return task
         return None
 
     return _search(tasks)

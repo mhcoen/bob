@@ -494,4 +494,12 @@ def run_gui(
             sample_output=sample_out if stuck else None,
         )
     finally:
-        proc.wait()
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        else:
+            proc.wait()
