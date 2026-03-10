@@ -645,6 +645,40 @@ def resolve_issue(
     return path
 
 
+def resolve_completed_fixes(
+    tasks: list,
+    *,
+    target_dir: Path | str = ".",
+) -> list[str]:
+    """Resolve issues referenced in completed tasks' ``[fix: ...]`` annotations.
+
+    Iterates over *tasks* (each a :class:`~duplo.planner.CompletedTask`),
+    collects unique fix descriptions from their ``fixes`` lists, and calls
+    :func:`resolve_issue` for each one.  Issues that do not exist in
+    *duplo.json* are silently skipped.
+
+    Args:
+        tasks: Completed task objects with ``fixes`` attribute.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        List of issue descriptions that were successfully resolved.
+    """
+    seen: set[str] = set()
+    resolved: list[str] = []
+    for task in tasks:
+        for desc in task.fixes:
+            if desc in seen:
+                continue
+            seen.add(desc)
+            try:
+                resolve_issue(desc, target_dir=target_dir)
+                resolved.append(desc)
+            except ValueError:
+                continue
+    return resolved
+
+
 def save_code_examples(
     examples: list[CodeExample],
     *,

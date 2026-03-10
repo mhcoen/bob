@@ -37,6 +37,7 @@ from duplo.saver import (
     load_product,
     mark_implemented_features,
     move_references,
+    resolve_completed_fixes,
     save_examples,
     save_feature_status,
     save_features,
@@ -1582,3 +1583,96 @@ class TestMarkImplementedFeatures:
         assert marked == ["Auth"]
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["features"][0]["status"] == "implemented"
+
+
+class TestResolveCompletedFixes:
+    """Tests for resolve_completed_fixes()."""
+
+    def _write_issues(self, tmp_path, issues_data):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"issues": issues_data}), encoding="utf-8")
+
+    def test_resolves_single_fix(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [{"description": "button misaligned", "status": "open"}],
+        )
+        tasks = [CompletedTask(text="Fix button", fixes=["button misaligned"])]
+        resolved = resolve_completed_fixes(tasks, target_dir=tmp_path)
+        assert resolved == ["button misaligned"]
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["issues"][0]["status"] == "resolved"
+        assert "resolved_at" in data["issues"][0]
+
+    def test_resolves_multiple_fixes(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [
+                {"description": "button misaligned", "status": "open"},
+                {"description": "color wrong", "status": "open"},
+            ],
+        )
+        tasks = [
+            CompletedTask(text="Fix button", fixes=["button misaligned"]),
+            CompletedTask(text="Fix color", fixes=["color wrong"]),
+        ]
+        resolved = resolve_completed_fixes(tasks, target_dir=tmp_path)
+        assert set(resolved) == {"button misaligned", "color wrong"}
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert all(i["status"] == "resolved" for i in data["issues"])
+
+    def test_deduplicates_fix_descriptions(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [{"description": "button misaligned", "status": "open"}],
+        )
+        tasks = [
+            CompletedTask(text="Fix button layout", fixes=["button misaligned"]),
+            CompletedTask(text="Adjust button CSS", fixes=["button misaligned"]),
+        ]
+        resolved = resolve_completed_fixes(tasks, target_dir=tmp_path)
+        assert resolved == ["button misaligned"]
+
+    def test_skips_unknown_issues(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [{"description": "button misaligned", "status": "open"}],
+        )
+        tasks = [
+            CompletedTask(text="Fix button", fixes=["button misaligned"]),
+            CompletedTask(text="Fix ghost", fixes=["nonexistent issue"]),
+        ]
+        resolved = resolve_completed_fixes(tasks, target_dir=tmp_path)
+        assert resolved == ["button misaligned"]
+
+    def test_empty_tasks(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [{"description": "button misaligned", "status": "open"}],
+        )
+        resolved = resolve_completed_fixes([], target_dir=tmp_path)
+        assert resolved == []
+
+    def test_tasks_without_fixes(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [{"description": "button misaligned", "status": "open"}],
+        )
+        tasks = [CompletedTask(text="Add login", features=["Auth"])]
+        resolved = resolve_completed_fixes(tasks, target_dir=tmp_path)
+        assert resolved == []
+
+    def test_leaves_other_issues_unchanged(self, tmp_path):
+        self._write_issues(
+            tmp_path,
+            [
+                {"description": "button misaligned", "status": "open"},
+                {"description": "font too small", "status": "open"},
+            ],
+        )
+        tasks = [CompletedTask(text="Fix button", fixes=["button misaligned"])]
+        resolve_completed_fixes(tasks, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["issues"][1]["status"] == "open"
