@@ -2165,3 +2165,135 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
 
     tasks = parse_checklist(plan)
     assert tasks[0].checked
+
+
+# --- --fallback-model ---
+
+
+def test_fallback_model_flag():
+    args = _parse("--fallback-model", "sonnet")
+    assert args.fallback_model == "sonnet"
+
+
+def test_fallback_model_default_is_none():
+    args = _parse()
+    assert args.fallback_model is None
+
+
+def test_fallback_model_with_model():
+    args = _parse("--model", "opus", "--fallback-model", "sonnet")
+    assert args.model == "opus"
+    assert args.fallback_model == "sonnet"
+
+
+def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
+    """When rate-limited with fallback_model set, switches model."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count == 1:
+            # First call: rate limited
+            result.success = False
+            result.output = "rate limit exceeded"
+            result.exit_code = 1
+        else:
+            # Second call: succeeds
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    models_used = []
+
+    def tracking_run_task(*args, **kwargs):
+        models_used.append(kwargs.get("model"))
+        return fake_run_task(*args, **kwargs)
+
+    with (
+        patch("mcloop.main.run_task", side_effect=tracking_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main.wait_for_reset", return_value="claude"),
+    ):
+        run_loop(
+            plan,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    # First attempt used primary model, second used fallback
+    assert models_used[0] == "opus"
+    assert models_used[1] == "sonnet"
+
+
+def test_run_loop_no_fallback_without_flag(tmp_path):
+    """Without fallback_model, rate limit does not change model."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count == 1:
+            result.success = False
+            result.output = "rate limit exceeded"
+            result.exit_code = 1
+        else:
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    models_used = []
+
+    def tracking_run_task(*args, **kwargs):
+        models_used.append(kwargs.get("model"))
+        return fake_run_task(*args, **kwargs)
+
+    with (
+        patch("mcloop.main.run_task", side_effect=tracking_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main.wait_for_reset", return_value="claude"),
+    ):
+        run_loop(
+            plan,
+            model="opus",
+            no_audit=True,
+        )
+
+    # Both attempts should use the same model
+    assert models_used[0] == "opus"
+    assert models_used[1] == "opus"

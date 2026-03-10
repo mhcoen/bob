@@ -596,6 +596,8 @@ def _main() -> None:
         cmd = [sys.executable, "-m", "mcloop", "--no-audit", "--allow-web-tools"]
         if args.model:
             cmd.extend(["--model", args.model])
+        if args.fallback_model:
+            cmd.extend(["--fallback-model", args.fallback_model])
 
         for verify_round in range(1, MAX_VERIFICATION_ROUNDS + 1):
             print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
@@ -639,6 +641,7 @@ def _main() -> None:
         checklist_path,
         max_retries=args.max_retries,
         model=args.model,
+        fallback_model=args.fallback_model,
         no_audit=args.no_audit,
         allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
     )
@@ -649,6 +652,7 @@ def run_loop(
     max_retries: int = 3,
     enabled_clis: tuple[str, ...] = ("claude",),
     model: str | None = None,
+    fallback_model: str | None = None,
     no_audit: bool = False,
     allowed_tools: str | None = None,
 ) -> list[str]:
@@ -664,7 +668,7 @@ def run_loop(
 
     _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
-    _checkpoint(project_dir)
+    _checkpoint(project_dir, verbose=True)
     _push_or_die(project_dir)
 
     # Clean up stale pending files from previous runs
@@ -679,6 +683,7 @@ def run_loop(
     completed: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
+    current_model = model  # may switch to fallback_model on rate limit
 
     while True:
         tasks = parse(checklist_path)
@@ -753,7 +758,7 @@ def run_loop(
                 log_dir,
                 description,
                 task_label=label,
-                model=model,
+                model=current_model,
                 prior_errors=last_error,
                 session_context=ctx.text(),
                 check_commands=project_checks,
@@ -799,9 +804,22 @@ def run_loop(
             if is_rate_limited(result.output, result.exit_code):
                 rate_state.mark_limited(cli)
                 notify(f"Rate-limited on {cli}.", level="warning")
+                if fallback_model and current_model != fallback_model:
+                    current_model = fallback_model
+                    print(
+                        formatting.system_msg(f"Switching to fallback model: {fallback_model}"),
+                        flush=True,
+                    )
                 cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
                 if cli is None:
                     cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+                    # Reset to primary model after cooldown
+                    if fallback_model and current_model == fallback_model:
+                        current_model = model
+                        print(
+                            formatting.system_msg(f"Rate limit cleared, back to model: {model}"),
+                            flush=True,
+                        )
                 attempt -= 1  # don't count rate-limit as a real attempt
                 continue
 
@@ -984,6 +1002,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
     parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
+    parser.add_argument(
+        "--fallback-model",
+        default=None,
+        help="Model to use when the primary model is rate-limited",
+    )
     parser.add_argument(
         "--no-audit", action="store_true", help="Skip the post-completion bug audit cycle"
     )
@@ -2092,6 +2115,7 @@ def _git(
 def _checkpoint(
     project_dir: Path,
     next_task: str = "",
+    verbose: bool = False,
 ) -> None:
     """Stage and commit all changes as a checkpoint.
 
@@ -2111,7 +2135,11 @@ def _checkpoint(
         label="checkpoint status",
     )
     if result.returncode != 0 or not result.stdout.strip():
+        if verbose:
+            print(formatting.system_msg("No pending changes to commit."), flush=True)
         return
+    if verbose:
+        print(formatting.system_msg("Committing pending changes..."), flush=True)
     msg = "mcloop: checkpoint"
     if next_task:
         msg += f" (next: {next_task})"
@@ -2162,9 +2190,7 @@ def _push_or_die(project_dir: Path) -> None:
     )
     if push_result.returncode != 0:
         print(
-            formatting.error_msg(
-                "Pre-flight push failed. Fix the remote and re-run mcloop."
-            ),
+            formatting.error_msg("Pre-flight push failed. Fix the remote and re-run mcloop."),
             flush=True,
         )
         sys.exit(1)
