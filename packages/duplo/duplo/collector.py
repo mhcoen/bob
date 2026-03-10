@@ -69,8 +69,9 @@ def collect_issues(
 ) -> list[str]:
     """Prompt the user for known issues with the completed phase.
 
-    Each non-empty line the user enters becomes one issue description.
-    An empty line or EOF finishes input. Returns an empty list if the
+    Each issue may span multiple lines.  A blank line finishes the
+    current issue and prompts for the next one.  An immediate blank
+    line (or EOF) ends input entirely.  Returns an empty list if the
     user enters nothing (no issues to report is a valid response).
 
     Args:
@@ -80,16 +81,25 @@ def collect_issues(
     Returns:
         List of issue description strings (may be empty).
     """
-    print_fn("Any known issues with this phase? (one per line, blank line to skip):")
+    print_fn(
+        "Any known issues with this phase? (blank line to finish each issue, blank line to stop):"
+    )
     issues: list[str] = []
+    lines: list[str] = []
     try:
         while True:
-            line = input_fn("")
-            if line == "":
+            lines = []
+            while True:
+                line = input_fn("")
+                if line == "":
+                    break
+                lines.append(line)
+            text = "\n".join(lines).strip()
+            if not text:
                 break
-            stripped = line.strip()
-            if stripped:
-                issues.append(stripped)
+            issues.append(text)
     except EOFError:
-        pass
+        text = "\n".join(lines).strip()
+        if text:
+            issues.append(text)
     return issues

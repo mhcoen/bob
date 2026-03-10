@@ -86,29 +86,58 @@ class TestCollectFeedbackInteractive:
 
 
 class TestCollectIssues:
-    def test_returns_issues_list(self):
-        result = collect_issues(input_fn=make_input("button broken", "text misaligned", ""))
+    def test_single_line_issues(self):
+        # Each issue is one line, blank line between separates them.
+        result = collect_issues(
+            input_fn=make_input("button broken", "", "text misaligned", "", "")
+        )
         assert result == ["button broken", "text misaligned"]
+
+    def test_multi_line_issue(self):
+        result = collect_issues(
+            input_fn=make_input("crash on save", "stack trace attached", "", "")
+        )
+        assert result == ["crash on save\nstack trace attached"]
+
+    def test_multiple_multi_line_issues(self):
+        result = collect_issues(
+            input_fn=make_input(
+                "issue one line 1",
+                "issue one line 2",
+                "",
+                "issue two line 1",
+                "",
+                "",
+            )
+        )
+        assert result == [
+            "issue one line 1\nissue one line 2",
+            "issue two line 1",
+        ]
 
     def test_empty_input_returns_empty_list(self):
         result = collect_issues(input_fn=make_input(""))
         assert result == []
 
-    def test_eof_terminates(self):
+    def test_eof_mid_issue_saves_it(self):
         result = collect_issues(input_fn=make_input_with_eof("crash on save", None))
         assert result == ["crash on save"]
+
+    def test_eof_after_blank_line(self):
+        result = collect_issues(input_fn=make_input_with_eof("an issue", "", None))
+        assert result == ["an issue"]
 
     def test_immediate_eof_returns_empty(self):
         result = collect_issues(input_fn=make_input_with_eof(None))
         assert result == []
 
-    def test_strips_whitespace_from_lines(self):
-        result = collect_issues(input_fn=make_input("  padded issue  ", ""))
+    def test_strips_whitespace_from_issue_text(self):
+        result = collect_issues(input_fn=make_input("  padded issue  ", "", ""))
         assert result == ["padded issue"]
 
-    def test_skips_blank_only_lines(self):
-        result = collect_issues(input_fn=make_input("real issue", "   ", ""))
-        assert result == ["real issue"]
+    def test_blank_only_lines_within_issue_are_stripped(self):
+        result = collect_issues(input_fn=make_input("   ", "", ""))
+        assert result == []
 
     def test_prints_prompt(self):
         lines: list[str] = []
