@@ -79,6 +79,26 @@ def run_task(
             " and re-run until they all pass."
             " Do not finish with failing checks."
         )
+    if shutil.which("rtk"):
+        parts.append(
+            "IMPORTANT: `rtk` is installed. ALWAYS prefix"
+            " test runners, linters, and build tools with"
+            " `rtk proxy` to compress their output and save"
+            " tokens. Commands to prefix: pytest, ruff,"
+            " swift build, swift test, cargo build, cargo"
+            " test, npm test, make, gcc, clang, javac, go"
+            " build, go test, and similar build/test/lint"
+            " tools. For example: `rtk proxy pytest`,"
+            " `rtk proxy swift build`, `rtk proxy ruff"
+            " check .`. Do NOT prefix short commands like"
+            " cat, ls, head, grep, git, echo, cd, mkdir,"
+            " cp, mv, or rm. The ONLY time you should skip"
+            " `rtk proxy` on a build/test command is when"
+            " you are actively debugging a failure and need"
+            " the full uncompressed output to diagnose the"
+            " error. In that case, run without `rtk proxy`"
+            " and state why you need the raw output."
+        )
     parts.append(
         "When debugging crashes or unexpected"
         " behavior, always find and read the actual"
@@ -133,15 +153,6 @@ def run_task(
         " setAccessibleName() in Qt. This makes the"
         " app programmatically testable."
     )
-    if shutil.which("rtk"):
-        parts.append(
-            "Prefix test runners, linters, and build tools"
-            " with `rtk proxy` to compress their output."
-            " For example: `rtk proxy pytest`, `rtk proxy"
-            " ruff check .`, `rtk proxy swift build`."
-            " Do not prefix short commands like cat, ls,"
-            " head, grep, git, echo, or cd."
-        )
     parts.append(
         "Never install tools or dependencies via brew,"
         " cargo, pip, npm, apt, or any other package"

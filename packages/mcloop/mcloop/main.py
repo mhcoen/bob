@@ -665,6 +665,7 @@ def run_loop(
     _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     _checkpoint(project_dir)
+    _push_or_die(project_dir)
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
@@ -830,7 +831,24 @@ def run_loop(
             changed_files = _changed_files(project_dir)
             check_result = run_checks(project_dir, changed_files=changed_files)
             if check_result.passed:
-                _commit(project_dir, task.text)
+                try:
+                    _commit(project_dir, task.text)
+                except RuntimeError as exc:
+                    print(
+                        formatting.error_msg(str(exc)),
+                        flush=True,
+                    )
+                    total = time.monotonic() - run_start
+                    _print_summary(
+                        completed,
+                        f"{label}) {task.text}",
+                        str(exc),
+                        parse(checklist_path),
+                        total,
+                        project_dir,
+                        notes_snapshot,
+                    )
+                    sys.exit(1)
                 check_off(checklist_path, task)
                 elapsed = _format_elapsed(time.monotonic() - task_start)
                 completed.append(f"{label}) {task.text}")
@@ -1959,7 +1977,14 @@ def _run_single_audit_round(
                         flush=True,
                     )
 
-            _commit(project_dir, "Fix bugs from audit")
+            try:
+                _commit(project_dir, "Fix bugs from audit")
+            except RuntimeError as exc:
+                print(
+                    formatting.error_msg(str(exc)),
+                    flush=True,
+                )
+                sys.exit(1)
             bugs_path.unlink(missing_ok=True)
             return True
 
@@ -2036,6 +2061,7 @@ def _git(
     cwd: Path,
     *,
     label: str = "",
+    silent: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run a git command and report errors.
 
@@ -2058,7 +2084,7 @@ def _git(
             msg += f"\n    {stderr}"
         print(formatting.error_msg(msg), flush=True)
         # Only notify for real git failures, not missing repos
-        if "not a git repository" not in stderr:
+        if not silent and "not a git repository" not in stderr:
             notify(msg, level="error")
     return result
 
@@ -2111,6 +2137,39 @@ def _checkpoint(
     )
 
 
+def _push_or_die(project_dir: Path) -> None:
+    """Push to remote before starting any work.
+
+    Ensures the remote is up to date so no work is done on top
+    of an un-pushed state. If there is no remote, this is a no-op.
+    If the push fails, mcloop exits immediately.
+    """
+    if not (project_dir / ".git").exists():
+        return
+    result = _git(
+        ["git", "remote"],
+        cwd=project_dir,
+        label="pre-flight remote check",
+    )
+    if not result.stdout.strip():
+        return  # no remote configured
+    print(formatting.system_msg("Pushing to remote..."), flush=True)
+    push_result = _git(
+        ["git", "push"],
+        cwd=project_dir,
+        label="pre-flight push",
+        silent=True,
+    )
+    if push_result.returncode != 0:
+        print(
+            formatting.error_msg(
+                "Pre-flight push failed. Fix the remote and re-run mcloop."
+            ),
+            flush=True,
+        )
+        sys.exit(1)
+
+
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     if not (project_dir / ".git").exists():
@@ -2150,8 +2209,15 @@ def _commit(project_dir: Path, task_text: str) -> None:
             label="commit remote recheck",
         )
     if result.stdout.strip():
-        _git(
+        print(formatting.system_msg("Pushing..."), flush=True)
+        push_result = _git(
             ["git", "push"],
             cwd=project_dir,
             label="push",
+            silent=True,
         )
+        if push_result.returncode != 0:
+            raise RuntimeError(
+                f"git push failed (exit {push_result.returncode})."
+                f" Fix the remote and re-run mcloop."
+            )

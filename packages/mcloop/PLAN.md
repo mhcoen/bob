@@ -200,3 +200,10 @@ The debugging playbook this enforces:
   - [x] Enable WebFetch and WebSearch tools for investigation sessions so the agent can research APIs and find working examples
   - [x] Enhanced testing instruction for investigation sessions: write tests that exercise real code with real inputs, do not mock core logic, test threading/async for deadlocks, handle system API permission cases gracefully
   - [x] Enhanced debugging instruction for investigation sessions: decompose before patching, search web for working examples, question assumptions when repeated approaches fail
+
+- [ ] Model fallback on task failure
+  - [ ] Add `--fallback-model` CLI flag (e.g. `mcloop --model sonnet --fallback-model opus`). Not the default; only active when explicitly provided.
+  - [ ] When a task exhausts all retries on the primary model and `--fallback-model` is set, retry the task from scratch using the fallback model (same retry count) before marking it failed.
+  - [ ] Print a clear message when falling back: "Primary model failed, retrying with <fallback-model>".
+  - [ ] If the fallback model also exhausts retries, mark the task failed as normal.
+  - [ ] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
