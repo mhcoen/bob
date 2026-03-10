@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import re
+
 import pytest
 
 from duplo.extractor import Feature
@@ -149,6 +151,104 @@ class TestNextPhaseSystemPromptAnnotations:
         assert "no annotation" in _NEXT_PHASE_SYSTEM.lower()
 
 
+_SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
+
+_ANNOTATED_PHASE_PLAN = """\
+# MyApp
+
+Web app built with Python/FastAPI and PostgreSQL.
+
+- [ ] Set up project structure and build system
+- [ ] Add user login form [feat: "User auth"]
+  - [ ] Create login page template
+  - [ ] Wire up authentication backend [feat: "User auth"]
+- [ ] Build activity overview [feat: "Dashboard"]
+- [ ] Fix email validation on signup [fix: "email format not checked"]
+"""
+
+_ANNOTATED_NEXT_PLAN = """\
+# Phase 2: Search
+
+## Objective
+Add full-text search across the application.
+
+## Implementation steps
+1. Set up search index infrastructure
+2. Add search bar component [feat: "Full-text search"]
+3. Implement result ranking [feat: "Full-text search", "Relevance scoring"]
+4. Fix broken layout on mobile [fix: "sidebar overlaps content on small screens"]
+"""
+
+_ANNOTATION_RE = re.compile(r"\[(feat|fix):\s*\"[^\"]+\"(?:,\s*\"[^\"]+\")*\]")
+
+
+class TestPlanAnnotationOutput:
+    """Verify that generated plans contain [feat:] or [fix:] annotations."""
+
+    def test_phase_plan_contains_feat_annotations(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        feat_matches = re.findall(r'\[feat: "[^"]+"\]', result)
+        assert len(feat_matches) >= 1
+
+    def test_phase_plan_contains_fix_annotations(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        fix_matches = re.findall(r'\[fix: "[^"]+"\]', result)
+        assert len(fix_matches) >= 1
+
+    def test_phase_plan_annotations_on_task_lines(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        for line in result.splitlines():
+            match = _ANNOTATION_RE.search(line)
+            if match:
+                stripped = line.lstrip()
+                assert stripped.startswith("- [ ]") or stripped.startswith("- [x]")
+
+    def test_next_phase_plan_contains_feat_annotations(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
+            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
+        feat_matches = re.findall(r'\[feat: "[^"]+"\]', result)
+        assert len(feat_matches) >= 1
+
+    def test_next_phase_plan_contains_fix_annotations(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
+            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
+        fix_matches = re.findall(r'\[fix: "[^"]+"\]', result)
+        assert len(fix_matches) >= 1
+
+    def test_next_phase_plan_multi_feature_annotation(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
+            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
+        multi = re.findall(r'\[feat: "[^"]+",\s*"[^"]+"\]', result)
+        assert len(multi) >= 1
+
+    def test_scaffolding_lines_have_no_annotation(self):
+        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        for line in result.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("- [ ]") and "project structure" in stripped:
+                assert not _ANNOTATION_RE.search(line)
+
+
 class TestDetectNextPhaseNumber:
     def test_extracts_phase_number(self):
         plan = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
@@ -170,7 +270,6 @@ class TestDetectNextPhaseNumber:
 
 
 _SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search."
-_SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
 
 
 class TestGenerateNextPhasePlan:
