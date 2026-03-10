@@ -479,3 +479,81 @@ Web app built with Python/FastAPI.
         plan = "- [x] Task one\n"
         tasks = parse_completed_tasks(plan)
         assert isinstance(tasks[0], CompletedTask)
+
+    def test_multi_fix_annotation(self):
+        plan = '- [x] Fix layout bugs [fix: "sidebar overlap", "footer gap"]\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Fix layout bugs"
+        assert tasks[0].fixes == ["sidebar overlap", "footer gap"]
+        assert tasks[0].features == []
+
+    def test_annotation_like_text_midline_not_parsed(self):
+        plan = '- [x] Update [feat: "old"] handler to use new API\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        # The regex only matches annotations at end of line, so mid-line
+        # bracket text is kept as part of the task description.
+        assert tasks[0].text == 'Update [feat: "old"] handler to use new API'
+        assert tasks[0].features == []
+        assert tasks[0].fixes == []
+
+    def test_annotation_with_extra_spaces(self):
+        plan = '- [x] Task with spacing [feat:  "Spaced feature"]\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].features == ["Spaced feature"]
+
+    def test_all_lines_annotated(self):
+        plan = (
+            '- [x] Add login [feat: "Auth"]\n'
+            '- [x] Add dashboard [feat: "Dashboard"]\n'
+            '- [x] Fix crash [fix: "null pointer on empty input"]\n'
+        )
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 3
+        assert all(t.features or t.fixes for t in tasks)
+        assert tasks[0].features == ["Auth"]
+        assert tasks[1].features == ["Dashboard"]
+        assert tasks[2].fixes == ["null pointer on empty input"]
+
+    def test_all_lines_unannotated(self):
+        plan = "- [x] Set up project structure\n- [x] Configure CI pipeline\n- [x] Add README\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 3
+        assert all(t.features == [] and t.fixes == [] for t in tasks)
+
+    def test_mixed_feat_fix_and_bare(self):
+        plan = (
+            "- [x] Scaffold project\n"
+            '- [x] Add search [feat: "Full-text search"]\n'
+            "- [x] Refactor utils\n"
+            '- [x] Fix timeout [fix: "request hangs after 30s"]\n'
+            '- [x] Add export [feat: "CSV export", "PDF export"]\n'
+        )
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 5
+        assert tasks[0].features == [] and tasks[0].fixes == []
+        assert tasks[1].features == ["Full-text search"]
+        assert tasks[2].features == [] and tasks[2].fixes == []
+        assert tasks[3].fixes == ["request hangs after 30s"]
+        assert tasks[4].features == ["CSV export", "PDF export"]
+
+    def test_indented_subtask_with_annotation(self):
+        plan = (
+            '- [x] Build auth module [feat: "Auth"]\n'
+            '  - [x] Add password hashing [feat: "Auth"]\n'
+            "  - [x] Write migration script\n"
+        )
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 3
+        assert tasks[0].indent == 0 and tasks[0].features == ["Auth"]
+        assert tasks[1].indent == 2 and tasks[1].features == ["Auth"]
+        assert tasks[2].indent == 2 and tasks[2].features == []
+
+    def test_trailing_whitespace_after_annotation(self):
+        plan = '- [x] Add feature [feat: "Foo"]   \n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].features == ["Foo"]
+        assert tasks[0].text == "Add feature"
