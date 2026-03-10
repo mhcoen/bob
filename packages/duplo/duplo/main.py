@@ -100,6 +100,7 @@ class UpdateSummary:
     missing_examples: int = 0
     design_refinements: int = 0
     tasks_appended: int = 0
+    collected_text: str = ""
 
 
 def _download_site_media(
@@ -514,6 +515,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         print(f"\nExtracting text from {len(relevant_pdfs)} new PDF(s) …")
         pdf_text = extract_pdf_text(relevant_pdfs)
         if pdf_text:
+            summary.collected_text += pdf_text + "\n"
             print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
             summary.pdfs_extracted = len(relevant_pdfs)
             analyzed_anything = True
@@ -527,6 +529,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
             except OSError:
                 pass
         if text_content.strip():
+            summary.collected_text += text_content
             print(f"\nRead {len(scan.text_files)} new text file(s).")
             summary.text_files_read = len(scan.text_files)
             analyzed_anything = True
@@ -545,7 +548,11 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
             for url in new_urls:
                 print(f"  Fetching {url} …")
                 try:
-                    _, code_examples, doc_structures, page_records, raw_pages = fetch_site(url)
+                    url_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
+                        url
+                    )
+                    if url_text:
+                        summary.collected_text += url_text + "\n"
                     if page_records:
                         all_page_records.extend(page_records)
                         if raw_pages:
@@ -843,11 +850,16 @@ def _subsequent_run() -> None:
     summary.pages_rescraped = pages
     summary.examples_rescraped = examples
 
-    # Re-extract features from the updated scraped content and merge
+    # Combine text from new files with re-scraped content for feature extraction.
+    combined_text = scraped_text
+    if summary.collected_text.strip():
+        combined_text = summary.collected_text + "\n" + combined_text
+
+    # Re-extract features from the updated content and merge
     # new ones into duplo.json so the gap detector can find them.
-    if scraped_text:
+    if combined_text:
         print("\nRe-extracting features …")
-        new_features = extract_features(scraped_text)
+        new_features = extract_features(combined_text)
         if new_features:
             try:
                 old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))

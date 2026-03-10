@@ -29,14 +29,17 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     if system:
         cmd.extend(["--system-prompt", system])
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=env,
+        )
+    except FileNotFoundError:
+        raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
     return result.stdout.strip()
@@ -76,14 +79,17 @@ def query_with_images(
     if system:
         cmd.extend(["--system-prompt", system])
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    result = subprocess.run(
-        cmd,
-        input=full_prompt,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            input=full_prompt,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=env,
+        )
+    except FileNotFoundError:
+        raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
     return result.stdout.strip()

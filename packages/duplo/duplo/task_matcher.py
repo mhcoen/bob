@@ -107,10 +107,10 @@ def match_unannotated_tasks(
                 implemented_in=phase_label,
             )
             save_features([feat], target_dir=target_dir)
-            # save_features merges by name but doesn't set status on new entries
-            # from the Feature object; it uses asdict which includes status.
-            # However save_features only sets defaults if missing, so the
-            # status="implemented" from asdict will be preserved.
+            try:
+                save_feature_status(name, "implemented", phase_label, target_dir=target_dir)
+            except ValueError:
+                pass
             new.append(name)
 
     return (matched, new)
