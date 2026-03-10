@@ -2365,6 +2365,61 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
     assert models_used[2] == "sonnet"
 
 
+def test_fallback_model_prints_message(tmp_path, capsys):
+    """Prints 'Primary model failed, retrying with <model>' on fallback."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count <= 2:
+            result.success = False
+            result.output = "some error"
+            result.exit_code = 1
+        else:
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch(
+            "mcloop.main._has_meaningful_changes",
+            return_value=True,
+        ),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+        patch(
+            "mcloop.main.get_available_cli",
+            return_value="claude",
+        ),
+    ):
+        run_loop(
+            plan,
+            max_retries=2,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    captured = capsys.readouterr().out
+    assert "Primary model failed, retrying with sonnet" in captured
+
+
 def test_fallback_model_also_exhausted(tmp_path):
     """When both primary and fallback exhaust retries, task fails."""
     plan = tmp_path / "PLAN.md"

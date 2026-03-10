@@ -753,7 +753,7 @@ def run_loop(
         for model_idx, task_model in enumerate(models_to_try):
             if model_idx > 0:
                 print(
-                    formatting.system_msg(f"Retrying with fallback model: {task_model}"),
+                    formatting.system_msg(f"Primary model failed, retrying with {task_model}"),
                     flush=True,
                 )
             attempt = 0
