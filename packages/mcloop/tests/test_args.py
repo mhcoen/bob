@@ -11,11 +11,9 @@ from mcloop.errors import (
     _error_signature_hash,
     _insert_bugs_section,
 )
-from mcloop.investigator import _find_recent_crash_report, gather_bug_context
-from mcloop.main import (
+from mcloop.investigate_cmd import (
     MAX_VERIFICATION_ROUNDS,
     _append_verification_failure,
-    _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
     _handle_auto_task,
@@ -23,11 +21,15 @@ from mcloop.main import (
     _investigation_failed,
     _investigation_passed,
     _launch_app_verification,
-    _parse_args,
     _read_repro_steps,
-    _reinject_wrappers,
     _replay_repro_steps,
     _verify_gui_survival,
+)
+from mcloop.investigator import _find_recent_crash_report, gather_bug_context
+from mcloop.main import (
+    _check_user_input,
+    _parse_args,
+    _reinject_wrappers,
     run_loop,
 )
 from mcloop.session_context import SessionContext
@@ -544,11 +546,11 @@ def test_investigate_creates_worktree(tmp_path, capsys):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "app crashes"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        patch("mcloop.main._investigation_passed") as mock_passed,
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
+        patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-app-crashes", False)
@@ -588,10 +590,10 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "segfault"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        patch("mcloop.main._investigation_passed") as mock_passed,
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
+        patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -623,11 +625,11 @@ def test_investigate_no_description_uses_fallback(tmp_path):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (
@@ -651,8 +653,8 @@ def test_investigate_worktree_error_exits(tmp_path):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "bug"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context") as mock_gather,
-        patch("mcloop.main.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd.gather_bug_context") as mock_gather,
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
@@ -759,11 +761,11 @@ def test_investigate_generates_plan_with_context(tmp_path, capsys):
             ["mcloop", "--file", str(plan), "investigate", "crash on save"],
         ),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash-on-save", False)
@@ -800,11 +802,11 @@ def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
             ["mcloop", "--file", str(plan), "investigate", "segfault"],
         ),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings") as mock_copy,
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings") as mock_copy,
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-segfault", True)
@@ -843,10 +845,10 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
             ["mcloop", "--file", str(plan), "investigate", "bug"],
         ),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-bug", False)
@@ -880,11 +882,11 @@ def test_investigate_runs_mcloop_with_no_audit(tmp_path):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash", False)
@@ -919,11 +921,11 @@ def test_investigate_passes_model_to_subprocess(tmp_path):
             ["mcloop", "--file", str(plan), "--model", "opus", "investigate", "bug"],
         ),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result) as mock_run,
-        patch("mcloop.main._investigation_passed"),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
+        patch("mcloop.investigate_cmd._investigation_passed"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-bug", False)
@@ -953,11 +955,11 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "bug"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._investigation_failed") as mock_failed,
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._investigation_failed") as mock_failed,
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
@@ -986,13 +988,13 @@ def test_investigate_verification_passes_calls_merge(tmp_path, capsys):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
-        patch("mcloop.main._launch_app_verification", return_value=None) as mock_verify,
-        patch("mcloop.main._investigation_passed") as mock_passed,
-        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd._launch_app_verification", return_value=None) as mock_verify,
+        patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
+        patch("mcloop.investigate_cmd.notify") as mock_notify,
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash", False)
@@ -1026,17 +1028,17 @@ def test_investigate_verification_fails_then_passes(tmp_path, capsys):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch(
-            "mcloop.main._launch_app_verification",
+            "mcloop.investigate_cmd._launch_app_verification",
             side_effect=["App crashed", None],
         ) as mock_verify,
-        patch("mcloop.main._append_verification_failure") as mock_append,
-        patch("mcloop.main._investigation_passed") as mock_passed,
-        patch("mcloop.main.notify"),
+        patch("mcloop.investigate_cmd._append_verification_failure") as mock_append,
+        patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
+        patch("mcloop.investigate_cmd.notify"),
     ):
         mock_stdin.isatty.return_value = True
         mock_create.return_value = (wt_path, "investigate-crash", False)
@@ -1060,8 +1062,8 @@ def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
     wt_path.mkdir()
     (wt_path / "PLAN.md").write_text("# Project\n- [ ] Fix bug\n")
 
+    from mcloop.investigate_cmd import MAX_VERIFICATION_ROUNDS
     from mcloop.investigator import BugContext
-    from mcloop.main import MAX_VERIFICATION_ROUNDS
 
     ctx = BugContext(user_description="crash")
     mock_result = MagicMock(returncode=0)
@@ -1069,17 +1071,17 @@ def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
     with (
         patch("sys.argv", ["mcloop", "--file", str(plan), "investigate", "crash"]),
         patch("sys.stdin") as mock_stdin,
-        patch("mcloop.main.gather_bug_context", return_value=ctx),
-        patch("mcloop.main.worktree.create") as mock_create,
-        patch("mcloop.main._copy_project_settings"),
-        patch("mcloop.main.subprocess.run", return_value=mock_result),
+        patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
+        patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch(
-            "mcloop.main._launch_app_verification",
+            "mcloop.investigate_cmd._launch_app_verification",
             return_value="App crashed",
         ),
-        patch("mcloop.main._append_verification_failure"),
-        patch("mcloop.main._investigation_failed") as mock_failed,
-        patch("mcloop.main.notify"),
+        patch("mcloop.investigate_cmd._append_verification_failure"),
+        patch("mcloop.investigate_cmd._investigation_failed") as mock_failed,
+        patch("mcloop.investigate_cmd.notify"),
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_stdin.isatty.return_value = True
@@ -1100,7 +1102,7 @@ def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
 
 def test_launch_app_verification_no_run_cmd(tmp_path, capsys):
     """When no run command is detected, returns None."""
-    with patch("mcloop.main.detect_run", return_value=None):
+    with patch("mcloop.investigate_cmd.detect_run", return_value=None):
         result = _launch_app_verification(tmp_path)
     assert result is None
     captured = capsys.readouterr()
@@ -1111,8 +1113,8 @@ def test_launch_app_verification_gui_ok(tmp_path, capsys):
     """GUI app that starts OK is reported, killed, and returns None."""
     gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
     with (
-        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_gui.return_value = gui_result
@@ -1131,8 +1133,8 @@ def test_launch_app_verification_gui_crashed(tmp_path, capsys):
         crashed=True, hung=False, duration=2.0, crash_report="crash info\nline2"
     )
     with (
-        patch("mcloop.main.detect_run", return_value="open Foo.app"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="open Foo.app"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_gui.return_value = gui_result
@@ -1148,8 +1150,8 @@ def test_launch_app_verification_gui_hung(tmp_path, capsys):
     """GUI app that hangs returns failure description."""
     gui_result = MagicMock(crashed=False, hung=True, duration=15.0)
     with (
-        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_gui.return_value = gui_result
@@ -1166,8 +1168,8 @@ def test_launch_app_verification_cli_ok(tmp_path, capsys):
     """CLI app that exits 0 returns None."""
     cli_result = MagicMock(hung=False, exit_code=0, duration=1.5, output="")
     with (
-        patch("mcloop.main.detect_run", return_value="cargo run"),
-        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="cargo run"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="cli"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
@@ -1184,8 +1186,8 @@ def test_launch_app_verification_cli_crash(tmp_path, capsys):
     """CLI app with non-zero exit returns failure description."""
     cli_result = MagicMock(hung=False, exit_code=1, duration=0.5, output="error: segfault")
     with (
-        patch("mcloop.main.detect_run", return_value="./myapp"),
-        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="./myapp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="cli"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
@@ -1200,8 +1202,8 @@ def test_launch_app_verification_cli_hung(tmp_path, capsys):
     """CLI app that hangs returns failure description."""
     cli_result = MagicMock(hung=True, exit_code=None, duration=10.0, output="")
     with (
-        patch("mcloop.main.detect_run", return_value="./myapp"),
-        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="./myapp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="cli"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.return_value = cli_result
@@ -1215,8 +1217,8 @@ def test_launch_app_verification_cli_hung(tmp_path, capsys):
 def test_launch_app_verification_web_skipped(tmp_path, capsys):
     """Web apps are skipped and return None."""
     with (
-        patch("mcloop.main.detect_run", return_value="npm start"),
-        patch("mcloop.main.detect_app_type", return_value="web"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="npm start"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="web"),
     ):
         result = _launch_app_verification(tmp_path)
     assert result is None
@@ -1228,8 +1230,8 @@ def test_launch_app_verification_gui_process_name_from_app_bundle(tmp_path, caps
     """Process name is extracted from .app bundle path."""
     gui_result = MagicMock(crashed=False, hung=False, duration=3.0)
     with (
-        patch("mcloop.main.detect_run", return_value="open MyApp.app"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="open MyApp.app"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_gui.return_value = gui_result
@@ -1345,8 +1347,8 @@ def test_launch_app_verification_gui_replays_repro_steps(tmp_path, capsys):
 
     gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
     with (
-        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
         patch("mcloop.app_interact.window_exists", return_value=True) as mock_we,
     ):
@@ -1374,8 +1376,8 @@ def test_launch_app_verification_gui_no_repro_on_crash(tmp_path, capsys):
 
     gui_result = MagicMock(crashed=True, hung=False, duration=2.0, crash_report=None)
     with (
-        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_gui.return_value = gui_result
@@ -1397,8 +1399,8 @@ def test_launch_app_verification_cli_replays_repro_steps(tmp_path, capsys):
     cli_result = MagicMock(hung=False, exit_code=0, duration=1.5, output="")
     repro_cli = MagicMock(exit_code=0, hung=False, output="ok", sample_output=None)
     with (
-        patch("mcloop.main.detect_run", return_value="./myapp"),
-        patch("mcloop.main.detect_app_type", return_value="cli"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="./myapp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="cli"),
         patch("mcloop.process_monitor") as mock_pm,
     ):
         mock_pm.run_cli.side_effect = [cli_result, repro_cli]
@@ -1503,8 +1505,8 @@ def test_launch_verification_gui_survival_check_after_replay(tmp_path, capsys):
 
     gui_result = MagicMock(crashed=False, hung=False, duration=5.0)
     with (
-        patch("mcloop.main.detect_run", return_value="swift run MyApp"),
-        patch("mcloop.main.detect_app_type", return_value="gui"),
+        patch("mcloop.investigate_cmd.detect_run", return_value="swift run MyApp"),
+        patch("mcloop.investigate_cmd.detect_app_type", return_value="gui"),
         patch("mcloop.process_monitor") as mock_pm,
         patch("mcloop.app_interact.window_exists", return_value=True),
     ):
@@ -1527,11 +1529,11 @@ def test_investigation_passed_merges_on_yes(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main.worktree.current_branch", return_value="main"),
-        patch("mcloop.main.subprocess.run") as mock_run,
+        patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
+        patch("mcloop.investigate_cmd.subprocess.run") as mock_run,
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.worktree.merge") as mock_merge,
-        patch("mcloop.main.worktree.remove") as mock_remove,
+        patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
+        patch("mcloop.investigate_cmd.worktree.remove") as mock_remove,
     ):
         # git log and git diff --stat
         mock_run.side_effect = [
@@ -1556,10 +1558,10 @@ def test_investigation_passed_skips_merge_on_no(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main.worktree.current_branch", return_value="main"),
-        patch("mcloop.main.subprocess.run") as mock_run,
+        patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
+        patch("mcloop.investigate_cmd.subprocess.run") as mock_run,
         patch("builtins.input", return_value="n"),
-        patch("mcloop.main.worktree.merge") as mock_merge,
+        patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
     ):
         mock_run.return_value = MagicMock(stdout="")
         _investigation_passed(wt_path, "investigate-bug", tmp_path)
@@ -1576,10 +1578,10 @@ def test_investigation_passed_skips_merge_on_eof(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main.worktree.current_branch", return_value="main"),
-        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", side_effect=EOFError),
-        patch("mcloop.main.worktree.merge") as mock_merge,
+        patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
     ):
         _investigation_passed(wt_path, "investigate-bug", tmp_path)
 
@@ -1594,11 +1596,11 @@ def test_investigation_passed_merge_failure(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main.worktree.current_branch", return_value="main"),
-        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
         patch(
-            "mcloop.main.worktree.merge",
+            "mcloop.investigate_cmd.worktree.merge",
             side_effect=RuntimeError("conflict"),
         ),
         pytest.raises(SystemExit) as exc_info,
@@ -1616,12 +1618,12 @@ def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
     wt_path.mkdir()
 
     with (
-        patch("mcloop.main.worktree.current_branch", return_value="main"),
-        patch("mcloop.main.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
+        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
-        patch("mcloop.main.worktree.merge"),
+        patch("mcloop.investigate_cmd.worktree.merge"),
         patch(
-            "mcloop.main.worktree.remove",
+            "mcloop.investigate_cmd.worktree.remove",
             side_effect=RuntimeError("locked"),
         ),
     ):
@@ -1962,7 +1964,7 @@ def test_run_loop_picks_up_user_input(tmp_path):
 def test_handle_auto_task_prints_and_returns(capsys):
     """Auto task prints observation header and result."""
     with patch(
-        "mcloop.main._dispatch_auto_action",
+        "mcloop.investigate_cmd._dispatch_auto_action",
         return_value="window_exists(MyApp): True",
     ):
         result = _handle_auto_task("3", "window_exists", "MyApp")
@@ -1977,7 +1979,7 @@ def test_handle_auto_task_prints_and_returns(capsys):
 def test_handle_auto_task_exception(capsys):
     """Auto task catches exceptions and returns error string."""
     with patch(
-        "mcloop.main._dispatch_auto_action",
+        "mcloop.investigate_cmd._dispatch_auto_action",
         side_effect=RuntimeError("osascript failed"),
     ):
         result = _handle_auto_task("1", "screenshot", "MyApp")
@@ -1990,7 +1992,7 @@ def test_handle_auto_task_truncates_long_result(capsys):
     """Long results are truncated in display but not in return value."""
     long_result = "x" * 1000
     with patch(
-        "mcloop.main._dispatch_auto_action",
+        "mcloop.investigate_cmd._dispatch_auto_action",
         return_value=long_result,
     ):
         result = _handle_auto_task("1", "list_elements", "MyApp")
@@ -2135,7 +2137,10 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
     (tmp_path / ".git").mkdir()
 
     with (
-        patch("mcloop.main._dispatch_auto_action", return_value="STATUS: OK") as mock_dispatch,
+        patch(
+            "mcloop.investigate_cmd._dispatch_auto_action",
+            return_value="STATUS: OK",
+        ) as mock_dispatch,
         patch("mcloop.main.run_task") as mock_run_task,
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main.notify"),
