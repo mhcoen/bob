@@ -115,25 +115,77 @@ Running `duplo` again in the same directory detects what happened
 since the last run:
 
 - **Completed phase:** If all tasks in PLAN.md are checked off,
-  Duplo records the phase in history, captures screenshots for
-  comparison, collects your feedback, and generates the next
-  phase's PLAN.md. You then run mcloop again.
+  Duplo records the phase in history, tracks which features were
+  implemented, prompts for known issues, and enters the next-phase
+  flow. See "Phase completion" and "Next-phase generation" below.
 
 - **Incomplete phase:** If PLAN.md has unchecked tasks, Duplo
-  tells you to run mcloop to continue building.
+  prints a status summary and tells you to run mcloop to continue
+  building.
 
-- **New files detected:** Duplo compares the directory against its
-  stored file hash manifest and reports what changed (added, modified,
-  removed files).
+- **No PLAN.md:** Duplo enters the next-phase flow directly.
 
 On every subsequent run, Duplo also re-scrapes the product URL to
 pick up site changes, re-extracts features from the updated content,
 and merges new features into its stored list (without removing
-existing ones). It then runs gap detection to compare the full
-feature list against PLAN.md and appends tasks for anything missing.
-Gap detection is platform-aware: features that are infeasible for
-the target stack (e.g., "Windows support" for a macOS-only SwiftUI
-app) are skipped.
+existing ones).
+
+Duplo prints a status summary at the start of every run: current
+phase number, features implemented vs. remaining, and open issue
+count.
+
+### Phase completion
+
+When Duplo detects that all tasks in PLAN.md are checked off, it
+runs the phase-completion flow:
+
+1. **Track implemented features.** Generated plans include
+   `[feat: "Feature Name"]` annotations on each task line linking
+   it to features in `duplo.json`. Duplo parses checked lines and
+   marks annotated features as `implemented`. Bug fix tasks carry
+   `[fix: "description"]` annotations and resolve matching issues.
+   Unannotated tasks (added by the user or from pre-annotation
+   plans) are matched against the feature list via a single
+   `claude -p` call. Matched features are marked as implemented.
+   Genuinely new items are added to `duplo.json` as new features
+   with `status: "implemented"`.
+
+2. **Collect issues.** Duplo prompts for known problems with the
+   completed phase (bugs, incomplete wiring, UI issues). Each
+   line is stored in the `issues` list in `duplo.json`. Skippable
+   with a blank line.
+
+3. **Record and advance.** The completed plan is appended to the
+   phase history in `duplo.json`, PLAN.md is deleted, and Duplo
+   falls through to the next-phase flow.
+
+### Next-phase generation
+
+After phase completion (or when no PLAN.md exists), Duplo generates
+the next phase:
+
+1. **Re-scrape and re-extract.** Fetches the product site again,
+   extracts features from the updated content, and merges new ones
+   into `duplo.json`.
+
+2. **Generate roadmap.** If no roadmap exists or the previous one
+   has been fully consumed, Duplo generates a new phased roadmap
+   from the remaining unimplemented features. The roadmap is
+   regenerated at each phase boundary so it always reflects what
+   has actually been built.
+
+3. **Feature selection.** Presents the remaining unimplemented
+   features (numbered, grouped by category) with the next roadmap
+   phase highlighted as a recommendation. You can accept the
+   recommendation, modify it, or pick entirely different features.
+
+4. **Issue selection.** Shows open issues from `duplo.json` and
+   asks which should be addressed in this phase.
+
+5. **Plan generation.** Generates a PLAN.md scoped to the selected
+   features and issues. Every task line is annotated with
+   `[feat: ...]` or `[fix: ...]` so the next phase completion can
+   track status deterministically.
 
 ### Non-destructive updates
 
@@ -158,10 +210,35 @@ losing work. Add more reference material, run duplo, and only
 new tasks for uncovered features or design refinements are added.
 
 All state lives in `.duplo/` (added to `.gitignore` automatically):
-`duplo.json` for selections, features, phases, and preferences;
-`references/` for processed reference files; `examples/` for
-extracted code examples; `raw_pages/` for scraped HTML content;
-`file_hashes.json` for change detection.
+`duplo.json` for selections, features (with implementation status),
+phases, issues, roadmap, and preferences; `references/` for
+processed reference files; `examples/` for extracted code examples;
+`raw_pages/` for scraped HTML content; `file_hashes.json` for
+change detection.
+
+## Feature tracking
+
+Duplo maintains a persistent feature list in `duplo.json`. Each
+feature has a name, description, category, implementation status
+(`pending`, `implemented`, or `partial`), and which phase
+implemented it. Features come from three sources:
+
+- **Product scraping.** Extracted from the product site on first
+  run and re-extracted on every subsequent run. New features are
+  merged without removing existing ones.
+
+- **Plan annotations.** When a generated plan includes
+  `[feat: "Feature Name"]` on a task line, phase completion
+  marks that feature as implemented.
+
+- **User additions.** Any task line in PLAN.md without an
+  annotation is treated as user-added. At phase completion,
+  Duplo matches it against existing features or adds it as a
+  new entry.
+
+This means the feature list is a complete record of everything
+built across all phases, not just what was scraped from the
+product site.
 
 ## Requirements
 
