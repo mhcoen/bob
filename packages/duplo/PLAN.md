@@ -28,7 +28,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] At phase completion (all checkboxes checked), parse PLAN.md for checked task lines
   - [x] For each checked line with a `[feat: ...]` annotation, mark the referenced features as `implemented` with the current phase label
   - [x] For each checked line with a `[fix: ...]` annotation, mark the corresponding issue as resolved
-  - [ ] For checked lines without annotations (user-added tasks or pre-annotation plans), batch them into a single `claude -p` call with the full feature list. Claude matches each task to an existing feature or confirms it is genuinely new. Mark matched features as implemented. Add genuinely new items as new feature entries with `status: "implemented"` and `implemented_in` set to the current phase.
+  - [x] For checked lines without annotations (user-added tasks or pre-annotation plans), batch them into a single `claude -p` call with the full feature list. Claude matches each task to an existing feature or confirms it is genuinely new. Mark matched features as implemented. Add genuinely new items as new feature entries with `status: "implemented"` and `implemented_in` set to the current phase.
   - [ ] Add tests for the annotation parser covering annotated lines, unannotated lines, and mixed plans
 
 - [ ] Prompt for issues at phase completion
