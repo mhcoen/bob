@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mcloop.gather import gather_audit_context, gather_sync_context
 from mcloop.prompts import (
     bugs_md_has_bugs,
     build_audit_prompt,
@@ -27,8 +28,6 @@ from mcloop.runner import (
     _reclaim_foreground,
     _slugify,
     _write_log,
-    gather_audit_context,
-    gather_sync_context,
 )
 
 

@@ -478,50 +478,6 @@ def _print_stream_event(line: str) -> None:
                 print(f"  {status}", flush=True)
 
 
-def gather_sync_context(project_dir: Path) -> dict[str, str]:
-    """Collect PLAN.md, README.md, CLAUDE.md, git log, file tree, and source files."""
-    context: dict[str, str] = {}
-
-    for name in ("PLAN.md", "README.md", "CLAUDE.md"):
-        path = project_dir / name
-        if path.exists():
-            context[name] = path.read_text()
-
-    try:
-        result = subprocess.run(
-            ["git", "log", "--oneline", "-30"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            context["git_log"] = result.stdout.strip()
-    except Exception:
-        pass
-
-    try:
-        result = subprocess.run(
-            ["git", "ls-files"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            context["file_tree"] = result.stdout.strip()
-    except Exception:
-        pass
-
-    for path in sorted(project_dir.rglob("*.py")):
-        if ".git" not in path.parts:
-            rel = str(path.relative_to(project_dir))
-            try:
-                context[rel] = path.read_text()
-            except Exception:
-                pass
-
-    return context
-
-
 def run_sync(
     project_dir: str | Path,
     log_dir: str | Path,
@@ -556,26 +512,6 @@ def run_sync(
         exit_code=returncode,
         log_path=log_path,
     )
-
-
-def gather_audit_context(project_dir: Path) -> dict[str, str]:
-    """Collect README.md, CLAUDE.md, and all Python source files for auditing."""
-    context: dict[str, str] = {}
-
-    for name in ("README.md", "CLAUDE.md"):
-        path = project_dir / name
-        if path.exists():
-            context[name] = path.read_text()
-
-    for path in sorted(project_dir.rglob("*.py")):
-        if ".git" not in path.parts:
-            rel = str(path.relative_to(project_dir))
-            try:
-                context[rel] = path.read_text()
-            except Exception:
-                pass
-
-    return context
 
 
 def run_audit(
