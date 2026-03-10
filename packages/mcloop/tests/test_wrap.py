@@ -164,6 +164,11 @@ def test_strip_no_markers():
     assert strip_markers(text, "swift") == text
 
 
+def test_strip_unsupported_language():
+    text = "hello\nworld\n"
+    assert strip_markers(text, "rust") == text
+
+
 # ---- inject ----
 
 
@@ -243,6 +248,53 @@ def test_inject_idempotent_python():
     second = inject(first, "python")
     assert second.count(PYTHON_BEGIN) == 1
     assert second.count(PYTHON_END) == 1
+
+
+def test_reinject_after_user_edit_swift():
+    """After user edits code outside markers, re-inject preserves edits."""
+    content = "import SwiftUI\n\n@main\nstruct MyApp: App {\n    init() {\n    }\n}\n"
+    injected = inject(content, "swift")
+    # Simulate user adding code after the wrapper block
+    edited = injected + "\nextension MyApp {\n    func newFeature() {}\n}\n"
+    reinjected = inject(edited, "swift")
+    assert reinjected.count(SWIFT_BEGIN) == 1
+    assert reinjected.count(SWIFT_END) == 1
+    assert "newFeature" in reinjected
+    assert "NSSetUncaughtExceptionHandler" in reinjected
+
+
+def test_reinject_after_user_edit_python():
+    """After user edits code outside markers, re-inject preserves edits."""
+    content = "import sys\n\ndef main():\n    pass\n"
+    injected = inject(content, "python")
+    # Simulate user adding a new function after injection
+    edited = injected + "\ndef new_feature():\n    return 42\n"
+    reinjected = inject(edited, "python")
+    assert reinjected.count(PYTHON_BEGIN) == 1
+    assert reinjected.count(PYTHON_END) == 1
+    assert "new_feature" in reinjected
+    assert "_mcloop_setup_crash_handlers" in reinjected
+
+
+def test_reinject_restores_corrupted_wrapper_swift():
+    """If user modifies code inside markers, re-inject restores canonical."""
+    content = "import Foundation\n\nfunc main() {}\n"
+    injected = inject(content, "swift")
+    # Corrupt the wrapper by replacing content between markers
+    corrupted = injected.replace("_McloopState", "_BrokenState")
+    reinjected = inject(corrupted, "swift")
+    assert "_McloopState" in reinjected
+    assert "_BrokenState" not in reinjected
+
+
+def test_reinject_restores_corrupted_wrapper_python():
+    """If user modifies code inside markers, re-inject restores canonical."""
+    content = "import sys\n\ndef main():\n    pass\n"
+    injected = inject(content, "python")
+    corrupted = injected.replace("_McloopState", "_BrokenState")
+    reinjected = inject(corrupted, "python")
+    assert "_McloopState" in reinjected
+    assert "_BrokenState" not in reinjected
 
 
 def test_swift_wrapper_state_registry():
@@ -329,13 +381,38 @@ def test_save_wrappers_swift(tmp_path):
     save_canonical_wrappers(tmp_path, "swift")
     wrapper = tmp_path / ".mcloop" / "wrap" / "swift_wrapper.swift"
     assert wrapper.exists()
-    assert SWIFT_BEGIN in wrapper.read_text()
+    text = wrapper.read_text()
+    assert SWIFT_BEGIN in text
+    assert SWIFT_END in text
 
 
 def test_save_wrappers_python(tmp_path):
     save_canonical_wrappers(tmp_path, "python")
     wrapper = tmp_path / ".mcloop" / "wrap" / "python_wrapper.py"
     assert wrapper.exists()
+    text = wrapper.read_text()
+    assert PYTHON_BEGIN in text
+    assert PYTHON_END in text
+
+
+def test_save_wrappers_matches_constants(tmp_path):
+    """Canonical files contain exact wrapper constants."""
+    from mcloop.wrap import PYTHON_WRAPPER, SWIFT_WRAPPER
+
+    save_canonical_wrappers(tmp_path, "swift")
+    save_canonical_wrappers(tmp_path, "python")
+    swift_file = tmp_path / ".mcloop" / "wrap" / "swift_wrapper.swift"
+    python_file = tmp_path / ".mcloop" / "wrap" / "python_wrapper.py"
+    assert swift_file.read_text() == SWIFT_WRAPPER
+    assert python_file.read_text() == PYTHON_WRAPPER
+
+
+def test_save_wrappers_overwrites_existing(tmp_path):
+    """Re-saving canonical wrappers overwrites previous version."""
+    save_canonical_wrappers(tmp_path, "python")
+    wrapper = tmp_path / ".mcloop" / "wrap" / "python_wrapper.py"
+    wrapper.write_text("corrupted content")
+    save_canonical_wrappers(tmp_path, "python")
     assert PYTHON_BEGIN in wrapper.read_text()
 
 
