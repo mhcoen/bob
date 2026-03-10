@@ -2546,3 +2546,187 @@ def test_no_fallback_retry_without_flag(tmp_path):
     # Only 2 attempts, no fallback
     assert len(models_used) == 2
     assert models_used == ["opus", "opus"]
+
+
+def test_fallback_same_as_primary_skips_fallback(tmp_path):
+    """When fallback_model equals primary model, no extra retry round."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    def fake_run_task(*args, **kwargs):
+        result = MagicMock()
+        result.success = False
+        result.output = "always fails"
+        result.exit_code = 1
+        return result
+
+    models_used = []
+
+    def tracking_run_task(*args, **kwargs):
+        models_used.append(kwargs.get("model"))
+        return fake_run_task(*args, **kwargs)
+
+    with (
+        patch("mcloop.main.run_task", side_effect=tracking_run_task),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch(
+            "mcloop.main.get_available_cli",
+            return_value="claude",
+        ),
+    ):
+        stuck = run_loop(
+            plan,
+            max_retries=2,
+            model="opus",
+            fallback_model="opus",
+            no_audit=True,
+        )
+
+    assert stuck == ["Do something"]
+    # Same model as fallback: only 2 attempts, not 4
+    assert len(models_used) == 2
+    assert models_used == ["opus", "opus"]
+
+
+def test_fallback_gets_fresh_retries(tmp_path):
+    """Fallback model gets its own full set of retries (not shared)."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count <= 3:
+            # 3 primary retries fail
+            result.success = False
+            result.output = "error"
+            result.exit_code = 1
+        elif call_count <= 5:
+            # 2 fallback retries fail
+            result.success = False
+            result.output = "error"
+            result.exit_code = 1
+        else:
+            # 3rd fallback retry succeeds
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    models_used = []
+
+    def tracking_run_task(*args, **kwargs):
+        models_used.append(kwargs.get("model"))
+        return fake_run_task(*args, **kwargs)
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_task", side_effect=tracking_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch(
+            "mcloop.main._has_meaningful_changes",
+            return_value=True,
+        ),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+        patch(
+            "mcloop.main.get_available_cli",
+            return_value="claude",
+        ),
+    ):
+        stuck = run_loop(
+            plan,
+            max_retries=3,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    assert stuck == []
+    # 3 primary + 3 fallback = 6 total, fallback succeeded on 3rd try
+    assert len(models_used) == 6
+    assert models_used[:3] == ["opus", "opus", "opus"]
+    assert models_used[3:] == ["sonnet", "sonnet", "sonnet"]
+
+
+def test_fallback_resets_per_task(tmp_path):
+    """Each task starts with the primary model, even after a prior fallback."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task one\n- [ ] Task two\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count <= 2:
+            # Task 1: primary retries fail
+            result.success = False
+            result.output = "error"
+            result.exit_code = 1
+        else:
+            # Task 1 fallback + Task 2 primary: succeed
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    models_used = []
+
+    def tracking_run_task(*args, **kwargs):
+        models_used.append(kwargs.get("model"))
+        return fake_run_task(*args, **kwargs)
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_task", side_effect=tracking_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch(
+            "mcloop.main._has_meaningful_changes",
+            return_value=True,
+        ),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._commit"),
+        patch(
+            "mcloop.main.get_available_cli",
+            return_value="claude",
+        ),
+    ):
+        stuck = run_loop(
+            plan,
+            max_retries=2,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    assert stuck == []
+    # Task 1: opus, opus (fail), sonnet (succeed)
+    # Task 2: should start with opus again
+    assert models_used[0] == "opus"
+    assert models_used[1] == "opus"
+    assert models_used[2] == "sonnet"
+    # Task 2 starts fresh with primary model
+    assert models_used[3] == "opus"
