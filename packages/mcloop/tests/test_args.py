@@ -3472,6 +3472,81 @@ def test_check_errors_new_entry_gets_fix_attempts(tmp_path):
     assert updated[0]["fix_attempts"] == 1
 
 
+def test_check_errors_just_below_limit_is_resolvable(tmp_path):
+    """Entry with fix_attempts = MAX - 1 is still diagnosed (boundary)."""
+    entries = [
+        {
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+            "fix_attempts": _MAX_FIX_ATTEMPTS - 1,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    assert mock_diag.call_count == 1
+
+
+def test_check_errors_at_limit_is_unresolvable(tmp_path, capsys):
+    """Entry with fix_attempts = MAX is unresolvable (boundary)."""
+    entries = [
+        {
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+            "fix_attempts": _MAX_FIX_ATTEMPTS,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    result = _check_errors_json(tmp_path)
+
+    assert result is False
+    out = capsys.readouterr().out
+    assert "unresolvable" in out.lower()
+
+
+def test_check_errors_non_integer_fix_attempts_treated_as_zero(tmp_path):
+    """Non-integer fix_attempts is treated as 0 (resolvable)."""
+    entries = [
+        {
+            "exception_type": "TypeError",
+            "description": "none + int",
+            "source_file": "lib.py",
+            "line": 10,
+            "fix_attempts": "not_a_number",
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    assert mock_diag.call_count == 1
+
+
 # --- _insert_bugs_section ---
 
 

@@ -506,6 +506,39 @@ def test_find_next_bug_nested_children(tmp_path):
     assert nxt.text == "Apply fix"
 
 
+def test_find_next_no_bugs_section_returns_feature(tmp_path):
+    """Without a ## Bugs section, find_next returns first feature task."""
+    md = "## Stage 1: Core\n- [ ] Feature A\n- [ ] Feature B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Feature A"
+
+
+def test_find_next_empty_bugs_section_returns_feature(tmp_path):
+    """An empty ## Bugs section (no tasks) returns feature tasks."""
+    md = "## Bugs\n\n## Stage 1: Core\n- [ ] Feature A\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Feature A"
+
+
+def test_find_next_multiple_bugs_returns_first(tmp_path):
+    """With multiple unchecked bugs, returns the first one."""
+    md = "## Stage 1: Core\n- [ ] Feature\n## Bugs\n- [ ] Bug A\n- [ ] Bug B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Bug A"
+
+
 def test_has_unchecked_bugs_true(tmp_path):
     md = "## Bugs\n- [ ] Fix crash\n## Stage 1: Core\n- [ ] Add feature\n"
     f = tmp_path / "tasks.md"

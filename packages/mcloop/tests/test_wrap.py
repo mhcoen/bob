@@ -276,6 +276,46 @@ def test_reinject_after_user_edit_python():
     assert "_mcloop_setup_crash_handlers" in reinjected
 
 
+def test_inject_after_strip_swift():
+    """Full cycle: inject, strip markers completely, re-inject restores wrapper."""
+    content = "import SwiftUI\n\n@main\nstruct MyApp: App {\n    init() {\n    }\n}\n"
+    injected = inject(content, "swift")
+    assert has_markers(injected, "swift")
+
+    stripped = strip_markers(injected, "swift")
+    assert not has_markers(stripped, "swift")
+    assert "NSSetUncaughtExceptionHandler" not in stripped
+
+    reinjected = inject(stripped, "swift")
+    assert has_markers(reinjected, "swift")
+    assert reinjected.count(SWIFT_BEGIN) == 1
+    assert "NSSetUncaughtExceptionHandler" in reinjected
+    assert "_McloopState" in reinjected
+    # Original code preserved
+    assert "@main" in reinjected
+    assert "struct MyApp" in reinjected
+
+
+def test_inject_after_strip_python():
+    """Full cycle: inject, strip markers completely, re-inject restores wrapper."""
+    content = "#!/usr/bin/env python3\nimport sys\n\ndef main():\n    pass\n"
+    injected = inject(content, "python")
+    assert has_markers(injected, "python")
+
+    stripped = strip_markers(injected, "python")
+    assert not has_markers(stripped, "python")
+    assert "_mcloop_setup_crash_handlers" not in stripped
+
+    reinjected = inject(stripped, "python")
+    assert has_markers(reinjected, "python")
+    assert reinjected.count(PYTHON_BEGIN) == 1
+    assert "_mcloop_setup_crash_handlers" in reinjected
+    assert "_McloopState" in reinjected
+    # Original code preserved
+    assert reinjected.startswith("#!/usr/bin/env python3\n")
+    assert "def main():" in reinjected
+
+
 def test_reinject_restores_corrupted_wrapper_swift():
     """If user modifies code inside markers, re-inject restores canonical."""
     content = "import Foundation\n\nfunc main() {}\n"
@@ -416,6 +456,53 @@ def test_python_wrapper_fix_attempts_starts_zero():
     from mcloop.wrap import PYTHON_WRAPPER
 
     assert '"fix_attempts": 0' in PYTHON_WRAPPER
+
+
+def test_swift_wrapper_errors_json_structure():
+    """Swift wrapper writes errors.json as JSON array with required fields."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    # The wrapper builds a JSON dict with these keys
+    required_keys = [
+        "id",
+        "timestamp",
+        "stack_trace",
+        "app_state",
+        "last_action",
+        "description",
+        "source_file",
+        "line",
+        "fix_attempts",
+    ]
+    for key in required_keys:
+        assert f'"{key}"' in SWIFT_WRAPPER, f"missing JSON key: {key}"
+    # Signal handler writes signal field; exception handler writes exception_type
+    assert '"signal"' in SWIFT_WRAPPER
+    assert '"exception_type"' in SWIFT_WRAPPER
+    # Writes to errors.json as array (reads existing, appends, writes back)
+    assert "errors.json" in SWIFT_WRAPPER
+
+
+def test_python_wrapper_errors_json_structure():
+    """Python wrapper writes errors.json as JSON array with required fields."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    required_keys = [
+        "id",
+        "timestamp",
+        "stack_trace",
+        "app_state",
+        "last_action",
+        "description",
+        "source_file",
+        "line",
+        "fix_attempts",
+    ]
+    for key in required_keys:
+        assert f'"{key}"' in PYTHON_WRAPPER, f"missing JSON key: {key}"
+    assert '"signal"' in PYTHON_WRAPPER
+    assert '"exception_type"' in PYTHON_WRAPPER
+    assert "errors.json" in PYTHON_WRAPPER
 
 
 def test_python_wrapper_local_variables():

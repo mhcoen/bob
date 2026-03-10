@@ -845,7 +845,10 @@ def _check_errors_json(
             task_lines.append(f"- [ ] Fix crash: {exc_type}: {short_desc}{location}")
 
         # Increment fix_attempts
-        entry["fix_attempts"] = entry.get("fix_attempts", 0) + 1
+        prev = entry.get("fix_attempts", 0)
+        if not isinstance(prev, int):
+            prev = 0
+        entry["fix_attempts"] = prev + 1
 
     # Write back updated entries (resolvable + unresolvable)
     try:
