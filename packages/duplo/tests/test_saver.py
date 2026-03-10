@@ -295,6 +295,13 @@ class TestAppendPhaseToHistory:
         path = append_phase_to_history(self._PLAN, target_dir=tmp_path)
         assert path.read_text().endswith("\n")
 
+    def test_prefixed_heading(self, tmp_path, sample_features, sample_prefs):
+        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
+        plan = "# McWhisper — Phase 1: Core\n\n## Objective\nBuild it.\n"
+        append_phase_to_history(plan, target_dir=tmp_path)
+        entry = json.loads((tmp_path / DUPLO_JSON).read_text())["phases"][0]
+        assert entry["phase"] == "Phase 1: Core"
+
 
 class TestSetInProgress:
     def test_creates_in_progress_key(self, tmp_path, sample_features, sample_prefs):

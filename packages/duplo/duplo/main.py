@@ -980,7 +980,7 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     print(f"\nFeedback recorded ({len(feedback)} chars).")
 
     current_phase_match = re.search(
-        r"#\s*(Phase\s+\d+[^\n]*)", current_plan, re.IGNORECASE | re.MULTILINE
+        r"#\s*.*?(Phase\s+\d+[^\n]*)", current_plan, re.IGNORECASE | re.MULTILINE
     )
     current_phase_label = current_phase_match.group(1).strip() if current_phase_match else ""
     save_feedback(feedback, after_phase=current_phase_label)
@@ -996,7 +996,7 @@ def _advance_to_next(data: dict, app_name: str) -> None:
     saved = save_plan(content)
     print(f"Next phase plan saved to {saved}")
 
-    match = re.search(r"#\s*(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
+    match = re.search(r"#\s*.*?(Phase\s+\d+[^\n]*)", content, re.IGNORECASE | re.MULTILINE)
     phase_label = match.group(1).strip() if match else "Next Phase"
     _plan_ready(phase_label)
 

@@ -128,6 +128,10 @@ class TestDetectNextPhaseNumber:
     def test_case_insensitive(self):
         assert _detect_next_phase_number("# phase 2: Foo") == 3
 
+    def test_prefixed_heading(self):
+        plan = "# McWhisper — Phase 3: Dashboard\n\n## Objective\nAdd dashboard."
+        assert _detect_next_phase_number(plan) == 4
+
 
 _SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search."
 _SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
