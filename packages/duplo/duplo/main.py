@@ -68,7 +68,7 @@ from duplo.saver import (
     write_claude_md,
 )
 from duplo.screenshotter import map_screenshots_to_features, save_reference_screenshots
-from duplo.selector import select_features
+from duplo.selector import select_features, select_issues
 
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 _DUPLO_JSON = ".duplo/duplo.json"
@@ -954,6 +954,13 @@ def _subsequent_run() -> None:
         # Update phase_info to reflect user's selection.
         phase_info = dict(phase_info)
         phase_info["features"] = [f.name for f in selected]
+
+    # Show open issues and let user pick which to address.
+    all_issues = data.get("issues", [])
+    selected_issues = select_issues(all_issues)
+    if selected_issues:
+        phase_info = dict(phase_info)
+        phase_info["issues"] = [iss["description"] for iss in selected_issues]
 
     # Generate plan for current phase.
     source_url = data.get("source_url", "")

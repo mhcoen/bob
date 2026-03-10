@@ -8,6 +8,7 @@ from duplo.selector import (
     _print_features,
     _recommended_indices,
     select_features,
+    select_issues,
 )
 
 
@@ -274,3 +275,79 @@ class TestSelectFeaturesRecommended:
         )
         combined = "\n".join(lines)
         assert "recommended by roadmap: 1, 3" in combined
+
+
+# ---------------------------------------------------------------------------
+# select_issues
+# ---------------------------------------------------------------------------
+
+SAMPLE_ISSUES = [
+    {"description": "Button misaligned", "severity": "major", "status": "open"},
+    {"description": "Color too dark", "source": "visual comparison", "status": "open"},
+    {"description": "Already fixed", "severity": "minor", "status": "resolved"},
+]
+
+
+class TestSelectIssues:
+    def _run(self, issues, user_input):
+        lines: list[str] = []
+        result = select_issues(issues, input_fn=lambda _: user_input, print_fn=lines.append)
+        return result, lines
+
+    def test_empty_issues_returns_empty(self):
+        result, lines = self._run([], "all")
+        assert result == []
+        assert not lines
+
+    def test_all_resolved_returns_empty(self):
+        resolved = [{"description": "Done", "status": "resolved"}]
+        result, lines = self._run(resolved, "all")
+        assert result == []
+
+    def test_all_keyword(self):
+        result, _ = self._run(SAMPLE_ISSUES, "all")
+        assert len(result) == 2
+        assert result[0]["description"] == "Button misaligned"
+        assert result[1]["description"] == "Color too dark"
+
+    def test_blank_input_returns_none(self):
+        result, _ = self._run(SAMPLE_ISSUES, "")
+        assert result == []
+
+    def test_none_keyword(self):
+        result, _ = self._run(SAMPLE_ISSUES, "none")
+        assert result == []
+
+    def test_numeric_selection(self):
+        result, _ = self._run(SAMPLE_ISSUES, "2")
+        assert len(result) == 1
+        assert result[0]["description"] == "Color too dark"
+
+    def test_range_selection(self):
+        result, _ = self._run(SAMPLE_ISSUES, "1-2")
+        assert len(result) == 2
+
+    def test_shows_severity(self):
+        _, lines = self._run(SAMPLE_ISSUES, "none")
+        combined = "\n".join(lines)
+        assert "[major]" in combined
+
+    def test_shows_source_as_label(self):
+        _, lines = self._run(SAMPLE_ISSUES, "none")
+        combined = "\n".join(lines)
+        assert "[visual comparison]" in combined
+
+    def test_prints_summary_count(self):
+        _, lines = self._run(SAMPLE_ISSUES, "1")
+        combined = "\n".join(lines)
+        assert "1 of 2" in combined
+
+    def test_issues_without_status_treated_as_open(self):
+        issues = [{"description": "No status field", "severity": "minor"}]
+        result, _ = self._run(issues, "all")
+        assert len(result) == 1
+
+    def test_filters_resolved(self):
+        result, _ = self._run(SAMPLE_ISSUES, "all")
+        descriptions = [r["description"] for r in result]
+        assert "Already fixed" not in descriptions

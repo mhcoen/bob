@@ -255,6 +255,7 @@ def generate_phase_plan(
         phase_goal = phase["goal"]
         phase_features = phase.get("features", [])
         phase_test = phase.get("test", "")
+        phase_issues = phase.get("issues", [])
         features_text = "\n".join(f"- {name}" for name in phase_features) or "(scaffold only)"
     else:
         phase_num = 1
@@ -262,12 +263,18 @@ def generate_phase_plan(
         phase_goal = "Smallest end-to-end working thing"
         features_text = "\n".join(f"- {f.name}: {f.description}" for f in features)
         phase_test = ""
+        phase_issues = []
 
     design_block = ""
     if design_section:
         design_block = (
             f"\nVisual design requirements (from reference screenshots):\n{design_section}\n"
         )
+
+    issues_block = ""
+    if phase_issues:
+        issues_text = "\n".join(f"- {desc}" for desc in phase_issues)
+        issues_block = f"\nKnown issues to fix in this phase:\n{issues_text}\n"
 
     prompt = f"""\
 Project: {project_name or source_url}
@@ -286,7 +293,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-{design_block}
+{design_block}{issues_block}
 Generate the PLAN.md now.
 """
 

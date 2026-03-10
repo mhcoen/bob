@@ -110,6 +110,54 @@ def _print_features(
             print_fn(f"       {feature.description}")
 
 
+def select_issues(
+    issues: list[dict],
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> list[dict]:
+    """Display open *issues* and interactively ask which to address.
+
+    Only issues with ``status == "open"`` (or no ``status`` field) are
+    shown.  Uses the same numbered selection pattern as
+    :func:`select_features`.
+
+    Accepts selections like:
+      - "all"           – include everything
+      - blank           – include nothing (skip issues)
+      - "none"          – include nothing
+      - "1,3,5"         – comma-separated numbers
+      - "1-4,7"         – ranges and individual numbers mixed
+
+    Returns the list of selected issue dicts.
+    """
+    open_issues = [iss for iss in issues if iss.get("status", "open") == "open"]
+    if not open_issues:
+        return []
+
+    print_fn("\nOpen issues:")
+    for idx, iss in enumerate(open_issues, start=1):
+        severity = iss.get("severity", iss.get("source", ""))
+        label = f" [{severity}]" if severity else ""
+        print_fn(f"  {idx:>3}. {iss['description']}{label}")
+
+    print_fn("")
+    print_fn("Which issues should be addressed in this phase?")
+    print_fn('  Examples: "all", "none", "1,3", "1-3"')
+    raw = input_fn("Issues [none]: ").strip()
+
+    if raw.lower() == "all":
+        selected = list(open_issues)
+    elif not raw or raw.lower() == "none":
+        selected = []
+    else:
+        indices = _parse_selection(raw, len(open_issues))
+        selected = [open_issues[i] for i in sorted(indices)]
+
+    print_fn(f"\n{len(selected)} of {len(open_issues)} issue(s) selected.")
+    return selected
+
+
 def _parse_selection(raw: str, count: int) -> set[int]:
     """Parse a selection string into a set of 0-based indices.
 
