@@ -37,11 +37,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Each line becomes an entry in the `issues` list in `duplo.json` with `source: "user"` and the current phase label
   - [x] This is where the user reports bugs (e.g. "waveform shows static bars during recording") or incomplete wiring (e.g. "qwen3-asr-swift dependency is unused")
 
-- [ ] Generate roadmap from remaining features when missing or consumed
+- [x] Generate roadmap from remaining features when missing or consumed
   - [x] At the start of the next-phase flow, if `duplo.json` has no `roadmap` or the existing roadmap has been fully consumed (current_phase is past the last entry), generate a new one using `generate_roadmap` with only the remaining unimplemented features
   - [x] Pass the completion history (list of phase labels and what they implemented) as context so the roadmap builds on what exists rather than starting from scratch
   - [x] Save the new roadmap to `duplo.json`, resetting `current_phase` to 0 relative to the new roadmap
-  - [ ] Add a test that verifies roadmap generation excludes implemented features
+  - [x] Add a test that verifies roadmap generation excludes implemented features
 
 - [ ] Redesign `_subsequent_run` state machine
   - [ ] Replace the current branching (in_progress checks, roadmap lookups, history-based detection) with a clean flow:
