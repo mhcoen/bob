@@ -9,6 +9,7 @@ import pytest
 
 from duplo.extractor import Feature
 from duplo.planner import (
+    _PHASE_SYSTEM,
     _PLAN_FILENAME,
     _detect_next_phase_number,
     append_test_tasks,
@@ -111,6 +112,26 @@ class TestGeneratePhasePlan:
         prompt = mock_query.call_args[0][0]
         assert "(none)" in prompt
         assert isinstance(result, str)
+
+
+class TestPhaseSystemPromptAnnotations:
+    def test_system_prompt_requires_feat_annotation(self):
+        assert '[feat: "Feature Name"]' in _PHASE_SYSTEM
+
+    def test_system_prompt_requires_multi_feature_annotation(self):
+        assert "comma-separated" in _PHASE_SYSTEM
+
+    def test_system_prompt_requires_fix_annotation(self):
+        assert '[fix: "description"]' in _PHASE_SYSTEM
+
+    def test_system_prompt_no_annotation_for_scaffolding(self):
+        assert "no annotation" in _PHASE_SYSTEM.lower()
+
+    def test_system_prompt_shows_feat_example_in_format(self):
+        assert '[feat: "User authentication"]' in _PHASE_SYSTEM
+
+    def test_system_prompt_shows_fix_example_in_format(self):
+        assert '[fix: "email format not checked"]' in _PHASE_SYSTEM
 
 
 class TestDetectNextPhaseNumber:

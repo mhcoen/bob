@@ -33,6 +33,13 @@ Rules for the plan:
 - If visual design requirements are provided, include them
   verbatim as a section in the plan so the builder knows the
   exact colors, fonts, spacing, and component styles to use.
+- Every task line that implements one or more features from the
+  input list MUST end with a [feat: "Feature Name"] annotation.
+  If a task addresses multiple features, list them comma-separated:
+  [feat: "Push-to-talk recording", "Global keyboard shortcuts"].
+  Tasks that fix bugs or issues use [fix: "description"] instead.
+  Scaffolding or structural tasks that do not map to any feature
+  use no annotation.
 
 Output ONLY the Markdown for PLAN.md. No explanation outside it.
 Format:
@@ -41,9 +48,10 @@ Format:
 
 <Description with platform, language, constraints, and phase goal.>
 
-- [ ] First task
+- [ ] Set up project structure and build system
+- [ ] Add user login form [feat: "User authentication"]
   - [ ] Subtask if needed
-- [ ] Second task
+- [ ] Fix input validation on signup [fix: "email format not checked"]
 - [ ] ...
 """
 
