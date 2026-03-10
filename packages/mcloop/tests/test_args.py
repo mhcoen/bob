@@ -6,6 +6,7 @@ import pytest
 
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
+    _MAX_FIX_ATTEMPTS,
     MAX_VERIFICATION_ROUNDS,
     SessionContext,
     _append_verification_failure,
@@ -13,6 +14,7 @@ from mcloop.main import (
     _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
+    _error_signature_hash,
     _handle_auto_task,
     _handle_user_task,
     _insert_bugs_section,
@@ -3208,6 +3210,171 @@ def test_check_errors_passes_model(tmp_path):
         _check_errors_json(tmp_path, model="opus")
 
     assert mock_diag.call_args.kwargs["model"] == "opus"
+
+
+# --- _error_signature_hash ---
+
+
+def test_error_signature_hash_basic():
+    """Hash uses exception_type + source_file + line."""
+    entry = {"exception_type": "ValueError", "source_file": "app.py", "line": 42}
+    h = _error_signature_hash(entry)
+    assert isinstance(h, str)
+    assert len(h) == 16
+    # Same input produces same hash
+    assert _error_signature_hash(entry) == h
+
+
+def test_error_signature_hash_different_errors():
+    """Different errors produce different hashes."""
+    e1 = {"exception_type": "ValueError", "source_file": "app.py", "line": 42}
+    e2 = {"exception_type": "TypeError", "source_file": "app.py", "line": 42}
+    e3 = {"exception_type": "ValueError", "source_file": "lib.py", "line": 42}
+    assert _error_signature_hash(e1) != _error_signature_hash(e2)
+    assert _error_signature_hash(e1) != _error_signature_hash(e3)
+
+
+def test_error_signature_hash_fallback_stack_trace():
+    """Falls back to stack_trace when location fields missing."""
+    entry = {"stack_trace": "Traceback...\n  File app.py\nValueError"}
+    h = _error_signature_hash(entry)
+    assert len(h) == 16
+
+
+def test_error_signature_hash_fallback_description():
+    """Falls back to exception_type + description as last resort."""
+    entry = {"exception_type": "RuntimeError", "description": "oops"}
+    h = _error_signature_hash(entry)
+    assert len(h) == 16
+
+
+# --- _check_errors_json loop limit ---
+
+
+def test_check_errors_all_unresolvable(tmp_path, capsys):
+    """Returns False when all errors exceed max fix attempts."""
+    entries = [
+        {
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+            "fix_attempts": _MAX_FIX_ATTEMPTS,
+        },
+        {
+            "exception_type": "TypeError",
+            "description": "none + int",
+            "source_file": "lib.py",
+            "line": 10,
+            "fix_attempts": _MAX_FIX_ATTEMPTS + 1,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    result = _check_errors_json(tmp_path)
+
+    assert result is False
+    out = capsys.readouterr().out
+    assert "unresolvable" in out.lower()
+    assert "ValueError" in out
+    assert "TypeError" in out
+    assert f"attempted {_MAX_FIX_ATTEMPTS}x" in out
+
+
+def test_check_errors_mixed_resolvable_unresolvable(tmp_path, capsys):
+    """Skips unresolvable, diagnoses only resolvable entries."""
+    entries = [
+        {
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+            "fix_attempts": _MAX_FIX_ATTEMPTS,
+        },
+        {
+            "exception_type": "IndexError",
+            "description": "list index out of range",
+            "source_file": "lib.py",
+            "line": 99,
+            "fix_attempts": 1,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    # Only the resolvable error should be diagnosed
+    assert mock_diag.call_count == 1
+    out = capsys.readouterr().out
+    assert "unresolvable" in out.lower()
+    assert "1 bug(s)" in out
+    assert "Added 1 fix task(s)" in out
+
+
+def test_check_errors_increments_fix_attempts(tmp_path):
+    """Fix attempts are incremented and written back after diagnosis."""
+    import json
+
+    entries = [
+        {
+            "exception_type": "ValueError",
+            "description": "bad",
+            "source_file": "a.py",
+            "line": 1,
+            "fix_attempts": 1,
+        },
+    ]
+    errors_path = _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        _check_errors_json(tmp_path)
+
+    # Read back errors.json — fix_attempts should be incremented
+    updated = json.loads(errors_path.read_text())
+    assert updated[0]["fix_attempts"] == 2
+
+
+def test_check_errors_new_entry_gets_fix_attempts(tmp_path):
+    """Entries without fix_attempts get it set to 1 after first diagnosis."""
+    import json
+
+    entries = [
+        {
+            "exception_type": "RuntimeError",
+            "description": "oops",
+        },
+    ]
+    errors_path = _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        _check_errors_json(tmp_path)
+
+    updated = json.loads(errors_path.read_text())
+    assert updated[0]["fix_attempts"] == 1
 
 
 # --- _insert_bugs_section ---
