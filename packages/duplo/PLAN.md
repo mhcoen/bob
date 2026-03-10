@@ -32,7 +32,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add tests for the annotation parser covering annotated lines, unannotated lines, and mixed plans
 
 - [ ] Prompt for issues at phase completion
-  - [ ] After status tracking, before advancing to the next phase, prompt the user for known issues with the completed phase
+  - [x] After status tracking, before advancing to the next phase, prompt the user for known issues with the completed phase
   - [ ] Multi-line input, blank line to finish, skippable
   - [ ] Each line becomes an entry in the `issues` list in `duplo.json` with `source: "user"` and the current phase label
   - [ ] This is where the user reports bugs (e.g. "waveform shows static bars during recording") or incomplete wiring (e.g. "qwen3-asr-swift dependency is unused")
