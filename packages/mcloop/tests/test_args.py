@@ -3040,8 +3040,8 @@ def test_check_errors_user_accepts(tmp_path, capsys):
     original_idx = next(i for i, ln in enumerate(lines) if "First task" in ln)
     assert bugs_idx < original_idx
 
-    # errors.json should be deleted
-    assert not (tmp_path / ".mcloop" / "errors.json").exists()
+    # errors.json should still exist (cleared after bugs are fixed, not at diagnosis)
+    assert (tmp_path / ".mcloop" / "errors.json").exists()
 
     out = capsys.readouterr().out
     assert "Added 2 fix task(s)" in out
@@ -3379,6 +3379,121 @@ def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
         run_loop(plan)
 
     mock_verify.assert_called_once_with(tmp_path)
+
+
+def test_run_loop_bug_only_clears_errors_json(tmp_path):
+    """Bug-only mode: clears errors.json after all bugs fixed and verified."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    (tmp_path / ".git").mkdir()
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    errors_path = mcloop_dir / "errors.json"
+    errors_path.write_text('[{"exception_type": "ValueError"}]')
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._launch_app_verification", return_value=None),
+    ):
+        run_loop(plan)
+
+    # errors.json should be deleted after successful bug-only completion
+    assert not errors_path.exists()
+
+
+def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
+    """Bug-only mode: keeps errors.json when verification fails."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    (tmp_path / ".git").mkdir()
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    errors_path = mcloop_dir / "errors.json"
+    errors_path.write_text('[{"exception_type": "ValueError"}]')
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._launch_app_verification", return_value="App crashed"),
+    ):
+        run_loop(plan)
+
+    # errors.json should still exist when verification failed
+    assert errors_path.exists()
+
+
+def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):
+    """Bug-only mode: keeps errors.json when bugs could not be fixed."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    (tmp_path / ".git").mkdir()
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    errors_path = mcloop_dir / "errors.json"
+    errors_path.write_text('[{"exception_type": "ValueError"}]')
+
+    result = MagicMock()
+    result.success = False
+    result.output = "error"
+    result.exit_code = 1
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._launch_app_verification"),
+    ):
+        run_loop(plan)
+
+    # errors.json should still exist when bugs couldn't be fixed
+    assert errors_path.exists()
 
 
 def test_run_loop_no_bugs_runs_normally(tmp_path):

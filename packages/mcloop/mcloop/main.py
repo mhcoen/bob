@@ -775,9 +775,6 @@ def _check_errors_json(
     # Insert tasks under ## Bugs section
     _insert_bugs_section(plan_path, task_lines)
 
-    # Clear the errors file
-    errors_path.unlink(missing_ok=True)
-
     print(
         formatting.system_msg(f"Added {len(entries)} fix task(s) to PLAN.md"),
         flush=True,
@@ -1193,6 +1190,10 @@ def run_loop(
                     formatting.system_msg("Bug verification passed"),
                     flush=True,
                 )
+                # Clear errors.json now that all bugs are fixed and verified
+                errors_path = project_dir / ".mcloop" / "errors.json"
+                if errors_path.is_file():
+                    errors_path.unlink()
         total = time.monotonic() - run_start
         _print_summary(
             completed,
