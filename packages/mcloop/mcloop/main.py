@@ -747,149 +747,189 @@ def run_loop(
 
         task_start = time.monotonic()
         success = False
-        attempt = 0
-        last_error = ""
-        while attempt < max_retries:
-            attempt += 1
-            result = run_task(
-                task.text,
-                cli,
-                project_dir,
-                log_dir,
-                description,
-                task_label=label,
-                model=current_model,
-                prior_errors=last_error,
-                session_context=ctx.text(),
-                check_commands=project_checks,
-                allowed_tools=allowed_tools,
-            )
-
-            if is_session_limited(
-                result.output,
-                result.exit_code,
-            ):
-                _checkpoint(project_dir)
-                notify(
-                    "Session limit reached. Polling every 10m.",
-                    level="warning",
-                )
+        models_to_try = [current_model]
+        if fallback_model and fallback_model != current_model:
+            models_to_try.append(fallback_model)
+        for model_idx, task_model in enumerate(models_to_try):
+            if model_idx > 0:
                 print(
-                    formatting.system_msg(
-                        "Session limit reached."
-                        f" Polling every {SESSION_LIMIT_POLL // 60}m."
-                        " Press Ctrl-C to exit."
-                    ),
+                    formatting.system_msg(f"Retrying with fallback model: {task_model}"),
                     flush=True,
                 )
-                try:
-                    time.sleep(SESSION_LIMIT_POLL)
-                except KeyboardInterrupt:
-                    total = time.monotonic() - run_start
-                    _print_summary(
-                        completed,
-                        None,
-                        "",
-                        parse(checklist_path),
-                        total,
-                        project_dir,
-                        notes_snapshot,
-                    )
-                    print("\nExiting.", flush=True)
-                    return [task.text]
-                # No notification on retry — session limit was already reported
-                attempt -= 1  # don't count as a real attempt
-                continue
+            attempt = 0
+            last_error = ""
+            while attempt < max_retries:
+                attempt += 1
+                result = run_task(
+                    task.text,
+                    cli,
+                    project_dir,
+                    log_dir,
+                    description,
+                    task_label=label,
+                    model=task_model,
+                    prior_errors=last_error,
+                    session_context=ctx.text(),
+                    check_commands=project_checks,
+                    allowed_tools=allowed_tools,
+                )
 
-            if is_rate_limited(result.output, result.exit_code):
-                rate_state.mark_limited(cli)
-                notify(f"Rate-limited on {cli}.", level="warning")
-                if fallback_model and current_model != fallback_model:
-                    current_model = fallback_model
+                if is_session_limited(
+                    result.output,
+                    result.exit_code,
+                ):
+                    _checkpoint(project_dir)
+                    notify(
+                        "Session limit reached. Polling every 10m.",
+                        level="warning",
+                    )
                     print(
-                        formatting.system_msg(f"Switching to fallback model: {fallback_model}"),
+                        formatting.system_msg(
+                            "Session limit reached."
+                            f" Polling every {SESSION_LIMIT_POLL // 60}m."
+                            " Press Ctrl-C to exit."
+                        ),
                         flush=True,
                     )
-                cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
-                if cli is None:
-                    cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
-                    # Reset to primary model after cooldown
-                    if fallback_model and current_model == fallback_model:
-                        current_model = model
+                    try:
+                        time.sleep(SESSION_LIMIT_POLL)
+                    except KeyboardInterrupt:
+                        total = time.monotonic() - run_start
+                        _print_summary(
+                            completed,
+                            None,
+                            "",
+                            parse(checklist_path),
+                            total,
+                            project_dir,
+                            notes_snapshot,
+                        )
+                        print("\nExiting.", flush=True)
+                        return [task.text]
+                    # Don't count as a real attempt
+                    attempt -= 1
+                    continue
+
+                if is_rate_limited(result.output, result.exit_code):
+                    rate_state.mark_limited(cli)
+                    notify(
+                        f"Rate-limited on {cli}.",
+                        level="warning",
+                    )
+                    if fallback_model and current_model != fallback_model:
+                        current_model = fallback_model
+                        task_model = fallback_model
                         print(
-                            formatting.system_msg(f"Rate limit cleared, back to model: {model}"),
+                            formatting.system_msg(
+                                f"Switching to fallback model: {fallback_model}"
+                            ),
                             flush=True,
                         )
-                attempt -= 1  # don't count rate-limit as a real attempt
-                continue
+                    cli = get_available_cli(
+                        rate_state,
+                        enabled_clis=enabled_clis,
+                    )
+                    if cli is None:
+                        cli = wait_for_reset(
+                            rate_state,
+                            notify,
+                            enabled_clis=enabled_clis,
+                        )
+                        # Reset to primary model after cooldown
+                        if fallback_model and current_model == fallback_model:
+                            current_model = model
+                            task_model = model
+                            print(
+                                formatting.system_msg(
+                                    f"Rate limit cleared, back to model: {model}"
+                                ),
+                                flush=True,
+                            )
+                    # Don't count rate-limit as a real attempt
+                    attempt -= 1
+                    continue
 
-            if not result.success:
-                last_error = _tail(result.output, 50)
-                print(
-                    formatting.error_msg(f"Task failed (attempt {attempt}/{max_retries})"),
-                    flush=True,
-                )
-                print(
-                    f"    Exit code: {result.exit_code}",
-                    flush=True,
-                )
-                _print_error_tail(result.output)
-                continue
-
-            if not _has_meaningful_changes(project_dir):
-                last_error = "Task produced no file changes"
-                print(
-                    formatting.error_msg(
-                        f"No-op task (attempt {attempt}/{max_retries}): {task.text}"
-                    ),
-                    flush=True,
-                )
-                continue
-
-            changed_files = _changed_files(project_dir)
-            check_result = run_checks(project_dir, changed_files=changed_files)
-            if check_result.passed:
-                try:
-                    _commit(project_dir, task.text)
-                except RuntimeError as exc:
+                if not result.success:
+                    last_error = _tail(result.output, 50)
                     print(
-                        formatting.error_msg(str(exc)),
+                        formatting.error_msg(f"Task failed (attempt {attempt}/{max_retries})"),
                         flush=True,
                     )
-                    total = time.monotonic() - run_start
-                    _print_summary(
-                        completed,
-                        f"{label}) {task.text}",
-                        str(exc),
-                        parse(checklist_path),
-                        total,
-                        project_dir,
-                        notes_snapshot,
+                    print(
+                        f"    Exit code: {result.exit_code}",
+                        flush=True,
                     )
-                    sys.exit(1)
-                check_off(checklist_path, task)
-                elapsed = _format_elapsed(time.monotonic() - task_start)
-                completed.append(f"{label}) {task.text}")
-                print(formatting.task_complete(label, elapsed), flush=True)
-                ctx.add(
-                    label,
-                    task.text,
-                    elapsed,
-                    result.output,
+                    _print_error_tail(result.output)
+                    continue
+
+                if not _has_meaningful_changes(project_dir):
+                    last_error = "Task produced no file changes"
+                    print(
+                        formatting.error_msg(
+                            f"No-op task (attempt {attempt}/{max_retries}): {task.text}"
+                        ),
+                        flush=True,
+                    )
+                    continue
+
+                changed_files = _changed_files(project_dir)
+                check_result = run_checks(
+                    project_dir,
                     changed_files=changed_files,
                 )
-                success = True
+                if check_result.passed:
+                    try:
+                        _commit(project_dir, task.text)
+                    except RuntimeError as exc:
+                        print(
+                            formatting.error_msg(str(exc)),
+                            flush=True,
+                        )
+                        total = time.monotonic() - run_start
+                        _print_summary(
+                            completed,
+                            f"{label}) {task.text}",
+                            str(exc),
+                            parse(checklist_path),
+                            total,
+                            project_dir,
+                            notes_snapshot,
+                        )
+                        sys.exit(1)
+                    check_off(checklist_path, task)
+                    elapsed = _format_elapsed(
+                        time.monotonic() - task_start,
+                    )
+                    completed.append(f"{label}) {task.text}")
+                    print(
+                        formatting.task_complete(label, elapsed),
+                        flush=True,
+                    )
+                    ctx.add(
+                        label,
+                        task.text,
+                        elapsed,
+                        result.output,
+                        changed_files=changed_files,
+                    )
+                    success = True
+                    break
+                else:
+                    last_error = f"Command: {check_result.command}\n" + _tail(
+                        check_result.output, 50
+                    )
+                    print(
+                        formatting.error_msg(
+                            f"Checks failed (attempt"
+                            f" {attempt}/{max_retries}):"
+                            f" {check_result.command}"
+                        ),
+                        flush=True,
+                    )
+                    _print_error_tail(check_result.output)
+
+            if success:
                 break
-            else:
-                last_error = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
-                print(
-                    formatting.error_msg(
-                        f"Checks failed (attempt {attempt}/{max_retries}): {check_result.command}"
-                    ),
-                    flush=True,
-                )
-                _print_error_tail(check_result.output)
-                # No notification on individual retry — only after all retries exhausted
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
