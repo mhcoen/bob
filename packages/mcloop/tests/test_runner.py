@@ -6,6 +6,18 @@ from unittest.mock import patch
 
 import pytest
 
+from mcloop.prompts import (
+    bugs_md_has_bugs,
+    build_audit_prompt,
+    build_bug_fix_prompt,
+    build_bug_verify_prompt,
+    build_investigation_plan_description,
+    build_post_fix_review_prompt,
+    build_sync_prompt,
+    parse_bugs_md,
+    parse_verification_output,
+    review_found_problems,
+)
 from mcloop.runner import (
     _SUPPRESS_ALL_TOOLS,
     INVESTIGATION_TOOLS,
@@ -15,18 +27,8 @@ from mcloop.runner import (
     _reclaim_foreground,
     _slugify,
     _write_log,
-    bugs_md_has_bugs,
-    build_audit_prompt,
-    build_bug_fix_prompt,
-    build_bug_verify_prompt,
-    build_investigation_plan_description,
-    build_post_fix_review_prompt,
-    build_sync_prompt,
     gather_audit_context,
     gather_sync_context,
-    parse_bugs_md,
-    parse_verification_output,
-    review_found_problems,
 )
 
 

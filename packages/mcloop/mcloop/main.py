@@ -48,6 +48,13 @@ from mcloop.git_ops import (
 )
 from mcloop.investigator import gather_bug_context, generate_plan
 from mcloop.notify import notify
+from mcloop.prompts import (
+    bugs_md_has_bugs,
+    parse_bugs_md,
+    parse_diagnostic_output,
+    parse_verification_output,
+    review_found_problems,
+)
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
     RateLimitState,
@@ -58,11 +65,6 @@ from mcloop.ratelimit import (
 )
 from mcloop.runner import (
     INVESTIGATION_TOOLS,
-    bugs_md_has_bugs,
-    parse_bugs_md,
-    parse_diagnostic_output,
-    parse_verification_output,
-    review_found_problems,
     run_audit,
     run_bug_fix,
     run_bug_verify,
