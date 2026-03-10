@@ -455,6 +455,7 @@ def run_loop(
                             notes_snapshot,
                         )
                         sys.exit(1)
+                    _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
                     check_off(checklist_path, task)
                     elapsed = _format_elapsed(
@@ -1049,6 +1050,50 @@ def _run_build(project_dir: Path) -> None:
             _print_error_tail(result.stdout + result.stderr)
     except Exception as e:
         print(formatting.error_msg(f"Build error: {e}"), flush=True)
+
+
+def _maybe_auto_wrap(project_dir: Path) -> None:
+    """Auto-inject crash handlers after first task producing a runnable app.
+
+    Triggered once: when detect_run() returns a command and no canonical
+    wrappers exist yet in .mcloop/wrap/.
+    """
+    from mcloop.wrap import wrap_project
+
+    # Already wrapped — canonical wrappers exist
+    wrap_dir = project_dir / ".mcloop" / "wrap"
+    if wrap_dir.is_dir() and any(wrap_dir.iterdir()):
+        return
+
+    # Not a runnable app (yet)
+    run_cmd = detect_run(project_dir)
+    if not run_cmd:
+        return
+
+    try:
+        wrap_project(project_dir)
+    except ValueError:
+        return
+
+    print("Injected crash handlers.", flush=True)
+
+    _git(["git", "add", "-A"], cwd=project_dir, label="auto-wrap add")
+    _git(
+        ["git", "commit", "-m", "Inject mcloop crash handlers"],
+        cwd=project_dir,
+        label="auto-wrap commit",
+    )
+    push_result = _git(
+        ["git", "push"],
+        cwd=project_dir,
+        label="auto-wrap push",
+        silent=True,
+    )
+    if push_result.returncode != 0:
+        print(
+            formatting.error_msg("Push after auto-wrap failed"),
+            flush=True,
+        )
 
 
 def _reinject_wrappers(project_dir: Path) -> None:

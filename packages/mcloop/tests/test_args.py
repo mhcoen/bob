@@ -28,6 +28,7 @@ from mcloop.investigate_cmd import (
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
     _check_user_input,
+    _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
     run_loop,
@@ -2741,6 +2742,141 @@ def test_fallback_resets_per_task(tmp_path):
     assert models_used[2] == "sonnet"
     # Task 2 starts fresh with primary model
     assert models_used[3] == "opus"
+
+
+# --- _maybe_auto_wrap tests ---
+
+
+def test_auto_wrap_no_run_command(tmp_path):
+    """When detect_run returns None, no wrapping happens."""
+    with patch("mcloop.main.detect_run", return_value=None):
+        _maybe_auto_wrap(tmp_path)
+    # No .mcloop/wrap/ created
+    assert not (tmp_path / ".mcloop" / "wrap").exists()
+
+
+def test_auto_wrap_already_wrapped(tmp_path):
+    """When .mcloop/wrap/ has files, auto-wrap is skipped."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    wrap_dir = tmp_path / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True)
+    (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+
+    with patch("mcloop.main.detect_run") as mock_run:
+        _maybe_auto_wrap(tmp_path)
+
+    mock_run.assert_not_called()
+
+
+def test_auto_wrap_injects_and_commits(tmp_path, capsys):
+    """First runnable task triggers auto-wrap, commit, and push."""
+    entry = tmp_path / "main.py"
+    entry.write_text("print('hello')\n")
+
+    git_result = MagicMock()
+    git_result.returncode = 0
+
+    with (
+        patch("mcloop.main.detect_run", return_value="python main.py"),
+        patch("mcloop.main._git", return_value=git_result) as mock_git,
+    ):
+        _maybe_auto_wrap(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Injected crash handlers." in captured.out
+
+    # Should have committed: add, commit, push
+    assert mock_git.call_count == 3
+    commit_call = mock_git.call_args_list[1]
+    assert "Inject mcloop crash handlers" in commit_call[0][0]
+
+    # Entry point should have markers
+    content = entry.read_text()
+    assert "# mcloop:wrap:begin" in content
+
+    # Canonical wrappers saved
+    assert (tmp_path / ".mcloop" / "wrap" / "python_wrapper.py").exists()
+
+
+def test_auto_wrap_language_detection_fails(tmp_path):
+    """When wrap_project raises ValueError, auto-wrap silently skips."""
+    with (
+        patch("mcloop.main.detect_run", return_value="cargo run"),
+        patch("mcloop.wrap.wrap_project", side_effect=ValueError("no lang")),
+    ):
+        _maybe_auto_wrap(tmp_path)
+    # No crash, no .mcloop/wrap/
+    assert not (tmp_path / ".mcloop" / "wrap").exists()
+
+
+def test_auto_wrap_push_failure(tmp_path, capsys):
+    """When push fails after auto-wrap, prints error but continues."""
+    entry = tmp_path / "main.py"
+    entry.write_text("print('hello')\n")
+
+    def fake_git(cmd, cwd=None, label="", silent=False):
+        result = MagicMock()
+        if "push" in cmd:
+            result.returncode = 1
+        else:
+            result.returncode = 0
+        return result
+
+    with (
+        patch("mcloop.main.detect_run", return_value="python main.py"),
+        patch("mcloop.main._git", side_effect=fake_git),
+    ):
+        _maybe_auto_wrap(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Push after auto-wrap failed" in captured.out
+
+
+def test_run_loop_calls_auto_wrap_after_commit(tmp_path):
+    """run_loop calls _maybe_auto_wrap after each successful commit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._maybe_auto_wrap") as mock_auto_wrap,
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    mock_auto_wrap.assert_called_once_with(tmp_path)
 
 
 # --- _reinject_wrappers tests ---
