@@ -132,14 +132,41 @@ private func _mcloopWriteError(_ report: [String: Any], dir: String) {
 
 PYTHON_WRAPPER = """\
 # mcloop:wrap:begin
-import atexit as _mcloop_atexit
 import hashlib as _mcloop_hashlib
 import json as _mcloop_json
+import logging as _mcloop_logging
 import signal as _mcloop_signal
 import sys as _mcloop_sys
 import traceback as _mcloop_traceback
 from datetime import datetime as _mcloop_datetime, timezone as _mcloop_tz
 from pathlib import Path as _mcloop_Path
+
+
+class _McloopState:
+    _providers = []
+    _last_action = ""
+
+    @classmethod
+    def register(cls, provider):
+        cls._providers.append(provider)
+
+    @classmethod
+    def record_action(cls, action):
+        cls._last_action = str(action)
+
+    @classmethod
+    def snapshot(cls):
+        result = {}
+        for provider in cls._providers:
+            try:
+                result.update(provider())
+            except Exception:
+                pass
+        return result
+
+    @classmethod
+    def last_action(cls):
+        return cls._last_action
 
 
 def _mcloop_setup_crash_handlers():
@@ -179,6 +206,8 @@ def _mcloop_setup_crash_handlers():
                 for k, v in tb.tb_frame.f_locals.items()
                 if not k.startswith("_")
             }
+        state = _McloopState.snapshot()
+        state.update(local_vars)
         report = {
             "timestamp": _mcloop_datetime.now(
                 _mcloop_tz.utc
@@ -192,7 +221,8 @@ def _mcloop_setup_crash_handlers():
             ),
             "source_file": last.filename if last else "",
             "line": last.lineno if last else 0,
-            "app_state": local_vars,
+            "app_state": state,
+            "last_action": _McloopState.last_action(),
             "fix_attempts": 0,
         }
         _write_error(report)
@@ -216,7 +246,8 @@ def _mcloop_setup_crash_handlers():
             "stack_trace": "".join(_mcloop_traceback.format_stack(frame)),
             "source_file": source,
             "line": lineno,
-            "app_state": {},
+            "app_state": _McloopState.snapshot(),
+            "last_action": _McloopState.last_action(),
             "fix_attempts": 0,
         }
         _write_error(report)
@@ -232,6 +263,47 @@ def _mcloop_setup_crash_handlers():
             _mcloop_signal.signal(_sig, _signal_handler)
         except OSError:
             pass
+
+    class _McloopLogHandler(_mcloop_logging.Handler):
+        def emit(self, record):
+            if record.exc_info and record.exc_info[1] is not None:
+                exc_type, exc_value, exc_tb = record.exc_info
+                frames = _mcloop_traceback.extract_tb(exc_tb)
+                last = frames[-1] if frames else None
+                local_vars = {}
+                if exc_tb is not None:
+                    tb = exc_tb
+                    while tb.tb_next:
+                        tb = tb.tb_next
+                    local_vars = {
+                        k: repr(v)
+                        for k, v in tb.tb_frame.f_locals.items()
+                        if not k.startswith("_")
+                    }
+                state = _McloopState.snapshot()
+                state.update(local_vars)
+                report = {
+                    "timestamp": _mcloop_datetime.now(
+                        _mcloop_tz.utc
+                    ).isoformat(),
+                    "exception_type": exc_type.__name__,
+                    "description": str(exc_value),
+                    "stack_trace": "".join(
+                        _mcloop_traceback.format_exception(
+                            exc_type, exc_value, exc_tb
+                        )
+                    ),
+                    "source_file": last.filename if last else "",
+                    "line": last.lineno if last else 0,
+                    "app_state": state,
+                    "last_action": _McloopState.last_action(),
+                    "fix_attempts": 0,
+                }
+                _write_error(report)
+
+    handler = _McloopLogHandler()
+    handler.setLevel(_mcloop_logging.ERROR)
+    _mcloop_logging.getLogger().addHandler(handler)
 
 
 _mcloop_setup_crash_handlers()

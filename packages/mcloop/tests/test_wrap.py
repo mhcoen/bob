@@ -209,6 +209,16 @@ def test_inject_python():
     assert "_mcloop_setup_crash_handlers()" in result
     # Shebang preserved at top
     assert result.startswith("#!/usr/bin/env python3\n")
+    # State registry
+    assert "_McloopState" in result
+    assert "record_action" in result
+    assert "snapshot" in result
+    assert "last_action" in result
+    assert '"last_action"' in result
+    assert '"app_state"' in result
+    # Logging integration
+    assert "_McloopLogHandler" in result
+    assert "logging" in result
 
 
 def test_inject_python_no_shebang():
@@ -263,6 +273,53 @@ def test_swift_wrapper_signal_handlers():
     assert "SIGBUS" in SWIFT_WRAPPER
     assert "SIG_DFL" in SWIFT_WRAPPER
     assert "Darwin.raise" in SWIFT_WRAPPER
+
+
+def test_python_wrapper_state_registry():
+    """Python wrapper includes state registry for application state capture."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    # Registry API
+    assert "class _McloopState" in PYTHON_WRAPPER
+    assert "register(" in PYTHON_WRAPPER
+    assert "record_action(" in PYTHON_WRAPPER
+    assert "snapshot()" in PYTHON_WRAPPER
+    assert "last_action()" in PYTHON_WRAPPER
+    # Error reports include state and last action
+    assert '"app_state": state' in PYTHON_WRAPPER
+    assert '"last_action":' in PYTHON_WRAPPER
+    # Reports written to errors.json
+    assert "errors.json" in PYTHON_WRAPPER
+
+
+def test_python_wrapper_signal_handlers():
+    """Python wrapper installs handlers for SIGSEGV and SIGABRT."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    assert "SIGSEGV" in PYTHON_WRAPPER
+    assert "SIGABRT" in PYTHON_WRAPPER
+    assert "SIG_DFL" in PYTHON_WRAPPER
+
+
+def test_python_wrapper_logging_integration():
+    """Python wrapper installs a logging handler to capture logged exceptions."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    assert "_McloopLogHandler" in PYTHON_WRAPPER
+    assert "logging.Handler" in PYTHON_WRAPPER
+    assert "exc_info" in PYTHON_WRAPPER
+    assert "ERROR" in PYTHON_WRAPPER
+    assert "addHandler" in PYTHON_WRAPPER
+
+
+def test_python_wrapper_local_variables():
+    """Python wrapper captures local variables from the crashing frame."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    assert "f_locals" in PYTHON_WRAPPER
+    assert "tb.tb_next" in PYTHON_WRAPPER
+    # Filters out private vars
+    assert 'not k.startswith("_")' in PYTHON_WRAPPER
 
 
 # ---- save_canonical_wrappers ----
