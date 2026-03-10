@@ -1101,6 +1101,28 @@ class TestSaveFeatures:
         assert feat["status"] == "implemented"
         assert feat["implemented_in"] == "Phase 1"
 
+    def test_legacy_features_without_status_treated_as_pending(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True)
+        (duplo_dir / "duplo.json").write_text(
+            json.dumps(
+                {
+                    "features": [
+                        {
+                            "name": "Auth",
+                            "description": "User login.",
+                            "category": "core",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        feat = Feature(**data["features"][0])
+        assert feat.status == "pending"
+        assert feat.implemented_in == ""
+
     def test_selections_include_status_fields(self, tmp_path, sample_features, sample_prefs):
         save_selections(
             "https://example.com",
@@ -1170,6 +1192,23 @@ class TestSaveFeatureStatus:
         assert auth["implemented_in"] == ""
         assert search["status"] == "partial"
         assert search["implemented_in"] == "Phase 2"
+
+    def test_updates_feature_without_status_field(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                },
+            ],
+        )
+        save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        feat = data["features"][0]
+        assert feat["status"] == "implemented"
+        assert feat["implemented_in"] == "Phase 1"
 
     def test_raises_on_unknown_feature(self, tmp_path):
         self._write_features(

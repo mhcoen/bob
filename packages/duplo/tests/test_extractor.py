@@ -82,6 +82,12 @@ class TestParseFeatures:
         assert feat.status == "pending"
         assert feat.implemented_in == ""
 
+    def test_feature_from_dict_without_status_defaults_to_pending(self):
+        d = {"name": "X", "description": "Y", "category": "core"}
+        feat = Feature(**d)
+        assert feat.status == "pending"
+        assert feat.implemented_in == ""
+
     def test_feature_explicit_status(self):
         feat = Feature(
             name="X",
