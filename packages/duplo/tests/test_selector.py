@@ -250,4 +250,27 @@ class TestSelectFeaturesRecommended:
     def test_shows_roadmap_hint(self):
         _, lines = self._run(SAMPLE, "", recommended=["Search"])
         combined = "\n".join(lines)
-        assert "recommended by roadmap" in combined
+        assert "recommended by roadmap: 1" in combined
+
+    def test_shows_phase_label_in_recommendation(self):
+        lines: list[str] = []
+        select_features(
+            SAMPLE,
+            recommended=["Search", "SSO"],
+            phase_label="Phase 2: API Integration",
+            input_fn=lambda _: "",
+            print_fn=lines.append,
+        )
+        combined = "\n".join(lines)
+        assert "Recommended for Phase 2: API Integration: 1, 3" in combined
+
+    def test_no_phase_label_shows_generic_hint(self):
+        lines: list[str] = []
+        select_features(
+            SAMPLE,
+            recommended=["Search", "SSO"],
+            input_fn=lambda _: "",
+            print_fn=lines.append,
+        )
+        combined = "\n".join(lines)
+        assert "recommended by roadmap: 1, 3" in combined

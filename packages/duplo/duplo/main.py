@@ -945,7 +945,9 @@ def _subsequent_run() -> None:
     remaining = _unimplemented_features(data)
     phase_feature_names = phase_info.get("features", [])
     if remaining:
-        selected = select_features(remaining, recommended=phase_feature_names)
+        selected = select_features(
+            remaining, recommended=phase_feature_names, phase_label=phase_label
+        )
         if not selected:
             print("No features selected. Nothing to do.")
             return

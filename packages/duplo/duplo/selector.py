@@ -14,6 +14,7 @@ def select_features(
     features: list[Feature],
     *,
     recommended: list[str] | None = None,
+    phase_label: str | None = None,
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print,
 ) -> list[Feature]:
@@ -22,6 +23,10 @@ def select_features(
     When *recommended* is provided (a list of feature names from the
     roadmap's next phase), those features are marked with ``*`` in the
     display and used as the default selection instead of "all".
+
+    When *phase_label* is also provided (e.g. ``"Phase 2"``), the
+    recommendation line includes the phase name and the numbered
+    feature indices for quick reference.
 
     Accepts selections like:
       - "all"           – include everything
@@ -50,7 +55,11 @@ def select_features(
     print_fn("Enter the numbers of the features to include.")
     print_fn('  Examples: "all", "none", "1,3,5", "1-4,7"')
     if rec_indices is not None:
-        print_fn("  * = recommended by roadmap")
+        nums = ", ".join(str(i + 1) for i in rec_indices)
+        if phase_label:
+            print_fn(f"  * = Recommended for {phase_label}: {nums}")
+        else:
+            print_fn(f"  * = recommended by roadmap: {nums}")
     raw = input_fn(f"Selection [{default_hint}]: ").strip()
 
     if raw.lower() == "all":
