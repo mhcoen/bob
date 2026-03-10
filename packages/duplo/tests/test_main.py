@@ -18,6 +18,7 @@ from duplo.main import (
     _init_project,
     _print_summary,
     _rescrape_product_url,
+    _unimplemented_features,
     main,
 )
 from duplo.questioner import BuildPreferences
@@ -266,6 +267,16 @@ class TestMainSubsequentRun:
             "constraints": [],
             "preferences": [],
         },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Search",
+                "features": ["Search"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 0,
     }
 
     def test_generates_and_runs_phase(self, capsys, tmp_path, monkeypatch):
@@ -302,6 +313,10 @@ class TestSubsequentRunResume:
             "constraints": [],
             "preferences": [],
         },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": [], "test": "ok"},
+        ],
+        "current_phase": 0,
     }
 
     def test_skips_plan_generation_when_plan_exists(self, tmp_path, monkeypatch):
@@ -353,6 +368,11 @@ class TestAdvanceToNext:
             "constraints": [],
             "preferences": [],
         },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Next", "goal": "Next", "features": [], "test": "ok"},
+        ],
+        "current_phase": 0,
     }
 
     def test_collects_feedback_and_generates_next(self, capsys, tmp_path, monkeypatch):
@@ -1282,6 +1302,16 @@ class TestDetectAndAppendGaps:
                     "constraints": [],
                     "preferences": [],
                 },
+                "roadmap": [
+                    {
+                        "phase": 0,
+                        "title": "Core",
+                        "goal": "Core",
+                        "features": ["Search"],
+                        "test": "ok",
+                    },
+                ],
+                "current_phase": 0,
             },
         )
         duplo_dir = tmp_path / ".duplo"
@@ -1622,6 +1652,10 @@ class TestSubsequentRunReextractsFeatures:
             "constraints": [],
             "preferences": [],
         },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": ["Auth"], "test": "ok"},
+        ],
+        "current_phase": 0,
     }
 
     def test_reextracts_and_merges_features(self, capsys, tmp_path, monkeypatch):
@@ -1722,3 +1756,180 @@ class TestCompletePhaseIssues:
         data = _read_duplo_json(tmp_path)
         assert data.get("issues", []) == []
         assert "No issues reported." in capsys.readouterr().out
+
+
+class TestUnimplementedFeatures:
+    """Tests for _unimplemented_features helper."""
+
+    def test_returns_only_non_implemented(self):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Filter",
+                    "description": "Filter",
+                    "category": "core",
+                    "status": "partial",
+                    "implemented_in": "Phase 2",
+                },
+            ],
+        }
+        result = _unimplemented_features(data)
+        names = [f.name for f in result]
+        assert names == ["Export", "Filter"]
+
+    def test_returns_empty_when_all_implemented(self):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        }
+        assert _unimplemented_features(data) == []
+
+    def test_returns_empty_when_no_features(self):
+        assert _unimplemented_features({}) == []
+
+    def test_defaults_missing_status_to_pending(self):
+        data = {
+            "features": [
+                {"name": "A", "description": "A", "category": "core"},
+            ],
+        }
+        result = _unimplemented_features(data)
+        assert len(result) == 1
+        assert result[0].name == "A"
+
+
+class TestRoadmapRegeneration:
+    """Tests for roadmap regeneration when roadmap is missing or consumed."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [
+            {
+                "name": "Export",
+                "description": "Export data",
+                "category": "core",
+                "status": "pending",
+                "implemented_in": "",
+            },
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    def test_regenerates_when_no_roadmap(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "Export works",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_gen.assert_called_once()
+        out = capsys.readouterr().out
+        assert "remaining feature" in out
+
+    def test_regenerates_when_roadmap_consumed(self, capsys, tmp_path, monkeypatch):
+        data = {
+            **self._BASE_DATA,
+            "roadmap": [
+                {"phase": 0, "title": "Done", "goal": "Done", "features": [], "test": "ok"},
+            ],
+            "current_phase": 1,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "ok",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_gen.assert_called_once()
+        # Only pending features should be passed
+        features_arg = mock_gen.call_args[0][1]
+        assert all(f.status != "implemented" for f in features_arg)
+
+    def test_stops_when_all_features_implemented(self, capsys, tmp_path, monkeypatch):
+        data = {
+            **self._BASE_DATA,
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main.generate_roadmap") as mock_gen:
+            main()
+
+        mock_gen.assert_not_called()
+        out = capsys.readouterr().out
+        assert "All features implemented" in out
+
+    def test_stops_when_roadmap_generation_fails(self, capsys, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.generate_roadmap", return_value=[]),
+            patch("duplo.main.generate_phase_plan") as mock_plan,
+        ):
+            main()
+
+        mock_plan.assert_not_called()
+        out = capsys.readouterr().out
+        assert "failed to generate roadmap" in out

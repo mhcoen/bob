@@ -887,14 +887,35 @@ def _subsequent_run() -> None:
 
     phase_num, phase_info = get_current_phase()
 
-    # Detect end of roadmap: roadmap exists but current_phase is past last entry.
+    # If no roadmap exists or the existing one is fully consumed,
+    # regenerate from remaining unimplemented features.
     roadmap = data.get("roadmap", [])
-    if roadmap and phase_info is None:
-        print("All roadmap phases complete. Nothing to do.")
-        plan_path = Path("PLAN.md")
-        if plan_path.exists():
-            plan_path.unlink()
-        return
+    if not roadmap or (roadmap and phase_info is None):
+        remaining = _unimplemented_features(data)
+        if not remaining:
+            print("All features implemented. Nothing to do.")
+            plan_path = Path("PLAN.md")
+            if plan_path.exists():
+                plan_path.unlink()
+            return
+        source_url = data.get("source_url", "")
+        prefs_data = data.get("preferences", {})
+        preferences = BuildPreferences(
+            platform=prefs_data.get("platform", ""),
+            language=prefs_data.get("language", ""),
+            constraints=prefs_data.get("constraints", []),
+            preferences=prefs_data.get("preferences", []),
+        )
+        print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) …")
+        new_roadmap = generate_roadmap(source_url, remaining, preferences)
+        if not new_roadmap:
+            print("Error: failed to generate roadmap.")
+            return
+        save_roadmap(new_roadmap)
+        print(format_roadmap(new_roadmap))
+        # Reload state after saving roadmap.
+        data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+        phase_num, phase_info = get_current_phase()
 
     phase_label = (
         f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
@@ -956,6 +977,15 @@ def _subsequent_run() -> None:
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
     _plan_ready(phase_label)
+
+
+def _unimplemented_features(data: dict) -> list[Feature]:
+    """Return features from *data* whose status is not ``"implemented"``."""
+    result: list[Feature] = []
+    for f in data.get("features", []):
+        if f.get("status", "pending") != "implemented":
+            result.append(Feature(**f))
+    return result
 
 
 def _advance_to_next(data: dict, app_name: str) -> None:
