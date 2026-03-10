@@ -653,12 +653,16 @@ def _main() -> None:
     )
 
 
-def _check_errors_json(project_dir: Path) -> bool:
+def _check_errors_json(
+    project_dir: Path,
+    model: str | None = None,
+) -> bool:
     """Check for .mcloop/errors.json and prompt the user to fix bugs.
 
     Reads the error file, prints a summary, and asks the user whether
-    to prepend fix tasks to PLAN.md. Returns True if tasks were added
-    (or no errors found), False if the user declined.
+    to run diagnostic sessions and insert fix tasks into a ``## Bugs``
+    section of PLAN.md. Returns True if tasks were added (or no errors
+    found), False if the user declined.
     """
     errors_path = project_dir / ".mcloop" / "errors.json"
     if not errors_path.is_file():
@@ -708,36 +712,67 @@ def _check_errors_json(project_dir: Path) -> bool:
         )
         return True
 
-    plan_text = plan_path.read_text()
+    # Gather git log for diagnostic context
+    git_log = ""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-20"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            git_log = result.stdout.strip()
+    except Exception:
+        pass
 
-    task_lines = []
-    for entry in entries:
+    # Run diagnostic sessions per error
+    log_dir = project_dir / "logs"
+    task_lines: list[str] = []
+    for i, entry in enumerate(entries, 1):
         exc_type = entry.get("exception_type", "Unknown")
         desc = entry.get("description", "")
-        source = entry.get("source_file", "")
+        source_file = entry.get("source_file", "")
         line = entry.get("line", "")
-        location = f" at {source}:{line}" if source else ""
-        short_desc = desc[:120] + "..." if len(desc) > 120 else desc
-        task_lines.append(f"- [ ] Fix crash: {exc_type}: {short_desc}{location}")
+        location = f" at {source_file}:{line}" if source_file else ""
 
-    # Find first unchecked task and insert before it
-    insert_block = "\n".join(task_lines) + "\n"
-    lines = plan_text.splitlines(keepends=True)
-    insert_idx = None
-    for idx, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
-            insert_idx = idx
-            break
+        # Read relevant source file
+        source_content = ""
+        if source_file:
+            source_path = project_dir / source_file
+            if source_path.is_file():
+                try:
+                    source_content = source_path.read_text()
+                except OSError:
+                    pass
 
-    if insert_idx is not None:
-        lines.insert(insert_idx, insert_block)
-        plan_path.write_text("".join(lines))
-    else:
-        # Append to end
-        if not plan_text.endswith("\n"):
-            plan_text += "\n"
-        plan_path.write_text(plan_text + insert_block)
+        print(
+            formatting.system_msg(f"Diagnosing {i}/{len(entries)}: {exc_type}{location}"),
+            flush=True,
+        )
+
+        result = run_diagnostic(
+            project_dir,
+            log_dir,
+            entry,
+            source_content=source_content,
+            git_log=git_log,
+            model=model,
+        )
+
+        fix_desc = ""
+        if result.success:
+            fix_desc = parse_diagnostic_output(result.output)
+
+        if fix_desc:
+            task_lines.append(f"- [ ] {fix_desc}")
+        else:
+            # Fallback to generic description
+            short_desc = desc[:120] + "..." if len(desc) > 120 else desc
+            task_lines.append(f"- [ ] Fix crash: {exc_type}: {short_desc}{location}")
+
+    # Insert tasks under ## Bugs section
+    _insert_bugs_section(plan_path, task_lines)
 
     # Clear the errors file
     errors_path.unlink(missing_ok=True)
@@ -747,6 +782,64 @@ def _check_errors_json(project_dir: Path) -> bool:
         flush=True,
     )
     return True
+
+
+def _insert_bugs_section(plan_path: Path, task_lines: list[str]) -> None:
+    """Insert tasks into a ``## Bugs`` section of PLAN.md.
+
+    If a ``## Bugs`` section already exists, appends tasks to it.
+    Otherwise, inserts a new section before the first ``## Stage``
+    header or the first checkbox line.
+    """
+    import re as _re
+
+    plan_text = plan_path.read_text()
+    lines = plan_text.splitlines(keepends=True)
+    task_block = "\n".join(task_lines) + "\n"
+
+    # Check if ## Bugs section already exists
+    bugs_header_re = _re.compile(r"^##\s+Bugs\s*$", _re.IGNORECASE)
+    stage_header_re = _re.compile(r"^##\s+Stage\s+\d+", _re.IGNORECASE)
+    bugs_idx = None
+    for idx, raw_line in enumerate(lines):
+        if bugs_header_re.match(raw_line.strip()):
+            bugs_idx = idx
+            break
+
+    if bugs_idx is not None:
+        # Find end of Bugs section (next ## header or end of file)
+        insert_at = len(lines)
+        for idx in range(bugs_idx + 1, len(lines)):
+            if lines[idx].strip().startswith("## "):
+                insert_at = idx
+                break
+        lines.insert(insert_at, task_block)
+        plan_path.write_text("".join(lines))
+        return
+
+    # No existing ## Bugs section — create one
+    bugs_section = f"## Bugs\n\n{task_block}\n"
+
+    # Insert before the first ## Stage header
+    for idx, raw_line in enumerate(lines):
+        if stage_header_re.match(raw_line.strip()):
+            lines.insert(idx, bugs_section)
+            plan_path.write_text("".join(lines))
+            return
+
+    # No stage headers — insert before the first checkbox
+    from mcloop.checklist import CHECKBOX_RE
+
+    for idx, raw_line in enumerate(lines):
+        if CHECKBOX_RE.match(raw_line):
+            lines.insert(idx, bugs_section)
+            plan_path.write_text("".join(lines))
+            return
+
+    # No checkboxes — append to end
+    if not plan_text.endswith("\n"):
+        plan_text += "\n"
+    plan_path.write_text(plan_text + bugs_section)
 
 
 def run_loop(
@@ -774,7 +867,7 @@ def run_loop(
     _push_or_die(project_dir)
 
     # Check for crash errors from previous runs
-    _check_errors_json(project_dir)
+    _check_errors_json(project_dir, model=model)
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"

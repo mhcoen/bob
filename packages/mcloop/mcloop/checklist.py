@@ -213,9 +213,7 @@ def find_next(tasks: list[Task]) -> Task | None:
     return _search(tasks)
 
 
-def _search_in_stage(
-    tasks: list[Task], stage: str
-) -> Task | None:
+def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
     """Search for the next unchecked leaf in a specific stage."""
 
     def _search(task_list: list[Task]) -> Task | None:

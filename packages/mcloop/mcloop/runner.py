@@ -1098,9 +1098,7 @@ def build_diagnostic_prompt(
     if stack:
         parts.append(f"Stack trace:\n{stack}")
     if app_state:
-        state_lines = "\n".join(
-            f"  {k}: {v}" for k, v in app_state.items()
-        )
+        state_lines = "\n".join(f"  {k}: {v}" for k, v in app_state.items())
         parts.append(f"App state at crash:\n{state_lines}")
     if last_action:
         parts.append(f"Last user action: {last_action}")
@@ -1160,9 +1158,7 @@ def run_diagnostic(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_diagnostic_prompt(
-        error_entry, source_content, git_log
-    )
+    prompt = build_diagnostic_prompt(error_entry, source_content, git_log)
     cmd = _build_command(
         "claude",
         prompt=prompt,

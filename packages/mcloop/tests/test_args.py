@@ -15,6 +15,7 @@ from mcloop.main import (
     _dispatch_auto_action,
     _handle_auto_task,
     _handle_user_task,
+    _insert_bugs_section,
     _investigation_failed,
     _investigation_passed,
     _launch_app_verification,
@@ -2992,7 +2993,7 @@ def test_check_errors_user_declines(tmp_path, capsys):
 
 
 def test_check_errors_user_accepts(tmp_path, capsys):
-    """Adds fix tasks to PLAN.md and clears errors.json."""
+    """Runs diagnostics, adds fix tasks under ## Bugs, clears errors.json."""
     entries = [
         {
             "timestamp": "2026-03-10T10:00:00+00:00",
@@ -3011,23 +3012,33 @@ def test_check_errors_user_accepts(tmp_path, capsys):
     ]
     _make_errors_json(tmp_path, entries)
     _make_plan(tmp_path)
+    # Create source files for diagnostic context
+    (tmp_path / "app.py").write_text("x = 1\n")
+    (tmp_path / "lib.py").write_text("y = []\n")
 
-    with patch("builtins.input", return_value=""):
+    diag_result = MagicMock(
+        success=True,
+        output="--- FIX DESCRIPTION ---\nGuard against None\n--- END FIX ---",
+    )
+    with (
+        patch("builtins.input", return_value=""),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="abc123 commit\n")
         result = _check_errors_json(tmp_path)
 
     assert result is True
+    assert mock_diag.call_count == 2
     plan_text = (tmp_path / "PLAN.md").read_text()
-    # Fix tasks should be before the original task
+    # Should have ## Bugs section with diagnostic fix descriptions
+    assert "## Bugs" in plan_text
+    assert "Guard against None" in plan_text
+    # Bugs section should come before original task
     lines = plan_text.splitlines()
-    fix_indices = [i for i, line in enumerate(lines) if "Fix crash" in line]
-    original_idx = next(i for i, line in enumerate(lines) if "First task" in line)
-    assert len(fix_indices) == 2
-    for idx in fix_indices:
-        assert idx < original_idx
-    assert "ValueError" in plan_text
-    assert "IndexError" in plan_text
-    assert "app.py:42" in plan_text
-    assert "lib.py:99" in plan_text
+    bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
+    original_idx = next(i for i, ln in enumerate(lines) if "First task" in ln)
+    assert bugs_idx < original_idx
 
     # errors.json should be deleted
     assert not (tmp_path / ".mcloop" / "errors.json").exists()
@@ -3037,7 +3048,7 @@ def test_check_errors_user_accepts(tmp_path, capsys):
 
 
 def test_check_errors_default_yes(tmp_path):
-    """Empty input (just Enter) defaults to yes."""
+    """Empty input (just Enter) defaults to yes, runs diagnostics."""
     entries = [
         {
             "exception_type": "RuntimeError",
@@ -3047,11 +3058,19 @@ def test_check_errors_default_yes(tmp_path):
     _make_errors_json(tmp_path, entries)
     _make_plan(tmp_path)
 
-    with patch("builtins.input", return_value=""):
+    # Diagnostic fails — falls back to generic description
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value=""),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
         result = _check_errors_json(tmp_path)
 
     assert result is True
     plan_text = (tmp_path / "PLAN.md").read_text()
+    assert "## Bugs" in plan_text
     assert "Fix crash: RuntimeError" in plan_text
 
 
@@ -3095,20 +3114,25 @@ def test_check_errors_long_description_truncated(tmp_path, capsys):
 
 
 def test_check_errors_no_plan_file(tmp_path, capsys):
-    """Handles missing PLAN.md gracefully."""
+    """Handles missing PLAN.md gracefully (no diagnostic sessions)."""
     entries = [{"exception_type": "E", "description": "d"}]
     _make_errors_json(tmp_path, entries)
 
-    with patch("builtins.input", return_value="y"):
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic") as mock_diag,
+    ):
         result = _check_errors_json(tmp_path)
 
     assert result is True
+    # Should not run diagnostics when there's no PLAN.md
+    mock_diag.assert_not_called()
     out = capsys.readouterr().out
     assert "No PLAN.md found" in out
 
 
 def test_check_errors_appends_when_no_tasks(tmp_path):
-    """Appends fix tasks when PLAN.md has no existing task lines."""
+    """Appends ## Bugs section when PLAN.md has no existing task lines."""
     entries = [
         {
             "exception_type": "TypeError",
@@ -3121,8 +3145,127 @@ def test_check_errors_appends_when_no_tasks(tmp_path):
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Plan\n\nJust a description.\n")
 
-    with patch("builtins.input", return_value="y"):
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result),
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
         _check_errors_json(tmp_path)
 
     plan_text = plan.read_text()
+    assert "## Bugs" in plan_text
     assert "Fix crash: TypeError: none + int at main.py:10" in plan_text
+
+
+def test_check_errors_diagnostic_reads_source(tmp_path):
+    """Diagnostic session receives source file content."""
+    entries = [
+        {
+            "exception_type": "KeyError",
+            "description": "missing key",
+            "source_file": "data.py",
+            "line": 5,
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+    (tmp_path / "data.py").write_text("d = {}\nv = d['x']\n")
+
+    diag_result = MagicMock(
+        success=True,
+        output="--- FIX DESCRIPTION ---\nUse .get() in data.py:5\n--- END FIX ---",
+    )
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="abc commit\n")
+        _check_errors_json(tmp_path)
+
+    # Verify source content was passed to diagnostic
+    call_kwargs = mock_diag.call_args
+    assert "d = {}" in call_kwargs.kwargs.get(
+        "source_content", call_kwargs[0][3] if len(call_kwargs[0]) > 3 else ""
+    )
+
+
+def test_check_errors_passes_model(tmp_path):
+    """Model parameter is forwarded to diagnostic sessions."""
+    entries = [{"exception_type": "E", "description": "d"}]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    diag_result = MagicMock(success=False, output="")
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("mcloop.main.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        _check_errors_json(tmp_path, model="opus")
+
+    assert mock_diag.call_args.kwargs["model"] == "opus"
+
+
+# --- _insert_bugs_section ---
+
+
+def test_insert_bugs_section_before_stage(tmp_path):
+    """Inserts ## Bugs before first ## Stage header."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n## Stage 1: Setup\n\n- [ ] Task A\n")
+
+    _insert_bugs_section(plan, ["- [ ] Fix X"])
+
+    text = plan.read_text()
+    lines = text.splitlines()
+    bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
+    stage_idx = next(i for i, ln in enumerate(lines) if "## Stage" in ln)
+    assert bugs_idx < stage_idx
+
+
+def test_insert_bugs_section_before_checkbox(tmp_path):
+    """Inserts ## Bugs before first checkbox when no stages."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Task A\n")
+
+    _insert_bugs_section(plan, ["- [ ] Fix Y"])
+
+    text = plan.read_text()
+    lines = text.splitlines()
+    bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
+    task_idx = next(i for i, ln in enumerate(lines) if "Task A" in ln)
+    assert bugs_idx < task_idx
+    assert "Fix Y" in text
+
+
+def test_insert_bugs_section_appends_to_existing(tmp_path):
+    """Appends to existing ## Bugs section."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n## Bugs\n\n- [x] Old bug\n\n## Stage 1: Setup\n\n- [ ] Task\n")
+
+    _insert_bugs_section(plan, ["- [ ] New bug"])
+
+    text = plan.read_text()
+    assert "Old bug" in text
+    assert "New bug" in text
+    # New bug should be between Bugs and Stage headers
+    lines = text.splitlines()
+    new_idx = next(i for i, ln in enumerate(lines) if "New bug" in ln)
+    stage_idx = next(i for i, ln in enumerate(lines) if "## Stage" in ln)
+    assert new_idx < stage_idx
+
+
+def test_insert_bugs_section_appends_to_end(tmp_path):
+    """Appends ## Bugs at end when no stages or checkboxes."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\nJust a description.")
+
+    _insert_bugs_section(plan, ["- [ ] Fix Z"])
+
+    text = plan.read_text()
+    assert "## Bugs" in text
+    assert "Fix Z" in text
