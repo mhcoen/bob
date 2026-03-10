@@ -24,12 +24,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add `save_issue(description, source, phase)` and `resolve_issue(description)` functions to saver.py
   - [x] Existing features in duplo.json files that lack a `status` field should be treated as `pending` by all code that reads them
 
-- [ ] Implement deterministic phase-completion tracking
+- [x] Implement deterministic phase-completion tracking
   - [x] At phase completion (all checkboxes checked), parse PLAN.md for checked task lines
   - [x] For each checked line with a `[feat: ...]` annotation, mark the referenced features as `implemented` with the current phase label
   - [x] For each checked line with a `[fix: ...]` annotation, mark the corresponding issue as resolved
   - [x] For checked lines without annotations (user-added tasks or pre-annotation plans), batch them into a single `claude -p` call with the full feature list. Claude matches each task to an existing feature or confirms it is genuinely new. Mark matched features as implemented. Add genuinely new items as new feature entries with `status: "implemented"` and `implemented_in` set to the current phase.
-  - [ ] Add tests for the annotation parser covering annotated lines, unannotated lines, and mixed plans
+  - [x] Add tests for the annotation parser covering annotated lines, unannotated lines, and mixed plans
 
 - [ ] Prompt for issues at phase completion
   - [ ] After status tracking, before advancing to the next phase, prompt the user for known issues with the completed phase
