@@ -528,6 +528,87 @@ def clear_issues(
     return path
 
 
+def save_issue(
+    description: str,
+    source: str,
+    phase: str,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Record an implementation issue with its source and phase context.
+
+    Appends to the ``issues`` list in *duplo.json*.  Skips duplicates:
+    if an issue with the same ``description`` already exists, the list
+    is not modified.  Records an ISO 8601 timestamp.
+
+    Args:
+        description: What went wrong.
+        source: Where the issue was found (e.g. ``"visual comparison"``,
+            ``"test failure"``).
+        phase: Phase label when the issue was discovered (e.g. ``"Phase 1"``).
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    issues = data.get("issues", [])
+    for existing in issues:
+        if existing.get("description") == description:
+            return path
+    issues.append(
+        {
+            "description": description,
+            "source": source,
+            "phase": phase,
+            "status": "open",
+            "added_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+    )
+    data["issues"] = issues
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def resolve_issue(
+    description: str,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Mark an issue as resolved by description.
+
+    Finds the issue whose ``description`` matches and sets its ``status``
+    to ``"resolved"`` with a ``resolved_at`` timestamp.  Raises
+    ``ValueError`` if no matching issue is found.
+
+    Args:
+        description: Description of the issue to resolve (must match exactly).
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+
+    Raises:
+        ValueError: If no issue with the given description exists.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    issues = data.get("issues", [])
+    for issue in issues:
+        if issue.get("description") == description:
+            issue["status"] = "resolved"
+            issue["resolved_at"] = datetime.now(tz=timezone.utc).isoformat()
+            break
+    else:
+        msg = f"No issue with description {description!r}"
+        raise ValueError(msg)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def save_code_examples(
     examples: list[CodeExample],
     *,

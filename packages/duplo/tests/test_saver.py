@@ -27,6 +27,8 @@ from duplo.saver import (
     REFERENCES_DIR,
     add_issue,
     append_phase_to_history,
+    resolve_issue,
+    save_issue,
     clear_in_progress,
     clear_issues,
     load_examples,
@@ -1300,3 +1302,69 @@ class TestIssues:
         add_issue("Bug", "major", target_dir=tmp_path)
         clear_issues(target_dir=tmp_path)
         assert load_issues(target_dir=tmp_path) == []
+
+
+class TestSaveIssueAndResolve:
+    """Tests for save_issue and resolve_issue."""
+
+    def test_save_issue_creates_entry(self, tmp_path):
+        save_issue("Crash on save", "test failure", "Phase 1", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 1
+        issue = data["issues"][0]
+        assert issue["description"] == "Crash on save"
+        assert issue["source"] == "test failure"
+        assert issue["phase"] == "Phase 1"
+        assert issue["status"] == "open"
+        assert "added_at" in issue
+
+    def test_save_issue_appends_multiple(self, tmp_path):
+        save_issue("Bug A", "visual comparison", "Phase 1", target_dir=tmp_path)
+        save_issue("Bug B", "test failure", "Phase 2", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 2
+        assert data["issues"][0]["description"] == "Bug A"
+        assert data["issues"][1]["description"] == "Bug B"
+
+    def test_save_issue_skips_duplicate(self, tmp_path):
+        save_issue("Same bug", "tests", "Phase 1", target_dir=tmp_path)
+        save_issue("Same bug", "visual", "Phase 2", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 1
+
+    def test_save_issue_preserves_other_keys(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"source_url": "https://example.com"}), encoding="utf-8")
+        save_issue("Bug", "tests", "Phase 1", target_dir=tmp_path)
+        data = json.loads(path.read_text())
+        assert data["source_url"] == "https://example.com"
+        assert len(data["issues"]) == 1
+
+    def test_resolve_issue_sets_resolved(self, tmp_path):
+        save_issue("Broken layout", "visual comparison", "Phase 1", target_dir=tmp_path)
+        resolve_issue("Broken layout", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        issue = data["issues"][0]
+        assert issue["status"] == "resolved"
+        assert "resolved_at" in issue
+
+    def test_resolve_issue_raises_on_missing(self, tmp_path):
+        save_issue("Existing bug", "tests", "Phase 1", target_dir=tmp_path)
+        with pytest.raises(ValueError, match="No issue with description"):
+            resolve_issue("Nonexistent bug", target_dir=tmp_path)
+
+    def test_resolve_issue_raises_on_empty(self, tmp_path):
+        (tmp_path / ".duplo").mkdir(parents=True, exist_ok=True)
+        (tmp_path / DUPLO_JSON).write_text("{}", encoding="utf-8")
+        with pytest.raises(ValueError, match="No issue with description"):
+            resolve_issue("Bug", target_dir=tmp_path)
+
+    def test_resolve_leaves_other_issues_unchanged(self, tmp_path):
+        save_issue("Bug A", "tests", "Phase 1", target_dir=tmp_path)
+        save_issue("Bug B", "visual", "Phase 1", target_dir=tmp_path)
+        resolve_issue("Bug A", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["issues"][0]["status"] == "resolved"
+        assert data["issues"][1]["status"] == "open"
