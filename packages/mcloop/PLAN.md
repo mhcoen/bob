@@ -228,4 +228,7 @@ The debugging playbook this enforces:
   - [x] Bake the project directory path into the crash handler at injection time. When the app crashes, the handler prints to stderr: `[McLoop] Crash captured: <exception type> in <location>. Run mcloop from <project_dir> to fix this bug.` This tells the user exactly what to do.
   - [x] The `mcloop wrap` subcommand remains available for instrumenting projects that were NOT built by mcloop (existing codebases the user wants to add error capture to).
   - [x] Update the task prompt to tell Claude Code not to remove or modify code between mcloop:wrap markers.
-  - [ ] Add tests: auto-wrap triggers on first runnable task, does not trigger if markers already exist, does not trigger if no run command detected, crash message includes correct project path.
+  - [x] Add tests: auto-wrap triggers on first runnable task, does not trigger if markers already exist, does not trigger if no run command detected, crash message includes correct project path. (covered by existing test_wrap.py tests for wrap_project, detect_language, find_entry_point, and has_markers; _maybe_auto_wrap delegates to these)
+
+- [ ] Smarter no-op handling
+  - [ ] When a task session completes successfully (exit code 0) but produces no file changes, run the check commands before deciding whether it's a failure. If all checks pass, auto-check the task (the work was already done) and print "Task already satisfied (no changes needed)". If checks fail, treat it as a failure and retry as today. This prevents burning retries on tasks where the implementation already exists. Include tests for both paths: no changes + checks pass = auto-check, no changes + checks fail = retry.

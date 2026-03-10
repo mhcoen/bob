@@ -181,6 +181,13 @@ codebase as for building something from scratch.
 help write the PLAN.md file. Feed it the README.md along with a description of
 your project, have it ask any questions it has, and output the markdown file.
 
+**Do not write separate "add tests" tasks.** Every task session is
+instructed to write unit tests as part of its work. A dedicated test
+task at the end of a group will find the tests already written,
+produce no file changes, and fail as a no-op. If specific test
+coverage matters, include it in the implementation task (e.g.
+"Implement X with unit tests covering Y and Z").
+
 ### Subtasks
 
 Nest subtasks with indentation. McLoop completes children before parents, and
