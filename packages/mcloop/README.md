@@ -104,7 +104,7 @@ mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
 mcloop investigate "crash on wake from sleep"  # Debug a specific bug
 mcloop investigate --log crash.log             # Debug from a log file
-mcloop wrap                                    # Instrument project for runtime error capture
+mcloop wrap                                    # Instrument an existing project for error capture
 mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
 ```
 
@@ -697,16 +697,22 @@ after a McLoop session to see how many tokens were saved. This helps
 you gauge whether the compression is working and how much headroom
 you have.
 
-## Runtime error capture
+## Self-healing apps
 
-`mcloop wrap` instruments a project's source files with error-catching
-hooks that capture crashes and exceptions during normal use. You build
-the app with McLoop, use it yourself, and when something goes wrong
-the instrumentation captures the context and writes it to
-`.mcloop/errors.json`.
+Every app McLoop builds is automatically instrumented with crash
+handlers. You do not need to do anything to enable this. After the
+first task that produces a runnable app, McLoop injects
+error-catching hooks into the source code. If the app crashes during
+normal use, the instrumentation captures the full context and tells
+you exactly what to do:
 
-The next time you run `mcloop`, it reads the error log before doing
-anything else:
+```
+[McLoop] Crash captured: SIGABRT in Qwen3ASREngine.loadModel()
+  Run mcloop from ~/proj/mcwhisper to fix this bug.
+```
+
+The next time you run `mcloop`, it reads the captured errors before
+doing anything else:
 
 ```
 2 runtime bugs detected:
@@ -734,10 +740,10 @@ The `## Bugs` section in PLAN.md has absolute priority. If it
 contains unchecked items, `find_next` returns those before any
 feature tasks.
 
-### How wrapping works
+### How it works
 
-`mcloop wrap` analyzes the project language and injects
-error-catching code into source files, delimited with markers
+McLoop detects the project language and injects error-catching
+code into source files, delimited with markers
 (`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift,
 `# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). The
 canonical wrapper source is stored in `.mcloop/wrap/` so McLoop
@@ -753,7 +759,9 @@ full tracebacks and local variables in the crashing frame.
 
 Both write structured error reports to `.mcloop/errors.json` with
 stack traces, app state, timestamps, crash location, and a one-line
-description.
+description. The project directory path is baked into the handler
+at injection time so the crash message can tell the user where to
+run mcloop.
 
 After every task that modifies instrumented source files, McLoop
 checks whether the markers are intact and re-injects from
@@ -763,6 +771,9 @@ Code edits automatically.
 If the same error triggers diagnostic insertion more than 3 times,
 McLoop marks it as unresolvable, prints the context, and stops
 rather than looping indefinitely.
+
+To instrument a project that was NOT built by McLoop, use
+`mcloop wrap` manually from that project's directory.
 
 ## License
 
