@@ -435,6 +435,42 @@ def save_feature_status(
     return path
 
 
+def mark_implemented_features(
+    tasks: list,
+    phase_label: str,
+    *,
+    target_dir: Path | str = ".",
+) -> list[str]:
+    """Mark features referenced in completed tasks as ``implemented``.
+
+    Iterates over *tasks* (each a :class:`~duplo.planner.CompletedTask`),
+    collects unique feature names from their ``features`` lists, and calls
+    :func:`save_feature_status` for each one.  Features that do not exist
+    in *duplo.json* are silently skipped.
+
+    Args:
+        tasks: Completed task objects with ``features`` attribute.
+        phase_label: Phase label string (e.g. ``"Phase 1"``).
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        List of feature names that were successfully marked.
+    """
+    seen: set[str] = set()
+    marked: list[str] = []
+    for task in tasks:
+        for name in task.features:
+            if name in seen:
+                continue
+            seen.add(name)
+            try:
+                save_feature_status(name, "implemented", phase_label, target_dir=target_dir)
+                marked.append(name)
+            except ValueError:
+                continue
+    return marked
+
+
 def save_issues(
     issues: list[dict],
     *,

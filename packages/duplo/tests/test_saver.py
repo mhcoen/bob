@@ -17,6 +17,7 @@ from duplo.doc_tables import (
 )
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
+from duplo.planner import CompletedTask
 from duplo.questioner import BuildPreferences
 from duplo.saver import (
     CLAUDE_MD,
@@ -34,6 +35,7 @@ from duplo.saver import (
     load_examples,
     load_issues,
     load_product,
+    mark_implemented_features,
     move_references,
     save_examples,
     save_feature_status,
@@ -1407,3 +1409,176 @@ class TestSaveIssueAndResolve:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["issues"][0]["status"] == "resolved"
         assert data["issues"][1]["status"] == "open"
+
+
+class TestMarkImplementedFeatures:
+    """Tests for mark_implemented_features()."""
+
+    def _write_features(self, tmp_path, features_data):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"features": features_data}), encoding="utf-8")
+
+    def test_marks_single_feature(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+            ],
+        )
+        tasks = [CompletedTask(text="Add login", features=["Auth"])]
+        marked = mark_implemented_features(tasks, "Phase 1", target_dir=tmp_path)
+        assert marked == ["Auth"]
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["features"][0]["status"] == "implemented"
+        assert data["features"][0]["implemented_in"] == "Phase 1"
+
+    def test_marks_multiple_features(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Search",
+                    "description": "Find things.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        tasks = [
+            CompletedTask(text="Add login", features=["Auth"]),
+            CompletedTask(text="Add search", features=["Search"]),
+        ]
+        marked = mark_implemented_features(tasks, "Phase 2", target_dir=tmp_path)
+        assert set(marked) == {"Auth", "Search"}
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert all(f["status"] == "implemented" for f in data["features"])
+
+    def test_deduplicates_feature_names(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+            ],
+        )
+        tasks = [
+            CompletedTask(text="Add login form", features=["Auth"]),
+            CompletedTask(text="Wire up auth backend", features=["Auth"]),
+        ]
+        marked = mark_implemented_features(tasks, "Phase 1", target_dir=tmp_path)
+        assert marked == ["Auth"]
+
+    def test_skips_unknown_features(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+            ],
+        )
+        tasks = [
+            CompletedTask(text="Add login", features=["Auth"]),
+            CompletedTask(text="Add magic", features=["Nonexistent"]),
+        ]
+        marked = mark_implemented_features(tasks, "Phase 1", target_dir=tmp_path)
+        assert marked == ["Auth"]
+
+    def test_empty_tasks(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+            ],
+        )
+        marked = mark_implemented_features([], "Phase 1", target_dir=tmp_path)
+        assert marked == []
+
+    def test_tasks_without_features(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+            ],
+        )
+        tasks = [CompletedTask(text="Set up project")]
+        marked = mark_implemented_features(tasks, "Phase 1", target_dir=tmp_path)
+        assert marked == []
+
+    def test_multi_feature_annotation(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Recording",
+                    "description": "Record audio.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Shortcuts",
+                    "description": "Key bindings.",
+                    "category": "ui",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        tasks = [
+            CompletedTask(
+                text="Add recording with hotkey",
+                features=["Recording", "Shortcuts"],
+            ),
+        ]
+        marked = mark_implemented_features(tasks, "Phase 3", target_dir=tmp_path)
+        assert set(marked) == {"Recording", "Shortcuts"}
+
+    def test_features_missing_status_field(self, tmp_path):
+        """Features without a status field should still be updatable."""
+        self._write_features(
+            tmp_path,
+            [{"name": "Auth", "description": "Login.", "category": "core"}],
+        )
+        tasks = [CompletedTask(text="Add login", features=["Auth"])]
+        marked = mark_implemented_features(tasks, "Phase 1", target_dir=tmp_path)
+        assert marked == ["Auth"]
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["features"][0]["status"] == "implemented"
