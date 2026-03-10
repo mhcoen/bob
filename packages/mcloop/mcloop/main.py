@@ -425,6 +425,26 @@ def run_loop(
                     continue
 
                 if not _has_meaningful_changes(project_dir):
+                    # No file changes — but maybe the work was already done.
+                    # Run checks: if they pass, auto-check the task.
+                    noop_check = run_checks(project_dir)
+                    if noop_check.passed:
+                        check_off(checklist_path, task)
+                        elapsed = _format_elapsed(
+                            time.monotonic() - task_start,
+                        )
+                        completed.append(f"{label}) {task.text}")
+                        print(
+                            "Task already satisfied (no changes needed)",
+                            flush=True,
+                        )
+                        print(
+                            formatting.task_complete(label, elapsed),
+                            flush=True,
+                        )
+                        ctx.add(label, task.text, elapsed, result.output)
+                        success = True
+                        break
                     last_error = "Task produced no file changes"
                     print(
                         formatting.error_msg(

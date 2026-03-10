@@ -273,16 +273,19 @@ def test_skips_already_checked_no_extra_notifications(
     assert calls[0] == ("All tasks completed!", "info")
 
 
+_CHECKS_FAIL = CheckResult(passed=False, output="FAILED", command="pytest")
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
-@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
-def test_noop_task_treated_as_failure(
+def test_noop_task_checks_fail_treated_as_failure(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """Task succeeds but produces no file changes: treated as failure, marked [!]."""
+    """No file changes + checks fail: treated as failure, marked [!]."""
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
@@ -291,12 +294,12 @@ def test_noop_task_treated_as_failure(
     assert stuck == ["Already done task"]
     assert mock_run.call_count == 3
     mock_commit.assert_not_called()
-    mock_checks.assert_not_called()
+    # Checks are now run on the no-changes path
+    assert mock_checks.call_count == 3
     content = md.read_text()
     assert "- [!] Already done task" in content
 
     calls = _notify_calls(mock_notify)
-    # Only "giving up" — no per-retry notifications
     assert len(calls) == 1
     assert calls[0] == ("Giving up on: Already done task", "error")
 
@@ -304,17 +307,48 @@ def test_noop_task_treated_as_failure(
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_noop_then_changes_succeeds(
-    mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path
+def test_noop_task_checks_pass_auto_checks(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
+    """No file changes + checks pass: auto-check the task."""
+    md = _make_project(tmp_path, "- [ ] Already done task\n")
+    mock_run.return_value = _ok_run_result()
+
+    stuck = run_loop(md, max_retries=3, no_audit=True)
+
+    assert stuck == []
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    # run_checks called once for no-changes path + once for end-of-run full suite
+    assert mock_checks.call_count == 2
+    content = md.read_text()
+    assert "- [x] Already done task" in content
+
+    calls = _notify_calls(mock_notify)
+    assert len(calls) == 1
+    assert calls[0] == ("All tasks completed!", "info")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_task")
+def test_noop_then_changes_succeeds(mock_run, mock_commit, mock_checkpoint, mock_notify, tmp_path):
     """Task produces no changes on first attempt but makes changes on retry: succeeds."""
     md = _make_project(tmp_path, "- [ ] Retry task\n")
     mock_run.return_value = _ok_run_result()
 
-    # First attempt: no changes. Second attempt: changes present.
-    with patch("mcloop.main._has_meaningful_changes", side_effect=[False, True]):
+    # First attempt: no changes (checks fail → retry). Second attempt: changes present.
+    with (
+        patch("mcloop.main._has_meaningful_changes", side_effect=[False, True]),
+        patch(
+            "mcloop.main.run_checks",
+            side_effect=[_CHECKS_FAIL, _CHECKS_PASS, _CHECKS_PASS],
+        ),
+    ):
         stuck = run_loop(md, max_retries=3, no_audit=True)
 
     assert stuck == []
@@ -333,12 +367,12 @@ def test_noop_then_changes_succeeds(
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
-@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
 def test_noop_with_max_retries_one(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """With max_retries=1, a single no-op attempt immediately marks task as failed."""
+    """With max_retries=1, no changes + checks fail immediately marks task as failed."""
     md = _make_project(tmp_path, "- [ ] One-shot task\n")
     mock_run.return_value = _ok_run_result()
 
