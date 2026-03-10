@@ -9,6 +9,7 @@ from mcloop.main import (
     MAX_VERIFICATION_ROUNDS,
     SessionContext,
     _append_verification_failure,
+    _check_errors_json,
     _check_user_input,
     _copy_project_settings,
     _dispatch_auto_action,
@@ -2923,3 +2924,205 @@ def test_run_loop_calls_reinject_after_commit(tmp_path):
         run_loop(plan, no_audit=True)
 
     mock_reinject.assert_called_once_with(tmp_path)
+
+
+# --- _check_errors_json ---
+
+
+def _make_errors_json(tmp_path, entries):
+    """Helper to create .mcloop/errors.json with given entries."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir(exist_ok=True)
+    import json
+
+    (mcloop_dir / "errors.json").write_text(json.dumps(entries))
+    return mcloop_dir / "errors.json"
+
+
+def _make_plan(tmp_path, content="# Plan\n\n- [ ] First task\n"):
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(content)
+    return plan
+
+
+def test_check_errors_no_file(tmp_path):
+    """Returns True when no errors.json exists."""
+    assert _check_errors_json(tmp_path) is True
+
+
+def test_check_errors_empty_list(tmp_path):
+    """Returns True when errors.json is an empty list."""
+    _make_errors_json(tmp_path, [])
+    assert _check_errors_json(tmp_path) is True
+
+
+def test_check_errors_invalid_json(tmp_path):
+    """Returns True when errors.json has invalid JSON."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "errors.json").write_text("not json{{{")
+    assert _check_errors_json(tmp_path) is True
+
+
+def test_check_errors_user_declines(tmp_path, capsys):
+    """Returns True without adding tasks when user says no."""
+    entries = [
+        {
+            "timestamp": "2026-03-10T10:00:00+00:00",
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    with patch("builtins.input", return_value="n"):
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    # Plan should not be modified
+    plan_text = (tmp_path / "PLAN.md").read_text()
+    assert "Fix crash" not in plan_text
+    # Summary should have been printed
+    out = capsys.readouterr().out
+    assert "1 bug(s)" in out
+    assert "ValueError" in out
+
+
+def test_check_errors_user_accepts(tmp_path, capsys):
+    """Adds fix tasks to PLAN.md and clears errors.json."""
+    entries = [
+        {
+            "timestamp": "2026-03-10T10:00:00+00:00",
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+        },
+        {
+            "timestamp": "2026-03-10T10:01:00+00:00",
+            "exception_type": "IndexError",
+            "description": "list index out of range",
+            "source_file": "lib.py",
+            "line": 99,
+        },
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    with patch("builtins.input", return_value=""):
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    plan_text = (tmp_path / "PLAN.md").read_text()
+    # Fix tasks should be before the original task
+    lines = plan_text.splitlines()
+    fix_indices = [i for i, line in enumerate(lines) if "Fix crash" in line]
+    original_idx = next(i for i, line in enumerate(lines) if "First task" in line)
+    assert len(fix_indices) == 2
+    for idx in fix_indices:
+        assert idx < original_idx
+    assert "ValueError" in plan_text
+    assert "IndexError" in plan_text
+    assert "app.py:42" in plan_text
+    assert "lib.py:99" in plan_text
+
+    # errors.json should be deleted
+    assert not (tmp_path / ".mcloop" / "errors.json").exists()
+
+    out = capsys.readouterr().out
+    assert "Added 2 fix task(s)" in out
+
+
+def test_check_errors_default_yes(tmp_path):
+    """Empty input (just Enter) defaults to yes."""
+    entries = [
+        {
+            "exception_type": "RuntimeError",
+            "description": "oops",
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+
+    with patch("builtins.input", return_value=""):
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    plan_text = (tmp_path / "PLAN.md").read_text()
+    assert "Fix crash: RuntimeError" in plan_text
+
+
+def test_check_errors_eof(tmp_path):
+    """Returns False on EOFError (piped input)."""
+    entries = [{"exception_type": "E", "description": "d"}]
+    _make_errors_json(tmp_path, entries)
+
+    with patch("builtins.input", side_effect=EOFError):
+        result = _check_errors_json(tmp_path)
+
+    assert result is False
+
+
+def test_check_errors_keyboard_interrupt(tmp_path):
+    """Returns False on KeyboardInterrupt."""
+    entries = [{"exception_type": "E", "description": "d"}]
+    _make_errors_json(tmp_path, entries)
+
+    with patch("builtins.input", side_effect=KeyboardInterrupt):
+        result = _check_errors_json(tmp_path)
+
+    assert result is False
+
+
+def test_check_errors_long_description_truncated(tmp_path, capsys):
+    """Long descriptions are truncated in display."""
+    entries = [
+        {
+            "exception_type": "E",
+            "description": "x" * 200,
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+
+    with patch("builtins.input", return_value="n"):
+        _check_errors_json(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "..." in out
+
+
+def test_check_errors_no_plan_file(tmp_path, capsys):
+    """Handles missing PLAN.md gracefully."""
+    entries = [{"exception_type": "E", "description": "d"}]
+    _make_errors_json(tmp_path, entries)
+
+    with patch("builtins.input", return_value="y"):
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    out = capsys.readouterr().out
+    assert "No PLAN.md found" in out
+
+
+def test_check_errors_appends_when_no_tasks(tmp_path):
+    """Appends fix tasks when PLAN.md has no existing task lines."""
+    entries = [
+        {
+            "exception_type": "TypeError",
+            "description": "none + int",
+            "source_file": "main.py",
+            "line": 10,
+        }
+    ]
+    _make_errors_json(tmp_path, entries)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\nJust a description.\n")
+
+    with patch("builtins.input", return_value="y"):
+        _check_errors_json(tmp_path)
+
+    plan_text = plan.read_text()
+    assert "Fix crash: TypeError: none + int at main.py:10" in plan_text

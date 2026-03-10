@@ -651,6 +651,102 @@ def _main() -> None:
     )
 
 
+def _check_errors_json(project_dir: Path) -> bool:
+    """Check for .mcloop/errors.json and prompt the user to fix bugs.
+
+    Reads the error file, prints a summary, and asks the user whether
+    to prepend fix tasks to PLAN.md. Returns True if tasks were added
+    (or no errors found), False if the user declined.
+    """
+    errors_path = project_dir / ".mcloop" / "errors.json"
+    if not errors_path.is_file():
+        return True
+    try:
+        entries = _json.loads(errors_path.read_text())
+    except (OSError, _json.JSONDecodeError):
+        return True
+    if not isinstance(entries, list) or not entries:
+        return True
+
+    # Print summary
+    print(
+        formatting.error_msg(f"Found {len(entries)} bug(s) in .mcloop/errors.json:"),
+        flush=True,
+    )
+    for i, entry in enumerate(entries, 1):
+        exc_type = entry.get("exception_type", "Unknown")
+        desc = entry.get("description", "")
+        ts = entry.get("timestamp", "")
+        source = entry.get("source_file", "")
+        line = entry.get("line", "")
+        location = f" at {source}:{line}" if source else ""
+        # Truncate description for display
+        short_desc = desc[:80] + "..." if len(desc) > 80 else desc
+        ts_display = f"  [{ts}]" if ts else ""
+        print(
+            f"  {i}. {exc_type}: {short_desc}{location}{ts_display}",
+            flush=True,
+        )
+
+    # Ask user
+    try:
+        answer = input("\nFix these bugs before continuing? [Y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        print(flush=True)
+        return False
+    if answer.strip().lower() in ("n", "no"):
+        return True
+
+    # Prepend fix tasks to PLAN.md
+    plan_path = project_dir / "PLAN.md"
+    if not plan_path.is_file():
+        print(
+            formatting.error_msg("No PLAN.md found, cannot add tasks"),
+            flush=True,
+        )
+        return True
+
+    plan_text = plan_path.read_text()
+
+    task_lines = []
+    for entry in entries:
+        exc_type = entry.get("exception_type", "Unknown")
+        desc = entry.get("description", "")
+        source = entry.get("source_file", "")
+        line = entry.get("line", "")
+        location = f" at {source}:{line}" if source else ""
+        short_desc = desc[:120] + "..." if len(desc) > 120 else desc
+        task_lines.append(f"- [ ] Fix crash: {exc_type}: {short_desc}{location}")
+
+    # Find first unchecked task and insert before it
+    insert_block = "\n".join(task_lines) + "\n"
+    lines = plan_text.splitlines(keepends=True)
+    insert_idx = None
+    for idx, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+            insert_idx = idx
+            break
+
+    if insert_idx is not None:
+        lines.insert(insert_idx, insert_block)
+        plan_path.write_text("".join(lines))
+    else:
+        # Append to end
+        if not plan_text.endswith("\n"):
+            plan_text += "\n"
+        plan_path.write_text(plan_text + insert_block)
+
+    # Clear the errors file
+    errors_path.unlink(missing_ok=True)
+
+    print(
+        formatting.system_msg(f"Added {len(entries)} fix task(s) to PLAN.md"),
+        flush=True,
+    )
+    return True
+
+
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
@@ -674,6 +770,9 @@ def run_loop(
     _ensure_git(project_dir)
     _checkpoint(project_dir, verbose=True)
     _push_or_die(project_dir)
+
+    # Check for crash errors from previous runs
+    _check_errors_json(project_dir)
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
