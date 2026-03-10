@@ -153,6 +153,13 @@ def _main() -> None:
     args = _parse_args()
     checklist_path = Path(args.file).resolve()
 
+    # The wrap subcommand works on any project directory — it does not
+    # need a checklist file because it detects the language from file
+    # extensions and build system files.
+    if args.command == "wrap":
+        _cmd_wrap(checklist_path.parent)
+        return
+
     if not checklist_path.exists():
         print(f"Checklist not found: {checklist_path}", file=sys.stderr)
         sys.exit(1)
@@ -163,10 +170,6 @@ def _main() -> None:
 
     if args.command == "audit":
         _cmd_audit(checklist_path)
-        return
-
-    if args.command == "wrap":
-        _cmd_wrap(checklist_path)
         return
 
     if args.command == "investigate":
@@ -678,11 +681,10 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _cmd_wrap(checklist_path: Path) -> None:
+def _cmd_wrap(project_dir: Path) -> None:
     """Instrument the project's source files with error-catching hooks."""
     from mcloop.wrap import wrap_project
 
-    project_dir = checklist_path.parent
     try:
         language, entry = wrap_project(project_dir)
     except ValueError as exc:

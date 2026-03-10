@@ -692,5 +692,19 @@ def test_wrap_subcommand(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from mcloop.main import _cmd_wrap
 
-    _cmd_wrap(tmp_path / "PLAN.md")
+    _cmd_wrap(tmp_path)
     assert PYTHON_BEGIN in (pkg / "__main__.py").read_text()
+
+
+def test_wrap_subcommand_no_plan_md(tmp_path, monkeypatch):
+    """Test wrap works on projects without PLAN.md (external codebases)."""
+    # No PLAN.md — just a Python project with a main.py
+    (tmp_path / "main.py").write_text("print('hello')\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'foo'\n")
+
+    monkeypatch.chdir(tmp_path)
+    from mcloop.main import _cmd_wrap
+
+    _cmd_wrap(tmp_path)
+    assert PYTHON_BEGIN in (tmp_path / "main.py").read_text()
+    assert (tmp_path / ".mcloop" / "wrap" / "python_wrapper.py").exists()
