@@ -445,7 +445,7 @@ def run_gui(
     Returns:
         GUIResult with crash/hang status and diagnostics.
     """
-    subprocess.Popen(
+    proc = subprocess.Popen(
         command,
         shell=True,
         stdout=subprocess.DEVNULL,
@@ -453,28 +453,11 @@ def run_gui(
     )
 
     start = time.monotonic()
-    time.sleep(settle_seconds)
+    try:
+        time.sleep(settle_seconds)
 
-    pids = pgrep(process_name)
-    if not pids:
-        crash_rpt = read_crash_report(process_name)
-        return GUIResult(
-            crashed=True,
-            hung=False,
-            duration=time.monotonic() - start,
-            crash_report=crash_rpt,
-        )
-
-    pid = pids[0]
-
-    while True:
-        elapsed = time.monotonic() - start
-        if elapsed >= timeout_seconds:
-            break
-
-        time.sleep(check_interval)
-
-        if not is_alive(pid):
+        pids = pgrep(process_name)
+        if not pids:
             crash_rpt = read_crash_report(process_name)
             return GUIResult(
                 crashed=True,
@@ -483,12 +466,32 @@ def run_gui(
                 crash_report=crash_rpt,
             )
 
-    sample_out = sample(pid)
-    stuck = is_main_thread_stuck(sample_out)
+        pid = pids[0]
 
-    return GUIResult(
-        crashed=False,
-        hung=stuck,
-        duration=time.monotonic() - start,
-        sample_output=sample_out if stuck else None,
-    )
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed >= timeout_seconds:
+                break
+
+            time.sleep(check_interval)
+
+            if not is_alive(pid):
+                crash_rpt = read_crash_report(process_name)
+                return GUIResult(
+                    crashed=True,
+                    hung=False,
+                    duration=time.monotonic() - start,
+                    crash_report=crash_rpt,
+                )
+
+        sample_out = sample(pid)
+        stuck = is_main_thread_stuck(sample_out)
+
+        return GUIResult(
+            crashed=False,
+            hung=stuck,
+            duration=time.monotonic() - start,
+            sample_output=sample_out if stuck else None,
+        )
+    finally:
+        proc.wait()

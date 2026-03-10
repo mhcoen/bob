@@ -74,7 +74,12 @@ def _escape_applescript(s: str) -> str:
 
 
 def notify(message: str, level: str = "info") -> None:
-    """Send a notification. Default: Telegram. Set MCLOOP_IMESSAGE=1 for iMessage."""
+    """Send a notification. Default: Telegram. Set MCLOOP_IMESSAGE=1 for iMessage.
+
+    Set MCLOOP_NOTIFY=0 to disable all notifications.
+    """
+    if os.environ.get("MCLOOP_NOTIFY") == "0":
+        return
     prefix = {"info": "", "warning": "Warning: ", "error": "ERROR: "}.get(level, "")
     if os.environ.get("MCLOOP_IMESSAGE"):
         _send_imessage(f"McLoop: {prefix}{message}")

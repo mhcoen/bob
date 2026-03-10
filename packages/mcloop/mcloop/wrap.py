@@ -436,7 +436,8 @@ def _detect_from_extensions(project_dir: Path) -> str | None:
         # Skip hidden dirs and common non-source dirs
         parts = p.parts
         if any(
-            part.startswith(".") or part in ("node_modules", "__pycache__", ".build")
+            part.startswith(".")
+            or part in ("node_modules", "__pycache__", ".build", "venv", ".venv")
             for part in parts
         ):
             continue

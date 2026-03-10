@@ -3268,7 +3268,7 @@ def test_check_errors_no_plan_file(tmp_path, capsys):
     ):
         result = _check_errors_json(tmp_path)
 
-    assert result is True
+    assert result is False
     # Should not run diagnostics when there's no PLAN.md
     mock_diag.assert_not_called()
     out = capsys.readouterr().out

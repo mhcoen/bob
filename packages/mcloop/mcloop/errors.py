@@ -140,7 +140,7 @@ def _check_errors_json(
             formatting.error_msg("No PLAN.md found, cannot add tasks"),
             flush=True,
         )
-        return True
+        return False
 
     # Gather git log for diagnostic context
     git_log = ""

@@ -627,10 +627,12 @@ def _cmd_investigate(args, checklist_path: Path) -> None:
     # Run mcloop in the worktree directory with --no-audit,
     # retrying if post-fix verification fails.
     cmd = [sys.executable, "-m", "mcloop", "--no-audit", "--allow-web-tools"]
-    if args.model:
-        cmd.extend(["--model", args.model])
-    if args.fallback_model:
-        cmd.extend(["--fallback-model", args.fallback_model])
+    model = getattr(args, "model", None)
+    if model:
+        cmd.extend(["--model", model])
+    fallback_model = getattr(args, "fallback_model", None)
+    if fallback_model:
+        cmd.extend(["--fallback-model", fallback_model])
 
     for verify_round in range(1, MAX_VERIFICATION_ROUNDS + 1):
         print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
