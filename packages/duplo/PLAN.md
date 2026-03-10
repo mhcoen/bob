@@ -17,12 +17,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Modify `generate_next_phase_plan` with the same annotation requirement
   - [x] Add a test that verifies generated plans contain `[feat: ...]` or `[fix: ...]` annotations on task lines
 
-- [ ] Add `status`, `implemented_in`, and `issues` fields to feature tracking
+- [x] Add `status`, `implemented_in`, and `issues` fields to feature tracking
   - [x] Each feature dict in `duplo.json` gets two optional fields: `status` (one of `pending`, `implemented`, `partial`) and `implemented_in` (phase label string). New features default to `status: "pending"`.
   - [x] Add a `save_feature_status(name, status, implemented_in)` function to saver.py that updates a feature by name
   - [x] Add a top-level `issues` list to `duplo.json` for implementation problems not tied to a specific feature
   - [x] Add `save_issue(description, source, phase)` and `resolve_issue(description)` functions to saver.py
-  - [ ] Existing features in duplo.json files that lack a `status` field should be treated as `pending` by all code that reads them
+  - [x] Existing features in duplo.json files that lack a `status` field should be treated as `pending` by all code that reads them
 
 - [ ] Implement deterministic phase-completion tracking
   - [ ] At phase completion (all checkboxes checked), parse PLAN.md for checked task lines
