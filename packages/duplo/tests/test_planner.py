@@ -118,6 +118,56 @@ class TestGeneratePhasePlan:
         assert "(none)" in prompt
         assert isinstance(result, str)
 
+    def test_includes_issues_in_prompt(self):
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "Fix known issues",
+            "features": ["Dashboard"],
+            "test": "All issues resolved",
+            "issues": ["Sidebar overlaps on mobile", "Login timeout too short"],
+        }
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Sidebar overlaps on mobile" in prompt
+        assert "Login timeout too short" in prompt
+        assert "Known issues to fix" in prompt
+
+    def test_no_issues_block_when_empty(self):
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "Add features",
+            "features": ["Dashboard"],
+            "test": "",
+            "issues": [],
+        }
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Known issues to fix" not in prompt
+
+    def test_no_issues_block_when_no_phase(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Known issues to fix" not in prompt
+
 
 class TestPhaseSystemPromptAnnotations:
     def test_system_prompt_requires_feat_annotation(self):
@@ -131,6 +181,9 @@ class TestPhaseSystemPromptAnnotations:
 
     def test_system_prompt_no_annotation_for_scaffolding(self):
         assert "no annotation" in _PHASE_SYSTEM.lower()
+
+    def test_system_prompt_orders_fixes_before_dependent_features(self):
+        assert "fix tasks before new feature work" in _PHASE_SYSTEM.lower()
 
     def test_system_prompt_shows_feat_example_in_format(self):
         assert '[feat: "User authentication"]' in _PHASE_SYSTEM

@@ -33,6 +33,11 @@ Rules for the plan:
 - If visual design requirements are provided, include them
   verbatim as a section in the plan so the builder knows the
   exact colors, fonts, spacing, and component styles to use.
+- If known issues are provided, generate fix tasks for each one.
+  Order fix tasks before new feature work when a feature depends
+  on the fix (e.g. a broken API must be fixed before building a
+  feature that calls it). Fixes that are independent of upcoming
+  features can be placed wherever they fit best.
 - Every task line that implements one or more features from the
   input list MUST end with a [feat: "Feature Name"] annotation.
   If a task addresses multiple features, list them comma-separated:
