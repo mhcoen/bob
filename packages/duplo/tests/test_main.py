@@ -2751,3 +2751,161 @@ class TestCompletePhaseTaskMatching:
 
         out = capsys.readouterr().out
         assert "No feature matches found" in out
+
+
+class TestPhase2NotStartedRunDuplo:
+    """Run duplo when Phase 1 is complete and Phase 2 PLAN.md has unchecked tasks.
+
+    Confirms duplo prints a status summary and tells the user to run mcloop.
+    """
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "app_name": "TestApp",
+        "features": [
+            {
+                "name": "Auth",
+                "description": "Login",
+                "category": "core",
+                "status": "implemented",
+                "implemented_in": "Phase 1: Core",
+            },
+            {
+                "name": "Search",
+                "description": "Find things",
+                "category": "core",
+                "status": "pending",
+                "implemented_in": "",
+            },
+            {
+                "name": "Export",
+                "description": "Export data",
+                "category": "core",
+                "status": "pending",
+                "implemented_in": "",
+            },
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core features",
+                "features": ["Auth"],
+                "test": "ok",
+            },
+            {
+                "phase": 1,
+                "title": "Search & Export",
+                "goal": "Add search and export",
+                "features": ["Search", "Export"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 1,
+        "phases": [
+            {
+                "phase": "Phase 1: Core",
+                "plan": "- [x] Set up auth",
+                "completed_at": "2026-03-01T00:00:00",
+            },
+        ],
+    }
+
+    _PHASE2_PLAN = (
+        "# TestApp — Phase 2: Search & Export\n\n"
+        '- [ ] Implement search [feat: "Search"]\n'
+        '- [ ] Implement export [feat: "Export"]\n'
+    )
+
+    def _run_main(self, tmp_path, monkeypatch, data=None):
+        """Set up duplo.json and PLAN.md, then run main() with mocks."""
+        _write_duplo_json(tmp_path, data or self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+        ):
+            main()
+
+    def test_prints_status_and_run_mcloop(self, capsys, tmp_path, monkeypatch):
+        """Phase 2 PLAN.md with unchecked tasks → status summary + run mcloop."""
+        self._run_main(tmp_path, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert "Phase 1 complete" in out
+        assert "1/3 features implemented" in out
+        assert "uncompleted tasks" in out
+        assert "Run mcloop to continue building" in out
+
+    def test_status_includes_app_name(self, capsys, tmp_path, monkeypatch):
+        """Status line includes the app name prefix."""
+        self._run_main(tmp_path, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert "TestApp: Phase 1 complete" in out
+
+    def test_phase_label_from_roadmap(self, capsys, tmp_path, monkeypatch):
+        """Phase label includes the title from the roadmap."""
+        self._run_main(tmp_path, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert "Phase 1: Search & Export" in out
+
+    def test_does_not_generate_plan(self, tmp_path, monkeypatch):
+        """Should NOT call generate_phase_plan when PLAN.md has unchecked tasks."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.generate_phase_plan") as mock_gen,
+        ):
+            main()
+
+        mock_gen.assert_not_called()
+
+    def test_does_not_complete_phase(self, tmp_path, monkeypatch):
+        """Should NOT call _complete_phase when tasks remain unchecked."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.append_phase_to_history") as mock_append,
+        ):
+            main()
+
+        mock_append.assert_not_called()
+
+    def test_returns_without_advancing(self, tmp_path, monkeypatch):
+        """current_phase and phases should remain unchanged after the run."""
+        self._run_main(tmp_path, monkeypatch)
+
+        data = _read_duplo_json(tmp_path)
+        assert data["current_phase"] == 1
+        assert len(data["phases"]) == 1
+
+    def test_status_with_open_issues(self, capsys, tmp_path, monkeypatch):
+        """Status line includes open issue count when issues exist."""
+        data = {
+            **self._BASE_DATA,
+            "issues": [
+                {"description": "crash on load", "status": "open"},
+                {"description": "typo fixed", "status": "resolved"},
+            ],
+        }
+        self._run_main(tmp_path, monkeypatch, data=data)
+
+        out = capsys.readouterr().out
+        assert "1 open issues" in out
