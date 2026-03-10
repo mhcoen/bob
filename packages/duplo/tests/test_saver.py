@@ -31,6 +31,7 @@ from duplo.saver import (
     load_product,
     move_references,
     save_examples,
+    save_feature_status,
     save_features,
     save_feedback,
     save_frame_descriptions,
@@ -1105,3 +1106,123 @@ class TestSaveFeatures:
         for feat in data["features"]:
             assert feat["status"] == "pending"
             assert feat["implemented_in"] == ""
+
+
+class TestSaveFeatureStatus:
+    """Tests for save_feature_status()."""
+
+    def _write_features(self, tmp_path, features_data):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"features": features_data}), encoding="utf-8")
+
+    def test_updates_existing_feature(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        feat = data["features"][0]
+        assert feat["status"] == "implemented"
+        assert feat["implemented_in"] == "Phase 1"
+
+    def test_updates_only_matching_feature(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Search",
+                    "description": "Find.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        save_feature_status("Search", "partial", "Phase 2", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        auth = [f for f in data["features"] if f["name"] == "Auth"][0]
+        search = [f for f in data["features"] if f["name"] == "Search"][0]
+        assert auth["status"] == "pending"
+        assert auth["implemented_in"] == ""
+        assert search["status"] == "partial"
+        assert search["implemented_in"] == "Phase 2"
+
+    def test_raises_on_unknown_feature(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="No feature named"):
+            save_feature_status("Nope", "implemented", "Phase 1", target_dir=tmp_path)
+
+    def test_raises_on_invalid_status(self, tmp_path):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="Invalid status"):
+            save_feature_status("Auth", "done", "Phase 1", target_dir=tmp_path)
+
+    def test_raises_on_empty_features_list(self, tmp_path):
+        self._write_features(tmp_path, [])
+        with pytest.raises(ValueError, match="No feature named"):
+            save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
+
+    def test_preserves_other_data(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "source_url": "https://example.com",
+                    "features": [
+                        {
+                            "name": "Auth",
+                            "description": "Login.",
+                            "category": "core",
+                            "status": "pending",
+                            "implemented_in": "",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["source_url"] == "https://example.com"

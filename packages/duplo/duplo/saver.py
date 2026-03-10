@@ -391,6 +391,50 @@ def save_features(
     return path
 
 
+def save_feature_status(
+    name: str,
+    status: str,
+    implemented_in: str,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Update the status of a feature by name in *duplo.json*.
+
+    Finds the feature dict whose ``name`` matches and sets its ``status``
+    and ``implemented_in`` fields.  Raises ``ValueError`` if no feature
+    with the given name exists or if *status* is not one of the allowed
+    values.
+
+    Args:
+        name: Feature name to update (must match exactly).
+        status: One of ``"pending"``, ``"implemented"``, ``"partial"``.
+        implemented_in: Phase label string (e.g. ``"Phase 1"``).
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    allowed = {"pending", "implemented", "partial"}
+    if status not in allowed:
+        msg = f"Invalid status {status!r}; must be one of {sorted(allowed)}"
+        raise ValueError(msg)
+
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    features = data.get("features", [])
+    for feat in features:
+        if feat["name"] == name:
+            feat["status"] = status
+            feat["implemented_in"] = implemented_in
+            break
+    else:
+        msg = f"No feature named {name!r}"
+        raise ValueError(msg)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def save_code_examples(
     examples: list[CodeExample],
     *,
