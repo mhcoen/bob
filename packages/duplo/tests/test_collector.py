@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from duplo.collector import collect_feedback, _read_interactive
+from duplo.collector import collect_feedback, collect_issues, _read_interactive
 
 
 def make_input(*answers: str):
@@ -83,6 +83,38 @@ class TestCollectFeedbackInteractive:
         )
         combined = "\n".join(lines)
         assert "feedback" in combined.lower()
+
+
+class TestCollectIssues:
+    def test_returns_issues_list(self):
+        result = collect_issues(input_fn=make_input("button broken", "text misaligned", ""))
+        assert result == ["button broken", "text misaligned"]
+
+    def test_empty_input_returns_empty_list(self):
+        result = collect_issues(input_fn=make_input(""))
+        assert result == []
+
+    def test_eof_terminates(self):
+        result = collect_issues(input_fn=make_input_with_eof("crash on save", None))
+        assert result == ["crash on save"]
+
+    def test_immediate_eof_returns_empty(self):
+        result = collect_issues(input_fn=make_input_with_eof(None))
+        assert result == []
+
+    def test_strips_whitespace_from_lines(self):
+        result = collect_issues(input_fn=make_input("  padded issue  ", ""))
+        assert result == ["padded issue"]
+
+    def test_skips_blank_only_lines(self):
+        result = collect_issues(input_fn=make_input("real issue", "   ", ""))
+        assert result == ["real issue"]
+
+    def test_prints_prompt(self):
+        lines: list[str] = []
+        collect_issues(input_fn=make_input(""), print_fn=lines.append)
+        combined = "\n".join(lines)
+        assert "issue" in combined.lower()
 
 
 class TestReadInteractive:

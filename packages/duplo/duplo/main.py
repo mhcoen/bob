@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
-from duplo.collector import collect_feedback
+from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
 from duplo.design_extractor import (
     DesignRequirements,
@@ -59,6 +59,7 @@ from duplo.saver import (
     save_examples,
     save_features,
     save_feedback,
+    save_issue,
     save_product,
     save_raw_content,
     save_reference_urls,
@@ -1213,6 +1214,15 @@ def _complete_phase(
     if plan_path.exists():
         plan_path.unlink()
     print(f"{phase_label} complete. Recorded in duplo.json.")
+
+    # Prompt for known issues before advancing.
+    issues = collect_issues()
+    if issues:
+        for desc in issues:
+            save_issue(desc, source="user report", phase=phase_label)
+        print(f"Recorded {len(issues)} issue(s) in duplo.json.")
+    else:
+        print("No issues reported.")
 
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"

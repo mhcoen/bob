@@ -1,4 +1,4 @@
-"""Collect user feedback as text input or from a file."""
+"""Collect user feedback and known issues as text input or from a file."""
 
 from __future__ import annotations
 
@@ -60,3 +60,36 @@ def _read_interactive(
     if not text:
         raise ValueError("No feedback provided.")
     return text
+
+
+def collect_issues(
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> list[str]:
+    """Prompt the user for known issues with the completed phase.
+
+    Each non-empty line the user enters becomes one issue description.
+    An empty line or EOF finishes input. Returns an empty list if the
+    user enters nothing (no issues to report is a valid response).
+
+    Args:
+        input_fn: Callable used to read user input (default ``input``).
+        print_fn: Callable used to print prompts (default ``print``).
+
+    Returns:
+        List of issue description strings (may be empty).
+    """
+    print_fn("Any known issues with this phase? (one per line, blank line to skip):")
+    issues: list[str] = []
+    try:
+        while True:
+            line = input_fn("")
+            if line == "":
+                break
+            stripped = line.strip()
+            if stripped:
+                issues.append(stripped)
+    except EOFError:
+        pass
+    return issues
