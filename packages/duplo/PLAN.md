@@ -51,7 +51,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Remove the separate `_advance_to_next` code path. The single next-phase flow handles everything.
   - [x] Remove the dependency on `in_progress` for flow control. The `in_progress` key can be removed entirely or repurposed for crash recovery only.
 
-- [ ] Implement next-phase flow with feature selection
+- [x] Implement next-phase flow with feature selection
   - [x] Re-scrape the product site, re-extract features, merge new ones into `duplo.json` (already works)
   - [x] Partition features into implemented and remaining based on `status` field
   - [x] If roadmap is missing or consumed, generate a new one from remaining features (previous item)
@@ -59,7 +59,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Present remaining features to the user using `select_features` (numbered, grouped by category), with the roadmap recommendation labeled (e.g. "Recommended for Phase 2: 3, 7, 12, 15")
   - [x] Show open issues from `duplo.json` and ask which should be addressed in this phase (same numbered selection pattern)
   - [x] Update `generate_phase_plan` to accept issues alongside features. The system prompt should instruct Claude to include fix tasks for issues alongside feature-implementation tasks, ordering fixes before new feature work when there are dependencies.
-  - [ ] Generate the next PLAN.md scoped to selected features + selected issues. Heading format: `# <AppName> — Phase N: <Title>`. All task lines include `[feat: ...]` or `[fix: ...]` annotations. Phase number derived from `phases` history length + 1.
+  - [x] Generate the next PLAN.md scoped to selected features + selected issues. Heading format: `# <AppName> — Phase N: <Title>`. All task lines include `[feat: ...]` or `[fix: ...]` annotations. Phase number derived from `phases` history length + 1.
 
 - [ ] Print status summary on every run
   - [ ] Before doing any work, print: current phase number, features implemented vs. remaining, open issues count
