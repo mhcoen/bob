@@ -226,6 +226,6 @@ The debugging playbook this enforces:
 - [ ] Auto-wrap: instrument apps automatically
   - [x] After the first successful task that results in a runnable app (detected via `detect_run` returning a non-empty command and no existing wrap markers in the project), automatically inject error-catching instrumentation. No `mcloop wrap` command needed. This happens once, silently, as part of the normal build flow. Print a one-line message: "Injected crash handlers."
   - [x] Bake the project directory path into the crash handler at injection time. When the app crashes, the handler prints to stderr: `[McLoop] Crash captured: <exception type> in <location>. Run mcloop from <project_dir> to fix this bug.` This tells the user exactly what to do.
-  - [ ] The `mcloop wrap` subcommand remains available for instrumenting projects that were NOT built by mcloop (existing codebases the user wants to add error capture to).
+  - [x] The `mcloop wrap` subcommand remains available for instrumenting projects that were NOT built by mcloop (existing codebases the user wants to add error capture to).
   - [ ] Update the task prompt to tell Claude Code not to remove or modify code between mcloop:wrap markers.
   - [ ] Add tests: auto-wrap triggers on first runnable task, does not trigger if markers already exist, does not trigger if no run command detected, crash message includes correct project path.
