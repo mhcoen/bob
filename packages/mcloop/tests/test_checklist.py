@@ -444,6 +444,68 @@ def test_parse_auto_task_no_tag(tmp_path):
     assert args == ""
 
 
+def test_find_next_bugs_before_features(tmp_path):
+    """Bug tasks have absolute priority over feature tasks."""
+    md = "## Stage 1: Core\n- [ ] Feature task\n## Bugs\n- [ ] Fix crash\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Fix crash"
+
+
+def test_find_next_bugs_before_features_no_stages(tmp_path):
+    """Bug priority works in plans without stage headers."""
+    md = "- [ ] Feature A\n- [ ] Feature B\n## Bugs\n- [ ] Fix segfault\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Fix segfault"
+
+
+def test_find_next_features_when_bugs_checked(tmp_path):
+    """Feature tasks returned when all bugs are checked off."""
+    md = "## Bugs\n- [x] Fixed crash\n## Stage 1: Core\n- [ ] Add feature\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Add feature"
+
+
+def test_find_next_features_when_bugs_failed(tmp_path):
+    """Failed bugs are skipped, feature tasks returned if no unchecked bugs."""
+    md = "## Bugs\n- [!] Unresolvable\n## Stage 1: Core\n- [ ] Add feature\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Add feature"
+
+
+def test_find_next_bug_nested_children(tmp_path):
+    """Bug tasks with children return the first unchecked child."""
+    md = (
+        "## Bugs\n"
+        "- [ ] Fix crash group\n"
+        "  - [x] Investigate cause\n"
+        "  - [ ] Apply fix\n"
+        "## Stage 1: Core\n"
+        "- [ ] Add feature\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Apply fix"
+
+
 def test_has_unchecked_bugs_true(tmp_path):
     md = "## Bugs\n- [ ] Fix crash\n## Stage 1: Core\n- [ ] Add feature\n"
     f = tmp_path / "tasks.md"
