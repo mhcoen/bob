@@ -941,6 +941,18 @@ def _subsequent_run() -> None:
         f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
     )
 
+    # Let the user confirm/adjust which features go into this phase.
+    remaining = _unimplemented_features(data)
+    phase_feature_names = phase_info.get("features", [])
+    if remaining:
+        selected = select_features(remaining, recommended=phase_feature_names)
+        if not selected:
+            print("No features selected. Nothing to do.")
+            return
+        # Update phase_info to reflect user's selection.
+        phase_info = dict(phase_info)
+        phase_info["features"] = [f.name for f in selected]
+
     # Generate plan for current phase.
     source_url = data.get("source_url", "")
     features = [Feature(**f) for f in data.get("features", [])]

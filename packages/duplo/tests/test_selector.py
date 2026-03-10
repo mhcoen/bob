@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from duplo.extractor import Feature
-from duplo.selector import _parse_selection, _print_features, select_features
+from duplo.selector import (
+    _parse_selection,
+    _print_features,
+    _recommended_indices,
+    select_features,
+)
 
 
 def make_features(*specs: tuple[str, str, str]) -> list[Feature]:
@@ -92,6 +97,21 @@ class TestPrintFeatures:
         _print_features(features, lines.append)
         assert "[OTHER]" in "\n".join(lines)
 
+    def test_recommended_features_marked(self):
+        lines: list[str] = []
+        _print_features(SAMPLE, lines.append, recommended={"Search", "SSO"})
+        combined = "\n".join(lines)
+        assert "Search *" in combined
+        assert "SSO *" in combined
+        # Non-recommended should not have marker.
+        assert "REST API *" not in combined
+
+    def test_no_marker_without_recommended(self):
+        lines: list[str] = []
+        _print_features(SAMPLE, lines.append)
+        combined = "\n".join(lines)
+        assert " *" not in combined
+
 
 # ---------------------------------------------------------------------------
 # select_features
@@ -149,3 +169,85 @@ class TestSelectFeatures:
     def test_case_insensitive_none(self):
         result, _ = self._run(SAMPLE, "NONE")
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _recommended_indices
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendedIndices:
+    def test_returns_none_for_empty_set(self):
+        assert _recommended_indices(SAMPLE, set()) is None
+
+    def test_returns_none_when_no_match(self):
+        assert _recommended_indices(SAMPLE, {"Nonexistent"}) is None
+
+    def test_returns_matching_indices(self):
+        result = _recommended_indices(SAMPLE, {"Search", "SSO"})
+        assert result == [0, 2]
+
+    def test_preserves_order(self):
+        result = _recommended_indices(SAMPLE, {"Dark mode", "Search"})
+        assert result == [0, 3]
+
+
+# ---------------------------------------------------------------------------
+# select_features with recommended
+# ---------------------------------------------------------------------------
+
+
+class TestSelectFeaturesRecommended:
+    def _run(self, features, user_input, recommended=None):
+        lines: list[str] = []
+        result = select_features(
+            features,
+            recommended=recommended,
+            input_fn=lambda _: user_input,
+            print_fn=lines.append,
+        )
+        return result, lines
+
+    def test_blank_input_selects_recommended(self):
+        result, _ = self._run(SAMPLE, "", recommended=["Search", "SSO"])
+        assert len(result) == 2
+        assert result[0].name == "Search"
+        assert result[1].name == "SSO"
+
+    def test_all_overrides_recommended(self):
+        result, _ = self._run(SAMPLE, "all", recommended=["Search"])
+        assert result == SAMPLE
+
+    def test_none_overrides_recommended(self):
+        result, _ = self._run(SAMPLE, "none", recommended=["Search"])
+        assert result == []
+
+    def test_numeric_overrides_recommended(self):
+        result, _ = self._run(SAMPLE, "2", recommended=["Search"])
+        assert len(result) == 1
+        assert result[0].name == "REST API"
+
+    def test_blank_with_no_matching_recommended_selects_all(self):
+        result, _ = self._run(SAMPLE, "", recommended=["Nonexistent"])
+        assert result == SAMPLE
+
+    def test_prompt_shows_recommended_numbers(self):
+        prompts: list[str] = []
+
+        def capture_prompt(p: str) -> str:
+            prompts.append(p)
+            return ""
+
+        select_features(
+            SAMPLE,
+            recommended=["Search", "SSO"],
+            input_fn=capture_prompt,
+            print_fn=lambda _: None,
+        )
+        assert len(prompts) == 1
+        assert "1,3" in prompts[0]
+
+    def test_shows_roadmap_hint(self):
+        _, lines = self._run(SAMPLE, "", recommended=["Search"])
+        combined = "\n".join(lines)
+        assert "recommended by roadmap" in combined

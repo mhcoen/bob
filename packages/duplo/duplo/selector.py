@@ -13,13 +13,19 @@ _CATEGORY_ORDER = ["core", "ui", "integrations", "api", "security", "other"]
 def select_features(
     features: list[Feature],
     *,
+    recommended: list[str] | None = None,
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print,
 ) -> list[Feature]:
     """Display *features* and interactively ask the user which to include.
 
+    When *recommended* is provided (a list of feature names from the
+    roadmap's next phase), those features are marked with ``*`` in the
+    display and used as the default selection instead of "all".
+
     Accepts selections like:
-      - "all" or blank  – include everything
+      - "all"           – include everything
+      - blank           – include recommended (or all if none)
       - "none"          – include nothing
       - "1,3,5"         – comma-separated numbers
       - "1-4,7"         – ranges and individual numbers mixed
@@ -30,17 +36,33 @@ def select_features(
         print_fn("No features to select.")
         return []
 
-    _print_features(features, print_fn)
+    rec_set = set(recommended) if recommended else set()
+    _print_features(features, print_fn, recommended=rec_set)
+
+    rec_indices = _recommended_indices(features, rec_set)
+    if rec_indices is not None:
+        default_label = ",".join(str(i + 1) for i in rec_indices)
+        default_hint = default_label
+    else:
+        default_hint = "all"
 
     print_fn("")
     print_fn("Enter the numbers of the features to include.")
     print_fn('  Examples: "all", "none", "1,3,5", "1-4,7"')
-    raw = input_fn("Selection [all]: ").strip()
+    if rec_indices is not None:
+        print_fn("  * = recommended by roadmap")
+    raw = input_fn(f"Selection [{default_hint}]: ").strip()
 
-    if not raw or raw.lower() == "all":
+    if raw.lower() == "all":
         selected = list(features)
     elif raw.lower() == "none":
         selected = []
+    elif not raw:
+        # Empty input: use recommended if available, otherwise all.
+        if rec_indices is not None:
+            selected = [features[i] for i in rec_indices]
+        else:
+            selected = list(features)
     else:
         indices = _parse_selection(raw, len(features))
         selected = [features[i] for i in sorted(indices)]
@@ -49,7 +71,21 @@ def select_features(
     return selected
 
 
-def _print_features(features: list[Feature], print_fn: Callable[[str], None]) -> None:
+def _recommended_indices(features: list[Feature], rec_set: set[str]) -> list[int] | None:
+    """Return sorted 0-based indices of features in *rec_set*, or None."""
+    if not rec_set:
+        return None
+    indices = [i for i, f in enumerate(features) if f.name in rec_set]
+    return indices if indices else None
+
+
+def _print_features(
+    features: list[Feature],
+    print_fn: Callable[[str], None],
+    *,
+    recommended: set[str] | None = None,
+) -> None:
+    rec_set = recommended or set()
     by_category: dict[str, list[tuple[int, Feature]]] = defaultdict(list)
     for idx, feature in enumerate(features, start=1):
         cat = feature.category if feature.category in _CATEGORY_ORDER else "other"
@@ -60,7 +96,8 @@ def _print_features(features: list[Feature], print_fn: Callable[[str], None]) ->
             continue
         print_fn(f"\n[{cat.upper()}]")
         for idx, feature in by_category[cat]:
-            print_fn(f"  {idx:>3}. {feature.name}")
+            marker = " *" if feature.name in rec_set else ""
+            print_fn(f"  {idx:>3}. {feature.name}{marker}")
             print_fn(f"       {feature.description}")
 
 

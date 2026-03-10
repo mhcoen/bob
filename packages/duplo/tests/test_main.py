@@ -286,9 +286,10 @@ class TestMainSubsequentRun:
         _write_duplo_json(tmp_path, self._BASE_DATA)
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save:
-                main()
+        with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save:
+                    main()
 
         mock_save.assert_called_once()
 
@@ -296,9 +297,10 @@ class TestMainSubsequentRun:
         _write_duplo_json(tmp_path, self._BASE_DATA)
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                main()
+        with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                    main()
 
         out = capsys.readouterr().out
         assert "Run mcloop to start building" in out
@@ -1196,9 +1198,10 @@ class TestDetectAndAppendGaps:
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)) as mock_gaps:
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                    main()
+            with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
+                with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                    with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                        main()
 
         mock_gaps.assert_called_once()
 
@@ -1550,6 +1553,7 @@ class TestSubsequentRunReextractsFeatures:
             patch("duplo.main.extract_features", return_value=[new_feature]) as mock_extract,
             patch("duplo.main.save_features") as mock_save,
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -1568,6 +1572,7 @@ class TestSubsequentRunReextractsFeatures:
             patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
             patch("duplo.main.extract_features") as mock_extract,
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -1893,6 +1898,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -1924,6 +1930,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2019,6 +2026,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2065,6 +2073,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2113,6 +2122,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2162,6 +2172,7 @@ class TestRoadmapRegeneration:
         ]
         with (
             patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2364,6 +2375,7 @@ class TestSubsequentRunFeatureCountingIntegration:
             patch("duplo.main.extract_features", return_value=[new_feat]),
             # Let save_features actually run so counting logic works
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2389,6 +2401,7 @@ class TestSubsequentRunFeatureCountingIntegration:
             ),
             patch("duplo.main.extract_features", return_value=[dup_feat]),
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
@@ -2440,6 +2453,7 @@ class TestSubsequentRunFeatureCountingIntegration:
             ),
             patch("duplo.main.extract_features", return_value=[]),
             patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
             patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
