@@ -204,7 +204,7 @@ The debugging playbook this enforces:
 - [ ] Model fallback on task failure
   - [x] Add `--fallback-model` CLI flag (e.g. `mcloop --model sonnet --fallback-model opus`). Not the default; only active when explicitly provided.
   - [x] When a task exhausts all retries on the primary model and `--fallback-model` is set, retry the task from scratch using the fallback model (same retry count) before marking it failed.
-  - [ ] Print a clear message when falling back: "Primary model failed, retrying with <fallback-model>".
+  - [x] Print a clear message when falling back: "Primary model failed, retrying with <fallback-model>".
   - [ ] If the fallback model also exhausts retries, mark the task failed as normal.
   - [ ] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
 
