@@ -125,6 +125,15 @@ def run_task(
         " update the relevant entry in CLAUDE.md"
         " before finishing."
     )
+    parts.append(
+        "Do not remove or modify code between"
+        " mcloop:wrap markers (e.g. `// mcloop:wrap:begin`"
+        " ... `// mcloop:wrap:end` or the Python `#`"
+        " equivalents). These are auto-injected crash"
+        " handlers managed by mcloop. If a task requires"
+        " changes to the entry point file, work around"
+        " the marked block."
+    )
     notes_instruction = (
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"

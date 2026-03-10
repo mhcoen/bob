@@ -858,6 +858,36 @@ def test_run_task_prompt_notes_three_sections(tmp_path):
     assert "ruled out" in prompt
 
 
+def test_run_task_prompt_includes_wrap_marker_instruction(tmp_path):
+    """run_task prompt tells sessions not to modify mcloop:wrap markers."""
+    log_dir = tmp_path / "logs"
+    captured_prompt = {}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_prompt["prompt"] = prompt
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        from mcloop.runner import run_task
+
+        run_task(
+            task_text="Fix the login flow",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+        )
+
+    prompt = captured_prompt["prompt"]
+    assert "mcloop:wrap" in prompt
+    assert "Do not remove or modify" in prompt
+    assert "mcloop:wrap:begin" in prompt
+    assert "mcloop:wrap:end" in prompt
+
+
 def test_run_task_accessibility_instruction_present_for_non_ui_task(tmp_path):
     """Accessibility instruction is included even for non-UI tasks."""
     log_dir = tmp_path / "logs"
