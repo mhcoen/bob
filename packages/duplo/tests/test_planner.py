@@ -9,6 +9,7 @@ import pytest
 
 from duplo.extractor import Feature
 from duplo.planner import (
+    _NEXT_PHASE_SYSTEM,
     _PHASE_SYSTEM,
     _PLAN_FILENAME,
     _detect_next_phase_number,
@@ -132,6 +133,20 @@ class TestPhaseSystemPromptAnnotations:
 
     def test_system_prompt_shows_fix_example_in_format(self):
         assert '[fix: "email format not checked"]' in _PHASE_SYSTEM
+
+
+class TestNextPhaseSystemPromptAnnotations:
+    def test_system_prompt_requires_feat_annotation(self):
+        assert '[feat: "Feature Name"]' in _NEXT_PHASE_SYSTEM
+
+    def test_system_prompt_requires_multi_feature_annotation(self):
+        assert "comma-separated" in _NEXT_PHASE_SYSTEM
+
+    def test_system_prompt_requires_fix_annotation(self):
+        assert '[fix: "description"]' in _NEXT_PHASE_SYSTEM
+
+    def test_system_prompt_no_annotation_for_scaffolding(self):
+        assert "no annotation" in _NEXT_PHASE_SYSTEM.lower()
 
 
 class TestDetectNextPhaseNumber:

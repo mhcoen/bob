@@ -83,6 +83,13 @@ A bullet list of new features or improvements being added.
 ## Implementation steps
 A numbered list of concrete implementation steps. Each step must be specific enough
 for a developer to act on without ambiguity.
+- Every step that implements one or more features MUST end with a
+  [feat: "Feature Name"] annotation. If a step addresses multiple
+  features, list them comma-separated:
+  [feat: "Push-to-talk recording", "Global keyboard shortcuts"].
+  Steps that fix bugs or visual issues use [fix: "description"].
+  Scaffolding or structural steps that do not map to any feature
+  use no annotation.
 
 ## Success criteria
 A checklist of observable outcomes that confirm this phase is complete and working.
