@@ -1935,6 +1935,66 @@ class TestRoadmapRegeneration:
         out = capsys.readouterr().out
         assert "failed to generate roadmap" in out
 
+    def test_excludes_implemented_features_from_roadmap(self, capsys, tmp_path, monkeypatch):
+        data = {
+            **self._BASE_DATA,
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search items",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0: Scaffold",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export data",
+                    "category": "extra",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Import",
+                    "description": "Import data",
+                    "category": "extra",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1: Core",
+                },
+                {
+                    "name": "Settings",
+                    "description": "User settings",
+                    "category": "ui",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Remaining",
+                "goal": "Build remaining",
+                "features": ["Export", "Settings"],
+                "test": "ok",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_gen.assert_called_once()
+        features_arg = mock_gen.call_args[0][1]
+        feature_names = [f.name for f in features_arg]
+        assert feature_names == ["Export", "Settings"]
+        assert "Search" not in feature_names
+        assert "Import" not in feature_names
+
     def test_passes_completion_history_when_regenerating(self, capsys, tmp_path, monkeypatch):
         data = {
             **self._BASE_DATA,
