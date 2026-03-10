@@ -19,20 +19,65 @@ SWIFT_WRAPPER = """\
 // mcloop:wrap:begin
 import Foundation
 
+/// Registry for app-state providers. Each closure returns a dict of
+/// property names to their string representations, captured at crash
+/// time.  ObservableObject subclasses register themselves so that
+/// @Published properties are included in error reports.
+enum _McloopState {
+    private static var _providers: [() -> [String: String]] = []
+    private static var _lastAction: String = ""
+    static let lock = NSLock()
+
+    static func register(_ provider: @escaping () -> [String: String]) {
+        lock.lock()
+        _providers.append(provider)
+        lock.unlock()
+    }
+
+    static func recordAction(_ action: String) {
+        lock.lock()
+        _lastAction = action
+        lock.unlock()
+    }
+
+    static func snapshot() -> [String: String] {
+        lock.lock()
+        let providers = _providers
+        lock.unlock()
+        var result: [String: String] = [:]
+        for provider in providers {
+            for (k, v) in provider() {
+                result[k] = v
+            }
+        }
+        return result
+    }
+
+    static func lastAction() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastAction
+    }
+}
+
 private func _mcloopSetupCrashHandlers() {
     let errorDir = FileManager.default.currentDirectoryPath + "/.mcloop"
     try? FileManager.default.createDirectory(
         atPath: errorDir, withIntermediateDirectories: true)
 
     NSSetUncaughtExceptionHandler { exception in
+        let state = _McloopState.snapshot()
+        let action = _McloopState.lastAction()
         let report: [String: Any] = [
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "exception_type": String(describing: type(of: exception)),
             "description": exception.reason ?? exception.name.rawValue,
-            "stack_trace": exception.callStackSymbols.joined(separator: "\\n"),
+            "stack_trace": exception.callStackSymbols.joined(
+                separator: "\\n"),
             "source_file": "",
             "line": 0,
-            "app_state": [:] as [String: String],
+            "app_state": state,
+            "last_action": action,
             "fix_attempts": 0,
         ]
         _mcloopWriteError(report, dir: errorDir)
@@ -40,15 +85,19 @@ private func _mcloopSetupCrashHandlers() {
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
         signal(sig) { signum in
+            let state = _McloopState.snapshot()
+            let action = _McloopState.lastAction()
             let report: [String: Any] = [
                 "timestamp": ISO8601DateFormatter().string(from: Date()),
                 "signal": signum,
                 "exception_type": "Signal",
                 "description": "Received signal \\(signum)",
-                "stack_trace": Thread.callStackSymbols.joined(separator: "\\n"),
+                "stack_trace": Thread.callStackSymbols.joined(
+                    separator: "\\n"),
                 "source_file": "",
                 "line": 0,
-                "app_state": [:] as [String: String],
+                "app_state": state,
+                "last_action": action,
                 "fix_attempts": 0,
             ]
             _mcloopWriteError(report, dir: errorDir)
@@ -62,7 +111,9 @@ private func _mcloopWriteError(_ report: [String: Any], dir: String) {
     let path = dir + "/errors.json"
     var entries: [[String: Any]] = []
     if let data = FileManager.default.contents(atPath: path),
-       let existing = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+       let existing = try? JSONSerialization.jsonObject(
+        with: data) as? [[String: Any]]
+    {
         entries = existing
     }
     var entry = report
@@ -71,7 +122,8 @@ private func _mcloopWriteError(_ report: [String: Any], dir: String) {
     entry["id"] = String(format: "%08x", abs(trace.hashValue ^ sig))
     entries.append(entry)
     if let data = try? JSONSerialization.data(
-        withJSONObject: entries, options: [.prettyPrinted]) {
+        withJSONObject: entries, options: [.prettyPrinted])
+    {
         FileManager.default.createFile(atPath: path, contents: data)
     }
 }

@@ -174,6 +174,17 @@ def test_inject_swift():
     assert SWIFT_END in result
     assert "_mcloopSetupCrashHandlers()" in result
     assert "NSSetUncaughtExceptionHandler" in result
+    # Signal handlers
+    assert "SIGSEGV" in result
+    assert "SIGABRT" in result
+    assert "SIGBUS" in result
+    # State registry
+    assert "_McloopState" in result
+    assert "snapshot()" in result
+    assert "lastAction()" in result
+    assert "recordAction" in result
+    assert '"last_action"' in result
+    assert '"app_state"' in result
 
 
 def test_inject_swift_no_main():
@@ -222,6 +233,36 @@ def test_inject_idempotent_python():
     second = inject(first, "python")
     assert second.count(PYTHON_BEGIN) == 1
     assert second.count(PYTHON_END) == 1
+
+
+def test_swift_wrapper_state_registry():
+    """Swift wrapper includes state registry for @Published property capture."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    # Registry API
+    assert "enum _McloopState" in SWIFT_WRAPPER
+    assert "register(" in SWIFT_WRAPPER
+    assert "recordAction(" in SWIFT_WRAPPER
+    assert "snapshot()" in SWIFT_WRAPPER
+    assert "lastAction()" in SWIFT_WRAPPER
+    # Thread safety
+    assert "NSLock" in SWIFT_WRAPPER
+    # Error reports include state and last action
+    assert '"app_state": state' in SWIFT_WRAPPER
+    assert '"last_action": action' in SWIFT_WRAPPER
+    # Reports written to errors.json
+    assert "errors.json" in SWIFT_WRAPPER
+
+
+def test_swift_wrapper_signal_handlers():
+    """Swift wrapper installs handlers for SIGSEGV, SIGABRT, SIGBUS."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    assert "SIGSEGV" in SWIFT_WRAPPER
+    assert "SIGABRT" in SWIFT_WRAPPER
+    assert "SIGBUS" in SWIFT_WRAPPER
+    assert "SIG_DFL" in SWIFT_WRAPPER
+    assert "Darwin.raise" in SWIFT_WRAPPER
 
 
 # ---- save_canonical_wrappers ----
