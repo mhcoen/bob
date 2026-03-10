@@ -43,8 +43,19 @@ def generate_roadmap(
     source_url: str,
     features: list[Feature],
     preferences: BuildPreferences,
+    *,
+    completion_history: list[dict] | None = None,
 ) -> list[dict]:
     """Generate a phased build roadmap.
+
+    Args:
+        source_url: Product URL being duplicated.
+        features: Features to include in the new roadmap.
+        preferences: Build platform and language preferences.
+        completion_history: Optional list of dicts with ``phase`` (label)
+            and ``features`` (list of feature names implemented in that
+            phase).  When provided, the prompt tells the model what has
+            already been built so the new roadmap continues from there.
 
     Returns a list of phase dicts, each with phase, title, goal,
     features, and test.
@@ -58,6 +69,22 @@ def generate_roadmap(
         "\n".join(f"  - {p}" for p in prefs["preferences"]) if prefs["preferences"] else "  (none)"
     )
 
+    history_section = ""
+    if completion_history:
+        history_lines = []
+        for entry in completion_history:
+            label = entry.get("phase", "Unknown")
+            feats = entry.get("features", [])
+            if feats:
+                history_lines.append(f"- {label}: {', '.join(feats)}")
+            else:
+                history_lines.append(f"- {label}: (scaffolding/infrastructure)")
+        history_section = (
+            "\nAlready completed phases (DO NOT repeat these features):\n"
+            + "\n".join(history_lines)
+            + "\n"
+        )
+
     prompt = f"""\
 Product: {source_url}
 
@@ -67,7 +94,7 @@ Constraints:
 {constraints}
 Preferences:
 {other_prefs}
-
+{history_section}
 Features to include:
 {features_text}
 

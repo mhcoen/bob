@@ -13,6 +13,7 @@ from duplo.extractor import Feature
 from duplo.main import (
     UpdateSummary,
     _analyze_new_files,
+    _build_completion_history,
     _complete_phase,
     _detect_and_append_gaps,
     _init_project,
@@ -1933,3 +1934,104 @@ class TestRoadmapRegeneration:
         mock_plan.assert_not_called()
         out = capsys.readouterr().out
         assert "failed to generate roadmap" in out
+
+    def test_passes_completion_history_when_regenerating(self, capsys, tmp_path, monkeypatch):
+        data = {
+            **self._BASE_DATA,
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0: Scaffold",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export data",
+                    "category": "extra",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "ok",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_gen.assert_called_once()
+        kwargs = mock_gen.call_args[1]
+        assert "completion_history" in kwargs
+        history = kwargs["completion_history"]
+        assert len(history) == 1
+        assert history[0]["phase"] == "Phase 0: Scaffold"
+        assert history[0]["features"] == ["Search"]
+
+
+class TestBuildCompletionHistory:
+    """Tests for _build_completion_history."""
+
+    def test_empty_features(self):
+        assert _build_completion_history({}) == []
+        assert _build_completion_history({"features": []}) == []
+
+    def test_no_implemented_features(self):
+        data = {
+            "features": [
+                {"name": "A", "status": "pending", "implemented_in": ""},
+            ]
+        }
+        assert _build_completion_history(data) == []
+
+    def test_groups_by_phase(self):
+        data = {
+            "features": [
+                {
+                    "name": "A",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0",
+                },
+                {
+                    "name": "B",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "C",
+                    "status": "implemented",
+                    "implemented_in": "Phase 0",
+                },
+                {
+                    "name": "D",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ]
+        }
+        result = _build_completion_history(data)
+        assert len(result) == 2
+        assert result[0] == {"phase": "Phase 0", "features": ["A", "C"]}
+        assert result[1] == {"phase": "Phase 1", "features": ["B"]}
+
+    def test_skips_missing_implemented_in(self):
+        data = {
+            "features": [
+                {"name": "A", "status": "implemented"},
+            ]
+        }
+        assert _build_completion_history(data) == []

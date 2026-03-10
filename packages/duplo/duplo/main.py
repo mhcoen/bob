@@ -906,8 +906,11 @@ def _subsequent_run() -> None:
             constraints=prefs_data.get("constraints", []),
             preferences=prefs_data.get("preferences", []),
         )
+        history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) …")
-        new_roadmap = generate_roadmap(source_url, remaining, preferences)
+        new_roadmap = generate_roadmap(
+            source_url, remaining, preferences, completion_history=history
+        )
         if not new_roadmap:
             print("Error: failed to generate roadmap.")
             return
@@ -986,6 +989,21 @@ def _unimplemented_features(data: dict) -> list[Feature]:
         if f.get("status", "pending") != "implemented":
             result.append(Feature(**f))
     return result
+
+
+def _build_completion_history(data: dict) -> list[dict]:
+    """Build a completion history from implemented features in *data*.
+
+    Groups features by their ``implemented_in`` phase label and returns
+    a list of ``{"phase": label, "features": [name, ...]}`` dicts,
+    ordered by first appearance.
+    """
+    phase_features: dict[str, list[str]] = {}
+    for f in data.get("features", []):
+        if f.get("status") == "implemented" and f.get("implemented_in"):
+            label = f["implemented_in"]
+            phase_features.setdefault(label, []).append(f["name"])
+    return [{"phase": label, "features": names} for label, names in phase_features.items()]
 
 
 def _advance_to_next(data: dict, app_name: str) -> None:
