@@ -435,6 +435,99 @@ def save_feature_status(
     return path
 
 
+def save_issues(
+    issues: list[dict],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Replace the top-level ``issues`` list in *duplo.json*.
+
+    Each issue dict should have ``description`` and ``severity`` keys.
+    Returns the path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    data["issues"] = issues
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def add_issue(
+    description: str,
+    severity: str = "major",
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Append a single issue to the ``issues`` list in *duplo.json*.
+
+    Skips duplicates: if an issue with the same ``description`` already
+    exists, the list is not modified.  Records an ISO 8601 timestamp.
+
+    Args:
+        description: What went wrong.
+        severity: One of ``"critical"``, ``"major"``, ``"minor"``.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+
+    Raises:
+        ValueError: If *severity* is not one of the allowed values.
+    """
+    allowed = {"critical", "major", "minor"}
+    if severity not in allowed:
+        msg = f"Invalid severity {severity!r}; must be one of {sorted(allowed)}"
+        raise ValueError(msg)
+
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    issues = data.get("issues", [])
+    for existing in issues:
+        if existing.get("description") == description:
+            return path
+    issues.append(
+        {
+            "description": description,
+            "severity": severity,
+            "added_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+    )
+    data["issues"] = issues
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def load_issues(
+    *,
+    target_dir: Path | str = ".",
+) -> list[dict]:
+    """Load the ``issues`` list from *duplo.json*.
+
+    Returns an empty list if no issues have been recorded.
+    """
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data = _safe_read_json(path)
+    return data.get("issues", [])
+
+
+def clear_issues(
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Remove all issues from *duplo.json*.
+
+    Returns the path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    data["issues"] = []
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def save_code_examples(
     examples: list[CodeExample],
     *,

@@ -25,9 +25,12 @@ from duplo.saver import (
     PRODUCT_JSON,
     RAW_PAGES_DIR,
     REFERENCES_DIR,
+    add_issue,
     append_phase_to_history,
     clear_in_progress,
+    clear_issues,
     load_examples,
+    load_issues,
     load_product,
     move_references,
     save_examples,
@@ -35,6 +38,7 @@ from duplo.saver import (
     save_features,
     save_feedback,
     save_frame_descriptions,
+    save_issues,
     save_product,
     save_raw_content,
     save_reference_urls,
@@ -1226,3 +1230,73 @@ class TestSaveFeatureStatus:
         save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["source_url"] == "https://example.com"
+
+
+class TestIssues:
+    """Tests for save_issues, add_issue, load_issues, and clear_issues."""
+
+    def test_save_issues_creates_list(self, tmp_path):
+        issues = [
+            {"description": "Crash on startup", "severity": "critical"},
+            {"description": "Slow render", "severity": "minor"},
+        ]
+        save_issues(issues, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["issues"] == issues
+
+    def test_save_issues_replaces_existing(self, tmp_path):
+        save_issues([{"description": "Old bug", "severity": "major"}], target_dir=tmp_path)
+        save_issues([{"description": "New bug", "severity": "minor"}], target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 1
+        assert data["issues"][0]["description"] == "New bug"
+
+    def test_save_issues_preserves_other_keys(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"source_url": "https://example.com"}), encoding="utf-8")
+        save_issues([{"description": "Bug", "severity": "major"}], target_dir=tmp_path)
+        data = json.loads(path.read_text())
+        assert data["source_url"] == "https://example.com"
+        assert len(data["issues"]) == 1
+
+    def test_add_issue_appends(self, tmp_path):
+        add_issue("First problem", "critical", target_dir=tmp_path)
+        add_issue("Second problem", "minor", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 2
+        assert data["issues"][0]["description"] == "First problem"
+        assert data["issues"][0]["severity"] == "critical"
+        assert "added_at" in data["issues"][0]
+        assert data["issues"][1]["description"] == "Second problem"
+
+    def test_add_issue_skips_duplicate(self, tmp_path):
+        add_issue("Same problem", "major", target_dir=tmp_path)
+        add_issue("Same problem", "critical", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["issues"]) == 1
+
+    def test_add_issue_rejects_invalid_severity(self, tmp_path):
+        with pytest.raises(ValueError, match="Invalid severity"):
+            add_issue("Bug", "blocker", target_dir=tmp_path)
+
+    def test_load_issues_returns_list(self, tmp_path):
+        add_issue("Bug", "major", target_dir=tmp_path)
+        issues = load_issues(target_dir=tmp_path)
+        assert len(issues) == 1
+        assert issues[0]["description"] == "Bug"
+
+    def test_load_issues_empty_when_no_file(self, tmp_path):
+        assert load_issues(target_dir=tmp_path) == []
+
+    def test_load_issues_empty_when_no_key(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        (duplo_dir / "duplo.json").write_text("{}", encoding="utf-8")
+        assert load_issues(target_dir=tmp_path) == []
+
+    def test_clear_issues(self, tmp_path):
+        add_issue("Bug", "major", target_dir=tmp_path)
+        clear_issues(target_dir=tmp_path)
+        assert load_issues(target_dir=tmp_path) == []
