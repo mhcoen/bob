@@ -43,7 +43,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Save the new roadmap to `duplo.json`, resetting `current_phase` to 0 relative to the new roadmap
   - [x] Add a test that verifies roadmap generation excludes implemented features
 
-- [ ] Redesign `_subsequent_run` state machine
+- [x] Redesign `_subsequent_run` state machine
   - [x] Replace the current branching (in_progress checks, roadmap lookups, history-based detection) with a clean flow:
     - If PLAN.md exists and has unchecked items: print status summary and "Run mcloop to continue building." Exit.
     - If PLAN.md exists and all items are checked: run phase-completion flow (annotation parsing, status tracking, issue prompt). Delete PLAN.md. Fall through to next-phase flow.
