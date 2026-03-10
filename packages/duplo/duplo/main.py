@@ -887,6 +887,7 @@ def _subsequent_run() -> None:
         _complete_phase(content, app_name, phase_label)
         # Reload data after phase completion modified duplo.json.
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
+        _print_feature_status(data)
 
     # State 2: PLAN.md incomplete → tell user to continue.
     elif plan_path.exists():
@@ -973,13 +974,50 @@ def _subsequent_run() -> None:
     _plan_ready(phase_label)
 
 
+def _partition_features(
+    data: dict,
+) -> tuple[list[Feature], list[Feature]]:
+    """Split features into implemented and remaining lists.
+
+    Returns ``(implemented, remaining)`` where *implemented* contains
+    features with ``status == "implemented"`` and *remaining* contains
+    everything else (``"pending"``, ``"partial"``, or missing status).
+    """
+    implemented: list[Feature] = []
+    remaining: list[Feature] = []
+    for f in data.get("features", []):
+        feat = Feature(**f)
+        if f.get("status", "pending") == "implemented":
+            implemented.append(feat)
+        else:
+            remaining.append(feat)
+    return implemented, remaining
+
+
 def _unimplemented_features(data: dict) -> list[Feature]:
     """Return features from *data* whose status is not ``"implemented"``."""
-    result: list[Feature] = []
-    for f in data.get("features", []):
-        if f.get("status", "pending") != "implemented":
-            result.append(Feature(**f))
-    return result
+    _, remaining = _partition_features(data)
+    return remaining
+
+
+def _print_feature_status(data: dict) -> None:
+    """Print a summary of implemented vs remaining features."""
+    implemented, remaining = _partition_features(data)
+    total = len(implemented) + len(remaining)
+    if total == 0:
+        return
+    print(f"\nFeature status: {len(implemented)}/{total} implemented")
+    if implemented:
+        print("  Implemented:")
+        for f in implemented:
+            phase = f" ({f.implemented_in})" if f.implemented_in else ""
+            print(f"    - {f.name}{phase}")
+    if remaining:
+        print("  Remaining:")
+        for f in remaining:
+            status = f.status if f.status != "pending" else ""
+            label = f" [{status}]" if status else ""
+            print(f"    - {f.name}{label}")
 
 
 def _build_completion_history(data: dict) -> list[dict]:

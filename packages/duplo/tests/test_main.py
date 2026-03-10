@@ -17,6 +17,8 @@ from duplo.main import (
     _complete_phase,
     _detect_and_append_gaps,
     _init_project,
+    _partition_features,
+    _print_feature_status,
     _print_summary,
     _rescrape_product_url,
     _unimplemented_features,
@@ -1692,6 +1694,166 @@ class TestUnimplementedFeatures:
         result = _unimplemented_features(data)
         assert len(result) == 1
         assert result[0].name == "A"
+
+
+class TestPartitionFeatures:
+    """Tests for _partition_features helper."""
+
+    def test_splits_by_status(self):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Filter",
+                    "description": "Filter",
+                    "category": "core",
+                    "status": "partial",
+                    "implemented_in": "Phase 2",
+                },
+            ],
+        }
+        implemented, remaining = _partition_features(data)
+        assert [f.name for f in implemented] == ["Search"]
+        assert [f.name for f in remaining] == ["Export", "Filter"]
+
+    def test_all_implemented(self):
+        data = {
+            "features": [
+                {
+                    "name": "A",
+                    "description": "A",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        }
+        implemented, remaining = _partition_features(data)
+        assert len(implemented) == 1
+        assert remaining == []
+
+    def test_no_features(self):
+        implemented, remaining = _partition_features({})
+        assert implemented == []
+        assert remaining == []
+
+    def test_missing_status_defaults_to_remaining(self):
+        data = {
+            "features": [
+                {"name": "A", "description": "A", "category": "core"},
+            ],
+        }
+        implemented, remaining = _partition_features(data)
+        assert implemented == []
+        assert len(remaining) == 1
+
+    def test_preserves_feature_fields(self):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Full-text search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        }
+        implemented, _ = _partition_features(data)
+        feat = implemented[0]
+        assert feat.name == "Search"
+        assert feat.description == "Full-text search"
+        assert feat.category == "core"
+        assert feat.status == "implemented"
+        assert feat.implemented_in == "Phase 1"
+
+
+class TestPrintFeatureStatus:
+    """Tests for _print_feature_status display."""
+
+    def test_prints_implemented_and_remaining(self, capsys):
+        data = {
+            "features": [
+                {
+                    "name": "Search",
+                    "description": "Search",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Export",
+                    "description": "Export",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        }
+        _print_feature_status(data)
+        out = capsys.readouterr().out
+        assert "1/2 implemented" in out
+        assert "Search" in out
+        assert "(Phase 1)" in out
+        assert "Export" in out
+
+    def test_no_output_when_no_features(self, capsys):
+        _print_feature_status({})
+        assert capsys.readouterr().out == ""
+
+    def test_partial_shown_with_label(self, capsys):
+        data = {
+            "features": [
+                {
+                    "name": "Filter",
+                    "description": "Filter",
+                    "category": "core",
+                    "status": "partial",
+                    "implemented_in": "Phase 2",
+                },
+            ],
+        }
+        _print_feature_status(data)
+        out = capsys.readouterr().out
+        assert "0/1 implemented" in out
+        assert "[partial]" in out
+
+    def test_all_implemented(self, capsys):
+        data = {
+            "features": [
+                {
+                    "name": "A",
+                    "description": "A",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "B",
+                    "description": "B",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 2",
+                },
+            ],
+        }
+        _print_feature_status(data)
+        out = capsys.readouterr().out
+        assert "2/2 implemented" in out
+        assert "Remaining" not in out
 
 
 class TestRoadmapRegeneration:
