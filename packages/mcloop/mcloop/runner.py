@@ -416,6 +416,7 @@ def _run_session(
     # Kill the watchdog and clean up PID file on normal exit
     try:
         _watchdog.kill()
+        _watchdog.wait()
     except OSError:
         pass
     try:
