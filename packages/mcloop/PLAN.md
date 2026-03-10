@@ -201,12 +201,12 @@ The debugging playbook this enforces:
   - [x] Enhanced testing instruction for investigation sessions: write tests that exercise real code with real inputs, do not mock core logic, test threading/async for deadlocks, handle system API permission cases gracefully
   - [x] Enhanced debugging instruction for investigation sessions: decompose before patching, search web for working examples, question assumptions when repeated approaches fail
 
-- [ ] Model fallback on task failure
+- [x] Model fallback on task failure
   - [x] Add `--fallback-model` CLI flag (e.g. `mcloop --model sonnet --fallback-model opus`). Not the default; only active when explicitly provided.
   - [x] When a task exhausts all retries on the primary model and `--fallback-model` is set, retry the task from scratch using the fallback model (same retry count) before marking it failed.
   - [x] Print a clear message when falling back: "Primary model failed, retrying with <fallback-model>".
   - [x] If the fallback model also exhausts retries, mark the task failed as normal.
-  - [ ] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
+  - [x] Add tests covering the fallback path: primary fails all retries, fallback succeeds; both fail; fallback not set (no change in behavior).
 
 - [ ] Runtime error capture and self-healing (`mcloop wrap`)
   - [ ] Add `mcloop wrap` subcommand that instruments a project's source files with error-catching hooks. Detects project language from PLAN.md description, file extensions, or build system. Supports Swift and Python initially.
