@@ -324,6 +324,10 @@ def _run_session(
     t = threading.Thread(target=_reader, daemon=True)
     t.start()
 
+    # Cap output buffer to prevent unbounded memory growth.
+    # A stuck claude session running checks in a loop can
+    # produce millions of lines. Keep only the tail.
+    _MAX_OUTPUT_LINES = 50_000
     output_lines: list[str] = []
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
@@ -388,6 +392,8 @@ def _run_session(
             if line is _SENTINEL:
                 break
             output_lines.append(line)
+            if len(output_lines) > _MAX_OUTPUT_LINES * 2:
+                output_lines = output_lines[-_MAX_OUTPUT_LINES:]
             _print_stream_event(line)
             shown_waiting = False
             now = time.monotonic()
@@ -1056,6 +1062,128 @@ def build_investigation_plan_description(
         " justify revisiting it."
     )
     return "\n\n".join(parts)
+
+
+def build_diagnostic_prompt(
+    error_entry: dict,
+    source_content: str,
+    git_log: str,
+) -> str:
+    """Build prompt for a diagnostic session that analyzes a crash.
+
+    The session reads the crash context and relevant source code,
+    then produces a one-line fix description suitable for a PLAN.md
+    task.
+    """
+    parts = [
+        "You are diagnosing a crash. Analyze the error context"
+        " and source code below, then produce a one-line fix"
+        " description.\n",
+    ]
+
+    # Error context
+    exc_type = error_entry.get("exception_type", "Unknown")
+    desc = error_entry.get("description", "")
+    source_file = error_entry.get("source_file", "")
+    line = error_entry.get("line", "")
+    stack = error_entry.get("stack_trace", "")
+    app_state = error_entry.get("app_state", {})
+    last_action = error_entry.get("last_action", "")
+
+    parts.append(f"Exception type: {exc_type}")
+    parts.append(f"Description: {desc}")
+    if source_file:
+        loc = f"{source_file}:{line}" if line else source_file
+        parts.append(f"Location: {loc}")
+    if stack:
+        parts.append(f"Stack trace:\n{stack}")
+    if app_state:
+        state_lines = "\n".join(
+            f"  {k}: {v}" for k, v in app_state.items()
+        )
+        parts.append(f"App state at crash:\n{state_lines}")
+    if last_action:
+        parts.append(f"Last user action: {last_action}")
+
+    if source_content:
+        parts.append(f"Relevant source file:\n```\n{source_content}\n```")
+
+    if git_log:
+        parts.append(f"Recent git log:\n{git_log}")
+
+    parts.append(
+        "\nPrint your fix description in this exact format:\n"
+        "--- FIX DESCRIPTION ---\n"
+        "<one-line description of what to fix and how>\n"
+        "--- END FIX ---\n\n"
+        "The description should be actionable and specific,"
+        " suitable as a task in a checklist. Example:\n"
+        "--- FIX DESCRIPTION ---\n"
+        "Guard against None return from parse_config() in"
+        " main.py:42 by adding a None check before accessing"
+        " .value\n"
+        "--- END FIX ---\n\n"
+        "Do not modify any files. This is a read-only"
+        " diagnostic session."
+    )
+    return "\n\n".join(parts)
+
+
+def parse_diagnostic_output(output: str) -> str:
+    """Extract fix description from diagnostic session output.
+
+    Returns the fix description string, or empty string if not
+    found.
+    """
+    marker = "--- FIX DESCRIPTION ---"
+    end_marker = "--- END FIX ---"
+    idx = output.find(marker)
+    if idx == -1:
+        return ""
+    after = output[idx + len(marker) :]
+    end_idx = after.find(end_marker)
+    if end_idx != -1:
+        after = after[:end_idx]
+    return after.strip()
+
+
+def run_diagnostic(
+    project_dir: str | Path,
+    log_dir: str | Path,
+    error_entry: dict,
+    source_content: str = "",
+    git_log: str = "",
+    model: str | None = None,
+) -> RunResult:
+    """Run a read-only diagnostic session for a single error."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = build_diagnostic_prompt(
+        error_entry, source_content, git_log
+    )
+    cmd = _build_command(
+        "claude",
+        prompt=prompt,
+        model=model,
+        allowed_tools="Read,Glob,Grep",
+    )
+    output, returncode = _run_session(cmd, project_dir)
+    exc_type = error_entry.get("exception_type", "unknown")
+    log_path = _write_log(
+        log_dir,
+        f"diagnostic-{exc_type}",
+        cmd,
+        output,
+        returncode,
+    )
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
 
 
 def _slugify(text: str) -> str:

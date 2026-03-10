@@ -8,6 +8,7 @@ from pathlib import Path
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
+BUGS_RE = re.compile(r"^##\s+Bugs\s*$", re.IGNORECASE)
 _USER_TAG = "[USER]"
 _AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
 
@@ -52,6 +53,12 @@ def parse(path: str | Path) -> list[Task]:
             stack.clear()
             continue
 
+        # Detect ## Bugs header
+        if BUGS_RE.match(line):
+            current_stage = "Bugs"
+            stack.clear()
+            continue
+
         m = CHECKBOX_RE.match(line)
         if not m:
             continue
@@ -93,7 +100,7 @@ def get_stages(tasks: list[Task]) -> list[str]:
 
     def _collect(task_list: list[Task]) -> None:
         for task in task_list:
-            if task.stage and task.stage not in seen:
+            if task.stage and task.stage != "Bugs" and task.stage not in seen:
                 seen.add(task.stage)
                 stages.append(task.stage)
             _collect(task.children)
@@ -165,17 +172,29 @@ def stage_status(tasks: list[Task]) -> str:
 def find_next(tasks: list[Task]) -> Task | None:
     """Depth-first search for the next unchecked leaf task.
 
+    Bug tasks (under ``## Bugs``) have absolute priority and are
+    returned before any feature/stage tasks.
+
     If the plan uses stages (``## Stage N:`` headers), only
     returns tasks from the first incomplete stage.  Returns
     ``None`` when the current stage is fully complete, even if
     later stages have unchecked tasks.
     """
+    # Priority: bug tasks first
+    bug_task = _search_in_stage(tasks, "Bugs")
+    if bug_task:
+        return bug_task
+
     active_stage = current_stage(tasks)
     has_stages = len(get_stages(tasks)) > 0
 
     def _search(task_list: list[Task]) -> Task | None:
         for task in task_list:
             if task.checked or task.failed:
+                continue
+
+            # Skip bug tasks (already handled above)
+            if task.stage == "Bugs":
                 continue
 
             # Skip tasks not in the active stage
@@ -188,6 +207,28 @@ def find_next(tasks: list[Task]) -> Task | None:
                     return child
                 return task
 
+            return task
+        return None
+
+    return _search(tasks)
+
+
+def _search_in_stage(
+    tasks: list[Task], stage: str
+) -> Task | None:
+    """Search for the next unchecked leaf in a specific stage."""
+
+    def _search(task_list: list[Task]) -> Task | None:
+        for task in task_list:
+            if task.checked or task.failed:
+                continue
+            if task.stage != stage:
+                continue
+            if task.children:
+                child = _search(task.children)
+                if child:
+                    return child
+                return task
             return task
         return None
 
