@@ -100,6 +100,72 @@ A brief bullet list of items deliberately deferred to later phases.
 
 _PLAN_FILENAME = "PLAN.md"
 
+_ANNOTATION_RE = re.compile(
+    r"\[(feat|fix):\s*"
+    r"\"([^\"]+)\""
+    r"(?:,\s*\"([^\"]+)\")*"
+    r"\]\s*$"
+)
+
+
+@dataclasses.dataclass
+class CompletedTask:
+    """A checked task line parsed from PLAN.md."""
+
+    text: str
+    features: list[str] = dataclasses.field(default_factory=list)
+    fixes: list[str] = dataclasses.field(default_factory=list)
+    indent: int = 0
+
+
+def parse_completed_tasks(plan_content: str) -> list[CompletedTask]:
+    """Parse checked task lines from PLAN.md content.
+
+    Finds all ``- [x]`` (case-insensitive) lines and extracts:
+    - The task description text (without the checkbox prefix and annotation suffix)
+    - Any ``[feat: "..."]`` feature annotations
+    - Any ``[fix: "..."]`` fix annotations
+    - The indentation level (number of leading spaces)
+
+    Args:
+        plan_content: Full Markdown content of PLAN.md.
+
+    Returns:
+        List of :class:`CompletedTask` for each checked line, in order.
+    """
+    tasks: list[CompletedTask] = []
+    for line in plan_content.splitlines():
+        stripped = line.lstrip()
+        if not (stripped.startswith("- [x]") or stripped.startswith("- [X]")):
+            continue
+        indent = len(line) - len(stripped)
+        # Remove the checkbox prefix.
+        body = stripped[5:].strip()
+        # Extract annotations.
+        features: list[str] = []
+        fixes: list[str] = []
+        anno_match = re.search(
+            r"\[(feat|fix):\s*(\"[^\"]+\"(?:,\s*\"[^\"]+\")*)\]\s*$",
+            body,
+        )
+        if anno_match:
+            kind = anno_match.group(1)
+            raw_names = re.findall(r"\"([^\"]+)\"", anno_match.group(2))
+            if kind == "feat":
+                features = raw_names
+            else:
+                fixes = raw_names
+            body = body[: anno_match.start()].rstrip()
+        tasks.append(
+            CompletedTask(
+                text=body,
+                features=features,
+                fixes=fixes,
+                indent=indent,
+            )
+        )
+    return tasks
+
 
 def _detect_next_phase_number(current_plan: str) -> int:
     """Return the next phase number inferred from *current_plan* heading."""

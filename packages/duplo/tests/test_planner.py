@@ -11,6 +11,7 @@ import pytest
 
 from duplo.extractor import Feature
 from duplo.planner import (
+    CompletedTask,
     _NEXT_PHASE_SYSTEM,
     _PHASE_SYSTEM,
     _PLAN_FILENAME,
@@ -18,6 +19,7 @@ from duplo.planner import (
     append_test_tasks,
     generate_next_phase_plan,
     generate_phase_plan,
+    parse_completed_tasks,
     save_plan,
 )
 from duplo.questioner import BuildPreferences
@@ -371,3 +373,109 @@ class TestSavePlan:
         monkeypatch.chdir(tmp_path)
         path = save_plan("# Plan")
         assert path.parent == tmp_path.resolve()
+
+
+class TestParseCompletedTasks:
+    def test_empty_content(self):
+        assert parse_completed_tasks("") == []
+
+    def test_no_checked_items(self):
+        plan = "# Phase 1\n- [ ] Not done\n- [ ] Also not done\n"
+        assert parse_completed_tasks(plan) == []
+
+    def test_basic_checked_items(self):
+        plan = "- [x] Set up project\n- [x] Add login form\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 2
+        assert tasks[0].text == "Set up project"
+        assert tasks[1].text == "Add login form"
+
+    def test_uppercase_x(self):
+        plan = "- [X] Done task\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Done task"
+
+    def test_mixed_checked_and_unchecked(self):
+        plan = "- [x] Done\n- [ ] Not done\n- [x] Also done\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 2
+        assert tasks[0].text == "Done"
+        assert tasks[1].text == "Also done"
+
+    def test_feat_annotation(self):
+        plan = '- [x] Add login form [feat: "User auth"]\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Add login form"
+        assert tasks[0].features == ["User auth"]
+        assert tasks[0].fixes == []
+
+    def test_multi_feat_annotation(self):
+        plan = '- [x] Add recording [feat: "Push-to-talk", "Keyboard shortcuts"]\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].features == ["Push-to-talk", "Keyboard shortcuts"]
+
+    def test_fix_annotation(self):
+        plan = '- [x] Fix email check [fix: "email format not validated"]\n'
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Fix email check"
+        assert tasks[0].fixes == ["email format not validated"]
+        assert tasks[0].features == []
+
+    def test_no_annotation(self):
+        plan = "- [x] Set up project structure\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 1
+        assert tasks[0].features == []
+        assert tasks[0].fixes == []
+
+    def test_indented_subtask(self):
+        plan = "- [x] Main task\n  - [x] Subtask one\n    - [x] Deep subtask\n"
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 3
+        assert tasks[0].indent == 0
+        assert tasks[1].indent == 2
+        assert tasks[2].indent == 4
+
+    def test_skips_non_task_lines(self):
+        plan = (
+            "# Phase 1: Core\n"
+            "\n"
+            "## Objective\n"
+            "Build the core.\n"
+            "\n"
+            "- [x] First task\n"
+            "Some text.\n"
+            "- [x] Second task\n"
+        )
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 2
+
+    def test_full_plan(self):
+        plan = """\
+# MyApp
+
+Web app built with Python/FastAPI.
+
+- [x] Set up project structure and build system
+- [x] Add user login form [feat: "User auth"]
+  - [x] Create login page template
+  - [x] Wire up auth backend [feat: "User auth"]
+- [x] Build activity overview [feat: "Dashboard"]
+- [x] Fix email validation [fix: "email format not checked"]
+"""
+        tasks = parse_completed_tasks(plan)
+        assert len(tasks) == 6
+        assert tasks[0].text == "Set up project structure and build system"
+        assert tasks[0].features == []
+        assert tasks[1].features == ["User auth"]
+        assert tasks[4].features == ["Dashboard"]
+        assert tasks[5].fixes == ["email format not checked"]
+
+    def test_returns_completed_task_dataclass(self):
+        plan = "- [x] Task one\n"
+        tasks = parse_completed_tasks(plan)
+        assert isinstance(tasks[0], CompletedTask)
