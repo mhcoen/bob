@@ -15,6 +15,8 @@ SWIFT_END = "// mcloop:wrap:end"
 PYTHON_BEGIN = "# mcloop:wrap:begin"
 PYTHON_END = "# mcloop:wrap:end"
 
+_PROJECT_DIR_PLACEHOLDER = "__MCLOOP_PROJECT_DIR__"
+
 SWIFT_WRAPPER = """\
 // mcloop:wrap:begin
 import Foundation
@@ -96,6 +98,13 @@ private func _mcloopSetupCrashHandlers() {
             "fix_attempts": 0,
         ]
         _mcloopWriteError(report, dir: errorDir)
+        let excType = String(describing: type(of: exception))
+        fputs(
+            "[McLoop] Crash captured: \\(excType)"
+            + " in \\(exception.name.rawValue)."
+            + " Run mcloop from __MCLOOP_PROJECT_DIR__"
+            + " to fix this bug.\\n",
+            stderr)
     }
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
@@ -116,6 +125,11 @@ private func _mcloopSetupCrashHandlers() {
                 "fix_attempts": 0,
             ]
             _mcloopWriteError(report, dir: errorDir)
+            fputs(
+                "[McLoop] Crash captured: Signal \\(signum)."
+                + " Run mcloop from __MCLOOP_PROJECT_DIR__"
+                + " to fix this bug.\\n",
+                stderr)
             Darwin.signal(signum, SIG_DFL)
             Darwin.raise(signum)
         }
@@ -244,6 +258,12 @@ def _mcloop_setup_crash_handlers():
             "fix_attempts": 0,
         }
         _write_error(report)
+        _loc = f"{last.filename}:{last.lineno}" if last else "unknown"
+        _mcloop_sys.stderr.write(
+            f"[McLoop] Crash captured: {exc_type.__name__} in {_loc}."
+            f" Run mcloop from __MCLOOP_PROJECT_DIR__"
+            f" to fix this bug.\\n"
+        )
         _mcloop_sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     _mcloop_sys.excepthook = _excepthook
@@ -276,6 +296,15 @@ def _mcloop_setup_crash_handlers():
         }
         try:
             _write_error(report)
+        except Exception:
+            pass
+        _loc = f"{source}:{lineno}" if source else "unknown"
+        try:
+            _mcloop_sys.stderr.write(
+                f"[McLoop] Crash captured: Signal {signum} in {_loc}."
+                f" Run mcloop from __MCLOOP_PROJECT_DIR__"
+                f" to fix this bug.\\n"
+            )
         except Exception:
             pass
         _mcloop_signal.signal(signum, _mcloop_signal.SIG_DFL)
@@ -524,24 +553,33 @@ def strip_markers(content: str, language: str) -> str:
     return "".join(result)
 
 
-def inject(content: str, language: str) -> str:
+def _resolve_wrapper(template: str, project_dir: str | None) -> str:
+    """Substitute __MCLOOP_PROJECT_DIR__ placeholder in wrapper text."""
+    replacement = project_dir if project_dir else "."
+    return template.replace(_PROJECT_DIR_PLACEHOLDER, replacement)
+
+
+def inject(content: str, language: str, project_dir: str | None = None) -> str:
     """Inject error-catching wrapper into file content.
 
     If markers already exist, strips and re-injects. For Swift,
     injects after imports and adds a call to the setup function.
     For Python, prepends the wrapper at the top of the file.
+
+    project_dir is baked into the crash handler stderr message so
+    the user knows where to run mcloop from.
     """
     # Strip existing markers first
     clean = strip_markers(content, language)
 
     if language == "swift":
-        return _inject_swift(clean)
+        return _inject_swift(clean, project_dir)
     if language == "python":
-        return _inject_python(clean)
+        return _inject_python(clean, project_dir)
     return content
 
 
-def _inject_swift(content: str) -> str:
+def _inject_swift(content: str, project_dir: str | None = None) -> str:
     """Inject Swift crash handlers after imports."""
     lines = content.splitlines(keepends=True)
 
@@ -554,7 +592,8 @@ def _inject_swift(content: str) -> str:
 
     # Insert wrapper after imports
     insert_pos = last_import + 1 if last_import >= 0 else 0
-    wrapper_lines = SWIFT_WRAPPER.splitlines(keepends=True)
+    resolved = _resolve_wrapper(SWIFT_WRAPPER, project_dir)
+    wrapper_lines = resolved.splitlines(keepends=True)
     # Add blank line before wrapper if not at start
     if insert_pos > 0:
         wrapper_lines = ["\n"] + wrapper_lines
@@ -601,7 +640,7 @@ def _add_swift_init_call(content: str) -> str:
     return "".join(result)
 
 
-def _inject_python(content: str) -> str:
+def _inject_python(content: str, project_dir: str | None = None) -> str:
     """Inject Python crash handlers at the top of the file."""
     # Insert after shebang and encoding lines if present
     lines = content.splitlines(keepends=True)
@@ -616,7 +655,8 @@ def _inject_python(content: str) -> str:
             continue
         break
 
-    wrapper_lines = PYTHON_WRAPPER.splitlines(keepends=True)
+    resolved = _resolve_wrapper(PYTHON_WRAPPER, project_dir)
+    wrapper_lines = resolved.splitlines(keepends=True)
     wrapper_lines.append("\n")
 
     return "".join(lines[:insert_pos]) + "".join(wrapper_lines) + "".join(lines[insert_pos:])
@@ -627,10 +667,13 @@ def save_canonical_wrappers(project_dir: Path, language: str) -> None:
     wrap_dir = project_dir / ".mcloop" / "wrap"
     wrap_dir.mkdir(parents=True, exist_ok=True)
 
+    dir_str = str(project_dir)
     if language == "swift":
-        (wrap_dir / "swift_wrapper.swift").write_text(SWIFT_WRAPPER)
+        resolved = _resolve_wrapper(SWIFT_WRAPPER, dir_str)
+        (wrap_dir / "swift_wrapper.swift").write_text(resolved)
     elif language == "python":
-        (wrap_dir / "python_wrapper.py").write_text(PYTHON_WRAPPER)
+        resolved = _resolve_wrapper(PYTHON_WRAPPER, dir_str)
+        (wrap_dir / "python_wrapper.py").write_text(resolved)
 
 
 def wrap_project(project_dir: Path) -> tuple[str, Path | None]:
@@ -655,7 +698,7 @@ def wrap_project(project_dir: Path) -> tuple[str, Path | None]:
         )
 
     content = entry.read_text()
-    instrumented = inject(content, language)
+    instrumented = inject(content, language, str(project_dir))
     entry.write_text(instrumented)
     save_canonical_wrappers(project_dir, language)
 

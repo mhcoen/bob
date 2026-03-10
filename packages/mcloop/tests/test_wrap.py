@@ -515,6 +515,75 @@ def test_python_wrapper_local_variables():
     assert 'not k.startswith("_")' in PYTHON_WRAPPER
 
 
+# ---- crash message with project dir ----
+
+
+def test_swift_wrapper_crash_message():
+    """Swift wrapper prints crash location to stderr."""
+    from mcloop.wrap import SWIFT_WRAPPER
+
+    assert "[McLoop] Crash captured:" in SWIFT_WRAPPER
+    assert "__MCLOOP_PROJECT_DIR__" in SWIFT_WRAPPER
+    assert "to fix this bug." in SWIFT_WRAPPER
+    assert "fputs(" in SWIFT_WRAPPER
+
+
+def test_python_wrapper_crash_message():
+    """Python wrapper prints crash location to stderr."""
+    from mcloop.wrap import PYTHON_WRAPPER
+
+    assert "[McLoop] Crash captured:" in PYTHON_WRAPPER
+    assert "__MCLOOP_PROJECT_DIR__" in PYTHON_WRAPPER
+    assert "to fix this bug." in PYTHON_WRAPPER
+    assert "stderr.write(" in PYTHON_WRAPPER
+
+
+def test_inject_substitutes_project_dir_python():
+    """inject() bakes project dir into the crash handler message."""
+    content = "import sys\n\ndef main():\n    pass\n"
+    result = inject(content, "python", "/home/user/myproject")
+    assert "/home/user/myproject" in result
+    assert "__MCLOOP_PROJECT_DIR__" not in result
+    assert "[McLoop] Crash captured:" in result
+
+
+def test_inject_substitutes_project_dir_swift():
+    """inject() bakes project dir into the crash handler message."""
+    content = "import SwiftUI\n\n@main\nstruct App: App {\n    init() {\n    }\n}\n"
+    result = inject(content, "swift", "/Users/dev/myapp")
+    assert "/Users/dev/myapp" in result
+    assert "__MCLOOP_PROJECT_DIR__" not in result
+    assert "[McLoop] Crash captured:" in result
+
+
+def test_inject_no_project_dir_uses_dot():
+    """inject() without project_dir falls back to '.' placeholder."""
+    content = "import sys\n\ndef main():\n    pass\n"
+    result = inject(content, "python")
+    assert "Run mcloop from ." in result
+    assert "__MCLOOP_PROJECT_DIR__" not in result
+
+
+def test_wrap_project_bakes_project_dir(tmp_path):
+    """wrap_project() bakes the project dir into crash handlers."""
+    (tmp_path / "PLAN.md").write_text("# CLI\nA Python tool.\n- [ ] task\n")
+    pkg = tmp_path / "myapp"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    entry = pkg / "__main__.py"
+    entry.write_text("import sys\n\ndef main():\n    pass\n")
+
+    wrap_project(tmp_path)
+    text = entry.read_text()
+    assert str(tmp_path) in text
+    assert "__MCLOOP_PROJECT_DIR__" not in text
+
+    # Canonical wrapper also has dir baked in
+    canonical = (tmp_path / ".mcloop" / "wrap" / "python_wrapper.py").read_text()
+    assert str(tmp_path) in canonical
+    assert "__MCLOOP_PROJECT_DIR__" not in canonical
+
+
 # ---- save_canonical_wrappers ----
 
 
@@ -537,15 +606,17 @@ def test_save_wrappers_python(tmp_path):
 
 
 def test_save_wrappers_matches_constants(tmp_path):
-    """Canonical files contain exact wrapper constants."""
-    from mcloop.wrap import PYTHON_WRAPPER, SWIFT_WRAPPER
+    """Canonical files contain wrapper with project dir substituted."""
+    from mcloop.wrap import _PROJECT_DIR_PLACEHOLDER, PYTHON_WRAPPER, SWIFT_WRAPPER
 
     save_canonical_wrappers(tmp_path, "swift")
     save_canonical_wrappers(tmp_path, "python")
     swift_file = tmp_path / ".mcloop" / "wrap" / "swift_wrapper.swift"
     python_file = tmp_path / ".mcloop" / "wrap" / "python_wrapper.py"
-    assert swift_file.read_text() == SWIFT_WRAPPER
-    assert python_file.read_text() == PYTHON_WRAPPER
+    expected_swift = SWIFT_WRAPPER.replace(_PROJECT_DIR_PLACEHOLDER, str(tmp_path))
+    expected_python = PYTHON_WRAPPER.replace(_PROJECT_DIR_PLACEHOLDER, str(tmp_path))
+    assert swift_file.read_text() == expected_swift
+    assert python_file.read_text() == expected_python
 
 
 def test_save_wrappers_overwrites_existing(tmp_path):

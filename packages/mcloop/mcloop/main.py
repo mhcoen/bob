@@ -1139,7 +1139,7 @@ def _reinject_wrappers(project_dir: Path) -> None:
         formatting.system_msg("Re-injecting crash handler wrappers"),
         flush=True,
     )
-    restored = inject(content, language)
+    restored = inject(content, language, str(project_dir))
     entry.write_text(restored)
     _git(["git", "add", "-A"], cwd=project_dir, label="reinject add")
     _git(
