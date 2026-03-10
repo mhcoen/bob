@@ -61,10 +61,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Update `generate_phase_plan` to accept issues alongside features. The system prompt should instruct Claude to include fix tasks for issues alongside feature-implementation tasks, ordering fixes before new feature work when there are dependencies.
   - [x] Generate the next PLAN.md scoped to selected features + selected issues. Heading format: `# <AppName> — Phase N: <Title>`. All task lines include `[feat: ...]` or `[fix: ...]` annotations. Phase number derived from `phases` history length + 1.
 
-- [ ] Print status summary on every run
+- [x] Print status summary on every run
   - [x] Before doing any work, print: current phase number, features implemented vs. remaining, open issues count
   - [x] Example output: `McWhisper: Phase 1 complete. 14/52 features implemented, 3 open issues.`
-  - [ ] If no phases have been completed yet, print feature count and "Phase 1 in progress" or "Ready to generate Phase 1"
+  - [x] If no phases have been completed yet, print feature count and "Phase 1 in progress" or "Ready to generate Phase 1"
 
 ---
 
