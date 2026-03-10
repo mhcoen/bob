@@ -273,7 +273,8 @@ def save_roadmap(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = _safe_read_json(path)
     data["roadmap"] = roadmap
-    data["current_phase"] = 0
+    first_phase = roadmap[0].get("phase", 0) if roadmap else 0
+    data["current_phase"] = first_phase
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

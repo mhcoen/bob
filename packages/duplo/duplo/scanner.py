@@ -40,6 +40,44 @@ _IGNORE_EXTS = {
     ".egg",
 }
 
+# Source code and config files that should not be scanned for URLs.
+# URLs in these files are dependencies, DTDs, or code references,
+# not product URLs the user wants scraped.
+_SOURCE_EXTS = {
+    ".swift", ".m", ".h", ".c", ".cpp", ".cc", ".cxx", ".hpp",
+    ".java", ".kt", ".kts", ".scala", ".groovy",
+    ".py", ".pyi", ".pyw",
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".rb", ".go", ".rs", ".lua", ".pl", ".pm",
+    ".cs", ".fs", ".vb",
+    ".r", ".R", ".jl",
+    ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".xml", ".plist", ".dtd", ".xsd", ".xsl",
+    ".html", ".htm", ".css", ".scss", ".sass", ".less",
+    ".sql", ".graphql", ".gql",
+    ".proto", ".thrift", ".avsc",
+    ".lock", ".resolved", ".sum",
+    ".gitignore", ".dockerignore", ".editorconfig",
+    ".env", ".envrc",
+    ".mk", ".cmake",
+}
+
+# Source/build files identified by name rather than extension.
+_SOURCE_NAMES = {
+    "Makefile", "Dockerfile", "Podfile", "Gemfile", "Rakefile",
+    "Vagrantfile", "Procfile", "Brewfile", "Cartfile",
+    "LICENSE", "CHANGELOG", "CONTRIBUTING",
+    "Package.swift", "Package.resolved",
+    "Cargo.toml", "Cargo.lock",
+    "go.mod", "go.sum",
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
+    "Pipfile", "Pipfile.lock", "poetry.lock",
+    "CMakeLists.txt",
+    "Info.plist",
+}
+
 
 @dataclass
 class FileRelevance:
@@ -139,6 +177,13 @@ def _classify_file(
         result.text_files.append(path)
         _assess_text(path, result)
         _extract_urls_from_file(path, result, seen_urls)
+        return
+
+    # Skip source code and config files. URLs in these are
+    # dependencies or code references, not product URLs.
+    if suffix in _SOURCE_EXTS:
+        return
+    if path.name in _SOURCE_NAMES:
         return
 
     # Any other file: try to extract URLs from it.

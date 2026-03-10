@@ -1364,9 +1364,6 @@ def _complete_phase(
 
     append_phase_to_history(plan_content)
     advance_phase()
-    plan_path = Path("PLAN.md")
-    if plan_path.exists():
-        plan_path.unlink()
     print(f"{phase_label} complete. Recorded in duplo.json.")
 
     # Prompt for known issues before advancing.
