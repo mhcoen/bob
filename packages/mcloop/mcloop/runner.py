@@ -76,8 +76,9 @@ def run_task(
             "Before finishing, run these check commands"
             f" and fix any failures: {cmds}."
             " Run them, read the output, fix issues,"
-            " and re-run until they all pass."
-            " Do not finish with failing checks."
+            " and re-run. Repeat up to 3 times. If checks"
+            " still fail after 3 attempts, stop and report"
+            " what is failing. Do not loop more than 3 times."
         )
     if shutil.which("rtk"):
         parts.append(
