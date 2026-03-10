@@ -3,8 +3,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checks import CheckResult
-from mcloop.main import _checkpoint, _commit, _run_audit_fix_cycle, run_loop
+from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
 
 
@@ -542,10 +543,10 @@ def test_checkpoint_called_before_loop(
 # --- Audit notification tests ---
 
 
-@patch("mcloop.main.notify")
-@patch("mcloop.main._save_audit_hash")
-@patch("mcloop.main._should_skip_audit", return_value=False)
-@patch("mcloop.main.run_audit")
+@patch("mcloop.audit.notify")
+@patch("mcloop.audit._save_audit_hash")
+@patch("mcloop.audit._should_skip_audit", return_value=False)
+@patch("mcloop.audit.run_audit")
 def test_audit_notifies_no_bugs(mock_audit, mock_skip, mock_save, mock_notify, tmp_path):
     """Audit cycle notifies when no bugs are found."""
     mock_audit.return_value = _ok_run_result()
@@ -558,16 +559,16 @@ def test_audit_notifies_no_bugs(mock_audit, mock_skip, mock_save, mock_notify, t
     assert calls[0] == ("Audit complete: no bugs found.", "info")
 
 
-@patch("mcloop.main.notify")
-@patch("mcloop.main._save_audit_hash")
-@patch("mcloop.main._should_skip_audit", return_value=False)
-@patch("mcloop.main._commit")
-@patch("mcloop.main._has_meaningful_changes", return_value=True)
-@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
-@patch("mcloop.main.run_post_fix_review")
-@patch("mcloop.main.run_bug_fix")
-@patch("mcloop.main.run_bug_verify")
-@patch("mcloop.main.run_audit")
+@patch("mcloop.audit.notify")
+@patch("mcloop.audit._save_audit_hash")
+@patch("mcloop.audit._should_skip_audit", return_value=False)
+@patch("mcloop.audit._commit")
+@patch("mcloop.audit._has_meaningful_changes", return_value=True)
+@patch("mcloop.audit.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.audit.run_post_fix_review")
+@patch("mcloop.audit.run_bug_fix")
+@patch("mcloop.audit.run_bug_verify")
+@patch("mcloop.audit.run_audit")
 def test_audit_notifies_bugs_fixed(
     mock_audit,
     mock_verify,
