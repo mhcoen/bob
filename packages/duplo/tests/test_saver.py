@@ -1056,3 +1056,52 @@ class TestSaveFeatures:
         save_features([], target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert len(data["features"]) == 2
+
+    def test_new_features_get_pending_status(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True)
+        (duplo_dir / "duplo.json").write_text("{}", encoding="utf-8")
+        new = [Feature(name="Auth", description="User login.", category="core")]
+        save_features(new, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        feat = data["features"][0]
+        assert feat["status"] == "pending"
+        assert feat["implemented_in"] == ""
+
+    def test_preserves_existing_status(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True)
+        (duplo_dir / "duplo.json").write_text(
+            json.dumps(
+                {
+                    "features": [
+                        {
+                            "name": "Auth",
+                            "description": "User login.",
+                            "category": "core",
+                            "status": "implemented",
+                            "implemented_in": "Phase 1",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        new = [Feature(name="Auth", description="Different.", category="core")]
+        save_features(new, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        feat = data["features"][0]
+        assert feat["status"] == "implemented"
+        assert feat["implemented_in"] == "Phase 1"
+
+    def test_selections_include_status_fields(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        for feat in data["features"]:
+            assert feat["status"] == "pending"
+            assert feat["implemented_in"] == ""

@@ -381,7 +381,10 @@ def save_features(
     existing_names = {f["name"] for f in existing}
     for feat in features:
         if feat.name not in existing_names:
-            existing.append(dataclasses.asdict(feat))
+            d = dataclasses.asdict(feat)
+            d.setdefault("status", "pending")
+            d.setdefault("implemented_in", "")
+            existing.append(d)
             existing_names.add(feat.name)
     data["features"] = existing
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

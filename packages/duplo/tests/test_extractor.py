@@ -71,6 +71,28 @@ class TestParseFeatures:
     def test_empty_array(self):
         assert _parse_features("[]") == []
 
+    def test_defaults_status_to_pending(self):
+        raw = '[{"name": "Search", "description": "Full-text search.", "category": "core"}]'
+        features = _parse_features(raw)
+        assert features[0].status == "pending"
+        assert features[0].implemented_in == ""
+
+    def test_feature_dataclass_defaults(self):
+        feat = Feature(name="X", description="Y", category="core")
+        assert feat.status == "pending"
+        assert feat.implemented_in == ""
+
+    def test_feature_explicit_status(self):
+        feat = Feature(
+            name="X",
+            description="Y",
+            category="core",
+            status="implemented",
+            implemented_in="Phase 1",
+        )
+        assert feat.status == "implemented"
+        assert feat.implemented_in == "Phase 1"
+
 
 class TestExtractFeatures:
     def test_returns_feature_list(self):

@@ -33,6 +33,8 @@ class Feature:
     name: str
     description: str
     category: str
+    status: str = "pending"
+    implemented_in: str = ""
 
 
 def extract_features(scraped_text: str) -> list[Feature]:
