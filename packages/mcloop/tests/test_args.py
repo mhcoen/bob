@@ -1,6 +1,6 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -2463,6 +2463,46 @@ def test_fallback_model_also_exhausted(tmp_path):
     assert len(models_used) == 4
     assert models_used[:2] == ["opus", "opus"]
     assert models_used[2:] == ["sonnet", "sonnet"]
+    # Task is marked failed in the checklist
+    assert "[!]" in plan.read_text()
+
+
+def test_fallback_model_also_exhausted_notifies(tmp_path):
+    """When both models exhaust retries, sends a 'giving up' notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    def fake_run_task(*args, **kwargs):
+        result = MagicMock()
+        result.success = False
+        result.output = "always fails"
+        result.exit_code = 1
+        return result
+
+    with (
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch(
+            "mcloop.main.get_available_cli",
+            return_value="claude",
+        ),
+    ):
+        run_loop(
+            plan,
+            max_retries=2,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    # "Giving up" notification is sent with error level
+    giving_up_calls = [c for c in mock_notify.call_args_list if "Giving up" in str(c)]
+    assert len(giving_up_calls) == 1
+    assert giving_up_calls[0] == call("Giving up on: Do something", level="error")
 
 
 def test_no_fallback_retry_without_flag(tmp_path):
