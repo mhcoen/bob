@@ -1982,6 +1982,50 @@ class TestRoadmapRegeneration:
         assert history[0]["phase"] == "Phase 0: Scaffold"
         assert history[0]["features"] == ["Search"]
 
+    def test_saves_new_roadmap_and_resets_current_phase(self, tmp_path, monkeypatch):
+        data = {
+            **self._BASE_DATA,
+            "roadmap": [
+                {
+                    "phase": 0,
+                    "title": "Done",
+                    "goal": "Done",
+                    "features": [],
+                    "test": "ok",
+                },
+            ],
+            "current_phase": 1,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "ok",
+            },
+            {
+                "phase": 1,
+                "title": "Polish",
+                "goal": "Polish export",
+                "features": [],
+                "test": "ok",
+            },
+        ]
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        saved = _read_duplo_json(tmp_path)
+        assert saved["current_phase"] == 0
+        assert saved["roadmap"] == fake_roadmap
+
 
 class TestBuildCompletionHistory:
     """Tests for _build_completion_history."""

@@ -47,6 +47,7 @@ from duplo.saver import (
     save_product,
     save_raw_content,
     save_reference_urls,
+    save_roadmap,
     save_screenshot_feature_map,
     save_selections,
     set_in_progress,
@@ -1676,3 +1677,32 @@ class TestResolveCompletedFixes:
         resolve_completed_fixes(tasks, target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["issues"][1]["status"] == "open"
+
+
+class TestSaveRoadmap:
+    """Tests for save_roadmap."""
+
+    def test_saves_roadmap_and_resets_current_phase(self, tmp_path):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"current_phase": 5, "features": []}), encoding="utf-8")
+
+        roadmap = [
+            {"phase": 0, "title": "A", "goal": "g", "features": [], "test": "t"},
+            {"phase": 1, "title": "B", "goal": "g", "features": [], "test": "t"},
+        ]
+        save_roadmap(roadmap, target_dir=tmp_path)
+
+        data = json.loads(path.read_text())
+        assert data["roadmap"] == roadmap
+        assert data["current_phase"] == 0
+        assert data["features"] == []
+
+    def test_creates_duplo_json_if_missing(self, tmp_path):
+        roadmap = [{"phase": 0, "title": "X", "goal": "g", "features": [], "test": "t"}]
+        save_roadmap(roadmap, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["roadmap"] == roadmap
+        assert data["current_phase"] == 0
