@@ -52,7 +52,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Remove the dependency on `in_progress` for flow control. The `in_progress` key can be removed entirely or repurposed for crash recovery only.
 
 - [ ] Implement next-phase flow with feature selection
-  - [ ] Re-scrape the product site, re-extract features, merge new ones into `duplo.json` (already works)
+  - [x] Re-scrape the product site, re-extract features, merge new ones into `duplo.json` (already works)
   - [ ] Partition features into implemented and remaining based on `status` field
   - [ ] If roadmap is missing or consumed, generate a new one from remaining features (previous item)
   - [ ] Use the next phase entry from the roadmap as the default recommendation during feature selection
