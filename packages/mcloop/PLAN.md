@@ -232,3 +232,8 @@ The debugging playbook this enforces:
 
 - [x] Smarter no-op handling
   - [x] When a task session completes successfully (exit code 0) but produces no file changes, run the check commands before deciding whether it's a failure. If all checks pass, auto-check the task (the work was already done) and print "Task already satisfied (no changes needed)". If checks fail, treat it as a failure and retry as today. This prevents burning retries on tasks where the implementation already exists. Include tests for both paths: no changes + checks pass = auto-check, no changes + checks fail = retry.
+
+- [ ] Fix Ctrl-C: run claude -p inside a pty
+  - [ ] Replace subprocess.Popen stdout/stderr piping with a pty pair. Open a pseudo-terminal with `pty.openpty()`, pass the slave fd as stdin/stdout/stderr to `claude -p`, keep `start_new_session=True`. McLoop reads from the master fd. Claude Code gets an isolated terminal it can never escape from. The real terminal belongs exclusively to mcloop, so Ctrl-C always reaches mcloop's signal handler. Remove `_reclaim_foreground` and all `tcsetpgrp` calls since they are no longer needed.
+  - [ ] Update the reader thread in `_run_session` to read from the master fd using `os.read()` and buffer/split on newlines manually, since pty output is raw bytes rather than line-delimited text. Close the slave fd in the parent process after spawning the child.
+  - [ ] Verify Ctrl-C, Ctrl-Z, and SIGTERM all reach mcloop's signal handler reliably. Verify claude -p still produces stream-json output correctly through the pty. Include tests using a mock subprocess behind a pty.
