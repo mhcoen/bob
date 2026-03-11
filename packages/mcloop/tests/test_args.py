@@ -175,6 +175,7 @@ def test_run_audit_fix_cycle_with_bugs(tmp_path):
 
     with (
         patch("mcloop.audit.run_audit", side_effect=fake_audit),
+        patch("mcloop.audit.run_bug_verify", return_value=_make_result()),
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()) as mock_fix,
         patch("mcloop.audit._has_meaningful_changes", return_value=False),
     ):
@@ -252,6 +253,7 @@ def test_single_audit_round_commits_when_checks_pass(tmp_path):
 
     with (
         patch("mcloop.audit.run_audit", side_effect=fake_audit),
+        patch("mcloop.audit.run_bug_verify", return_value=_make_result()),
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()),
         patch("mcloop.audit._has_meaningful_changes", return_value=True),
         patch("mcloop.audit.run_checks", return_value=check_result),
@@ -343,6 +345,7 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
 
     with (
         patch("mcloop.audit.run_audit", side_effect=fake_audit),
+        patch("mcloop.audit.run_bug_verify", return_value=_make_result()),
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()),
         patch("mcloop.audit._has_meaningful_changes", return_value=True),
         patch("mcloop.audit.run_checks", return_value=check_result),

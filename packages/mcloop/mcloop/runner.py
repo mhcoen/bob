@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import os
+import pty
 import queue
 import re
 import shlex
@@ -10,6 +12,7 @@ import shutil
 import subprocess
 import threading
 import time
+import tty
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -243,51 +246,45 @@ _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 
 
-def _reclaim_foreground() -> None:
-    """Reclaim the terminal foreground process group.
-
-    After launching a child with start_new_session=True,
-    the child may grab the foreground process group via
-    tcsetpgrp. This makes ctrl-c/ctrl-z go to the child
-    instead of mcloop. We call tcsetpgrp to reassign
-    the foreground group back to our own process group.
-    """
-    try:
-        fd = os.open("/dev/tty", os.O_RDWR)
-    except OSError:
-        return  # no controlling terminal (e.g., CI)
-    try:
-        os.tcsetpgrp(fd, os.getpgrp())
-    except OSError:
-        pass  # not a tty or no permission
-    finally:
-        os.close(fd)
-
-
 def _run_session(
     cmd: list[str],
     cwd: Path,
     env: dict | None = None,
     stdin_text: str | None = None,
 ) -> tuple[str, int]:
-    """Run a CLI session, stream output, return (output, exit_code)."""
+    """Run a CLI session, stream output, return (output, exit_code).
+
+    Uses a pty pair so the child gets an isolated terminal it
+    cannot escape from.  The real terminal belongs exclusively to
+    mcloop, so Ctrl-C always reaches mcloop's signal handler.
+    """
     # Strip ANTHROPIC_API_KEY so claude -p uses the
     # subscription instead of billing API credits.
     session_env = dict(env or os.environ)
     session_env.pop("ANTHROPIC_API_KEY", None)
+
+    # Open a pseudo-terminal pair.  The slave fd becomes the
+    # child's stdin/stdout/stderr; the master fd stays with us.
+    master_fd, slave_fd = pty.openpty()
+    # Set slave to raw mode so the pty line discipline does not
+    # interfere with stream-json output (no echo, no \n→\r\n).
+    tty.setraw(slave_fd)
+
     global _active_process
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
-        stdin=subprocess.PIPE if stdin_text else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
         env=session_env,
         start_new_session=True,
     )
+    # Child has its own copy of slave_fd; close ours.
+    os.close(slave_fd)
+
     _active_process = process
-    _reclaim_foreground()
+
     # Write PID file so orphans can be killed on next startup
     pid_dir = cwd / ".mcloop"
     pid_dir.mkdir(exist_ok=True)
@@ -314,21 +311,34 @@ def _run_session(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    if stdin_text and process.stdin:
-        process.stdin.write(stdin_text)
-        process.stdin.close()
 
-    if process.stdout is None:
-        raise RuntimeError("stdout is None despite stdout=PIPE")
+    if stdin_text:
+        os.write(master_fd, stdin_text.encode("utf-8"))
 
-    # Read lines in a thread so the main thread
+    # Read from master_fd in a thread so the main thread
     # can check for pending approval files.
     line_q: queue.Queue = queue.Queue()
 
     def _reader() -> None:
-        assert process.stdout is not None
-        for line in process.stdout:
-            line_q.put(line)
+        buf = b""
+        while True:
+            try:
+                data = os.read(master_fd, 4096)
+                if not data:
+                    break
+            except OSError as exc:
+                if exc.errno in (errno.EIO, errno.EBADF):
+                    break  # child closed the pty
+                raise
+            buf += data
+            while b"\n" in buf:
+                line_bytes, buf = buf.split(b"\n", 1)
+                line_q.put(
+                    line_bytes.decode("utf-8", errors="replace") + "\n",
+                )
+        # Flush remaining partial line
+        if buf:
+            line_q.put(buf.decode("utf-8", errors="replace") + "\n")
         line_q.put(_SENTINEL)
 
     t = threading.Thread(target=_reader, daemon=True)
@@ -342,7 +352,6 @@ def _run_session(
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
-    last_reclaim = time.monotonic()
     try:
         while True:
             try:
@@ -350,10 +359,6 @@ def _run_session(
                     timeout=PROGRESS_DOT_INTERVAL,
                 )
             except queue.Empty:
-                # Re-assert foreground so ctrl-c reaches mcloop,
-                # not the child which may have stolen it.
-                _reclaim_foreground()
-                last_reclaim = time.monotonic()
                 # Silence. Check for pending approvals.
                 if pending_dir.exists():
                     # Check if a permission was denied
@@ -370,6 +375,7 @@ def _run_session(
                         )
                         process.kill()
                         process.wait()
+                        os.close(master_fd)
                         try:
                             _watchdog.kill()
                         except OSError:
@@ -406,14 +412,11 @@ def _run_session(
                 output_lines = output_lines[-_MAX_OUTPUT_LINES:]
             _print_stream_event(line)
             shown_waiting = False
-            now = time.monotonic()
-            last_dot = now
-            if now - last_reclaim >= PROGRESS_DOT_INTERVAL:
-                _reclaim_foreground()
-                last_reclaim = now
+            last_dot = time.monotonic()
     except KeyboardInterrupt:
         process.kill()
         process.wait()
+        os.close(master_fd)
         try:
             _watchdog.kill()
         except OSError:
@@ -423,6 +426,7 @@ def _run_session(
     t.join(timeout=5)
     process.wait()
     _active_process = None
+    os.close(master_fd)
     # Kill the watchdog and clean up PID file on normal exit
     try:
         _watchdog.kill()

@@ -1,6 +1,5 @@
 """Tests for loop.runner."""
 
-import os
 import subprocess
 from unittest.mock import patch
 
@@ -25,7 +24,6 @@ from mcloop.runner import (
     _build_command,
     _extract_status,
     _print_stream_event,
-    _reclaim_foreground,
     _slugify,
     _write_log,
 )
@@ -559,45 +557,58 @@ def test_parse_verification_output_removed_no_reason():
     assert results[0][2] == ""
 
 
-# --- _reclaim_foreground ---
+# --- _run_session uses pty ---
 
 
-def test_reclaim_foreground_calls_tcsetpgrp():
-    """Verify _reclaim_foreground opens /dev/tty and calls tcsetpgrp."""
-    fake_fd = 42
+def test_run_session_uses_pty_openpty(tmp_path):
+    """_run_session calls pty.openpty and passes slave fd to Popen."""
+    import os
+
+    from mcloop.runner import _run_session
+
+    r_fd, w_fd = os.pipe()
+
+    def fake_openpty():
+        return r_fd, w_fd
+
     with (
-        patch("os.open", return_value=fake_fd) as mock_open,
-        patch("os.tcsetpgrp") as mock_tcsetpgrp,
-        patch("os.getpgrp", return_value=1234),
-        patch("os.close") as mock_close,
+        patch("mcloop.runner.pty.openpty", side_effect=fake_openpty),
+        patch("mcloop.runner.tty.setraw"),
+        patch("mcloop.runner.subprocess.Popen") as mock_popen,
+        patch("mcloop.runner.os.close"),
+        patch("mcloop.runner.os.read", side_effect=OSError(5, "EIO")),
     ):
-        _reclaim_foreground()
-        mock_open.assert_called_once_with("/dev/tty", os.O_RDWR)
-        mock_tcsetpgrp.assert_called_once_with(fake_fd, 1234)
-        mock_close.assert_called_once_with(fake_fd)
+        proc = mock_popen.return_value
+        proc.pid = 12345
+        proc.wait.return_value = 0
+        proc.returncode = 0
+        output, exitcode = _run_session(["echo", "hi"], cwd=tmp_path)
+
+    # First Popen call is the main process (second is the watchdog)
+    _, kwargs = mock_popen.call_args_list[0]
+    assert kwargs.get("stdin") == w_fd
+    assert kwargs.get("stdout") == w_fd
+    assert kwargs.get("stderr") == w_fd
+    assert kwargs.get("start_new_session") is True
+    assert exitcode == 0
 
 
-def test_reclaim_foreground_no_tty():
-    """_reclaim_foreground silently returns when there is no tty."""
-    with (
-        patch("os.open", side_effect=OSError("no tty")),
-        patch("os.tcsetpgrp") as mock_tcsetpgrp,
-    ):
-        _reclaim_foreground()  # should not raise
-        mock_tcsetpgrp.assert_not_called()
+def test_run_session_no_reclaim_foreground():
+    """_run_session does not reference _reclaim_foreground."""
+    import inspect
+
+    from mcloop.runner import _run_session
+
+    source = inspect.getsource(_run_session)
+    assert "_reclaim_foreground" not in source
+    assert "tcsetpgrp" not in source
 
 
-def test_reclaim_foreground_tcsetpgrp_fails():
-    """_reclaim_foreground silently handles tcsetpgrp OSError."""
-    fake_fd = 42
-    with (
-        patch("os.open", return_value=fake_fd),
-        patch("os.tcsetpgrp", side_effect=OSError("not a tty")),
-        patch("os.getpgrp", return_value=1234),
-        patch("os.close") as mock_close,
-    ):
-        _reclaim_foreground()  # should not raise
-        mock_close.assert_called_once_with(fake_fd)
+def test_reclaim_foreground_removed():
+    """_reclaim_foreground no longer exists in runner module."""
+    import mcloop.runner as runner
+
+    assert not hasattr(runner, "_reclaim_foreground")
 
 
 # --- _SUPPRESS_ALL_TOOLS ---
