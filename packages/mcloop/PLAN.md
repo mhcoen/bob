@@ -235,5 +235,5 @@ The debugging playbook this enforces:
 
 - [ ] Fix Ctrl-C: run claude -p inside a pty
   - [x] Replace subprocess.Popen stdout/stderr piping with a pty pair. Open a pseudo-terminal with `pty.openpty()`, pass the slave fd as stdin/stdout/stderr to `claude -p`, keep `start_new_session=True`. McLoop reads from the master fd. Claude Code gets an isolated terminal it can never escape from. The real terminal belongs exclusively to mcloop, so Ctrl-C always reaches mcloop's signal handler. Remove `_reclaim_foreground` and all `tcsetpgrp` calls since they are no longer needed.
-  - [ ] Update the reader thread in `_run_session` to read from the master fd using `os.read()` and buffer/split on newlines manually, since pty output is raw bytes rather than line-delimited text. Close the slave fd in the parent process after spawning the child.
+  - [x] Update the reader thread in `_run_session` to read from the master fd using `os.read()` and buffer/split on newlines manually, since pty output is raw bytes rather than line-delimited text. Close the slave fd in the parent process after spawning the child.
   - [ ] Verify Ctrl-C, Ctrl-Z, and SIGTERM all reach mcloop's signal handler reliably. Verify claude -p still produces stream-json output correctly through the pty. Include tests using a mock subprocess behind a pty.
