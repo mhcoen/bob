@@ -419,7 +419,14 @@ hook automatically unwraps `rtk proxy` commands before matching. So
 ## Notifications
 
 McLoop sends Telegram notifications for task completions, failures, rate limits,
-permission requests, and when all tasks are done. Set `NOTIFY_VIA=imessage` to use iMessage instead.
+permission requests, and when all tasks are done.
+
+**Tip:** Installing the [Telegram Desktop](https://desktop.telegram.org/)
+app alongside the mobile app is highly recommended. Both receive
+notifications simultaneously, so you can approve permission requests
+from whichever device is nearest. The desktop app is particularly
+convenient when you are already at your computer and McLoop is
+running in another terminal.
 
 Create `~/.claude/telegram-hook.env`:
 
