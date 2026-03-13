@@ -1048,9 +1048,48 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     version = result.stdout.strip()
     print(f"Found claude: {version}")
 
+    _install_hooks(dry_run=dry_run)
+
     # TODO: remaining install steps
     print("install: remaining steps not yet implemented", file=sys.stderr)
     sys.exit(1)
+
+
+# Hook scripts to copy: (source filename in repo root, dest filename)
+_HOOK_SCRIPTS = [
+    "telegram-permission-hook.py",
+    "session-start-hook.py",
+]
+
+
+def _install_hooks(*, dry_run: bool = False) -> None:
+    """Copy hook scripts to ~/.mcloop/hooks/. Skip if already present."""
+    repo_root = Path(__file__).resolve().parent.parent
+    hooks_dir = Path.home() / ".mcloop" / "hooks"
+
+    if not dry_run:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    for script_name in _HOOK_SCRIPTS:
+        src = repo_root / script_name
+        dest = hooks_dir / script_name
+
+        if not src.exists():
+            print(
+                f"Warning: hook source not found: {src}",
+                file=sys.stderr,
+            )
+            continue
+
+        if dest.exists():
+            print(f"  skip (exists): {dest}")
+            continue
+
+        if dry_run:
+            print(f"  would copy: {src} -> {dest}")
+        else:
+            shutil.copy2(src, dest)
+            print(f"  copied: {dest}")
 
 
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:

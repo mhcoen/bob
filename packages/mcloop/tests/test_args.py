@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -29,10 +30,12 @@ from mcloop.investigate_cmd import (
 )
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
+    _HOOK_SCRIPTS,
     _all_tasks,
     _check_interrupted,
     _check_user_input,
     _cmd_install,
+    _install_hooks,
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
@@ -203,6 +206,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
     ):
         with pytest.raises(SystemExit):
             _cmd_install(tmp_path)
@@ -228,6 +232,7 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/opt/bin/claude"),
         patch("subprocess.run", return_value=proc) as mock_run,
+        patch("mcloop.main._install_hooks"),
     ):
         with pytest.raises(SystemExit):
             _cmd_install(tmp_path)
@@ -237,6 +242,114 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         text=True,
         timeout=10,
     )
+
+
+# --- _install_hooks ---
+
+
+def _setup_hooks(tmp_path, create_sources=True):
+    """Create a fake repo root with hook source files."""
+    repo_root = tmp_path / "repo"
+    fake_mcloop_dir = repo_root / "mcloop"
+    fake_mcloop_dir.mkdir(parents=True)
+    (fake_mcloop_dir / "main.py").write_text("")
+    if create_sources:
+        for name in _HOOK_SCRIPTS:
+            (repo_root / name).write_text(f"# {name}\n")
+    return repo_root, fake_mcloop_dir
+
+
+def test_install_hooks_copies_scripts(tmp_path, capsys):
+    """Copies hook scripts from repo root to hooks dir."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            _install_hooks(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+
+    dest_dir = home / ".mcloop" / "hooks"
+    for name in _HOOK_SCRIPTS:
+        assert (dest_dir / name).exists()
+        assert (dest_dir / name).read_text() == f"# {name}\n"
+
+    out = capsys.readouterr().out
+    assert "copied:" in out
+
+
+def test_install_hooks_skips_existing(tmp_path, capsys):
+    """Skips copy when destination file already exists."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+    hooks_dir = home / ".mcloop" / "hooks"
+    hooks_dir.mkdir(parents=True)
+
+    for name in _HOOK_SCRIPTS:
+        (hooks_dir / name).write_text(f"# old {name}\n")
+
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            _install_hooks(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+
+    # Files should NOT be overwritten
+    for name in _HOOK_SCRIPTS:
+        assert (hooks_dir / name).read_text() == f"# old {name}\n"
+
+    out = capsys.readouterr().out
+    assert "skip (exists):" in out
+
+
+def test_install_hooks_dry_run(tmp_path, capsys):
+    """Dry run prints what would be copied but doesn't create files."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            _install_hooks(dry_run=True)
+    finally:
+        main_mod.__file__ = orig_file
+
+    hooks_dir = home / ".mcloop" / "hooks"
+    assert not hooks_dir.exists()
+
+    out = capsys.readouterr().out
+    assert "would copy:" in out
+
+
+def test_install_hooks_warns_missing_source(tmp_path, capsys):
+    """Warns when a source hook script is not found."""
+    _repo_root, fake_mcloop_dir = _setup_hooks(tmp_path, create_sources=False)
+    home = tmp_path / "home"
+
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            _install_hooks(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+
+    err = capsys.readouterr().err
+    assert "Warning: hook source not found" in err
 
 
 # --- _run_audit_fix_cycle ---
