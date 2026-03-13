@@ -276,6 +276,38 @@ ruff format --check .     # Format check
 pytest                    # Tests
 ```
 
+## Task batching
+
+Duplo marks parent tasks with `[BATCH]` when it determines that all
+subtasks are specific enough to be executed in a single McLoop
+session rather than one session per subtask. This is based on an
+empirical observation: tasks whose descriptions are close in
+complexity to their implementations (naming specific files, functions,
+conditions, and values) can be reliably combined, while tasks whose
+descriptions are short and abstract (requiring the agent to make
+significant design decisions) cannot.
+
+Empirically, tasks with a high ratio of concrete identifiers (file
+paths, function names, flag names, explicit conditionals) to total
+words are safe to batch because the description is essentially
+pseudocode. Tasks with a low ratio are abstract and require the
+agent to make design decisions that benefit from a dedicated session.
+Duplo uses this concreteness ratio along with a Claude API call
+during plan generation to decide which task groups to batch.
+
+When McLoop encounters a `[BATCH]` parent, it combines all unchecked
+children (up to the first `[USER]` or `[AUTO]` boundary) into a
+single numbered prompt and runs one session. If checks pass, all
+children are checked off in one commit. If the batch fails, McLoop
+automatically falls back to running each subtask individually. No
+work is lost on failure.
+
+For the install/uninstall feature (17 subtasks at ~2 minutes each),
+batching would reduce total time from ~35 minutes to under 10
+minutes by eliminating per-session overhead (process spawn, context
+loading, check running, commit, push) that dominates when individual
+tasks are trivial.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
