@@ -272,5 +272,5 @@ The debugging playbook this enforces:
   - [x] `uninstall`: remove `~/.claude/telegram-hook.env`
   - [x] `uninstall`: remove `~/.mcloop/hooks/` and `~/.mcloop/config.json` and `~/.mcloop/recommended-permissions.json`
   - [x] `uninstall`: leave `permissions.allow` entries, project-level `.mcloop/` directories, PLAN.md files, and logs untouched. Will not disable the sandbox.
-  - [ ] `uninstall`: print what was removed and what was left in place
+  - [x] `uninstall`: print what was removed and what was left in place
   - [ ] `uninstall --dry-run`: print every file that would be deleted or modified, with diffs for JSON modifications, but make no changes
