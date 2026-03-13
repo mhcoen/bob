@@ -208,9 +208,52 @@ auto-checks the parent when all children are done.
 | `- [ ]` | Pending. McLoop will pick this up. |
 | `- [x]` | Completed |
 | `- [!]` | Failed. McLoop gave up after max retries. |
+| `[USER]` | Requires human action. McLoop pauses and sends a Telegram notification. |
+| `[AUTO:<action>]` | Automated observation (process monitor, app interaction). |
+| `[RULEDOUT]` | Records a failed approach so it is not repeated. |
 
 You can manually edit any marker. To retry a failed task, change `[!]` back to
 `[ ]` and re-run.
+
+### User tasks
+
+Mark any task with `[USER]` when it requires human action that Claude
+Code cannot perform: testing Ctrl-C in a terminal, observing a GUI,
+confirming behavior on a physical device. When McLoop reaches a
+`[USER]` task, it pauses, prints instructions in the terminal, and
+sends a Telegram notification so you know to check in. You type your
+observation at the terminal and McLoop records it and continues.
+
+This is not limited to the investigation system. Any task in any
+PLAN.md can use `[USER]`:
+
+```markdown
+- [ ] [USER] Verify the app launches and the menu bar icon appears
+- [ ] [USER] Test Ctrl-C, Ctrl-Z, and kill on a live run
+```
+
+### Recording failed approaches
+
+When an approach has been tried and ruled out, add a `[RULEDOUT]`
+line under the task. McLoop parses these and injects them into the
+task prompt so Claude Code knows not to repeat them:
+
+```markdown
+- [ ] Fix Ctrl-C: prevent claude from stealing the terminal foreground
+  [RULEDOUT] pty isolation via pty.openpty(): Ctrl-C still ignored
+  [RULEDOUT] tcsetpgrp/_reclaim_foreground: race condition
+  - [x] Rewrite _run_session with stdin=DEVNULL
+  - [x] Add signal handlers
+```
+
+Subtasks inherit `[RULEDOUT]` entries from their parent. The agent
+sees the full list of ruled out approaches for the current task and
+all its ancestors, with an explicit instruction not to repeat any
+of them.
+
+You can add `[RULEDOUT]` lines manually, or McLoop can add them
+automatically when you describe a failure during the interrupt
+resumption prompt (see below).
 
 ## How McLoop works
 
@@ -250,6 +293,39 @@ the problem rather than repeating the same mistake.
 
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
+
+### Interrupting and resuming
+
+When you press Ctrl-C (or Ctrl-Z, or send SIGTERM), McLoop
+immediately acknowledges the interrupt, saves its state to
+`.mcloop/interrupted.json`, kills the child process group, and
+exits. The state includes which task was running, how long it had
+been active, the last 20 lines of output, and what phase McLoop
+was in (task session, checks, audit, or user prompt).
+
+The next time you run `mcloop`, it detects the saved state and
+prompts you:
+
+```
+  Previous run was interrupted during task phase (2026-03-13T11:02:44)
+  Task 14.2: Add unit conversion parser
+  Running for 3m 12s
+  Last output:
+    Running pytest... 8 tests failed in test_parser.py
+
+  (r)etry / (d)escribe what went wrong / (s)kip / (q)uit
+```
+
+**Retry** proceeds normally, picking up the unchecked task.
+**Describe** lets you type what went wrong. McLoop records your
+description as a `[RULEDOUT]` entry in PLAN.md under the task and
+appends it to `.mcloop/eliminated.json`, so the next attempt knows
+not to repeat the same approach. **Skip** marks the task as failed
+(`[!]`) and moves on. **Quit** exits.
+
+The prompt adapts to the interrupted phase. Audit interruptions
+offer resume/skip/quit. User prompt interruptions resume
+automatically with no prompt.
 
 ### Model fallback
 
