@@ -280,20 +280,19 @@ pytest                    # Tests
 
 Duplo marks parent tasks with `[BATCH]` when it determines that all
 subtasks are specific enough to be executed in a single McLoop
-session rather than one session per subtask. This is based on an
-empirical observation: tasks whose descriptions are close in
-complexity to their implementations (naming specific files, functions,
-conditions, and values) can be reliably combined, while tasks whose
-descriptions are short and abstract (requiring the agent to make
-significant design decisions) cannot.
+session rather than one session per subtask.
 
-Empirically, tasks with a high ratio of concrete identifiers (file
-paths, function names, flag names, explicit conditionals) to total
-words are safe to batch because the description is essentially
-pseudocode. Tasks with a low ratio are abstract and require the
-agent to make design decisions that benefit from a dedicated session.
-Duplo uses this concreteness ratio along with a Claude API call
-during plan generation to decide which task groups to batch.
+The underlying idea is a loose approximation of Kolmogorov
+complexity: when a task description is close in complexity to its
+implementation (naming specific files, functions, conditions, and
+values), the gap between description and code is small and the
+agent is essentially transcribing. When a task description is short
+and abstract, the gap is large and the agent must make design
+decisions that benefit from a dedicated session. Duplo estimates
+this gap using the ratio of concrete identifiers (file paths,
+function names, flag names, explicit conditionals) to total words,
+along with a Claude API call during plan generation, to decide
+which task groups to batch.
 
 When McLoop encounters a `[BATCH]` parent, it combines all unchecked
 children (up to the first `[USER]` or `[AUTO]` boundary) into a
