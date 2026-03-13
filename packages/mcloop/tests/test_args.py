@@ -472,7 +472,7 @@ def test_merge_settings_keeps_other_hooks(tmp_path):
 
 
 def test_merge_settings_dry_run(tmp_path, capsys):
-    """Dry run prints what would be added but doesn't write."""
+    """Dry run prints what would be added with diff but doesn't write."""
     home = tmp_path / "home"
     with patch.object(Path, "home", return_value=home):
         _merge_settings(dry_run=True)
@@ -482,6 +482,9 @@ def test_merge_settings_dry_run(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "would add:" in out
+    assert "---" in out
+    assert "++" in out
+    assert "telegram-permission-hook" in out
 
 
 def test_merge_settings_invalid_json(tmp_path, capsys):
@@ -538,7 +541,7 @@ def test_setup_telegram_env_vars(tmp_path, capsys):
 
 
 def test_setup_telegram_env_vars_dry_run(tmp_path, capsys):
-    """Dry run with env vars prints message but does not write file."""
+    """Dry run with env vars shows diff but does not write file."""
     home = tmp_path / "home"
     env_file = home / ".claude" / "telegram-hook.env"
 
@@ -551,6 +554,8 @@ def test_setup_telegram_env_vars_dry_run(tmp_path, capsys):
     assert not env_file.exists()
     out = capsys.readouterr().out
     assert "using credentials from environment" in out
+    assert "---" in out
+    assert "+TELEGRAM_BOT_TOKEN=tok" in out
 
 
 def test_setup_telegram_existing_file(tmp_path, capsys):
@@ -809,12 +814,15 @@ def test_setup_api_key_ctrl_c(tmp_path, capsys):
 
 
 def test_setup_api_key_dry_run(tmp_path, capsys):
-    """Dry run skips prompt."""
+    """Dry run shows diff with default (strip) but does not write."""
     cfg = tmp_path / "config.json"
     with patch("mcloop.main._MCLOOP_CONFIG", cfg):
-        _setup_api_key(dry_run=True)
+        result = _setup_api_key(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
+    assert "---" in out
+    assert "keep_anthropic_api_key" in out
+    assert "would configure" in result[1]
     assert not cfg.exists()
 
 
@@ -943,13 +951,16 @@ def test_setup_sandbox_ctrl_c(tmp_path, capsys):
 
 
 def test_setup_sandbox_dry_run(tmp_path, capsys):
-    """Dry run skips prompt and does not write."""
+    """Dry run shows diff with sandbox defaults but does not write."""
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with patch("mcloop.main._CLAUDE_SETTINGS", sf):
-        _setup_sandbox(dry_run=True)
+        result = _setup_sandbox(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
+    assert "---" in out
+    assert "sandbox" in out
+    assert "would enable" in result[1]
     saved = json.loads(sf.read_text())
     assert "sandbox" not in saved
 
@@ -1102,7 +1113,8 @@ def test_install_recommended_permissions_dry_run(tmp_path, capsys):
         main_mod.__file__ = orig_file
     assert not dest.exists()
     out = capsys.readouterr().out
-    assert "would write:" in out
+    assert "---" in out
+    assert "Bash(git:*)" in out
     assert "does not modify runtime permissions" in out
 
 

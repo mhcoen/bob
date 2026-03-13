@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json as _json
 import os
@@ -1016,6 +1017,24 @@ def _cmd_wrap(project_dir: Path) -> None:
     print("Canonical wrappers saved to .mcloop/wrap/")
 
 
+def _print_file_diff(
+    path: Path,
+    old_content: str,
+    new_content: str,
+) -> None:
+    """Print a unified diff of what a file operation would produce."""
+    diff = list(
+        difflib.unified_diff(
+            old_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=str(path),
+            tofile=str(path),
+        )
+    )
+    for line in diff:
+        print(f"    {line.rstrip()}")
+
+
 def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     """Install mcloop into the project directory."""
     claude_path = shutil.which("claude")
@@ -1107,11 +1126,15 @@ def _setup_telegram(*, dry_run: bool = False) -> tuple[str, str]:
 
     if token and chat_id:
         print("Telegram: using credentials from environment variables.")
-        if not dry_run:
+        content = f"TELEGRAM_BOT_TOKEN={token}\nTELEGRAM_CHAT_ID={chat_id}\n"
+        if dry_run:
+            old = ""
+            if _TELEGRAM_ENV_FILE.exists():
+                old = _TELEGRAM_ENV_FILE.read_text()
+            _print_file_diff(_TELEGRAM_ENV_FILE, old, content)
+        else:
             _TELEGRAM_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _TELEGRAM_ENV_FILE.write_text(
-                f"TELEGRAM_BOT_TOKEN={token}\nTELEGRAM_CHAT_ID={chat_id}\n"
-            )
+            _TELEGRAM_ENV_FILE.write_text(content)
         print(_TELEGRAM_DESKTOP_MSG)
         return ("Telegram", "configured (env vars)")
 
@@ -1181,8 +1204,13 @@ def _setup_api_key(*, dry_run: bool = False) -> tuple[str, str]:
     )
 
     if dry_run:
-        print("  (dry run: skipping interactive prompt)")
-        return ("API key", "skipped (dry run)")
+        new_config = dict(config)
+        new_config["keep_anthropic_api_key"] = False
+        new_content = _json.dumps(new_config, indent=2) + "\n"
+        old = _MCLOOP_CONFIG.read_text() if _MCLOOP_CONFIG.exists() else ""
+        _print_file_diff(_MCLOOP_CONFIG, old, new_content)
+        print("  (dry run: would use default — strip key)")
+        return ("API key", "would configure (dry run)")
 
     try:
         answer = input("  Keep ANTHROPIC_API_KEY? [y/N] ").strip().lower()
@@ -1214,11 +1242,12 @@ def _setup_sandbox(*, dry_run: bool = False) -> tuple[str, str]:
     """Ask whether to enable Claude Code sandbox. Will enable, never disable."""
     settings_path = _CLAUDE_SETTINGS
 
+    original_content = ""
     settings: dict = {}
     if settings_path.exists():
-        raw = settings_path.read_text()
+        original_content = settings_path.read_text()
         try:
-            settings = _json.loads(raw)
+            settings = _json.loads(original_content)
         except _json.JSONDecodeError:
             print(
                 f"Error: {settings_path} contains invalid JSON.",
@@ -1246,8 +1275,17 @@ def _setup_sandbox(*, dry_run: bool = False) -> tuple[str, str]:
     )
 
     if dry_run:
-        print("  (dry run: skipping interactive prompt)")
-        return ("Sandbox", "skipped (dry run)")
+        sandbox_cfg = dict(_SANDBOX_DEFAULTS)
+        if isinstance(sandbox, dict):
+            new_sandbox = dict(sandbox)
+            new_sandbox.update(sandbox_cfg)
+        else:
+            new_sandbox = sandbox_cfg
+        settings["sandbox"] = new_sandbox
+        new_content = _json.dumps(settings, indent=2) + "\n"
+        _print_file_diff(settings_path, original_content, new_content)
+        print("  (dry run: would enable sandbox by default)")
+        return ("Sandbox", "would enable (dry run)")
 
     try:
         answer = input("  Enable sandbox? [Y/n] ").strip().lower()
@@ -1310,11 +1348,13 @@ def _install_recommended_permissions(
     recommended = {"permissions": {"allow": allow}}
 
     dest = _RECOMMENDED_PERMS_DEST
+    new_content = _json.dumps(recommended, indent=2) + "\n"
     if dry_run:
-        print(f"  would write: {dest}")
+        old = dest.read_text() if dest.exists() else ""
+        _print_file_diff(dest, old, new_content)
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(_json.dumps(recommended, indent=2) + "\n")
+        dest.write_text(new_content)
         print(f"  installed: {dest}")
 
     print(
@@ -1399,11 +1439,12 @@ def _merge_settings(
 ) -> list[tuple[str, str]]:
     """Merge mcloop hook entries into ~/.claude/settings.json."""
     settings_path = Path.home() / ".claude" / "settings.json"
+    original_content = ""
 
     if settings_path.exists():
-        raw = settings_path.read_text()
+        original_content = settings_path.read_text()
         try:
-            settings = _json.loads(raw)
+            settings = _json.loads(original_content)
         except _json.JSONDecodeError:
             print(
                 f"Error: {settings_path} contains invalid JSON.",
@@ -1433,18 +1474,22 @@ def _merge_settings(
                 print(f"  skip (exists): hooks.{event_name}: {entry['command']}")
                 results.append((label, "skipped (already configured)"))
             else:
+                existing.append(entry)
+                changed = True
                 if dry_run:
                     print(f"  would add: hooks.{event_name}: {entry['command']}")
                     results.append((label, "would add (dry run)"))
                 else:
-                    existing.append(entry)
                     print(f"  added: hooks.{event_name}: {entry['command']}")
                     results.append((label, "configured"))
-                changed = True
 
-    if changed and not dry_run:
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
+    if changed:
+        new_content = _json.dumps(settings, indent=2) + "\n"
+        if dry_run:
+            _print_file_diff(settings_path, original_content, new_content)
+        else:
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(new_content)
     return results
 
 
