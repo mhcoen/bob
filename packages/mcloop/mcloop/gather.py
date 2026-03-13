@@ -39,8 +39,9 @@ def gather_sync_context(project_dir: Path) -> dict[str, str]:
     except Exception:
         pass
 
+    _excluded = {".git", ".venv", "venv", "node_modules", "__pycache__"}
     for path in sorted(project_dir.rglob("*.py")):
-        if ".git" not in path.parts:
+        if not _excluded.intersection(path.parts):
             rel = str(path.relative_to(project_dir))
             try:
                 context[rel] = path.read_text()
@@ -59,8 +60,9 @@ def gather_audit_context(project_dir: Path) -> dict[str, str]:
         if path.exists():
             context[name] = path.read_text()
 
+    _excluded = {".git", ".venv", "venv", "node_modules", "__pycache__"}
     for path in sorted(project_dir.rglob("*.py")):
-        if ".git" not in path.parts:
+        if not _excluded.intersection(path.parts):
             rel = str(path.relative_to(project_dir))
             try:
                 context[rel] = path.read_text()

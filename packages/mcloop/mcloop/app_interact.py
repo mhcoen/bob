@@ -85,10 +85,11 @@ def read_value(app_name: str, element_type: str, label: str) -> str:
 
     Example: read_value("MyApp", "text field", "Username")
     """
+    safe_type = _esc(element_type)
     script = (
         f'tell application "System Events"\n'
         f'  tell process "{_esc(app_name)}"\n'
-        f'    get value of {element_type} "{_esc(label)}" of window 1\n'
+        f'    get value of {safe_type} "{_esc(label)}" of window 1\n'
         f"  end tell\n"
         f"end tell"
     )

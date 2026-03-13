@@ -643,7 +643,7 @@ def _add_swift_init_call(content: str) -> str:
             continue
 
         if in_main_struct and not found_init:
-            if "init()" in stripped and "{" in stripped:
+            if re.match(r"^\s*init\s*\(", stripped) and "{" in stripped:
                 found_init = True
                 # Find the opening brace and insert after it
                 indent = len(line) - len(line.lstrip()) + 8

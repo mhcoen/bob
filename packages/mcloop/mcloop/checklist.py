@@ -22,6 +22,7 @@ class Task:
     indent_level: int
     stage: str = ""
     children: list[Task] = field(default_factory=list)
+    eliminated: list[str] = field(default_factory=list)
 
 
 def parse_description(path: str | Path) -> str:
@@ -57,6 +58,13 @@ def parse(path: str | Path) -> list[Task]:
         if BUGS_RE.match(line):
             current_stage = "Bugs"
             stack.clear()
+            continue
+
+        # Collect [ELIMINATED] lines and attach to the most recent task
+        stripped = line.strip()
+        if stripped.startswith("[ELIMINATED]"):
+            if stack:
+                stack[-1].eliminated.append(stripped)
             continue
 
         m = CHECKBOX_RE.match(line)

@@ -496,6 +496,10 @@ def run_gui(
         )
     finally:
         if kill_on_return:
+            # Kill the actual GUI app (not just the shell wrapper).
+            gui_pids = pgrep(process_name)
+            for gui_pid in gui_pids:
+                kill(gui_pid)
             if proc.poll() is None:
                 proc.terminate()
                 try:
