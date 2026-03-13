@@ -69,7 +69,6 @@ from mcloop.runner import (
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
 
-
 # Phase tracking for interrupt state capture
 _current_phase = ""  # task, checks, audit, user_prompt
 _current_task_label = ""
@@ -101,9 +100,7 @@ def _save_interrupt_state() -> None:
         "last_output": last_lines,
     }
     try:
-        (mcloop_dir / "interrupted.json").write_text(
-            _json.dumps(state, indent=2) + "\n"
-        )
+        (mcloop_dir / "interrupted.json").write_text(_json.dumps(state, indent=2) + "\n")
     except OSError:
         pass
 
@@ -141,8 +138,7 @@ def _check_interrupted(
         flush=True,
     )
     print(
-        f"  Previous run was interrupted during {phase}"
-        f" phase ({timestamp})",
+        f"  Previous run was interrupted during {phase} phase ({timestamp})",
         flush=True,
     )
     print(
@@ -177,8 +173,7 @@ def _check_interrupted(
         )
     else:
         print(
-            "  (r)etry / (d)escribe what went wrong"
-            " / (s)kip / (q)uit",
+            "  (r)etry / (d)escribe what went wrong / (s)kip / (q)uit",
             flush=True,
         )
 
@@ -204,8 +199,7 @@ def _check_interrupted(
 
     if choice == "d" and phase != "audit":
         print(
-            "  Describe what went wrong"
-            " (press Enter twice to finish):",
+            "  Describe what went wrong (press Enter twice to finish):",
             flush=True,
         )
         lines: list[str] = []
@@ -282,10 +276,12 @@ def _write_eliminated_json(
         data = {}
     if task_label not in data:
         data[task_label] = []
-    data[task_label].append({
-        "approach": description,
-        "timestamp": time.strftime("%Y-%m-%d"),
-    })
+    data[task_label].append(
+        {
+            "approach": description,
+            "timestamp": time.strftime("%Y-%m-%d"),
+        }
+    )
     elim_path.write_text(_json.dumps(data, indent=2) + "\n")
 
 
