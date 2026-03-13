@@ -265,7 +265,7 @@ The debugging playbook this enforces:
   - [x] `install`: ask about ANTHROPIC_API_KEY. Default is no (mcloop strips the key so claude uses the subscription). If yes, mcloop will not strip it. Record choice in `~/.mcloop/config.json`.
   - [x] `install`: ask whether to enable Claude Code sandbox. Will enable but will never disable. Skip if already enabled.
   - [x] `install`: do not modify `permissions.allow`. Install `~/.mcloop/recommended-permissions.json` with the recommended baseline from `settings.example.json`. Print a message stating that McLoop does not modify runtime permissions and the recommended settings are provided for the user to merge manually.
-  - [ ] `install`: if `rtk` is on PATH, print a note that RTK was detected and its hooks should be configured separately via `rtk init`. Do not touch RTK hooks.
+  - [x] `install`: if `rtk` is on PATH, print a note that RTK was detected and its hooks should be configured separately via `rtk init`. Do not touch RTK hooks.
   - [ ] `install`: print summary of everything configured, skipped, or needing manual action
   - [ ] `install --dry-run`: print every file that would be created or modified, with diffs for JSON modifications, but make no changes
   - [ ] `uninstall`: remove mcloop hook entries from `~/.claude/settings.json` (only entries pointing at `~/.mcloop/hooks/`, nothing else)
