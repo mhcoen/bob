@@ -3,9 +3,12 @@
 from mcloop.checklist import (
     check_off,
     find_next,
+    find_parent,
+    get_batch_children,
     get_eliminated,
     has_unchecked_bugs,
     is_auto_task,
+    is_batch_task,
     is_user_task,
     mark_failed,
     parse,
@@ -670,3 +673,89 @@ def test_get_eliminated_not_found(tmp_path):
         indent_level=0,
     )
     assert get_eliminated(tasks, fake) == []
+
+
+# ── [BATCH] support ──
+
+
+def test_is_batch_task_true(tmp_path):
+    md = "- [ ] [BATCH] Build all components\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert is_batch_task(tasks[0])
+
+
+def test_is_batch_task_false(tmp_path):
+    md = "- [ ] Build all components\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not is_batch_task(tasks[0])
+
+
+def test_get_batch_children_returns_unchecked(tmp_path):
+    md = (
+        "- [ ] [BATCH] Parent\n"
+        "  - [x] Done child\n"
+        "  - [ ] Child A\n"
+        "  - [ ] Child B\n"
+        "  - [!] Failed child\n"
+        "  - [ ] Child C\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 3
+    assert batch[0].text == "Child A"
+    assert batch[1].text == "Child B"
+    assert batch[2].text == "Child C"
+
+
+def test_get_batch_children_stops_at_user_task(tmp_path):
+    md = "- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [ ] [USER] Check the app\n  - [ ] Child B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 1
+    assert batch[0].text == "Child A"
+
+
+def test_get_batch_children_stops_at_auto_task(tmp_path):
+    md = "- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [ ] [AUTO:run_cli] ./app\n  - [ ] Child B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 1
+    assert batch[0].text == "Child A"
+
+
+def test_get_batch_children_empty_when_all_done(tmp_path):
+    md = "- [ ] [BATCH] Parent\n  - [x] Done A\n  - [x] Done B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert batch == []
+
+
+def test_find_parent_returns_parent(tmp_path):
+    md = "- [ ] Parent\n  - [ ] Child\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    child = tasks[0].children[0]
+    parent = find_parent(tasks, child)
+    assert parent is tasks[0]
+
+
+def test_find_parent_returns_none_for_root(tmp_path):
+    md = "- [ ] Root task\n- [ ] Another root\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert find_parent(tasks, tasks[0]) is None
+    assert find_parent(tasks, tasks[1]) is None

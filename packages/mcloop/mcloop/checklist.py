@@ -10,6 +10,7 @@ CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
 BUGS_RE = re.compile(r"^##\s+Bugs\s*$", re.IGNORECASE)
 _USER_TAG = "[USER]"
+_BATCH_TAG = "[BATCH]"
 _AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
 
 
@@ -128,6 +129,24 @@ def get_eliminated(tasks: list[Task], target: Task) -> list[str]:
 
     _search(tasks, [])
     return result
+
+
+def find_parent(tasks: list[Task], target: Task) -> Task | None:
+    """Find the parent of a target task in the tree.
+
+    Returns None if the target is a root task.
+    """
+
+    def _search(task_list: list[Task]) -> Task | None:
+        for task in task_list:
+            if target in task.children:
+                return task
+            found = _search(task.children)
+            if found is not None:
+                return found
+        return None
+
+    return _search(tasks)
 
 
 def get_stages(tasks: list[Task]) -> list[str]:
@@ -378,6 +397,32 @@ def user_task_instructions(task: Task) -> str:
     which describes what the user should do and observe.
     """
     return task.text.replace(_USER_TAG, "").strip()
+
+
+def is_batch_task(task: Task) -> bool:
+    """Return True if the task is marked for batch execution.
+
+    Tasks marked with [BATCH] in their text have all their
+    unchecked children combined into a single session.
+    """
+    return _BATCH_TAG in task.text
+
+
+def get_batch_children(task: Task) -> list[Task]:
+    """Collect consecutive unchecked children eligible for batching.
+
+    Starts from the first unchecked child and collects until
+    hitting a [USER] or [AUTO] task, or running out of children.
+    Already checked or failed children are skipped.
+    """
+    batch: list[Task] = []
+    for child in task.children:
+        if child.checked or child.failed:
+            continue
+        if is_user_task(child) or is_auto_task(child):
+            break
+        batch.append(child)
+    return batch
 
 
 def is_auto_task(task: Task) -> bool:

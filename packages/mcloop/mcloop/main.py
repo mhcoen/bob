@@ -23,10 +23,13 @@ from mcloop.checklist import (
     check_off,
     current_stage,
     find_next,
+    find_parent,
+    get_batch_children,
     get_eliminated,
     get_stages,
     has_unchecked_bugs,
     is_auto_task,
+    is_batch_task,
     is_user_task,
     mark_failed,
     parse,
@@ -463,6 +466,199 @@ def _main() -> None:
     )
 
 
+def _run_batch(
+    batch_children: list[Task],
+    tasks: list[Task],
+    checklist_path: Path,
+    project_dir: Path,
+    log_dir: Path,
+    description: str,
+    first_label: str,
+    ctx: SessionContext,
+    rate_state: RateLimitState,
+    enabled_clis: tuple[str, ...],
+    current_model: str | None,
+    fallback_model: str | None,
+    max_retries: int,
+    project_checks: list[str],
+    allowed_tools: str | None,
+    run_start: float,
+    completed: list[str],
+    notes_snapshot: tuple[str, int] | None,
+) -> str:
+    """Run multiple subtasks in a single session.
+
+    Combines the text of all batch_children into a single prompt
+    with numbered steps. On success (checks pass), checks off all
+    children. On failure, returns "failed" so the caller can fall
+    back to individual execution.
+
+    Returns "success" or "failed".
+    """
+    global _current_phase, _current_task_label
+    global _current_task_text, _phase_start_time
+
+    n = len(batch_children)
+    labels = []
+    for child in batch_children:
+        labels.append(_task_label(tasks, child))
+
+    label_range = f"{labels[0]}-{labels[-1]}"
+    print(
+        formatting.system_msg(f"Batching {n} subtasks ({label_range})"),
+        flush=True,
+    )
+
+    # Build combined prompt
+    steps = []
+    for i, child in enumerate(batch_children, 1):
+        steps.append(f"{i}. {child.text}")
+    combined_text = "Do all of the following in order:\n" + "\n".join(steps)
+
+    cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
+    if cli is None:
+        cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+
+    parent_label = first_label.rsplit(".", 1)[0] if "." in first_label else first_label
+    ctx.update_group(parent_label, True)
+
+    _checkpoint(
+        project_dir,
+        next_task=f"{label_range}) [BATCH] {n} subtasks",
+    )
+    print(
+        formatting.task_header(
+            label_range,
+            f"[BATCH] {n} subtasks",
+            cli,
+        ),
+        flush=True,
+    )
+    for step in steps:
+        print(f"  {step}", flush=True)
+
+    _current_phase = "task"
+    _current_task_label = label_range
+    _current_task_text = f"[BATCH] {n} subtasks"
+    _phase_start_time = time.monotonic()
+
+    # Collect eliminated from all children and parent
+    all_eliminated: list[str] = []
+    for child in batch_children:
+        all_eliminated.extend(get_eliminated(tasks, child))
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    eliminated: list[str] = []
+    for e in all_eliminated:
+        if e not in seen:
+            seen.add(e)
+            eliminated.append(e)
+
+    task_start = time.monotonic()
+    result = run_task(
+        combined_text,
+        cli,
+        project_dir,
+        log_dir,
+        description,
+        task_label=label_range,
+        model=current_model,
+        session_context=ctx.text(),
+        check_commands=project_checks,
+        allowed_tools=allowed_tools,
+        eliminated=eliminated,
+    )
+
+    if not result.success:
+        elapsed = _format_elapsed(time.monotonic() - task_start)
+        print(
+            formatting.error_msg(f"Batch failed ({elapsed}), will retry individually"),
+            flush=True,
+        )
+        return "failed"
+
+    if not _has_meaningful_changes(project_dir):
+        # No changes, check if work was already done
+        noop_check = run_checks(project_dir)
+        if noop_check.passed:
+            for child in batch_children:
+                check_off(checklist_path, child)
+                lbl = _task_label(tasks, child)
+                completed.append(f"{lbl}) {child.text}")
+            elapsed = _format_elapsed(time.monotonic() - task_start)
+            print(
+                f"Batch already satisfied (no changes needed) [{elapsed}]",
+                flush=True,
+            )
+            ctx.add(
+                label_range,
+                combined_text,
+                elapsed,
+                result.output,
+            )
+            return "success"
+        print(
+            formatting.error_msg("Batch produced no changes and checks failed"),
+            flush=True,
+        )
+        return "failed"
+
+    _current_phase = "checks"
+    changed_files = _changed_files(project_dir)
+    check_result = run_checks(
+        project_dir,
+        changed_files=changed_files,
+    )
+    if check_result.passed:
+        try:
+            _commit(
+                project_dir,
+                f"[BATCH] {label_range}: {n} subtasks",
+            )
+        except RuntimeError as exc:
+            print(
+                formatting.error_msg(str(exc)),
+                flush=True,
+            )
+            return "failed"
+        _maybe_auto_wrap(project_dir)
+        _reinject_wrappers(project_dir)
+        for child in batch_children:
+            check_off(checklist_path, child)
+            lbl = _task_label(tasks, child)
+            completed.append(f"{lbl}) {child.text}")
+        elapsed = _format_elapsed(time.monotonic() - task_start)
+        print(
+            formatting.task_complete(label_range, elapsed),
+            flush=True,
+        )
+        ctx.add(
+            label_range,
+            combined_text,
+            elapsed,
+            result.output,
+            changed_files=changed_files,
+        )
+        return "success"
+
+    print(
+        formatting.error_msg(f"Batch checks failed: {check_result.command}"),
+        flush=True,
+    )
+    # Discard uncommitted changes from the failed batch
+    _git(
+        ["git", "checkout", "."],
+        cwd=project_dir,
+        label="batch rollback",
+    )
+    _git(
+        ["git", "clean", "-fd"],
+        cwd=project_dir,
+        label="batch clean",
+    )
+    return "failed"
+
+
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
@@ -569,6 +765,45 @@ def run_loop(
             ctx.add(label, task.text, "0s", response)
             notify(f"[USER] {instructions[:80]}")
             continue
+
+        # Check for [BATCH] on the parent task.
+        # If the parent is marked [BATCH], collect all batchable
+        # siblings and combine them into a single session.
+        parent = find_parent(tasks, task)
+        if parent is not None and is_batch_task(parent):
+            batch_children = get_batch_children(parent)
+            if len(batch_children) > 1:
+                batch_handled = _run_batch(
+                    batch_children,
+                    tasks,
+                    checklist_path,
+                    project_dir,
+                    log_dir,
+                    description,
+                    label,
+                    ctx,
+                    rate_state,
+                    enabled_clis,
+                    current_model,
+                    fallback_model,
+                    max_retries,
+                    project_checks,
+                    allowed_tools,
+                    run_start,
+                    completed,
+                    notes_snapshot,
+                )
+                if batch_handled == "success":
+                    continue
+                elif batch_handled == "failed":
+                    # Fall through to individual execution
+                    print(
+                        formatting.system_msg("Batch failed, falling back to individual tasks"),
+                        flush=True,
+                    )
+                    # Re-parse and re-find since batch may have
+                    # partially modified state
+                    continue
 
         cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
         if cli is None:

@@ -255,6 +255,34 @@ You can add `[RULEDOUT]` lines manually, or McLoop can add them
 automatically when you describe a failure during the interrupt
 resumption prompt (see below).
 
+### Batching subtasks
+
+Mark a parent task with `[BATCH]` to combine all its unchecked
+children into a single Claude Code session:
+
+```markdown
+- [ ] [BATCH] mcloop install and uninstall subcommands
+  - [ ] Add subcommands to parser with --dry-run flags
+  - [ ] Check claude is on PATH, print version
+  - [ ] Copy hooks to ~/.mcloop/hooks/
+  - [ ] Merge settings.json entries
+  - [ ] Prompt for Telegram credentials
+  - [ ] [USER] Manual verification
+```
+
+McLoop collects all unchecked children up to the first `[USER]`
+or `[AUTO]` boundary, combines their text into a single numbered
+prompt ("Do all of the following in order: 1. ... 2. ... 3. ..."),
+and runs one session. If checks pass, all batched children are
+checked off in a single commit. If the batch fails, McLoop
+automatically falls back to running each subtask individually.
+
+Batching is most effective for late-stage, well-specified tasks
+where each subtask is essentially pseudocode. Early-stage tasks
+with significant design decisions should not be batched. Without
+a `[BATCH]` tag, behavior is unchanged: each subtask runs in its
+own session.
+
 ## How McLoop works
 
 ```

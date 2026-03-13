@@ -50,6 +50,7 @@ from mcloop.main import (
     _remove_hooks_dir,
     _remove_recommended_perms,
     _remove_telegram_env,
+    _run_batch,
     _save_interrupt_state,
     _setup_api_key,
     _setup_sandbox,
@@ -6087,3 +6088,272 @@ def test_write_eliminated_json_corrupt_starts_fresh(tmp_path):
     elim = json.loads((mcloop_dir / "eliminated.json").read_text())
     assert "2.1" in elim
     assert elim["2.1"][0]["approach"] == "new approach"
+
+
+# ── [BATCH] support ──
+
+
+def _make_batch_args(tmp_path, children=None):
+    """Helper to create common _run_batch arguments."""
+    from mcloop.checklist import Task
+    from mcloop.ratelimit import RateLimitState
+
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir(exist_ok=True)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(exist_ok=True)
+    checklist = tmp_path / "PLAN.md"
+
+    if children is None:
+        children = [
+            Task(
+                text="Add feature A",
+                checked=False,
+                failed=False,
+                line_number=1,
+                indent_level=2,
+            ),
+            Task(
+                text="Add feature B",
+                checked=False,
+                failed=False,
+                line_number=2,
+                indent_level=2,
+            ),
+        ]
+
+    parent = Task(
+        text="[BATCH] Build components",
+        checked=False,
+        failed=False,
+        line_number=0,
+        indent_level=0,
+        children=children,
+    )
+    tasks = [parent]
+
+    md_lines = ["- [ ] [BATCH] Build components\n"]
+    for child in children:
+        md_lines.append(f"  - [ ] {child.text}\n")
+    checklist.write_text("".join(md_lines))
+
+    ctx = SessionContext()
+    rate_state = RateLimitState()
+
+    return {
+        "batch_children": children,
+        "tasks": tasks,
+        "checklist_path": checklist,
+        "project_dir": project_dir,
+        "log_dir": log_dir,
+        "description": "Test project",
+        "first_label": "1.1",
+        "ctx": ctx,
+        "rate_state": rate_state,
+        "enabled_clis": ("claude",),
+        "current_model": None,
+        "fallback_model": None,
+        "max_retries": 3,
+        "project_checks": [],
+        "allowed_tools": None,
+        "run_start": time.monotonic(),
+        "completed": [],
+        "notes_snapshot": None,
+    }
+
+
+def test_run_batch_combines_text(tmp_path):
+    """_run_batch builds 'Do all of the following' numbered prompt."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        _run_batch(**args)
+
+        # Verify the combined text format
+        call_args = mock_run.call_args
+        prompt = call_args[0][0]
+        assert prompt.startswith("Do all of the following in order:")
+        assert "1. Add feature A" in prompt
+        assert "2. Add feature B" in prompt
+
+
+def test_run_batch_success_checks_off_children(tmp_path):
+    """On success, _run_batch checks off all children and returns 'success'."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.check_off") as mock_check_off,
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        result = _run_batch(**args)
+
+        assert result == "success"
+        assert mock_check_off.call_count == 2
+        assert len(args["completed"]) == 2
+
+
+def test_run_batch_task_failure_returns_failed(tmp_path):
+    """When run_task fails, _run_batch returns 'failed' without checking off."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.check_off") as mock_check_off,
+    ):
+        mock_run.return_value = MagicMock(success=False, output="error")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        mock_check_off.assert_not_called()
+        assert len(args["completed"]) == 0
+
+
+def test_run_batch_checks_fail_rolls_back(tmp_path):
+    """When checks fail, _run_batch rolls back with git checkout."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git") as mock_git,
+        patch("mcloop.main.check_off") as mock_check_off,
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        mock_check_off.assert_not_called()
+        # Verify rollback: git checkout and git clean
+        git_calls = [c[0][0] for c in mock_git.call_args_list]
+        assert any("checkout" in cmd for cmd in git_calls)
+        assert any("clean" in cmd for cmd in git_calls)
+
+
+def test_run_batch_noop_auto_checks(tmp_path):
+    """No changes but checks pass: auto-check all children."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.check_off") as mock_check_off,
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        result = _run_batch(**args)
+
+        assert result == "success"
+        assert mock_check_off.call_count == 2
+        assert len(args["completed"]) == 2
+
+
+def test_run_loop_batch_detection(tmp_path):
+    """When find_next returns a child whose parent has [BATCH], batch is triggered."""
+    md = (
+        "# Test project\n\n"
+        "- [ ] [BATCH] Build components\n"
+        "  - [ ] Add feature A\n"
+        "  - [ ] Add feature B\n"
+    )
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(md)
+
+    # Set up git repo
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._run_batch") as mock_batch,
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_checks") as mock_full_checks,
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+    ):
+        # First call: batch succeeds; second parse finds nothing left
+        mock_batch.return_value = "success"
+        mock_full_checks.return_value = MagicMock(passed=True)
+
+        # run_loop will call _run_batch because parent has [BATCH]
+        # After "success", it continues the loop and find_next returns
+        # the same children again (since we didn't really check them off).
+        # Make batch return "success" first time, then simulate completion.
+
+        def batch_side_effect(*a, **kw):
+            # Check off the tasks in the plan file to stop the loop
+            content = plan.read_text()
+            content = content.replace("- [ ] Add feature A", "- [x] Add feature A")
+            content = content.replace("- [ ] Add feature B", "- [x] Add feature B")
+            content = content.replace(
+                "- [ ] [BATCH] Build components",
+                "- [x] [BATCH] Build components",
+            )
+            plan.write_text(content)
+            return "success"
+
+        mock_batch.side_effect = batch_side_effect
+
+        run_loop(plan, max_retries=3)
+
+        # Verify _run_batch was called (batch detection worked)
+        assert mock_batch.call_count >= 1
