@@ -45,6 +45,9 @@ from mcloop.main import (
     _parse_args,
     _print_install_summary,
     _reinject_wrappers,
+    _remove_config_json,
+    _remove_hooks_dir,
+    _remove_recommended_perms,
     _remove_telegram_env,
     _save_interrupt_state,
     _setup_api_key,
@@ -690,14 +693,20 @@ def test_unmerge_settings_empty_hooks(tmp_path, capsys):
 
 
 def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
-    """_cmd_uninstall calls _unmerge_settings and _remove_telegram_env."""
+    """_cmd_uninstall calls all removal functions."""
     with (
         patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
         patch("mcloop.main._remove_telegram_env") as mock_tg,
+        patch("mcloop.main._remove_hooks_dir") as mock_hooks,
+        patch("mcloop.main._remove_config_json") as mock_config,
+        patch("mcloop.main._remove_recommended_perms") as mock_perms,
     ):
         _cmd_uninstall(tmp_path)
     mock_unmerge.assert_called_once_with(dry_run=False)
     mock_tg.assert_called_once_with(dry_run=False)
+    mock_hooks.assert_called_once_with(dry_run=False)
+    mock_config.assert_called_once_with(dry_run=False)
+    mock_perms.assert_called_once_with(dry_run=False)
     out = capsys.readouterr().out
     assert "uninstall" in out
 
@@ -707,10 +716,16 @@ def test_cmd_uninstall_dry_run(tmp_path, capsys):
     with (
         patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
         patch("mcloop.main._remove_telegram_env") as mock_tg,
+        patch("mcloop.main._remove_hooks_dir") as mock_hooks,
+        patch("mcloop.main._remove_config_json") as mock_config,
+        patch("mcloop.main._remove_recommended_perms") as mock_perms,
     ):
         _cmd_uninstall(tmp_path, dry_run=True)
     mock_unmerge.assert_called_once_with(dry_run=True)
     mock_tg.assert_called_once_with(dry_run=True)
+    mock_hooks.assert_called_once_with(dry_run=True)
+    mock_config.assert_called_once_with(dry_run=True)
+    mock_perms.assert_called_once_with(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
 
@@ -746,6 +761,118 @@ def test_remove_telegram_env_dry_run(tmp_path, capsys):
     with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
         component, status = _remove_telegram_env(dry_run=True)
     assert env_file.exists()
+    assert "would remove" in status
+    assert "Would remove" in capsys.readouterr().out
+
+
+# --- _remove_hooks_dir ---
+
+
+def test_remove_hooks_dir_exists(tmp_path, capsys):
+    """Removes the hooks directory when it exists."""
+    fake_home = tmp_path / "fake_home"
+    fake_mcloop = fake_home / ".mcloop"
+    fake_mcloop.mkdir(parents=True)
+    fake_hooks = fake_mcloop / "hooks"
+    fake_hooks.mkdir()
+    (fake_hooks / "some-hook.py").write_text("# hook\n")
+    with patch("mcloop.main.Path.home", return_value=fake_home):
+        component, status = _remove_hooks_dir()
+    assert not fake_hooks.exists()
+    assert status == "removed"
+    assert component == "hooks directory"
+    assert "Removed" in capsys.readouterr().out
+
+
+def test_remove_hooks_dir_not_found(tmp_path, capsys):
+    """Skips when hooks directory does not exist."""
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    with patch("mcloop.main.Path.home", return_value=fake_home):
+        component, status = _remove_hooks_dir()
+    assert "not found" in status
+    assert "not found" in capsys.readouterr().out
+
+
+def test_remove_hooks_dir_dry_run(tmp_path, capsys):
+    """Dry run prints but does not delete."""
+    fake_home = tmp_path / "fake_home"
+    fake_hooks = fake_home / ".mcloop" / "hooks"
+    fake_hooks.mkdir(parents=True)
+    (fake_hooks / "hook.py").write_text("# hook\n")
+    with patch("mcloop.main.Path.home", return_value=fake_home):
+        component, status = _remove_hooks_dir(dry_run=True)
+    assert fake_hooks.exists()
+    assert "would remove" in status
+    assert "Would remove" in capsys.readouterr().out
+
+
+# --- _remove_config_json ---
+
+
+def test_remove_config_json_exists(tmp_path, capsys):
+    """Removes config.json when it exists."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text('{"keep_anthropic_api_key": true}\n')
+    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+        component, status = _remove_config_json()
+    assert not config_file.exists()
+    assert status == "removed"
+    assert component == "config.json"
+    assert "Removed" in capsys.readouterr().out
+
+
+def test_remove_config_json_not_found(tmp_path, capsys):
+    """Skips when config.json does not exist."""
+    config_file = tmp_path / "config.json"
+    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+        component, status = _remove_config_json()
+    assert "not found" in status
+    assert "not found" in capsys.readouterr().out
+
+
+def test_remove_config_json_dry_run(tmp_path, capsys):
+    """Dry run prints but does not delete."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text('{"keep_anthropic_api_key": true}\n')
+    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+        component, status = _remove_config_json(dry_run=True)
+    assert config_file.exists()
+    assert "would remove" in status
+    assert "Would remove" in capsys.readouterr().out
+
+
+# --- _remove_recommended_perms ---
+
+
+def test_remove_recommended_perms_exists(tmp_path, capsys):
+    """Removes recommended-permissions.json when it exists."""
+    perms_file = tmp_path / "recommended-permissions.json"
+    perms_file.write_text('["/some/path"]\n')
+    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+        component, status = _remove_recommended_perms()
+    assert not perms_file.exists()
+    assert status == "removed"
+    assert component == "recommended-permissions.json"
+    assert "Removed" in capsys.readouterr().out
+
+
+def test_remove_recommended_perms_not_found(tmp_path, capsys):
+    """Skips when file does not exist."""
+    perms_file = tmp_path / "recommended-permissions.json"
+    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+        component, status = _remove_recommended_perms()
+    assert "not found" in status
+    assert "not found" in capsys.readouterr().out
+
+
+def test_remove_recommended_perms_dry_run(tmp_path, capsys):
+    """Dry run prints but does not delete."""
+    perms_file = tmp_path / "recommended-permissions.json"
+    perms_file.write_text('["/some/path"]\n')
+    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+        component, status = _remove_recommended_perms(dry_run=True)
+    assert perms_file.exists()
     assert "would remove" in status
     assert "Would remove" in capsys.readouterr().out
 

@@ -1589,6 +1589,49 @@ def _remove_telegram_env(*, dry_run: bool = False) -> tuple[str, str]:
     return (component, "removed")
 
 
+def _remove_hooks_dir(*, dry_run: bool = False) -> tuple[str, str]:
+    """Remove ~/.mcloop/hooks/ directory."""
+    component = "hooks directory"
+    hooks_dir = Path.home() / ".mcloop" / "hooks"
+    if not hooks_dir.exists():
+        print(f"  {hooks_dir}: not found, nothing to remove")
+        return (component, "skipped (not found)")
+    if dry_run:
+        print(f"  Would remove {hooks_dir}")
+        return (component, "would remove")
+    shutil.rmtree(hooks_dir)
+    print(f"  Removed {hooks_dir}")
+    return (component, "removed")
+
+
+def _remove_config_json(*, dry_run: bool = False) -> tuple[str, str]:
+    """Remove ~/.mcloop/config.json."""
+    component = "config.json"
+    if not _MCLOOP_CONFIG.exists():
+        print(f"  {_MCLOOP_CONFIG}: not found, nothing to remove")
+        return (component, "skipped (not found)")
+    if dry_run:
+        print(f"  Would remove {_MCLOOP_CONFIG}")
+        return (component, "would remove")
+    _MCLOOP_CONFIG.unlink()
+    print(f"  Removed {_MCLOOP_CONFIG}")
+    return (component, "removed")
+
+
+def _remove_recommended_perms(*, dry_run: bool = False) -> tuple[str, str]:
+    """Remove ~/.mcloop/recommended-permissions.json."""
+    component = "recommended-permissions.json"
+    if not _RECOMMENDED_PERMS_DEST.exists():
+        print(f"  {_RECOMMENDED_PERMS_DEST}: not found, nothing to remove")
+        return (component, "skipped (not found)")
+    if dry_run:
+        print(f"  Would remove {_RECOMMENDED_PERMS_DEST}")
+        return (component, "would remove")
+    _RECOMMENDED_PERMS_DEST.unlink()
+    print(f"  Removed {_RECOMMENDED_PERMS_DEST}")
+    return (component, "removed")
+
+
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     """Remove mcloop hook entries and credential files."""
     prefix = "[dry run] " if dry_run else ""
@@ -1597,6 +1640,12 @@ def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     _unmerge_settings(dry_run=dry_run)
     print("\nRemoving Telegram credentials...")
     _remove_telegram_env(dry_run=dry_run)
+    print("\nRemoving hooks directory...")
+    _remove_hooks_dir(dry_run=dry_run)
+    print("\nRemoving config.json...")
+    _remove_config_json(dry_run=dry_run)
+    print("\nRemoving recommended-permissions.json...")
+    _remove_recommended_perms(dry_run=dry_run)
     print("\nDone.")
 
 
