@@ -60,11 +60,21 @@ def parse(path: str | Path) -> list[Task]:
             stack.clear()
             continue
 
-        # Collect [ELIMINATED] lines and attach to the most recent task
+        # Collect [RULEDOUT] lines and attach to the parent task.
+        # The line's indentation determines which task it belongs to:
+        # it attaches to the nearest task with strictly less indentation.
         stripped = line.strip()
-        if stripped.startswith("[ELIMINATED]"):
-            if stack:
-                stack[-1].eliminated.append(stripped)
+        if stripped.startswith("[RULEDOUT]"):
+            elim_indent = len(line) - len(line.lstrip())
+            for t in reversed(stack):
+                if t.indent_level < elim_indent:
+                    t.eliminated.append(stripped)
+                    break
+            else:
+                # No parent found (top-level [RULEDOUT]), attach
+                # to the most recent root task if one exists.
+                if root_tasks:
+                    root_tasks[-1].eliminated.append(stripped)
             continue
 
         m = CHECKBOX_RE.match(line)
@@ -96,6 +106,28 @@ def parse(path: str | Path) -> list[Task]:
         stack.append(task)
 
     return root_tasks
+
+
+def get_eliminated(tasks: list[Task], target: Task) -> list[str]:
+    """Collect all [RULEDOUT] entries for a task, including from ancestors.
+
+    Walks the task tree to find the target and collects eliminated
+    entries from every ancestor along the path.
+    """
+    result: list[str] = []
+
+    def _search(task_list: list[Task], inherited: list[str]) -> bool:
+        for task in task_list:
+            combined = inherited + task.eliminated
+            if task is target:
+                result.extend(combined)
+                return True
+            if task.children and _search(task.children, combined):
+                return True
+        return False
+
+    _search(tasks, [])
+    return result
 
 
 def get_stages(tasks: list[Task]) -> list[str]:

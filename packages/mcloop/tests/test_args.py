@@ -1,5 +1,7 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
+import json
+import time
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -27,10 +29,15 @@ from mcloop.investigate_cmd import (
 )
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
+    _all_tasks,
+    _check_interrupted,
     _check_user_input,
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
+    _save_interrupt_state,
+    _write_eliminated_json,
+    _write_ruledout_to_plan,
     run_loop,
 )
 from mcloop.session_context import SessionContext
@@ -4000,3 +4007,343 @@ def test_run_loop_no_bugs_runs_normally(tmp_path):
         run_loop(plan, no_audit=False)
 
     mock_audit.assert_called_once()
+
+
+# ── _all_tasks ──
+
+
+def test_all_tasks_flat():
+    """Flattens a flat list of tasks."""
+    from mcloop.checklist import Task
+
+    tasks = [
+        Task("A", False, False, 0, 0),
+        Task("B", False, False, 1, 0),
+    ]
+    result = _all_tasks(tasks)
+    assert [t.text for t in result] == ["A", "B"]
+
+
+def test_all_tasks_nested():
+    """Flattens nested tasks depth-first."""
+    from mcloop.checklist import Task
+
+    child1 = Task("C1", False, False, 2, 2)
+    child2 = Task("C2", False, False, 3, 2)
+    parent = Task("P", False, False, 1, 0, children=[child1, child2])
+    root = Task("R", False, False, 0, 0)
+    result = _all_tasks([root, parent])
+    assert [t.text for t in result] == ["R", "P", "C1", "C2"]
+
+
+def test_all_tasks_empty():
+    """Empty input returns empty list."""
+    assert _all_tasks([]) == []
+
+
+# ── _save_interrupt_state ──
+
+
+def test_save_interrupt_state_writes_json(tmp_path):
+    """Writes interrupted.json with all expected fields."""
+    import mcloop.main as main_mod
+    import mcloop.runner as runner_mod
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+
+    orig = (
+        main_mod._project_dir,
+        main_mod._current_task_label,
+        main_mod._current_task_text,
+        main_mod._current_phase,
+        main_mod._phase_start_time,
+    )
+    try:
+        main_mod._project_dir = tmp_path
+        main_mod._current_task_label = "1.2"
+        main_mod._current_task_text = "Fix the bug"
+        main_mod._current_phase = "task"
+        main_mod._phase_start_time = time.monotonic() - 10
+        runner_mod._last_output_lines.clear()
+        runner_mod._last_output_lines.append("some output")
+
+        _save_interrupt_state()
+
+        state_file = mcloop_dir / "interrupted.json"
+        assert state_file.exists()
+        data = json.loads(state_file.read_text())
+        assert data["task_label"] == "1.2"
+        assert data["task_text"] == "Fix the bug"
+        assert data["phase"] == "task"
+        assert data["elapsed_seconds"] >= 9
+        assert "timestamp" in data
+        assert data["last_output"] == ["some output"]
+    finally:
+        (
+            main_mod._project_dir,
+            main_mod._current_task_label,
+            main_mod._current_task_text,
+            main_mod._current_phase,
+            main_mod._phase_start_time,
+        ) = orig
+
+
+def test_save_interrupt_state_noop_when_no_project_dir():
+    """Does nothing when _project_dir is None."""
+    import mcloop.main as main_mod
+
+    orig = main_mod._project_dir
+    try:
+        main_mod._project_dir = None
+        _save_interrupt_state()
+    finally:
+        main_mod._project_dir = orig
+
+
+def test_save_interrupt_state_handles_write_oserror(tmp_path):
+    """Handles OSError on write gracefully."""
+    import mcloop.main as main_mod
+    import mcloop.runner as runner_mod
+
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    orig = main_mod._project_dir
+    try:
+        main_mod._project_dir = tmp_path
+        main_mod._current_phase = "task"
+        main_mod._phase_start_time = time.monotonic()
+        runner_mod._last_output_lines.clear()
+        # Make the target a directory so write_text fails
+        (mcloop_dir / "interrupted.json").mkdir()
+        # Should not raise
+        _save_interrupt_state()
+    finally:
+        main_mod._project_dir = orig
+
+
+# ── _check_interrupted ──
+
+
+def test_check_interrupted_no_file(tmp_path):
+    """Returns None when no interrupted.json exists."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+    result = _check_interrupted(tmp_path, plan)
+    assert result is None
+
+
+def test_check_interrupted_user_prompt_auto_retry(tmp_path):
+    """Returns 'retry' automatically for user_prompt phase."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "task_label": "1",
+        "task_text": "test",
+        "phase": "user_prompt",
+        "elapsed_seconds": 5,
+        "timestamp": "2026-01-01T00:00:00",
+        "last_output": [],
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] test\n")
+
+    result = _check_interrupted(tmp_path, plan)
+    assert result == "retry"
+    assert not (mcloop_dir / "interrupted.json").exists()
+
+
+def test_check_interrupted_corrupt_json(tmp_path):
+    """Corrupt JSON deletes the file and returns None."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "interrupted.json").write_text("{bad json")
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] test\n")
+
+    result = _check_interrupted(tmp_path, plan)
+    assert result is None
+    assert not (mcloop_dir / "interrupted.json").exists()
+
+
+def test_check_interrupted_retry_on_r(tmp_path, monkeypatch):
+    """Returns 'retry' when user types 'r'."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "task_label": "1",
+        "task_text": "test",
+        "phase": "task",
+        "elapsed_seconds": 5,
+        "timestamp": "2026-01-01T00:00:00",
+        "last_output": [],
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] test\n")
+
+    monkeypatch.setattr("builtins.input", lambda _="": "r")
+    result = _check_interrupted(tmp_path, plan)
+    assert result == "retry"
+
+
+def test_check_interrupted_skip_marks_failed(tmp_path, monkeypatch):
+    """'skip' marks the task as failed in PLAN.md."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "task_label": "1",
+        "task_text": "Fix something",
+        "phase": "task",
+        "elapsed_seconds": 5,
+        "timestamp": "2026-01-01T00:00:00",
+        "last_output": [],
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Fix something\n- [ ] Other\n")
+
+    monkeypatch.setattr("builtins.input", lambda _="": "s")
+    result = _check_interrupted(tmp_path, plan)
+    assert result == "skip"
+    assert "- [!] Fix something" in plan.read_text()
+
+
+def test_check_interrupted_audit_prompt(tmp_path, monkeypatch):
+    """Audit phase shows audit-specific prompt."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "task_label": "1",
+        "task_text": "audit",
+        "phase": "audit",
+        "elapsed_seconds": 5,
+        "timestamp": "2026-01-01T00:00:00",
+        "last_output": [],
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] audit\n")
+
+    captured = []
+    orig_print = print
+
+    def capture_print(*args, **kwargs):
+        captured.append(" ".join(str(a) for a in args))
+        orig_print(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.input", lambda _="": "r")
+    with patch("builtins.print", side_effect=capture_print):
+        result = _check_interrupted(tmp_path, plan)
+    assert result == "retry"
+    assert any("esume audit" in line for line in captured)
+
+
+def test_check_interrupted_d_writes_ruledout(tmp_path, monkeypatch):
+    """'d' option accepts description, writes [RULEDOUT] and eliminated.json."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "task_label": "1.1",
+        "task_text": "Fix crash",
+        "phase": "task",
+        "elapsed_seconds": 5,
+        "timestamp": "2026-01-01T00:00:00",
+        "last_output": [],
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Fix crash\n")
+
+    inputs = iter(["d", "tried restarting", ""])
+    monkeypatch.setattr("builtins.input", lambda _="": next(inputs))
+    result = _check_interrupted(tmp_path, plan)
+    assert result == "retry"
+    assert "[RULEDOUT] tried restarting" in plan.read_text()
+    elim = json.loads((mcloop_dir / "eliminated.json").read_text())
+    assert "1.1" in elim
+
+
+# ── _write_ruledout_to_plan ──
+
+
+def test_write_ruledout_inserts_after_task(tmp_path):
+    """Inserts [RULEDOUT] line after the matching task."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Fix crash\n- [ ] Other task\n")
+
+    _write_ruledout_to_plan(plan, "Fix crash", "tried restart")
+
+    content = plan.read_text()
+    lines = content.splitlines()
+    assert lines[0] == "- [ ] Fix crash"
+    assert lines[1] == "  [RULEDOUT] tried restart"
+    assert lines[2] == "- [ ] Other task"
+
+
+def test_write_ruledout_indented_task(tmp_path):
+    """Inserts [RULEDOUT] at correct indentation for nested tasks."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Parent\n  - [ ] Child task\n")
+
+    _write_ruledout_to_plan(plan, "Child task", "bad approach")
+
+    content = plan.read_text()
+    lines = content.splitlines()
+    assert lines[1] == "  - [ ] Child task"
+    assert lines[2] == "    [RULEDOUT] bad approach"
+
+
+def test_write_ruledout_task_not_found(tmp_path):
+    """Does nothing if task text is not found."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Some task\n")
+
+    _write_ruledout_to_plan(plan, "Nonexistent task", "whatever")
+
+    assert plan.read_text() == "- [ ] Some task\n"
+
+
+# ── _write_eliminated_json ──
+
+
+def test_write_eliminated_json_creates_file(tmp_path):
+    """Creates eliminated.json if it does not exist."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+
+    _write_eliminated_json(tmp_path, "1.1", "tried restart")
+
+    elim = json.loads((mcloop_dir / "eliminated.json").read_text())
+    assert "1.1" in elim
+    assert len(elim["1.1"]) == 1
+    assert elim["1.1"][0]["approach"] == "tried restart"
+
+
+def test_write_eliminated_json_appends_to_existing(tmp_path):
+    """Appends to existing entries for the same task label."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "eliminated.json").write_text(
+        json.dumps({"1.1": [{"approach": "first", "timestamp": "2026-01-01"}]})
+    )
+
+    _write_eliminated_json(tmp_path, "1.1", "second approach")
+
+    elim = json.loads((mcloop_dir / "eliminated.json").read_text())
+    assert len(elim["1.1"]) == 2
+    assert elim["1.1"][1]["approach"] == "second approach"
+
+
+def test_write_eliminated_json_corrupt_starts_fresh(tmp_path):
+    """Handles corrupt existing JSON by starting fresh."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "eliminated.json").write_text("{bad json")
+
+    _write_eliminated_json(tmp_path, "2.1", "new approach")
+
+    elim = json.loads((mcloop_dir / "eliminated.json").read_text())
+    assert "2.1" in elim
+    assert elim["2.1"][0]["approach"] == "new approach"

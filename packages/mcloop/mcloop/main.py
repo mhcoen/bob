@@ -21,6 +21,7 @@ from mcloop.checklist import (
     check_off,
     current_stage,
     find_next,
+    get_eliminated,
     get_stages,
     has_unchecked_bugs,
     is_auto_task,
@@ -67,6 +68,225 @@ from mcloop.runner import (
 )
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
+
+
+# Phase tracking for interrupt state capture
+_current_phase = ""  # task, checks, audit, user_prompt
+_current_task_label = ""
+_current_task_text = ""
+_phase_start_time = 0.0
+_project_dir: Path | None = None
+
+
+def _save_interrupt_state() -> None:
+    """Write .mcloop/interrupted.json with current state.
+
+    Called from the signal handler. Uses only synchronous file
+    I/O and module-level state. No API calls.
+    """
+    import mcloop.runner as _runner
+
+    if _project_dir is None:
+        return
+    mcloop_dir = _project_dir / ".mcloop"
+    mcloop_dir.mkdir(exist_ok=True)
+    elapsed = time.monotonic() - _phase_start_time if _phase_start_time else 0
+    last_lines = list(_runner._last_output_lines)
+    state = {
+        "task_label": _current_task_label,
+        "task_text": _current_task_text,
+        "phase": _current_phase,
+        "elapsed_seconds": round(elapsed, 1),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "last_output": last_lines,
+    }
+    try:
+        (mcloop_dir / "interrupted.json").write_text(
+            _json.dumps(state, indent=2) + "\n"
+        )
+    except OSError:
+        pass
+
+
+def _check_interrupted(
+    project_dir: Path,
+    checklist_path: Path,
+) -> str | None:
+    """Check for interrupted.json and prompt the user.
+
+    Returns:
+        "retry" to proceed normally
+        "skip" to mark task [!] and move on
+        "quit" to exit
+        None if no interrupted state found
+    """
+    state_file = project_dir / ".mcloop" / "interrupted.json"
+    if not state_file.exists():
+        return None
+    try:
+        state = _json.loads(state_file.read_text())
+    except (OSError, _json.JSONDecodeError):
+        state_file.unlink(missing_ok=True)
+        return None
+
+    phase = state.get("phase", "task")
+    label = state.get("task_label", "?")
+    text = state.get("task_text", "unknown")
+    elapsed = state.get("elapsed_seconds", 0)
+    last_output = state.get("last_output", [])
+    timestamp = state.get("timestamp", "")
+
+    print(
+        formatting.summary_header(),
+        flush=True,
+    )
+    print(
+        f"  Previous run was interrupted during {phase}"
+        f" phase ({timestamp})",
+        flush=True,
+    )
+    print(
+        f"  Task {label}: {text}",
+        flush=True,
+    )
+    print(
+        f"  Running for {_format_elapsed(elapsed)}",
+        flush=True,
+    )
+    if last_output:
+        print("  Last output:", flush=True)
+        for line in last_output[-5:]:
+            print(f"    {line}", flush=True)
+    print(
+        formatting.summary_footer(),
+        flush=True,
+    )
+
+    if phase == "user_prompt":
+        print(
+            "  Resuming where you left off.",
+            flush=True,
+        )
+        state_file.unlink(missing_ok=True)
+        return "retry"
+
+    if phase == "audit":
+        print(
+            "  (r)esume audit / (s)kip audit / (q)uit",
+            flush=True,
+        )
+    else:
+        print(
+            "  (r)etry / (d)escribe what went wrong"
+            " / (s)kip / (q)uit",
+            flush=True,
+        )
+
+    try:
+        choice = input("  > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        choice = "q"
+
+    if choice == "q":
+        state_file.unlink(missing_ok=True)
+        print("Exiting.", flush=True)
+        sys.exit(0)
+
+    if choice == "s":
+        # Mark task as failed
+        tasks = parse(checklist_path)
+        for t in _all_tasks(tasks):
+            if t.text.strip() == text.strip() and not t.checked:
+                mark_failed(checklist_path, t)
+                break
+        state_file.unlink(missing_ok=True)
+        return "skip"
+
+    if choice == "d" and phase != "audit":
+        print(
+            "  Describe what went wrong"
+            " (press Enter twice to finish):",
+            flush=True,
+        )
+        lines: list[str] = []
+        try:
+            while True:
+                line = input()
+                if line == "":
+                    break
+                lines.append(line)
+        except (EOFError, KeyboardInterrupt):
+            pass
+        description = " ".join(lines).strip()
+        if description:
+            _write_ruledout_to_plan(
+                checklist_path,
+                text,
+                description,
+            )
+            _write_eliminated_json(
+                project_dir,
+                label,
+                description,
+            )
+            print(
+                f"  Recorded: [RULEDOUT] {description}",
+                flush=True,
+            )
+        state_file.unlink(missing_ok=True)
+        return "retry"
+
+    # Default: retry
+    state_file.unlink(missing_ok=True)
+    return "retry"
+
+
+def _all_tasks(tasks: list[Task]) -> list[Task]:
+    """Flatten the task tree into a list."""
+    result: list[Task] = []
+    for t in tasks:
+        result.append(t)
+        result.extend(_all_tasks(t.children))
+    return result
+
+
+def _write_ruledout_to_plan(
+    checklist_path: Path,
+    task_text: str,
+    description: str,
+) -> None:
+    """Append a [RULEDOUT] line under a task in PLAN.md."""
+    lines = checklist_path.read_text().splitlines()
+    from mcloop.checklist import CHECKBOX_RE
+
+    for i, line in enumerate(lines):
+        m = CHECKBOX_RE.match(line)
+        if m and m.group(3).strip() == task_text.strip():
+            indent = len(m.group(1))
+            ruledout_line = " " * (indent + 2) + f"[RULEDOUT] {description}"
+            lines.insert(i + 1, ruledout_line)
+            checklist_path.write_text("\n".join(lines) + "\n")
+            return
+
+
+def _write_eliminated_json(
+    project_dir: Path,
+    task_label: str,
+    description: str,
+) -> None:
+    """Append an entry to .mcloop/eliminated.json."""
+    elim_path = project_dir / ".mcloop" / "eliminated.json"
+    try:
+        data = _json.loads(elim_path.read_text())
+    except (OSError, _json.JSONDecodeError):
+        data = {}
+    if task_label not in data:
+        data[task_label] = []
+    data[task_label].append({
+        "approach": description,
+        "timestamp": time.strftime("%Y-%m-%d"),
+    })
+    elim_path.write_text(_json.dumps(data, indent=2) + "\n")
 
 
 def _kill_orphan_sessions(project_dir: Path) -> None:
@@ -183,8 +403,10 @@ def main() -> None:
         import mcloop.runner as _runner
 
         _runner._interrupted = True
-        print("\nInterrupted.", flush=True)
+        print("\nInterrupted. Saving state...", flush=True)
+        _save_interrupt_state()
         _graceful_kill_active_process()
+        print("State saved. Exiting.", flush=True)
         os._exit(130)
 
     signal.signal(signal.SIGINT, _handle_sigint)
@@ -245,9 +467,17 @@ def run_loop(
     allowed_tools: str | None = None,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
+    global _project_dir, _current_phase, _current_task_label
+    global _current_task_text, _phase_start_time
     project_dir = checklist_path.parent
+    _project_dir = project_dir
     log_dir = project_dir / "logs"
     description = parse_description(checklist_path)
+
+    # Check for interrupted state from a previous Ctrl-C
+    interrupt_action = _check_interrupted(project_dir, checklist_path)
+    if interrupt_action == "quit":
+        return []
 
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
@@ -319,6 +549,10 @@ def run_loop(
 
         # Handle [USER] tasks: pause for human observation
         if is_user_task(task):
+            _current_phase = "user_prompt"
+            _current_task_label = label
+            _current_task_text = task.text
+            _phase_start_time = time.monotonic()
             has_subtasks = "." in label
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
@@ -352,6 +586,12 @@ def run_loop(
         )
         print(formatting.task_header(label, task.text, cli), flush=True)
 
+        _current_phase = "task"
+        _current_task_label = label
+        _current_task_text = task.text
+        _phase_start_time = time.monotonic()
+
+        eliminated = get_eliminated(tasks, task)
         task_start = time.monotonic()
         success = False
         models_to_try = [current_model]
@@ -379,6 +619,7 @@ def run_loop(
                     session_context=ctx.text(),
                     check_commands=project_checks,
                     allowed_tools=allowed_tools,
+                    eliminated=eliminated,
                 )
 
                 if is_session_limited(
@@ -499,6 +740,7 @@ def run_loop(
                     )
                     continue
 
+                _current_phase = "checks"
                 changed_files = _changed_files(project_dir)
                 check_result = run_checks(
                     project_dir,
@@ -690,6 +932,8 @@ def run_loop(
             flush=True,
         )
     elif not no_audit:
+        _current_phase = "audit"
+        _phase_start_time = time.monotonic()
         _run_audit_fix_cycle(
             project_dir,
             log_dir,

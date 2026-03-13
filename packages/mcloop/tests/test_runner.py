@@ -1,5 +1,7 @@
 """Tests for loop.runner."""
 
+import collections
+import os
 import signal
 import subprocess
 import sys
@@ -26,9 +28,11 @@ from mcloop.runner import (
     INVESTIGATION_TOOLS,
     _build_command,
     _extract_status,
+    _last_output_lines,
     _print_stream_event,
     _slugify,
     _write_log,
+    run_task,
 )
 
 
@@ -1338,8 +1342,6 @@ def _spawn_signal_test():
 
 def test_sigint_reaches_handler():
     """SIGINT (Ctrl-C) reaches mcloop's signal handler and exits 130."""
-    import os
-
     proc = _spawn_signal_test()
     os.kill(proc.pid, signal.SIGINT)
     proc.wait(timeout=5)
@@ -1350,8 +1352,6 @@ def test_sigint_reaches_handler():
 
 def test_sigtstp_reaches_handler():
     """SIGTSTP (Ctrl-Z) reaches mcloop's signal handler and exits 130."""
-    import os
-
     proc = _spawn_signal_test()
     os.kill(proc.pid, signal.SIGTSTP)
     proc.wait(timeout=5)
@@ -1362,8 +1362,6 @@ def test_sigtstp_reaches_handler():
 
 def test_sigterm_reaches_handler():
     """SIGTERM (kill <pid>) reaches mcloop's signal handler and exits 130."""
-    import os
-
     proc = _spawn_signal_test()
     os.kill(proc.pid, signal.SIGTERM)
     proc.wait(timeout=5)
@@ -1472,8 +1470,6 @@ def test_child_process_no_tty_fds():
 
 def test_watchdog_process_no_tty_fds():
     """Watchdog spawned like _run_session has no terminal fds."""
-    import os
-
     # Spawn a "main" process to watch
     main_proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -1506,3 +1502,86 @@ def test_watchdog_process_no_tty_fds():
     finally:
         main_proc.kill()
         main_proc.wait()
+
+
+# ── _last_output_lines deque ──
+
+
+def test_last_output_lines_is_bounded_deque():
+    """_last_output_lines is a deque with maxlen=20."""
+    assert isinstance(_last_output_lines, collections.deque)
+    assert _last_output_lines.maxlen == 20
+
+
+def test_last_output_lines_cleared_on_session_start(tmp_path):
+    """_last_output_lines is cleared at the start of each session."""
+    from mcloop.runner import _run_session
+
+    _last_output_lines.append("stale line")
+    assert len(_last_output_lines) > 0
+
+    # Run a trivial command that exits immediately
+    cmd = ["echo", "hello"]
+    _run_session(cmd, tmp_path)
+    # After _run_session, the deque should NOT contain the stale line
+    assert "stale line" not in list(_last_output_lines)
+
+
+def test_last_output_lines_populated_during_session(tmp_path):
+    """_last_output_lines captures output lines from the session."""
+    from mcloop.runner import _run_session
+
+    _last_output_lines.clear()
+    cmd = [sys.executable, "-c", "print('line1'); print('line2')"]
+    _run_session(cmd, tmp_path)
+    lines = list(_last_output_lines)
+    assert "line1" in lines
+    assert "line2" in lines
+
+
+def test_run_task_eliminated_appends_ruled_out_block(tmp_path):
+    """The eliminated parameter adds a RULED OUT APPROACHES block to the prompt."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    eliminated = [
+        "[RULEDOUT] tried restart",
+        "[RULEDOUT] tried reinstall",
+    ]
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+            eliminated=eliminated,
+        )
+        # The prompt passed to _build_command -> _run_session should
+        # contain the ruled-out block
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]  # claude -p <prompt>
+        assert "RULED OUT APPROACHES" in prompt
+        assert "[RULEDOUT] tried restart" in prompt
+        assert "[RULEDOUT] tried reinstall" in prompt
+
+
+def test_run_task_no_eliminated_no_block(tmp_path):
+    """Without eliminated entries, no RULED OUT block in the prompt."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "RULED OUT APPROACHES" not in prompt

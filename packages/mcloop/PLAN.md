@@ -239,3 +239,19 @@ The debugging playbook this enforces:
   - [x] Register an explicit `signal.signal(signal.SIGINT, handler)` in mcloop. The handler must call `os.killpg(process.pid, signal.SIGTERM)` to signal the entire child process group (not just the immediate child), then set a flag. If the group does not exit within 2 seconds, escalate to `os.killpg(process.pid, signal.SIGKILL)`. Do not rely on `KeyboardInterrupt` exception delivery through `queue.get()`. Also handle SIGTSTP (Ctrl-Z) the same way, or explicitly ignore it with `signal.signal(signal.SIGTSTP, signal.SIG_IGN)` so it does not silently background mcloop.
   - [x] Verify no fd leakage: add a temporary diagnostic that runs `lsof -p <child_pid>` (or `/usr/sbin/lsof`) immediately after spawning claude and logs the output. Confirm there are zero fds referencing `/dev/tty*` or `/dev/pts/*` in the child. Verify the watchdog subprocess does not accidentally inherit a terminal fd. Remove the diagnostic after confirming.
   - [x] [USER] Manual verification: user tests Ctrl-C, Ctrl-Z, and `kill <pid>` on a live mcloop run. Verify all three interrupt mcloop cleanly and kill the claude subprocess group. Verify stream-json output is still captured correctly in logs.
+
+- [x] [RULEDOUT] tag for recording failed approaches in PLAN.md
+  - [x] Add a field to the Task dataclass in checklist.py to store ruled out approaches
+  - [x] Parse `[RULEDOUT]` lines in PLAN.md and attach them to the correct parent task based on indentation. Lines are associated with the nearest task at a strictly lower indent level.
+  - [x] Add a function to collect all [RULEDOUT] entries for a task, including entries inherited from ancestor tasks in the tree
+  - [x] Add a parameter to `run_task` in runner.py for ruled out approaches. When non-empty, append a "RULED OUT APPROACHES" block to the task prompt instructing the agent not to repeat any listed approach and to try a fundamentally different strategy.
+  - [x] In `run_loop` in main.py, collect ruled out entries before the retry loop and pass them to `run_task`
+
+- [x] Interrupt state capture and resumption
+  - [x] In the signal handler, immediately print "Interrupted. Saving state..." before any other work. Write `.mcloop/interrupted.json` with: task label, timestamp, elapsed time, last 20 lines of captured output, and what phase mcloop was in (task, checks, audit, user_prompt). Kill the child process group. Print "State saved. Exiting." All of this is synchronous file I/O and process signals, no API calls.
+  - [x] Track the current phase in a module-level variable (e.g. `_current_phase`) that is set at each transition point in `run_loop`: "task", "checks", "audit", "user_prompt". The signal handler reads this variable when writing `interrupted.json`.
+  - [x] On startup in `run_loop`, check for `.mcloop/interrupted.json`. If present, show a summary and prompt: the task that was running, how long it had been active, last output lines, and the phase. Offer choices: (r)etry as-is, (d)escribe what went wrong, (s)kip, (q)uit. Single keypress for the common case.
+  - [x] If the user picks "describe": accept free-form text, write a `[RULEDOUT]` entry to PLAN.md under the interrupted task, and append to `.mcloop/eliminated.json` (keyed by task label, with approach description, reason, timestamp). Optionally run a short Claude session against the captured output to generate a richer summary. Delete `interrupted.json`.
+  - [x] If the user picks "retry": delete `interrupted.json`, proceed normally.
+  - [x] If the user picks "skip": mark the task `[!]`, delete `interrupted.json`, move to the next task.
+  - [x] Tailor the prompt to the interrupted phase. Audit interruptions offer (r)esume audit / (s)kip audit / (q)uit. User prompt interruptions just re-present the `[USER]` prompt with no special handling. Task interruptions get the full (r)etry / (d)escribe / (s)kip / (q)uit menu.

@@ -3,6 +3,7 @@
 from mcloop.checklist import (
     check_off,
     find_next,
+    get_eliminated,
     has_unchecked_bugs,
     is_auto_task,
     is_user_task,
@@ -569,3 +570,103 @@ def test_has_unchecked_bugs_false_failed(tmp_path):
     f.write_text(md)
     tasks = parse(f)
     assert not has_unchecked_bugs(tasks)
+
+
+# ── [RULEDOUT] parsing ──
+
+
+def test_parse_ruledout_attaches_to_parent(tmp_path):
+    """[RULEDOUT] lines attach to the nearest parent task by indentation."""
+    md = "- [ ] Fix crash\n  [RULEDOUT] tried restarting\n- [ ] Other task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert len(tasks) == 2
+    assert tasks[0].eliminated == ["[RULEDOUT] tried restarting"]
+    assert tasks[1].eliminated == []
+
+
+def test_parse_ruledout_nested_task(tmp_path):
+    """[RULEDOUT] at deeper indent attaches to the nested parent."""
+    md = "- [ ] Parent\n  - [ ] Child\n    [RULEDOUT] didn't work\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert tasks[0].eliminated == []
+    assert tasks[0].children[0].eliminated == ["[RULEDOUT] didn't work"]
+
+
+def test_parse_ruledout_top_level_attaches_to_last_root(tmp_path):
+    """Top-level [RULEDOUT] (no indent) attaches to most recent root task."""
+    md = "- [ ] First task\n- [ ] Second task\n[RULEDOUT] top level approach\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert tasks[0].eliminated == []
+    assert tasks[1].eliminated == ["[RULEDOUT] top level approach"]
+
+
+def test_parse_ruledout_multiple_entries(tmp_path):
+    """Multiple [RULEDOUT] lines accumulate on the same task."""
+    md = "- [ ] Fix bug\n  [RULEDOUT] approach A\n  [RULEDOUT] approach B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert len(tasks[0].eliminated) == 2
+    assert "[RULEDOUT] approach A" in tasks[0].eliminated
+    assert "[RULEDOUT] approach B" in tasks[0].eliminated
+
+
+def test_parse_ruledout_no_tasks_ignored(tmp_path):
+    """[RULEDOUT] before any tasks is silently ignored."""
+    md = "[RULEDOUT] orphan\n- [ ] Task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert len(tasks) == 1
+    assert tasks[0].eliminated == []
+
+
+def test_get_eliminated_target_task(tmp_path):
+    """get_eliminated returns entries from the target task."""
+    md = "- [ ] Fix crash\n  [RULEDOUT] tried restart\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    result = get_eliminated(tasks, tasks[0])
+    assert result == ["[RULEDOUT] tried restart"]
+
+
+def test_get_eliminated_collects_ancestors(tmp_path):
+    """get_eliminated collects entries from ancestors along the path."""
+    md = (
+        "- [ ] Parent\n"
+        "  [RULEDOUT] parent approach\n"
+        "  - [ ] Child\n"
+        "    [RULEDOUT] child approach\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    child = tasks[0].children[0]
+    result = get_eliminated(tasks, child)
+    assert "[RULEDOUT] parent approach" in result
+    assert "[RULEDOUT] child approach" in result
+
+
+def test_get_eliminated_not_found(tmp_path):
+    """get_eliminated returns empty list when target not in tree."""
+    from mcloop.checklist import Task as CTask
+
+    md = "- [ ] Task A\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    fake = CTask(
+        text="nonexistent",
+        checked=False,
+        failed=False,
+        line_number=99,
+        indent_level=0,
+    )
+    assert get_eliminated(tasks, fake) == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import os
 import queue
 import re
@@ -47,6 +48,7 @@ def run_task(
     session_context: str = "",
     check_commands: list[str] | None = None,
     allowed_tools: str | None = None,
+    eliminated: list[str] | None = None,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -176,6 +178,16 @@ def run_task(
         parts.append(
             "IMPORTANT: A previous attempt at this task failed. Fix these errors:\n" + prior_errors
         )
+    if eliminated:
+        elim_text = "\n".join(eliminated)
+        parts.append(
+            "RULED OUT APPROACHES: The following approaches"
+            " have already been tried for this task and"
+            " failed. Do not repeat any of them. If you"
+            " find yourself heading toward a ruled out"
+            " approach, stop and try a fundamentally"
+            " different strategy.\n" + elim_text
+        )
     prompt = "\n\n".join(parts)
     build_kwargs: dict = {"model": model}
     if allowed_tools:
@@ -241,6 +253,7 @@ PROGRESS_DOT_INTERVAL = 3  # seconds between progress dots
 _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 _interrupted = False
+_last_output_lines: collections.deque[str] = collections.deque(maxlen=20)
 
 
 def _run_session(
@@ -253,6 +266,7 @@ def _run_session(
     # subscription instead of billing API credits.
     session_env = dict(env or os.environ)
     session_env.pop("ANTHROPIC_API_KEY", None)
+    _last_output_lines.clear()
     global _active_process
     process = subprocess.Popen(
         cmd,
@@ -382,6 +396,7 @@ def _run_session(
         if line is _SENTINEL:
             break
         output_lines.append(line)
+        _last_output_lines.append(line.rstrip("\n"))
         if len(output_lines) > _MAX_OUTPUT_LINES * 2:
             output_lines = output_lines[-_MAX_OUTPUT_LINES:]
         _print_stream_event(line)
