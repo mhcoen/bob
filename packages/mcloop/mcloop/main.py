@@ -1052,6 +1052,7 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     _merge_settings(dry_run=dry_run)
     _setup_telegram(dry_run=dry_run)
     _setup_api_key(dry_run=dry_run)
+    _setup_sandbox(dry_run=dry_run)
 
 
 _TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
@@ -1160,6 +1161,78 @@ def _setup_api_key(*, dry_run: bool = False) -> None:
     _MCLOOP_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     _MCLOOP_CONFIG.write_text(_json.dumps(config, indent=2) + "\n")
     print(f"  Saved to {_MCLOOP_CONFIG}")
+
+
+_CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
+
+_SANDBOX_DEFAULTS = {
+    "enabled": True,
+    "autoAllowBashIfSandboxed": True,
+    "allowUnsandboxedCommands": False,
+}
+
+
+def _setup_sandbox(*, dry_run: bool = False) -> None:
+    """Ask whether to enable Claude Code sandbox. Will enable, never disable."""
+    settings_path = _CLAUDE_SETTINGS
+
+    settings: dict = {}
+    if settings_path.exists():
+        raw = settings_path.read_text()
+        try:
+            settings = _json.loads(raw)
+        except _json.JSONDecodeError:
+            print(
+                f"Error: {settings_path} contains invalid JSON.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if not isinstance(settings, dict):
+        print(
+            f"Error: {settings_path} is not a JSON object.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    sandbox = settings.get("sandbox", {})
+    if isinstance(sandbox, dict) and sandbox.get("enabled") is True:
+        print("Sandbox: already enabled (skipping).")
+        return
+
+    print(
+        "\nSandbox mode:"
+        "\n  The sandbox restricts file system and network access for"
+        "\n  Claude Code sessions, adding a layer of protection when"
+        "\n  running unattended.\n"
+    )
+
+    if dry_run:
+        print("  (dry run: skipping interactive prompt)")
+        return
+
+    try:
+        answer = input("  Enable sandbox? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSkipped: sandbox not enabled.")
+        return
+
+    if answer in ("n", "no"):
+        print("  Sandbox: not enabled.")
+        return
+
+    sandbox_cfg = dict(_SANDBOX_DEFAULTS)
+    if isinstance(sandbox, dict):
+        sandbox.update(sandbox_cfg)
+    else:
+        sandbox = sandbox_cfg
+    settings["sandbox"] = sandbox
+
+    if not dry_run:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
+    print("  Sandbox: enabled.")
+    print(f"  Saved to {settings_path}")
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)

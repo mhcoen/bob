@@ -43,6 +43,7 @@ from mcloop.main import (
     _reinject_wrappers,
     _save_interrupt_state,
     _setup_api_key,
+    _setup_sandbox,
     _setup_telegram,
     _write_eliminated_json,
     _write_ruledout_to_plan,
@@ -214,6 +215,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -242,6 +244,7 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
@@ -689,6 +692,7 @@ def test_cmd_install_calls_setup_telegram(tmp_path):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram") as mock_tg,
         patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path)
     mock_tg.assert_called_once_with(dry_run=False)
@@ -704,6 +708,7 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram") as mock_tg,
         patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_tg.assert_called_once_with(dry_run=True)
@@ -804,6 +809,7 @@ def test_cmd_install_calls_setup_api_key(tmp_path):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key") as mock_ak,
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path)
     mock_ak.assert_called_once_with(dry_run=False)
@@ -819,9 +825,185 @@ def test_cmd_install_passes_dry_run_to_setup_api_key(tmp_path):
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key") as mock_ak,
+        patch("mcloop.main._setup_sandbox"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_ak.assert_called_once_with(dry_run=True)
+
+
+# --- _setup_sandbox ---
+
+
+def test_setup_sandbox_already_enabled(tmp_path, capsys):
+    """Skips when sandbox is already enabled."""
+    sf = tmp_path / "settings.json"
+    sf.write_text(json.dumps({"sandbox": {"enabled": True}}))
+    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+        _setup_sandbox(dry_run=False)
+    out = capsys.readouterr().out
+    assert "already enabled" in out
+
+
+def test_setup_sandbox_default_yes(tmp_path, capsys):
+    """Empty input defaults to enable (yes)."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", return_value=""),
+    ):
+        _setup_sandbox(dry_run=False)
+    out = capsys.readouterr().out
+    assert "enabled" in out.lower()
+    saved = json.loads(sf.read_text())
+    assert saved["sandbox"]["enabled"] is True
+    assert saved["sandbox"]["autoAllowBashIfSandboxed"] is True
+    assert saved["sandbox"]["allowUnsandboxedCommands"] is False
+
+
+def test_setup_sandbox_explicit_yes(tmp_path, capsys):
+    """Answering y enables sandbox."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", return_value="y"),
+    ):
+        _setup_sandbox(dry_run=False)
+    saved = json.loads(sf.read_text())
+    assert saved["sandbox"]["enabled"] is True
+
+
+def test_setup_sandbox_no(tmp_path, capsys):
+    """Answering no does not enable sandbox."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", return_value="n"),
+    ):
+        _setup_sandbox(dry_run=False)
+    out = capsys.readouterr().out
+    assert "not enabled" in out
+    saved = json.loads(sf.read_text())
+    assert "sandbox" not in saved
+
+
+def test_setup_sandbox_eof(tmp_path, capsys):
+    """EOFError skips sandbox."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        _setup_sandbox(dry_run=False)
+    out = capsys.readouterr().out
+    assert "not enabled" in out.lower() or "skipped" in out.lower()
+
+
+def test_setup_sandbox_ctrl_c(tmp_path, capsys):
+    """KeyboardInterrupt skips sandbox."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+    ):
+        _setup_sandbox(dry_run=False)
+    out = capsys.readouterr().out
+    assert "not enabled" in out.lower() or "skipped" in out.lower()
+
+
+def test_setup_sandbox_dry_run(tmp_path, capsys):
+    """Dry run skips prompt and does not write."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("{}")
+    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+        _setup_sandbox(dry_run=True)
+    out = capsys.readouterr().out
+    assert "dry run" in out
+    saved = json.loads(sf.read_text())
+    assert "sandbox" not in saved
+
+
+def test_setup_sandbox_no_settings_file(tmp_path, capsys):
+    """Creates settings.json if it doesn't exist."""
+    sf = tmp_path / "settings.json"
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", return_value=""),
+    ):
+        _setup_sandbox(dry_run=False)
+    assert sf.exists()
+    saved = json.loads(sf.read_text())
+    assert saved["sandbox"]["enabled"] is True
+
+
+def test_setup_sandbox_preserves_existing_settings(tmp_path, capsys):
+    """Preserves other settings when enabling sandbox."""
+    sf = tmp_path / "settings.json"
+    sf.write_text(json.dumps({"permissions": {"allow": ["Read"]}}))
+    with (
+        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("builtins.input", return_value="y"),
+    ):
+        _setup_sandbox(dry_run=False)
+    saved = json.loads(sf.read_text())
+    assert saved["permissions"]["allow"] == ["Read"]
+    assert saved["sandbox"]["enabled"] is True
+
+
+def test_setup_sandbox_invalid_json(tmp_path, capsys):
+    """Exits on invalid JSON."""
+    sf = tmp_path / "settings.json"
+    sf.write_text("not json")
+    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+        with pytest.raises(SystemExit) as exc:
+            _setup_sandbox(dry_run=False)
+    assert exc.value.code == 1
+
+
+def test_setup_sandbox_non_object_json(tmp_path, capsys):
+    """Exits on non-object JSON."""
+    sf = tmp_path / "settings.json"
+    sf.write_text('"just a string"')
+    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+        with pytest.raises(SystemExit) as exc:
+            _setup_sandbox(dry_run=False)
+    assert exc.value.code == 1
+
+
+def test_cmd_install_calls_setup_sandbox(tmp_path):
+    """_cmd_install calls _setup_sandbox."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox") as mock_sb,
+    ):
+        _cmd_install(tmp_path)
+    mock_sb.assert_called_once_with(dry_run=False)
+
+
+def test_cmd_install_passes_dry_run_to_setup_sandbox(tmp_path):
+    """_cmd_install passes dry_run to _setup_sandbox."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox") as mock_sb,
+    ):
+        _cmd_install(tmp_path, dry_run=True)
+    mock_sb.assert_called_once_with(dry_run=True)
 
 
 def test_load_mcloop_config_missing(tmp_path):
