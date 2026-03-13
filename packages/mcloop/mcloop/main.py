@@ -1048,16 +1048,38 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     version = result.stdout.strip()
     print(f"Found claude: {version}")
 
-    _install_hooks(dry_run=dry_run)
-    _merge_settings(dry_run=dry_run)
-    _setup_telegram(dry_run=dry_run)
-    _setup_api_key(dry_run=dry_run)
-    _setup_sandbox(dry_run=dry_run)
-    _install_recommended_permissions(dry_run=dry_run)
-    _check_rtk()
+    summary: list[tuple[str, str]] = []
+    summary.extend(_install_hooks(dry_run=dry_run))
+    summary.extend(_merge_settings(dry_run=dry_run))
+    summary.append(_setup_telegram(dry_run=dry_run))
+    summary.append(_setup_api_key(dry_run=dry_run))
+    summary.append(_setup_sandbox(dry_run=dry_run))
+    summary.append(_install_recommended_permissions(dry_run=dry_run))
+    rtk_status = _check_rtk()
+    if rtk_status:
+        summary.append(rtk_status)
+
+    _print_install_summary(summary, dry_run=dry_run)
 
 
-def _check_rtk() -> None:
+def _print_install_summary(summary: list[tuple[str, str]], *, dry_run: bool = False) -> None:
+    """Print a summary table of everything configured, skipped, or pending."""
+    prefix = "(dry run) " if dry_run else ""
+    print(f"\n{prefix}Install summary:")
+    print("  " + "-" * 50)
+    for component, status in summary:
+        print(f"  {component:<28} {status}")
+    print("  " + "-" * 50)
+
+    manual = [(c, s) for c, s in summary if "manual" in s.lower()]
+    if manual:
+        print("\n  Action needed:")
+        for component, status in manual:
+            print(f"    - {component}: {status}")
+        print()
+
+
+def _check_rtk() -> tuple[str, str] | None:
     """Print a note if rtk is on PATH."""
     if shutil.which("rtk"):
         print(
@@ -1065,6 +1087,8 @@ def _check_rtk() -> None:
             "  Note: RTK detected on PATH.\n"
             "  RTK hooks should be configured separately via: rtk init\n"
         )
+        return ("RTK", "detected — configure manually via rtk init")
+    return None
 
 
 _TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
@@ -1076,7 +1100,7 @@ _TELEGRAM_DESKTOP_MSG = (
 )
 
 
-def _setup_telegram(*, dry_run: bool = False) -> None:
+def _setup_telegram(*, dry_run: bool = False) -> tuple[str, str]:
     """Check for Telegram credentials or prompt interactively."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -1089,12 +1113,12 @@ def _setup_telegram(*, dry_run: bool = False) -> None:
                 f"TELEGRAM_BOT_TOKEN={token}\nTELEGRAM_CHAT_ID={chat_id}\n"
             )
         print(_TELEGRAM_DESKTOP_MSG)
-        return
+        return ("Telegram", "configured (env vars)")
 
     if _TELEGRAM_ENV_FILE.exists():
         print(f"Telegram: using existing credentials from {_TELEGRAM_ENV_FILE}")
         print(_TELEGRAM_DESKTOP_MSG)
-        return
+        return ("Telegram", "skipped (already configured)")
 
     print("\nTelegram setup (for remote approval notifications):")
     print("  1. Message @BotFather on Telegram to create a bot")
@@ -1103,20 +1127,20 @@ def _setup_telegram(*, dry_run: bool = False) -> None:
 
     if dry_run:
         print("  (dry run: skipping interactive prompt)")
-        return
+        return ("Telegram", "skipped (dry run)")
 
     try:
         bot_token = input("  Bot token: ").strip()
         if not bot_token:
             print("Skipped: no bot token entered.", file=sys.stderr)
-            return
+            return ("Telegram", "skipped (no token entered)")
         chat_id_input = input("  Chat ID: ").strip()
         if not chat_id_input:
             print("Skipped: no chat ID entered.", file=sys.stderr)
-            return
+            return ("Telegram", "skipped (no chat ID entered)")
     except (EOFError, KeyboardInterrupt):
         print("\nSkipped: Telegram setup cancelled.")
-        return
+        return ("Telegram", "skipped (cancelled)")
 
     _TELEGRAM_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     _TELEGRAM_ENV_FILE.write_text(
@@ -1124,6 +1148,7 @@ def _setup_telegram(*, dry_run: bool = False) -> None:
     )
     print(f"  Saved credentials to {_TELEGRAM_ENV_FILE}")
     print(_TELEGRAM_DESKTOP_MSG)
+    return ("Telegram", "configured")
 
 
 _MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
@@ -1139,14 +1164,14 @@ def _load_mcloop_config() -> dict:
         return {}
 
 
-def _setup_api_key(*, dry_run: bool = False) -> None:
+def _setup_api_key(*, dry_run: bool = False) -> tuple[str, str]:
     """Ask whether to keep ANTHROPIC_API_KEY. Default is no."""
     config = _load_mcloop_config()
     if "keep_anthropic_api_key" in config:
         choice = config["keep_anthropic_api_key"]
         label = "keep (use API credits)" if choice else "strip (use subscription)"
         print(f"ANTHROPIC_API_KEY: {label} (from {_MCLOOP_CONFIG})")
-        return
+        return ("API key", f"skipped ({label})")
 
     print(
         "\nANTHROPIC_API_KEY handling:"
@@ -1157,7 +1182,7 @@ def _setup_api_key(*, dry_run: bool = False) -> None:
 
     if dry_run:
         print("  (dry run: skipping interactive prompt)")
-        return
+        return ("API key", "skipped (dry run)")
 
     try:
         answer = input("  Keep ANTHROPIC_API_KEY? [y/N] ").strip().lower()
@@ -1173,6 +1198,7 @@ def _setup_api_key(*, dry_run: bool = False) -> None:
     _MCLOOP_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     _MCLOOP_CONFIG.write_text(_json.dumps(config, indent=2) + "\n")
     print(f"  Saved to {_MCLOOP_CONFIG}")
+    return ("API key", f"configured ({label})")
 
 
 _CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
@@ -1184,7 +1210,7 @@ _SANDBOX_DEFAULTS = {
 }
 
 
-def _setup_sandbox(*, dry_run: bool = False) -> None:
+def _setup_sandbox(*, dry_run: bool = False) -> tuple[str, str]:
     """Ask whether to enable Claude Code sandbox. Will enable, never disable."""
     settings_path = _CLAUDE_SETTINGS
 
@@ -1210,7 +1236,7 @@ def _setup_sandbox(*, dry_run: bool = False) -> None:
     sandbox = settings.get("sandbox", {})
     if isinstance(sandbox, dict) and sandbox.get("enabled") is True:
         print("Sandbox: already enabled (skipping).")
-        return
+        return ("Sandbox", "skipped (already enabled)")
 
     print(
         "\nSandbox mode:"
@@ -1221,17 +1247,17 @@ def _setup_sandbox(*, dry_run: bool = False) -> None:
 
     if dry_run:
         print("  (dry run: skipping interactive prompt)")
-        return
+        return ("Sandbox", "skipped (dry run)")
 
     try:
         answer = input("  Enable sandbox? [Y/n] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print("\nSkipped: sandbox not enabled.")
-        return
+        return ("Sandbox", "skipped (cancelled)")
 
     if answer in ("n", "no"):
         print("  Sandbox: not enabled.")
-        return
+        return ("Sandbox", "not enabled")
 
     sandbox_cfg = dict(_SANDBOX_DEFAULTS)
     if isinstance(sandbox, dict):
@@ -1245,12 +1271,16 @@ def _setup_sandbox(*, dry_run: bool = False) -> None:
         settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
     print("  Sandbox: enabled.")
     print(f"  Saved to {settings_path}")
+    return ("Sandbox", "configured (enabled)")
 
 
 _RECOMMENDED_PERMS_DEST = Path.home() / ".mcloop" / "recommended-permissions.json"
 
 
-def _install_recommended_permissions(*, dry_run: bool = False) -> None:
+def _install_recommended_permissions(
+    *,
+    dry_run: bool = False,
+) -> tuple[str, str]:
     """Install recommended permissions baseline for manual merging."""
     repo_root = Path(__file__).resolve().parent.parent
     src = repo_root / "settings.example.json"
@@ -1260,7 +1290,7 @@ def _install_recommended_permissions(*, dry_run: bool = False) -> None:
             f"Warning: settings.example.json not found: {src}",
             file=sys.stderr,
         )
-        return
+        return ("Permissions", "warning (settings.example.json not found)")
 
     raw = src.read_text()
     try:
@@ -1270,7 +1300,7 @@ def _install_recommended_permissions(*, dry_run: bool = False) -> None:
             f"Warning: settings.example.json contains invalid JSON: {src}",
             file=sys.stderr,
         )
-        return
+        return ("Permissions", "warning (invalid JSON)")
 
     perms = example.get("permissions", {})
     if not isinstance(perms, dict):
@@ -1294,6 +1324,7 @@ def _install_recommended_permissions(*, dry_run: bool = False) -> None:
         "\n  Merge them into ~/.claude/settings.json manually"
         "\n  if desired.\n"
     )
+    return ("Permissions", "installed — merge manually")
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)
@@ -1303,7 +1334,10 @@ _HOOK_SCRIPTS = [
 ]
 
 
-def _install_hooks(*, dry_run: bool = False) -> None:
+def _install_hooks(
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
     """Copy hook scripts to ~/.mcloop/hooks/. Skip if already present."""
     repo_root = Path(__file__).resolve().parent.parent
     hooks_dir = Path.home() / ".mcloop" / "hooks"
@@ -1311,26 +1345,33 @@ def _install_hooks(*, dry_run: bool = False) -> None:
     if not dry_run:
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
+    results: list[tuple[str, str]] = []
     for script_name in _HOOK_SCRIPTS:
         src = repo_root / script_name
         dest = hooks_dir / script_name
+        label = f"Hook ({script_name})"
 
         if not src.exists():
             print(
                 f"Warning: hook source not found: {src}",
                 file=sys.stderr,
             )
+            results.append((label, "warning (source not found)"))
             continue
 
         if dest.exists():
             print(f"  skip (exists): {dest}")
+            results.append((label, "skipped (already installed)"))
             continue
 
         if dry_run:
             print(f"  would copy: {src} -> {dest}")
+            results.append((label, "would install (dry run)"))
         else:
             shutil.copy2(src, dest)
             print(f"  copied: {dest}")
+            results.append((label, "installed"))
+    return results
 
 
 # Hook entries to merge into ~/.claude/settings.json
@@ -1352,7 +1393,10 @@ _HOOK_ENTRIES = {
 }
 
 
-def _merge_settings(*, dry_run: bool = False) -> None:
+def _merge_settings(
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
     """Merge mcloop hook entries into ~/.claude/settings.json."""
     settings_path = Path.home() / ".claude" / "settings.json"
 
@@ -1378,24 +1422,30 @@ def _merge_settings(*, dry_run: bool = False) -> None:
 
     hooks = settings.setdefault("hooks", {})
     changed = False
+    results: list[tuple[str, str]] = []
 
     for event_name, entries in _HOOK_ENTRIES["hooks"].items():
         existing = hooks.setdefault(event_name, [])
         existing_commands = {e.get("command") for e in existing if isinstance(e, dict)}
         for entry in entries:
+            label = f"Settings ({event_name})"
             if entry["command"] in existing_commands:
                 print(f"  skip (exists): hooks.{event_name}: {entry['command']}")
+                results.append((label, "skipped (already configured)"))
             else:
                 if dry_run:
                     print(f"  would add: hooks.{event_name}: {entry['command']}")
+                    results.append((label, "would add (dry run)"))
                 else:
                     existing.append(entry)
                     print(f"  added: hooks.{event_name}: {entry['command']}")
+                    results.append((label, "configured"))
                 changed = True
 
     if changed and not dry_run:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
+    return results
 
 
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:

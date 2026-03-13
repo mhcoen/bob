@@ -42,6 +42,7 @@ from mcloop.main import (
     _maybe_auto_wrap,
     _merge_settings,
     _parse_args,
+    _print_install_summary,
     _reinject_wrappers,
     _save_interrupt_state,
     _setup_api_key,
@@ -213,12 +214,15 @@ def test_install_prints_claude_version(tmp_path, capsys):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -243,12 +247,15 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/opt/bin/claude"),
         patch("subprocess.run", return_value=proc) as mock_run,
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
@@ -692,12 +699,15 @@ def test_cmd_install_calls_setup_telegram(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram") as mock_tg,
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path)
     mock_tg.assert_called_once_with(dry_run=False)
@@ -709,12 +719,15 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram") as mock_tg,
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_tg.assert_called_once_with(dry_run=True)
@@ -811,12 +824,15 @@ def test_cmd_install_calls_setup_api_key(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key") as mock_ak,
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")) as mock_ak,
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path)
     mock_ak.assert_called_once_with(dry_run=False)
@@ -828,12 +844,15 @@ def test_cmd_install_passes_dry_run_to_setup_api_key(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key") as mock_ak,
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")) as mock_ak,
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_ak.assert_called_once_with(dry_run=True)
@@ -988,12 +1007,15 @@ def test_cmd_install_calls_setup_sandbox(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox") as mock_sb,
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path)
     mock_sb.assert_called_once_with(dry_run=False)
@@ -1005,12 +1027,15 @@ def test_cmd_install_passes_dry_run_to_setup_sandbox(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox") as mock_sb,
-        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_sb.assert_called_once_with(dry_run=True)
@@ -1138,12 +1163,15 @@ def test_cmd_install_calls_install_recommended_permissions(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions") as mock_rp,
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ) as mock_rp,
     ):
         _cmd_install(tmp_path)
     mock_rp.assert_called_once_with(dry_run=False)
@@ -1155,12 +1183,15 @@ def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions") as mock_rp,
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ) as mock_rp,
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_rp.assert_called_once_with(dry_run=True)
@@ -1170,19 +1201,22 @@ def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
 
 
 def test_check_rtk_found(capsys):
-    """Prints note when rtk is on PATH."""
+    """Prints note and returns status when rtk is on PATH."""
     with patch("mcloop.main.shutil.which", return_value="/usr/local/bin/rtk"):
-        _check_rtk()
+        result = _check_rtk()
     out = capsys.readouterr().out
     assert "RTK detected" in out
     assert "rtk init" in out
+    assert result is not None
+    assert result[0] == "RTK"
 
 
 def test_check_rtk_not_found(capsys):
-    """Prints nothing when rtk is not on PATH."""
+    """Returns None when rtk is not on PATH."""
     with patch("mcloop.main.shutil.which", return_value=None):
-        _check_rtk()
+        result = _check_rtk()
     assert capsys.readouterr().out == ""
+    assert result is None
 
 
 def test_cmd_install_calls_check_rtk(tmp_path):
@@ -1191,16 +1225,89 @@ def test_cmd_install_calls_check_rtk(tmp_path):
     with (
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks"),
-        patch("mcloop.main._merge_settings"),
-        patch("mcloop.main._setup_telegram"),
-        patch("mcloop.main._setup_api_key"),
-        patch("mcloop.main._setup_sandbox"),
-        patch("mcloop.main._install_recommended_permissions"),
-        patch("mcloop.main._check_rtk") as mock_rtk,
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
+        patch("mcloop.main._check_rtk", return_value=None) as mock_rtk,
     ):
         _cmd_install(tmp_path)
     mock_rtk.assert_called_once()
+
+
+# --- _print_install_summary ---
+
+
+def test_print_install_summary(capsys):
+    """Prints a summary table with all components."""
+    summary = [
+        ("Hook (telegram)", "installed"),
+        ("Hook (session-start)", "skipped (already installed)"),
+        ("Settings (PreToolUse)", "configured"),
+        ("Telegram", "configured (env vars)"),
+        ("API key", "configured (strip)"),
+        ("Sandbox", "skipped (already enabled)"),
+        ("Permissions", "installed — merge manually"),
+    ]
+    _print_install_summary(summary)
+    out = capsys.readouterr().out
+    assert "Install summary:" in out
+    assert "Hook (telegram)" in out
+    assert "installed" in out
+    assert "Permissions" in out
+    assert "merge manually" in out
+    # Should show action needed for manual items
+    assert "Action needed:" in out
+
+
+def test_print_install_summary_no_manual(capsys):
+    """No action-needed section when nothing needs manual action."""
+    summary = [
+        ("Telegram", "configured"),
+        ("Sandbox", "configured (enabled)"),
+    ]
+    _print_install_summary(summary)
+    out = capsys.readouterr().out
+    assert "Install summary:" in out
+    assert "Action needed:" not in out
+
+
+def test_print_install_summary_dry_run(capsys):
+    """Dry run prefix in summary."""
+    summary = [("Telegram", "skipped (dry run)")]
+    _print_install_summary(summary, dry_run=True)
+    out = capsys.readouterr().out
+    assert "(dry run) Install summary:" in out
+
+
+def test_cmd_install_prints_summary(tmp_path, capsys):
+    """_cmd_install prints install summary at the end."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks", return_value=[("Hooks", "installed")]),
+        patch("mcloop.main._merge_settings", return_value=[("Settings", "ok")]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "configured")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "configured")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "configured")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "installed — merge manually"),
+        ),
+        patch("mcloop.main._check_rtk", return_value=None),
+    ):
+        _cmd_install(tmp_path)
+    out = capsys.readouterr().out
+    assert "Install summary:" in out
+    assert "Hooks" in out
+    assert "Telegram" in out
+    assert "Permissions" in out
 
 
 def test_load_mcloop_config_missing(tmp_path):
