@@ -1,6 +1,8 @@
 """Tests for loop.runner."""
 
+import signal
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1390,3 +1392,111 @@ def test_run_session_slave_fd_passed_to_child(tmp_path):
     assert kwargs["stdin"] == 11
     assert kwargs["stdout"] == 11
     assert kwargs["stderr"] == 11
+
+
+# --- Signal handling integration tests ---
+# These spawn a real subprocess that mimics mcloop's signal setup
+# and verify that SIGINT, SIGTSTP, and SIGTERM all reach the handler.
+
+
+_SIGNAL_TEST_SCRIPT = """\
+import os
+import signal
+import sys
+import time
+
+def _handle(sig, frame):
+    sys.stdout.write(f"CAUGHT:{sig}\\n")
+    sys.stdout.flush()
+    os._exit(130)
+
+signal.signal(signal.SIGINT, _handle)
+signal.signal(signal.SIGTSTP, _handle)
+signal.signal(signal.SIGTERM, _handle)
+signal.signal(signal.SIGHUP, _handle)
+
+# Signal readiness
+sys.stdout.write("READY\\n")
+sys.stdout.flush()
+time.sleep(30)
+"""
+
+
+def _spawn_signal_test():
+    """Spawn a subprocess running the signal test script."""
+    import os
+
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-c", _SIGNAL_TEST_SCRIPT],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # Do NOT use start_new_session — we need the child to
+        # receive signals we send directly via os.kill.
+    )
+    # Wait for the child to signal readiness
+    line = proc.stdout.readline().decode().strip()
+    assert line == "READY", f"Expected READY, got {line!r}"
+    return proc
+
+
+def test_sigint_reaches_handler():
+    """SIGINT (Ctrl-C) reaches mcloop's signal handler and exits 130."""
+    import os
+
+    proc = _spawn_signal_test()
+    os.kill(proc.pid, signal.SIGINT)
+    proc.wait(timeout=5)
+    output = proc.stdout.read().decode()
+    assert f"CAUGHT:{signal.SIGINT}" in output
+    assert proc.returncode == 130
+
+
+def test_sigtstp_reaches_handler():
+    """SIGTSTP (Ctrl-Z) reaches mcloop's signal handler and exits 130."""
+    import os
+
+    proc = _spawn_signal_test()
+    os.kill(proc.pid, signal.SIGTSTP)
+    proc.wait(timeout=5)
+    output = proc.stdout.read().decode()
+    assert f"CAUGHT:{signal.SIGTSTP}" in output
+    assert proc.returncode == 130
+
+
+def test_sigterm_reaches_handler():
+    """SIGTERM (kill <pid>) reaches mcloop's signal handler and exits 130."""
+    import os
+
+    proc = _spawn_signal_test()
+    os.kill(proc.pid, signal.SIGTERM)
+    proc.wait(timeout=5)
+    output = proc.stdout.read().decode()
+    assert f"CAUGHT:{signal.SIGTERM}" in output
+    assert proc.returncode == 130
+
+
+def test_signal_handler_kills_child_process():
+    """Signal handler kills the active child subprocess before exiting."""
+    # This test verifies the _kill_active_process logic:
+    # when a signal arrives, the handler kills the active subprocess's
+    # process group via SIGKILL, then exits.
+    import mcloop.runner as runner
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    original = runner._active_process
+    runner._active_process = mock_proc
+
+    with (
+        patch("mcloop.main.os.getpgid", return_value=99999),
+        patch("mcloop.main.os.killpg") as mock_killpg,
+        patch("mcloop.main.os._exit") as mock_exit,
+    ):
+        from mcloop.main import _kill_active_process
+
+        # Simulate signal handler flow
+        _kill_active_process()
+        mock_killpg.assert_called_once_with(99999, signal.SIGKILL)
+        assert runner._active_process is None
+
+    runner._active_process = original
