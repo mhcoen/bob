@@ -209,12 +209,11 @@ def _build_command(
     cli: str,
     prompt: str | None = None,
     model: str | None = None,
-    use_stdin: bool = False,
     allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
 ) -> list[str]:
     if cli == "claude":
         cmd = ["claude", "-p"]
-        if not use_stdin and prompt:
+        if prompt:
             cmd.append(prompt)
         cmd.extend(
             [
@@ -243,32 +242,10 @@ _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 
 
-def _reclaim_foreground() -> None:
-    """Reclaim the terminal foreground process group.
-
-    After launching a child with start_new_session=True,
-    the child may grab the foreground process group via
-    tcsetpgrp. This makes ctrl-c/ctrl-z go to the child
-    instead of mcloop. We call tcsetpgrp to reassign
-    the foreground group back to our own process group.
-    """
-    try:
-        fd = os.open("/dev/tty", os.O_RDWR)
-    except OSError:
-        return  # no controlling terminal (e.g., CI)
-    try:
-        os.tcsetpgrp(fd, os.getpgrp())
-    except OSError:
-        pass  # not a tty or no permission
-    finally:
-        os.close(fd)
-
-
 def _run_session(
     cmd: list[str],
     cwd: Path,
     env: dict | None = None,
-    stdin_text: str | None = None,
 ) -> tuple[str, int]:
     """Run a CLI session, stream output, return (output, exit_code)."""
     # Strip ANTHROPIC_API_KEY so claude -p uses the
@@ -279,7 +256,7 @@ def _run_session(
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
-        stdin=subprocess.PIPE if stdin_text else None,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -287,7 +264,6 @@ def _run_session(
         start_new_session=True,
     )
     _active_process = process
-    _reclaim_foreground()
     # Write PID file so orphans can be killed on next startup
     pid_dir = cwd / ".mcloop"
     pid_dir.mkdir(exist_ok=True)
@@ -314,10 +290,6 @@ def _run_session(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    if stdin_text and process.stdin:
-        process.stdin.write(stdin_text)
-        process.stdin.close()
-
     if process.stdout is None:
         raise RuntimeError("stdout is None despite stdout=PIPE")
 
@@ -342,7 +314,6 @@ def _run_session(
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
-    last_reclaim = time.monotonic()
     try:
         while True:
             try:
@@ -350,10 +321,6 @@ def _run_session(
                     timeout=PROGRESS_DOT_INTERVAL,
                 )
             except queue.Empty:
-                # Re-assert foreground so ctrl-c reaches mcloop,
-                # not the child which may have stolen it.
-                _reclaim_foreground()
-                last_reclaim = time.monotonic()
                 # Silence. Check for pending approvals.
                 if pending_dir.exists():
                     # Check if a permission was denied
@@ -406,11 +373,7 @@ def _run_session(
                 output_lines = output_lines[-_MAX_OUTPUT_LINES:]
             _print_stream_event(line)
             shown_waiting = False
-            now = time.monotonic()
-            last_dot = now
-            if now - last_reclaim >= PROGRESS_DOT_INTERVAL:
-                _reclaim_foreground()
-                last_reclaim = now
+            last_dot = time.monotonic()
     except KeyboardInterrupt:
         process.kill()
         process.wait()

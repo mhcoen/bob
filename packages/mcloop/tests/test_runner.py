@@ -559,40 +559,26 @@ def test_parse_verification_output_removed_no_reason():
     assert results[0][2] == ""
 
 
-# --- _run_session uses pty ---
+# --- _run_session uses DEVNULL+pipes ---
 
 
-def test_run_session_uses_pty_openpty(tmp_path):
-    """_run_session calls pty.openpty and passes slave fd to Popen."""
-    import os
-
+def test_run_session_uses_devnull_stdin(tmp_path):
+    """_run_session spawns child with stdin=DEVNULL, stdout=PIPE."""
     from mcloop.runner import _run_session
 
-    r_fd, w_fd = os.pipe()
-
-    def fake_openpty():
-        return r_fd, w_fd
-
-    with (
-        patch("mcloop.runner.pty.openpty", side_effect=fake_openpty),
-        patch("mcloop.runner.tty.setraw"),
-        patch("mcloop.runner.subprocess.Popen") as mock_popen,
-        patch("mcloop.runner.os.close"),
-        patch("mcloop.runner.os.read", side_effect=OSError(5, "EIO")),
-    ):
+    with patch("mcloop.runner.subprocess.Popen") as mock_popen:
         proc = mock_popen.return_value
         proc.pid = 12345
         proc.wait.return_value = 0
         proc.returncode = 0
-        output, exitcode = _run_session(["echo", "hi"], cwd=tmp_path)
+        proc.stdout = iter([])
+        _run_session(["echo", "hi"], cwd=tmp_path)
 
-    # First Popen call is the main process (second is the watchdog)
     _, kwargs = mock_popen.call_args_list[0]
-    assert kwargs.get("stdin") == w_fd
-    assert kwargs.get("stdout") == w_fd
-    assert kwargs.get("stderr") == w_fd
-    assert kwargs.get("start_new_session") is True
-    assert exitcode == 0
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.PIPE
+    assert kwargs["stderr"] == subprocess.STDOUT
+    assert kwargs["start_new_session"] is True
 
 
 def test_run_session_no_reclaim_foreground():
@@ -611,6 +597,17 @@ def test_reclaim_foreground_removed():
     import mcloop.runner as runner
 
     assert not hasattr(runner, "_reclaim_foreground")
+
+
+def test_run_session_no_pty_imports():
+    """runner module does not import pty or tty."""
+    import mcloop.runner as runner
+
+    source_file = runner.__file__
+    with open(source_file) as f:
+        source = f.read()
+    assert "import pty" not in source
+    assert "import tty" not in source
 
 
 # --- _SUPPRESS_ALL_TOOLS ---
@@ -1146,252 +1143,69 @@ def test_handle_sigint_exits_130():
         mock_exit.assert_called_once_with(130)
 
 
-# --- Pty-based tests with mock subprocess behind a pty ---
+# --- Pipe-based _run_session tests ---
 
 
-def _mock_run_session(tmp_path, read_side_effect, **extra_popen_attrs):
-    """Helper: run _run_session with fully mocked pty and os calls.
+def _mock_run_session_pipe(tmp_path, output_lines, returncode=0):
+    """Helper: run _run_session with mocked Popen using pipe stdout.
 
     Returns (output, exitcode, mock_popen).
-    read_side_effect controls what os.read returns to the reader thread.
+    output_lines: list of strings the child's stdout yields.
     """
     from mcloop.runner import _run_session
 
-    popen_attrs = {"pid": 12345, "returncode": 0}
-    popen_attrs.update(extra_popen_attrs)
-
-    with (
-        patch("mcloop.runner.pty.openpty", return_value=(10, 11)),
-        patch("mcloop.runner.tty.setraw"),
-        patch("mcloop.runner.subprocess.Popen") as mock_popen,
-        patch("mcloop.runner.os.close"),
-        patch("mcloop.runner.os.read", side_effect=read_side_effect),
-        patch("mcloop.runner.os.write"),
-        patch("mcloop.runner.os.getpgid", return_value=12345),
-    ):
+    with patch("mcloop.runner.subprocess.Popen") as mock_popen:
         proc = mock_popen.return_value
-        for k, v in popen_attrs.items():
-            setattr(proc, k, v)
-        proc.wait.return_value = popen_attrs["returncode"]
-        output, exitcode = _run_session(
-            extra_popen_attrs.pop("cmd", ["echo", "hi"]),
-            cwd=tmp_path,
-            **extra_popen_attrs.pop("session_kwargs", {}),
-        )
+        proc.pid = 12345
+        proc.returncode = returncode
+        proc.wait.return_value = returncode
+        proc.stdout = iter(output_lines)
+        output, exitcode = _run_session(["echo", "hi"], cwd=tmp_path)
     return output, exitcode, mock_popen
 
 
-def test_run_session_pty_stream_json(tmp_path):
-    """stream-json output from a child comes through the pty correctly."""
+def test_run_session_pipe_stream_json(tmp_path):
+    """stream-json output from child comes through pipes correctly."""
     import json
 
     lines = [json.dumps({"type": "stream_event", "index": i}) + "\n" for i in range(3)]
-    payload = "".join(lines).encode()
-    reads = iter([payload, b""])
-
-    output, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=lambda fd, sz: next(reads),
-    )
+    output, exitcode, _ = _mock_run_session_pipe(tmp_path, lines)
 
     assert exitcode == 0
     parsed = []
     for ln in output.strip().splitlines():
-        try:
-            obj = json.loads(ln)
-            if "index" in obj:
-                parsed.append(obj)
-        except (json.JSONDecodeError, ValueError):
-            pass
+        obj = json.loads(ln)
+        if "index" in obj:
+            parsed.append(obj)
     assert len(parsed) == 3
     assert parsed[0]["index"] == 0
     assert parsed[2]["index"] == 2
 
 
-def test_run_session_child_uses_start_new_session(tmp_path):
-    """Child process is spawned with start_new_session=True for isolation."""
-    _, _, mock_popen = _mock_run_session(
-        tmp_path,
-        read_side_effect=OSError(5, "EIO"),
-    )
-    _, kwargs = mock_popen.call_args_list[0]
-    assert kwargs["start_new_session"] is True
-
-
-def test_run_session_pty_multiline_output(tmp_path):
-    """Multiple lines are correctly buffered and split by the reader thread."""
-    payload = "".join(f"line_{i}\n" for i in range(10)).encode()
-    reads = iter([payload, b""])
-
-    output, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=lambda fd, sz: next(reads),
-    )
+def test_run_session_pipe_multiline_output(tmp_path):
+    """Multiple lines are read correctly from pipe stdout."""
+    lines = [f"line_{i}\n" for i in range(10)]
+    output, exitcode, _ = _mock_run_session_pipe(tmp_path, lines)
 
     assert exitcode == 0
     for i in range(10):
         assert f"line_{i}" in output
 
 
-def test_run_session_pty_nonzero_exit(tmp_path):
-    """Non-zero exit code from child is captured correctly through pty."""
-    _, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=OSError(5, "EIO"),
-        returncode=42,
-    )
+def test_run_session_pipe_nonzero_exit(tmp_path):
+    """Non-zero exit code from child is captured correctly."""
+    _, exitcode, _ = _mock_run_session_pipe(tmp_path, [], returncode=42)
     assert exitcode == 42
 
 
-def test_run_session_pty_stdin_text(tmp_path):
-    """stdin_text is written to the master fd via os.write."""
+def test_run_session_no_stdin_text_parameter():
+    """_run_session does not accept a stdin_text parameter."""
+    import inspect
+
     from mcloop.runner import _run_session
 
-    written_data = []
-
-    def capture_write(fd, data):
-        written_data.append((fd, data))
-        return len(data)
-
-    with (
-        patch("mcloop.runner.pty.openpty", return_value=(10, 11)),
-        patch("mcloop.runner.tty.setraw"),
-        patch("mcloop.runner.subprocess.Popen") as mock_popen,
-        patch("mcloop.runner.os.close"),
-        patch("mcloop.runner.os.read", side_effect=OSError(5, "EIO")),
-        patch("mcloop.runner.os.write", side_effect=capture_write),
-        patch("mcloop.runner.os.getpgid", return_value=12345),
-    ):
-        proc = mock_popen.return_value
-        proc.pid = 12345
-        proc.returncode = 0
-        proc.wait.return_value = 0
-        _run_session(["echo"], cwd=tmp_path, stdin_text="hello_pty\n")
-
-    # master_fd is 10; stdin_text should be written there
-    assert any(fd == 10 and b"hello_pty" in data for fd, data in written_data)
-
-
-def test_run_session_slave_fd_closed_in_parent(tmp_path):
-    """Parent closes the slave fd after spawning the child."""
-    from mcloop.runner import _run_session
-
-    closed_fds = []
-
-    def track_close(fd):
-        closed_fds.append(fd)
-
-    with (
-        patch("mcloop.runner.pty.openpty", return_value=(10, 11)),
-        patch("mcloop.runner.tty.setraw"),
-        patch("mcloop.runner.subprocess.Popen") as mock_popen,
-        patch("mcloop.runner.os.close", side_effect=track_close),
-        patch("mcloop.runner.os.read", side_effect=OSError(5, "EIO")),
-        patch("mcloop.runner.os.getpgid", return_value=12345),
-    ):
-        proc = mock_popen.return_value
-        proc.pid = 12345
-        proc.returncode = 0
-        proc.wait.return_value = 0
-        _run_session(["echo"], cwd=tmp_path)
-
-    # slave fd (11) closed first, master fd (10) closed after
-    assert 11 in closed_fds
-    assert 10 in closed_fds
-    assert closed_fds.index(11) < closed_fds.index(10)
-
-
-def test_run_session_slave_set_to_raw_mode(tmp_path):
-    """Slave fd is set to raw mode to avoid line-discipline interference."""
-    from mcloop.runner import _run_session
-
-    with (
-        patch("mcloop.runner.pty.openpty", return_value=(10, 11)),
-        patch("mcloop.runner.tty.setraw") as mock_setraw,
-        patch("mcloop.runner.subprocess.Popen") as mock_popen,
-        patch("mcloop.runner.os.close"),
-        patch("mcloop.runner.os.read", side_effect=OSError(5, "EIO")),
-        patch("mcloop.runner.os.getpgid", return_value=12345),
-    ):
-        proc = mock_popen.return_value
-        proc.pid = 12345
-        proc.returncode = 0
-        proc.wait.return_value = 0
-        _run_session(["echo"], cwd=tmp_path)
-
-    mock_setraw.assert_called_once_with(11)
-
-
-def test_run_session_reader_handles_partial_lines(tmp_path):
-    """Reader thread correctly reassembles data arriving in chunks."""
-    chunks = iter(
-        [
-            b'{"type": "stre',
-            b'am_event"}\n',
-            b"",
-        ]
-    )
-
-    output, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=lambda fd, sz: next(chunks),
-    )
-
-    assert '{"type": "stream_event"}' in output
-
-
-def test_run_session_reader_handles_eio(tmp_path):
-    """Reader thread treats EIO as end-of-stream (child closed pty)."""
-    import errno
-
-    call_count = [0]
-
-    def mock_read(fd, size):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return b"first_line\n"
-        raise OSError(errno.EIO, "EIO")
-
-    output, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=mock_read,
-    )
-
-    assert "first_line" in output
-    assert exitcode == 0
-
-
-def test_run_session_reader_handles_ebadf(tmp_path):
-    """Reader thread treats EBADF as end-of-stream."""
-    import errno
-
-    call_count = [0]
-
-    def mock_read(fd, size):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return b"data_line\n"
-        raise OSError(errno.EBADF, "EBADF")
-
-    output, exitcode, _ = _mock_run_session(
-        tmp_path,
-        read_side_effect=mock_read,
-    )
-
-    assert "data_line" in output
-    assert exitcode == 0
-
-
-def test_run_session_slave_fd_passed_to_child(tmp_path):
-    """Slave fd is used as stdin/stdout/stderr for the child process."""
-    _, _, mock_popen = _mock_run_session(
-        tmp_path,
-        read_side_effect=OSError(5, "EIO"),
-    )
-    _, kwargs = mock_popen.call_args_list[0]
-    assert kwargs["stdin"] == 11
-    assert kwargs["stdout"] == 11
-    assert kwargs["stderr"] == 11
+    sig = inspect.signature(_run_session)
+    assert "stdin_text" not in sig.parameters
 
 
 # --- Signal handling integration tests ---
@@ -1424,8 +1238,6 @@ time.sleep(30)
 
 def _spawn_signal_test():
     """Spawn a subprocess running the signal test script."""
-    import os
-
     proc = subprocess.Popen(
         [sys.executable, "-u", "-c", _SIGNAL_TEST_SCRIPT],
         stdout=subprocess.PIPE,
@@ -1490,7 +1302,7 @@ def test_signal_handler_kills_child_process():
     with (
         patch("mcloop.main.os.getpgid", return_value=99999),
         patch("mcloop.main.os.killpg") as mock_killpg,
-        patch("mcloop.main.os._exit") as mock_exit,
+        patch("mcloop.main.os._exit"),
     ):
         from mcloop.main import _kill_active_process
 
