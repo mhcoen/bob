@@ -37,6 +37,7 @@ from mcloop.main import (
     _cmd_install,
     _install_hooks,
     _maybe_auto_wrap,
+    _merge_settings,
     _parse_args,
     _reinject_wrappers,
     _save_interrupt_state,
@@ -207,9 +208,9 @@ def test_install_prints_claude_version(tmp_path, capsys):
         patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
         patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
     ):
-        with pytest.raises(SystemExit):
-            _cmd_install(tmp_path)
+        _cmd_install(tmp_path)
     out = capsys.readouterr().out
     assert "Found claude: claude 1.2.3" in out
 
@@ -233,9 +234,9 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         patch("mcloop.main.shutil.which", return_value="/opt/bin/claude"),
         patch("subprocess.run", return_value=proc) as mock_run,
         patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
     ):
-        with pytest.raises(SystemExit):
-            _cmd_install(tmp_path)
+        _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
         ["/opt/bin/claude", "--version"],
         capture_output=True,
@@ -350,6 +351,146 @@ def test_install_hooks_warns_missing_source(tmp_path, capsys):
 
     err = capsys.readouterr().err
     assert "Warning: hook source not found" in err
+
+
+# --- _merge_settings ---
+
+
+def test_merge_settings_creates_new_file(tmp_path, capsys):
+    """Creates settings.json when it doesn't exist."""
+    home = tmp_path / "home"
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=False)
+
+    settings_path = home / ".claude" / "settings.json"
+    assert settings_path.exists()
+    data = json.loads(settings_path.read_text())
+    assert "hooks" in data
+    assert len(data["hooks"]["PreToolUse"]) == 1
+    assert len(data["hooks"]["SessionStart"]) == 1
+    assert "telegram-permission-hook.py" in data["hooks"]["PreToolUse"][0]["command"]
+    assert "session-start-hook.py" in data["hooks"]["SessionStart"][0]["command"]
+
+    out = capsys.readouterr().out
+    assert "added:" in out
+
+
+def test_merge_settings_preserves_existing(tmp_path, capsys):
+    """Preserves existing settings and adds hook entries."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps({"permissions": {"allow": ["Read"]}}))
+
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=False)
+
+    data = json.loads(settings_path.read_text())
+    assert data["permissions"] == {"allow": ["Read"]}
+    assert "hooks" in data
+    assert len(data["hooks"]["PreToolUse"]) == 1
+
+
+def test_merge_settings_skips_existing_entries(tmp_path, capsys):
+    """Skips hook entries that already exist."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "type": "command",
+                    "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+                },
+            ],
+            "SessionStart": [
+                {
+                    "type": "command",
+                    "command": "python3 ~/.mcloop/hooks/session-start-hook.py",
+                },
+            ],
+        },
+    }
+    settings_path.write_text(json.dumps(existing))
+
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=False)
+
+    data = json.loads(settings_path.read_text())
+    # Should not duplicate
+    assert len(data["hooks"]["PreToolUse"]) == 1
+    assert len(data["hooks"]["SessionStart"]) == 1
+
+    out = capsys.readouterr().out
+    assert "skip (exists):" in out
+
+
+def test_merge_settings_keeps_other_hooks(tmp_path):
+    """Preserves existing hook entries from other tools."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {"type": "command", "command": "other-hook.sh"},
+            ],
+        },
+    }
+    settings_path.write_text(json.dumps(existing))
+
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=False)
+
+    data = json.loads(settings_path.read_text())
+    commands = [e["command"] for e in data["hooks"]["PreToolUse"]]
+    assert "other-hook.sh" in commands
+    assert "python3 ~/.mcloop/hooks/telegram-permission-hook.py" in commands
+    assert len(data["hooks"]["PreToolUse"]) == 2
+
+
+def test_merge_settings_dry_run(tmp_path, capsys):
+    """Dry run prints what would be added but doesn't write."""
+    home = tmp_path / "home"
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=True)
+
+    settings_path = home / ".claude" / "settings.json"
+    assert not settings_path.exists()
+
+    out = capsys.readouterr().out
+    assert "would add:" in out
+
+
+def test_merge_settings_invalid_json(tmp_path, capsys):
+    """Exits with error on invalid JSON."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("{broken")
+
+    with patch.object(Path, "home", return_value=home):
+        with pytest.raises(SystemExit) as exc:
+            _merge_settings(dry_run=False)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "invalid JSON" in err
+
+
+def test_merge_settings_not_object(tmp_path, capsys):
+    """Exits with error when settings.json is not a JSON object."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text('"just a string"')
+
+    with patch.object(Path, "home", return_value=home):
+        with pytest.raises(SystemExit) as exc:
+            _merge_settings(dry_run=False)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "not a JSON object" in err
 
 
 # --- _run_audit_fix_cycle ---

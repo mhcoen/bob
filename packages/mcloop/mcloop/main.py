@@ -1049,10 +1049,7 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     print(f"Found claude: {version}")
 
     _install_hooks(dry_run=dry_run)
-
-    # TODO: remaining install steps
-    print("install: remaining steps not yet implemented", file=sys.stderr)
-    sys.exit(1)
+    _merge_settings(dry_run=dry_run)
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)
@@ -1090,6 +1087,71 @@ def _install_hooks(*, dry_run: bool = False) -> None:
         else:
             shutil.copy2(src, dest)
             print(f"  copied: {dest}")
+
+
+# Hook entries to merge into ~/.claude/settings.json
+_HOOK_ENTRIES = {
+    "hooks": {
+        "PreToolUse": [
+            {
+                "type": "command",
+                "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+            },
+        ],
+        "SessionStart": [
+            {
+                "type": "command",
+                "command": "python3 ~/.mcloop/hooks/session-start-hook.py",
+            },
+        ],
+    },
+}
+
+
+def _merge_settings(*, dry_run: bool = False) -> None:
+    """Merge mcloop hook entries into ~/.claude/settings.json."""
+    settings_path = Path.home() / ".claude" / "settings.json"
+
+    if settings_path.exists():
+        raw = settings_path.read_text()
+        try:
+            settings = _json.loads(raw)
+        except _json.JSONDecodeError:
+            print(
+                f"Error: {settings_path} contains invalid JSON.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        settings = {}
+
+    if not isinstance(settings, dict):
+        print(
+            f"Error: {settings_path} is not a JSON object.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    hooks = settings.setdefault("hooks", {})
+    changed = False
+
+    for event_name, entries in _HOOK_ENTRIES["hooks"].items():
+        existing = hooks.setdefault(event_name, [])
+        existing_commands = {e.get("command") for e in existing if isinstance(e, dict)}
+        for entry in entries:
+            if entry["command"] in existing_commands:
+                print(f"  skip (exists): hooks.{event_name}: {entry['command']}")
+            else:
+                if dry_run:
+                    print(f"  would add: hooks.{event_name}: {entry['command']}")
+                else:
+                    existing.append(entry)
+                    print(f"  added: hooks.{event_name}: {entry['command']}")
+                changed = True
+
+    if changed and not dry_run:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
 
 
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
