@@ -29,8 +29,10 @@ mcloop to build it.
 When you test the result and find things missing or wrong, drop more
 reference material into the directory (a screenshot showing the right
 colors, a PDF of the full docs, notes about what to fix) and run
-`duplo` again. It detects the new files, re-analyzes, and appends
-tasks to the plan for anything that was missed.
+`duplo` again. It detects the new files, re-scrapes the original
+product URL to pick up any site changes, re-extracts features from
+the updated content, and appends tasks to the plan for anything that
+was missed.
 
 The cycle is: run duplo to generate the plan, run mcloop to build
 it, test, add more reference material if needed, run duplo again.
