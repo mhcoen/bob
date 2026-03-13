@@ -1053,6 +1053,7 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     _setup_telegram(dry_run=dry_run)
     _setup_api_key(dry_run=dry_run)
     _setup_sandbox(dry_run=dry_run)
+    _install_recommended_permissions(dry_run=dry_run)
 
 
 _TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
@@ -1233,6 +1234,55 @@ def _setup_sandbox(*, dry_run: bool = False) -> None:
         settings_path.write_text(_json.dumps(settings, indent=2) + "\n")
     print("  Sandbox: enabled.")
     print(f"  Saved to {settings_path}")
+
+
+_RECOMMENDED_PERMS_DEST = Path.home() / ".mcloop" / "recommended-permissions.json"
+
+
+def _install_recommended_permissions(*, dry_run: bool = False) -> None:
+    """Install recommended permissions baseline for manual merging."""
+    repo_root = Path(__file__).resolve().parent.parent
+    src = repo_root / "settings.example.json"
+
+    if not src.exists():
+        print(
+            f"Warning: settings.example.json not found: {src}",
+            file=sys.stderr,
+        )
+        return
+
+    raw = src.read_text()
+    try:
+        example = _json.loads(raw)
+    except _json.JSONDecodeError:
+        print(
+            f"Warning: settings.example.json contains invalid JSON: {src}",
+            file=sys.stderr,
+        )
+        return
+
+    perms = example.get("permissions", {})
+    if not isinstance(perms, dict):
+        perms = {}
+
+    allow = perms.get("allow", [])
+    recommended = {"permissions": {"allow": allow}}
+
+    dest = _RECOMMENDED_PERMS_DEST
+    if dry_run:
+        print(f"  would write: {dest}")
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(_json.dumps(recommended, indent=2) + "\n")
+        print(f"  installed: {dest}")
+
+    print(
+        "\n  McLoop does not modify runtime permissions."
+        "\n  Recommended permission settings are provided in:"
+        f"\n    {dest}"
+        "\n  Merge them into ~/.claude/settings.json manually"
+        "\n  if desired.\n"
+    )
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)

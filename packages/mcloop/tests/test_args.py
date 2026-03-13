@@ -36,6 +36,7 @@ from mcloop.main import (
     _check_user_input,
     _cmd_install,
     _install_hooks,
+    _install_recommended_permissions,
     _load_mcloop_config,
     _maybe_auto_wrap,
     _merge_settings,
@@ -216,6 +217,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -245,6 +247,7 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
@@ -693,6 +696,7 @@ def test_cmd_install_calls_setup_telegram(tmp_path):
         patch("mcloop.main._setup_telegram") as mock_tg,
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path)
     mock_tg.assert_called_once_with(dry_run=False)
@@ -709,6 +713,7 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
         patch("mcloop.main._setup_telegram") as mock_tg,
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_tg.assert_called_once_with(dry_run=True)
@@ -810,6 +815,7 @@ def test_cmd_install_calls_setup_api_key(tmp_path):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key") as mock_ak,
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path)
     mock_ak.assert_called_once_with(dry_run=False)
@@ -826,6 +832,7 @@ def test_cmd_install_passes_dry_run_to_setup_api_key(tmp_path):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key") as mock_ak,
         patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_ak.assert_called_once_with(dry_run=True)
@@ -985,6 +992,7 @@ def test_cmd_install_calls_setup_sandbox(tmp_path):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox") as mock_sb,
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path)
     mock_sb.assert_called_once_with(dry_run=False)
@@ -1001,9 +1009,160 @@ def test_cmd_install_passes_dry_run_to_setup_sandbox(tmp_path):
         patch("mcloop.main._setup_telegram"),
         patch("mcloop.main._setup_api_key"),
         patch("mcloop.main._setup_sandbox") as mock_sb,
+        patch("mcloop.main._install_recommended_permissions"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_sb.assert_called_once_with(dry_run=True)
+
+
+# --- _install_recommended_permissions ---
+
+
+def _setup_perms(tmp_path, example_content=None):
+    """Create a fake repo root for recommended permissions tests."""
+    repo_root = tmp_path / "repo"
+    fake_mcloop_dir = repo_root / "mcloop"
+    fake_mcloop_dir.mkdir(parents=True)
+    (fake_mcloop_dir / "main.py").write_text("")
+    if example_content is not None:
+        (repo_root / "settings.example.json").write_text(example_content)
+    return repo_root, fake_mcloop_dir
+
+
+def test_install_recommended_permissions_writes_file(tmp_path, capsys):
+    """Writes recommended-permissions.json from settings.example.json."""
+    repo_root, fake_mcloop_dir = _setup_perms(
+        tmp_path,
+        json.dumps(
+            {
+                "permissions": {"allow": ["Bash(git:*)", "WebSearch"]},
+                "sandbox": {"enabled": True},
+            }
+        ),
+    )
+    dest = tmp_path / "recommended-permissions.json"
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+            _install_recommended_permissions(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+    assert dest.exists()
+    content = json.loads(dest.read_text())
+    assert content == {"permissions": {"allow": ["Bash(git:*)", "WebSearch"]}}
+    out = capsys.readouterr().out
+    assert "installed:" in out
+    assert "does not modify runtime permissions" in out
+
+
+def test_install_recommended_permissions_dry_run(tmp_path, capsys):
+    """Dry run prints what would be written."""
+    repo_root, fake_mcloop_dir = _setup_perms(
+        tmp_path,
+        json.dumps({"permissions": {"allow": ["Bash(git:*)"]}}),
+    )
+    dest = tmp_path / "recommended-permissions.json"
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+            _install_recommended_permissions(dry_run=True)
+    finally:
+        main_mod.__file__ = orig_file
+    assert not dest.exists()
+    out = capsys.readouterr().out
+    assert "would write:" in out
+    assert "does not modify runtime permissions" in out
+
+
+def test_install_recommended_permissions_missing_example(tmp_path, capsys):
+    """Warns when settings.example.json is missing."""
+    repo_root, fake_mcloop_dir = _setup_perms(tmp_path)
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        _install_recommended_permissions(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+    err = capsys.readouterr().err
+    assert "settings.example.json not found" in err
+
+
+def test_install_recommended_permissions_invalid_json(tmp_path, capsys):
+    """Warns on invalid JSON in settings.example.json."""
+    repo_root, fake_mcloop_dir = _setup_perms(tmp_path, "not json")
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        _install_recommended_permissions(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+    err = capsys.readouterr().err
+    assert "invalid JSON" in err
+
+
+def test_install_recommended_permissions_no_permissions_key(tmp_path, capsys):
+    """Handles missing permissions key gracefully."""
+    repo_root, fake_mcloop_dir = _setup_perms(
+        tmp_path,
+        json.dumps({"sandbox": {"enabled": True}}),
+    )
+    dest = tmp_path / "recommended-permissions.json"
+    import mcloop.main as main_mod
+
+    orig_file = main_mod.__file__
+    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    try:
+        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+            _install_recommended_permissions(dry_run=False)
+    finally:
+        main_mod.__file__ = orig_file
+    assert dest.exists()
+    content = json.loads(dest.read_text())
+    assert content == {"permissions": {"allow": []}}
+
+
+def test_cmd_install_calls_install_recommended_permissions(tmp_path):
+    """_cmd_install calls _install_recommended_permissions."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions") as mock_rp,
+    ):
+        _cmd_install(tmp_path)
+    mock_rp.assert_called_once_with(dry_run=False)
+
+
+def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
+    """_cmd_install passes dry_run to _install_recommended_permissions."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions") as mock_rp,
+    ):
+        _cmd_install(tmp_path, dry_run=True)
+    mock_rp.assert_called_once_with(dry_run=True)
 
 
 def test_load_mcloop_config_missing(tmp_path):
