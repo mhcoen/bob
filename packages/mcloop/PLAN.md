@@ -258,7 +258,7 @@ The debugging playbook this enforces:
 
 - [ ] `mcloop install` and `mcloop uninstall` subcommands
   - [x] Add `install` and `uninstall` subcommands to the argument parser, both with `--dry-run` flags
-  - [ ] `install`: check that `claude` is on PATH, print version, stop with instructions if missing
+  - [x] `install`: check that `claude` is on PATH, print version, stop with instructions if missing
   - [ ] `install`: copy hook scripts (Telegram permission hook, session-start hook) to `~/.mcloop/hooks/`. Skip if already present.
   - [ ] `install`: read `~/.claude/settings.json`, merge in PreToolUse and SessionStart hook entries pointing at `~/.mcloop/hooks/`. Skip entries that already exist. Preserve all other settings in the file.
   - [ ] `install`: check for Telegram credentials. If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set in the environment, print that they will be used and skip prompting. If `~/.claude/telegram-hook.env` exists, print that existing credentials will be used and skip prompting. Otherwise, prompt interactively for bot token and chat ID and write `~/.claude/telegram-hook.env`. Print a recommendation to install the Telegram Desktop app alongside the mobile app.
