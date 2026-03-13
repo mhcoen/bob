@@ -280,8 +280,9 @@ Tasks within a single run share a rolling session context. After each task
 completes, McLoop summarizes what changed, including which files were
 created or modified, and feeds that summary into the next task's prompt.
 This gives later tasks awareness of what earlier tasks did without
-carrying over the full conversation history. The context resets when you
-restart McLoop.
+carrying over the full conversation history. This rolling summary
+resets when you restart McLoop, though McLoop does remember what it
+was doing if interrupted (see [Interrupting and resuming](#interrupting-and-resuming)).
 
 Each task is numbered (e.g., "Task 3.2)") and shows progress dots as the
 session works. Tool output is suppressed to keep the terminal clean. Elapsed
