@@ -706,7 +706,7 @@ def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
         ) as mock_tg,
         patch(
             "mcloop.main._remove_hooks_dir",
-            return_value=("hooks directory", "removed"),
+            return_value=[("hooks directory", "removed")],
         ) as mock_hooks,
         patch(
             "mcloop.main._remove_config_json",
@@ -748,7 +748,7 @@ def test_cmd_uninstall_dry_run(tmp_path, capsys):
         ) as mock_tg,
         patch(
             "mcloop.main._remove_hooks_dir",
-            return_value=("hooks directory", "would remove"),
+            return_value=[("hooks directory", "would remove")],
         ) as mock_hooks,
         patch(
             "mcloop.main._remove_config_json",
@@ -783,7 +783,7 @@ def test_cmd_uninstall_skipped_items(tmp_path, capsys):
         ),
         patch(
             "mcloop.main._remove_hooks_dir",
-            return_value=("hooks directory", "skipped (not found)"),
+            return_value=[("hooks directory", "skipped (not found)")],
         ),
         patch(
             "mcloop.main._remove_config_json",
@@ -815,7 +815,7 @@ def test_cmd_uninstall_mixed_results(tmp_path, capsys):
         ),
         patch(
             "mcloop.main._remove_hooks_dir",
-            return_value=("hooks directory", "removed"),
+            return_value=[("hooks directory", "removed")],
         ),
         patch(
             "mcloop.main._remove_config_json",
@@ -880,10 +880,10 @@ def test_remove_hooks_dir_exists(tmp_path, capsys):
     fake_hooks.mkdir()
     (fake_hooks / "some-hook.py").write_text("# hook\n")
     with patch("mcloop.main.Path.home", return_value=fake_home):
-        component, status = _remove_hooks_dir()
+        results = _remove_hooks_dir()
     assert not fake_hooks.exists()
-    assert status == "removed"
-    assert component == "hooks directory"
+    assert len(results) == 1
+    assert results[0] == ("hooks directory", "removed")
     assert "Removed" in capsys.readouterr().out
 
 
@@ -892,22 +892,43 @@ def test_remove_hooks_dir_not_found(tmp_path, capsys):
     fake_home = tmp_path / "fake_home"
     fake_home.mkdir()
     with patch("mcloop.main.Path.home", return_value=fake_home):
-        component, status = _remove_hooks_dir()
-    assert "not found" in status
+        results = _remove_hooks_dir()
+    assert len(results) == 1
+    assert "not found" in results[0][1]
     assert "not found" in capsys.readouterr().out
 
 
 def test_remove_hooks_dir_dry_run(tmp_path, capsys):
-    """Dry run prints but does not delete."""
+    """Dry run lists each file and does not delete."""
     fake_home = tmp_path / "fake_home"
     fake_hooks = fake_home / ".mcloop" / "hooks"
     fake_hooks.mkdir(parents=True)
-    (fake_hooks / "hook.py").write_text("# hook\n")
+    (fake_hooks / "hook-a.py").write_text("# a\n")
+    (fake_hooks / "hook-b.py").write_text("# b\n")
     with patch("mcloop.main.Path.home", return_value=fake_home):
-        component, status = _remove_hooks_dir(dry_run=True)
+        results = _remove_hooks_dir(dry_run=True)
     assert fake_hooks.exists()
-    assert "would remove" in status
-    assert "Would remove" in capsys.readouterr().out
+    assert len(results) == 2
+    names = {c for c, _ in results}
+    assert "hooks/hook-a.py" in names
+    assert "hooks/hook-b.py" in names
+    for _, status in results:
+        assert status == "would remove"
+    out = capsys.readouterr().out
+    assert "Would delete" in out
+    assert "hook-a.py" in out
+    assert "hook-b.py" in out
+
+
+def test_remove_hooks_dir_dry_run_empty(tmp_path, capsys):
+    """Dry run on empty hooks dir reports the directory itself."""
+    fake_home = tmp_path / "fake_home"
+    fake_hooks = fake_home / ".mcloop" / "hooks"
+    fake_hooks.mkdir(parents=True)
+    with patch("mcloop.main.Path.home", return_value=fake_home):
+        results = _remove_hooks_dir(dry_run=True)
+    assert results == [("hooks directory", "would remove")]
+    assert "empty" in capsys.readouterr().out
 
 
 # --- _remove_config_json ---

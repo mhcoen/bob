@@ -1589,19 +1589,29 @@ def _remove_telegram_env(*, dry_run: bool = False) -> tuple[str, str]:
     return (component, "removed")
 
 
-def _remove_hooks_dir(*, dry_run: bool = False) -> tuple[str, str]:
+def _remove_hooks_dir(
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
     """Remove ~/.mcloop/hooks/ directory."""
-    component = "hooks directory"
     hooks_dir = Path.home() / ".mcloop" / "hooks"
     if not hooks_dir.exists():
         print(f"  {hooks_dir}: not found, nothing to remove")
-        return (component, "skipped (not found)")
+        return [("hooks directory", "skipped (not found)")]
     if dry_run:
-        print(f"  Would remove {hooks_dir}")
-        return (component, "would remove")
+        files = sorted(hooks_dir.rglob("*"))
+        if files:
+            for f in files:
+                if f.is_file():
+                    print(f"  Would delete {f}")
+        else:
+            print(f"  Would remove {hooks_dir} (empty)")
+        return [
+            (f"hooks/{f.relative_to(hooks_dir)}", "would remove") for f in files if f.is_file()
+        ] or [("hooks directory", "would remove")]
     shutil.rmtree(hooks_dir)
     print(f"  Removed {hooks_dir}")
-    return (component, "removed")
+    return [("hooks directory", "removed")]
 
 
 def _remove_config_json(*, dry_run: bool = False) -> tuple[str, str]:
@@ -1681,7 +1691,7 @@ def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     print("\nRemoving Telegram credentials...")
     summary.append(_remove_telegram_env(dry_run=dry_run))
     print("\nRemoving hooks directory...")
-    summary.append(_remove_hooks_dir(dry_run=dry_run))
+    summary.extend(_remove_hooks_dir(dry_run=dry_run))
     print("\nRemoving config.json...")
     summary.append(_remove_config_json(dry_run=dry_run))
     print("\nRemoving recommended-permissions.json...")
