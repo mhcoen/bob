@@ -36,11 +36,13 @@ from mcloop.main import (
     _check_user_input,
     _cmd_install,
     _install_hooks,
+    _load_mcloop_config,
     _maybe_auto_wrap,
     _merge_settings,
     _parse_args,
     _reinject_wrappers,
     _save_interrupt_state,
+    _setup_api_key,
     _setup_telegram,
     _write_eliminated_json,
     _write_ruledout_to_plan,
@@ -211,6 +213,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -238,6 +241,7 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
     ):
         _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
@@ -684,6 +688,7 @@ def test_cmd_install_calls_setup_telegram(tmp_path):
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram") as mock_tg,
+        patch("mcloop.main._setup_api_key"),
     ):
         _cmd_install(tmp_path)
     mock_tg.assert_called_once_with(dry_run=False)
@@ -698,9 +703,149 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
         patch("mcloop.main._setup_telegram") as mock_tg,
+        patch("mcloop.main._setup_api_key"),
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_tg.assert_called_once_with(dry_run=True)
+
+
+# --- _setup_api_key ---
+
+
+def test_setup_api_key_existing_config_keep(tmp_path, capsys):
+    """Prints existing choice when config says keep."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"keep_anthropic_api_key": True}))
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "keep (use API credits)" in out
+
+
+def test_setup_api_key_existing_config_strip(tmp_path, capsys):
+    """Prints existing choice when config says strip."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"keep_anthropic_api_key": False}))
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "strip (use subscription)" in out
+
+
+def test_setup_api_key_default_no(tmp_path, capsys):
+    """Empty input defaults to strip (no)."""
+    cfg = tmp_path / "config.json"
+    with (
+        patch("mcloop.main._MCLOOP_CONFIG", cfg),
+        patch("builtins.input", return_value=""),
+    ):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "strip (use subscription)" in out
+    saved = json.loads(cfg.read_text())
+    assert saved["keep_anthropic_api_key"] is False
+
+
+def test_setup_api_key_yes(tmp_path, capsys):
+    """Answering yes keeps the key."""
+    cfg = tmp_path / "config.json"
+    with (
+        patch("mcloop.main._MCLOOP_CONFIG", cfg),
+        patch("builtins.input", return_value="y"),
+    ):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "keep (use API credits)" in out
+    saved = json.loads(cfg.read_text())
+    assert saved["keep_anthropic_api_key"] is True
+
+
+def test_setup_api_key_eof(tmp_path, capsys):
+    """EOFError defaults to strip."""
+    cfg = tmp_path / "config.json"
+    with (
+        patch("mcloop.main._MCLOOP_CONFIG", cfg),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "strip (use subscription)" in out
+
+
+def test_setup_api_key_ctrl_c(tmp_path, capsys):
+    """KeyboardInterrupt defaults to strip."""
+    cfg = tmp_path / "config.json"
+    with (
+        patch("mcloop.main._MCLOOP_CONFIG", cfg),
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+    ):
+        _setup_api_key(dry_run=False)
+    out = capsys.readouterr().out
+    assert "strip" in out.lower() or "default" in out.lower()
+
+
+def test_setup_api_key_dry_run(tmp_path, capsys):
+    """Dry run skips prompt."""
+    cfg = tmp_path / "config.json"
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        _setup_api_key(dry_run=True)
+    out = capsys.readouterr().out
+    assert "dry run" in out
+    assert not cfg.exists()
+
+
+def test_cmd_install_calls_setup_api_key(tmp_path):
+    """_cmd_install calls _setup_api_key."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key") as mock_ak,
+    ):
+        _cmd_install(tmp_path)
+    mock_ak.assert_called_once_with(dry_run=False)
+
+
+def test_cmd_install_passes_dry_run_to_setup_api_key(tmp_path):
+    """_cmd_install passes dry_run to _setup_api_key."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key") as mock_ak,
+    ):
+        _cmd_install(tmp_path, dry_run=True)
+    mock_ak.assert_called_once_with(dry_run=True)
+
+
+def test_load_mcloop_config_missing(tmp_path):
+    """Returns empty dict when config file doesn't exist."""
+    cfg = tmp_path / "config.json"
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        assert _load_mcloop_config() == {}
+
+
+def test_load_mcloop_config_invalid_json(tmp_path):
+    """Returns empty dict on invalid JSON."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text("not json")
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        assert _load_mcloop_config() == {}
+
+
+def test_load_mcloop_config_valid(tmp_path):
+    """Returns parsed config."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"keep_anthropic_api_key": True}))
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        result = _load_mcloop_config()
+    assert result == {"keep_anthropic_api_key": True}
 
 
 # --- _run_audit_fix_cycle ---

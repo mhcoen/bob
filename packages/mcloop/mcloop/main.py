@@ -1051,6 +1051,7 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     _install_hooks(dry_run=dry_run)
     _merge_settings(dry_run=dry_run)
     _setup_telegram(dry_run=dry_run)
+    _setup_api_key(dry_run=dry_run)
 
 
 _TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
@@ -1110,6 +1111,55 @@ def _setup_telegram(*, dry_run: bool = False) -> None:
     )
     print(f"  Saved credentials to {_TELEGRAM_ENV_FILE}")
     print(_TELEGRAM_DESKTOP_MSG)
+
+
+_MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
+
+
+def _load_mcloop_config() -> dict:
+    """Load ~/.mcloop/config.json, returning {} if missing or invalid."""
+    if not _MCLOOP_CONFIG.exists():
+        return {}
+    try:
+        return _json.loads(_MCLOOP_CONFIG.read_text())
+    except (_json.JSONDecodeError, OSError):
+        return {}
+
+
+def _setup_api_key(*, dry_run: bool = False) -> None:
+    """Ask whether to keep ANTHROPIC_API_KEY. Default is no."""
+    config = _load_mcloop_config()
+    if "keep_anthropic_api_key" in config:
+        choice = config["keep_anthropic_api_key"]
+        label = "keep (use API credits)" if choice else "strip (use subscription)"
+        print(f"ANTHROPIC_API_KEY: {label} (from {_MCLOOP_CONFIG})")
+        return
+
+    print(
+        "\nANTHROPIC_API_KEY handling:"
+        "\n  By default, mcloop strips ANTHROPIC_API_KEY from the environment"
+        "\n  so Claude Code uses your subscription instead of billing API credits."
+        "\n  If you want to use API credits instead, answer yes.\n"
+    )
+
+    if dry_run:
+        print("  (dry run: skipping interactive prompt)")
+        return
+
+    try:
+        answer = input("  Keep ANTHROPIC_API_KEY? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSkipped: using default (strip key).")
+        answer = ""
+
+    keep = answer in ("y", "yes")
+    label = "keep (use API credits)" if keep else "strip (use subscription)"
+    print(f"  ANTHROPIC_API_KEY: {label}")
+
+    config["keep_anthropic_api_key"] = keep
+    _MCLOOP_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    _MCLOOP_CONFIG.write_text(_json.dumps(config, indent=2) + "\n")
+    print(f"  Saved to {_MCLOOP_CONFIG}")
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)

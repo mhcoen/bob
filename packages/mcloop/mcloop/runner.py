@@ -262,10 +262,13 @@ def _run_session(
     env: dict | None = None,
 ) -> tuple[str, int]:
     """Run a CLI session, stream output, return (output, exit_code)."""
-    # Strip ANTHROPIC_API_KEY so claude -p uses the
-    # subscription instead of billing API credits.
     session_env = dict(env or os.environ)
-    session_env.pop("ANTHROPIC_API_KEY", None)
+    # Strip ANTHROPIC_API_KEY so claude -p uses the subscription
+    # instead of billing API credits — unless the user opted to keep it.
+    from mcloop.main import _load_mcloop_config
+
+    if not _load_mcloop_config().get("keep_anthropic_api_key", False):
+        session_env.pop("ANTHROPIC_API_KEY", None)
     _last_output_lines.clear()
     global _active_process
     process = subprocess.Popen(
