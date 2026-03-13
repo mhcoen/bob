@@ -185,7 +185,10 @@ the next phase:
 5. **Plan generation.** Generates a PLAN.md scoped to the selected
    features and issues. Every task line is annotated with
    `[feat: ...]` or `[fix: ...]` so the next phase completion can
-   track status deterministically.
+   track status deterministically. Parent tasks whose subtasks are
+   all specific enough to execute without design decisions are
+   marked with `[BATCH]` so McLoop combines the subtasks into a
+   single session for efficiency.
 
 ### Non-destructive updates
 

@@ -28,6 +28,15 @@ Rules for the plan:
 - Later phases should build incrementally on existing code.
 - Aim for 5-15 checklist items per phase.
 - Use subtasks (indented items) for complex items.
+- When a parent task has multiple subtasks that are all specific
+  enough to be executed without design decisions (file paths,
+  function names, explicit conditionals, concrete values), mark
+  the parent with [BATCH] so McLoop combines them into a single
+  session. Do NOT use [BATCH] on tasks whose subtasks require
+  significant design decisions or architectural exploration.
+  Do NOT use [BATCH] if any subtask is marked [USER] or [AUTO];
+  McLoop handles this automatically by stopping the batch at
+  those boundaries, but the intent should be clear in the plan.
 - The description at the top of PLAN.md should include the
   platform, language, build system, and any constraints.
 - If visual design requirements are provided, include them
@@ -54,8 +63,10 @@ Format:
 <Description with platform, language, constraints, and phase goal.>
 
 - [ ] Set up project structure and build system
-- [ ] Add user login form [feat: "User authentication"]
-  - [ ] Subtask if needed
+- [ ] [BATCH] Add user authentication [feat: "User authentication"]
+  - [ ] Create `AuthService.swift` with `login(email:password:)` and `signup(email:password:)` methods
+  - [ ] Add `LoginView.swift` with email/password fields and submit button
+  - [ ] Wire `AuthService` into the app lifecycle, store session token in Keychain
 - [ ] Fix input validation on signup [fix: "email format not checked"]
 - [ ] ...
 
@@ -99,6 +110,10 @@ for a developer to act on without ambiguity.
   Steps that fix bugs or visual issues use [fix: "description"].
   Scaffolding or structural steps that do not map to any feature
   use no annotation.
+- When a step has multiple subtasks that are all specific enough
+  to be executed without design decisions, mark the parent step
+  with [BATCH] so McLoop combines the subtasks into a single
+  session for efficiency.
 
 ## Success criteria
 A checklist of observable outcomes that confirm this phase is complete and working.
