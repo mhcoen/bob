@@ -33,6 +33,7 @@ from mcloop.main import (
     _HOOK_SCRIPTS,
     _all_tasks,
     _check_interrupted,
+    _check_rtk,
     _check_user_input,
     _cmd_install,
     _install_hooks,
@@ -1163,6 +1164,43 @@ def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
     ):
         _cmd_install(tmp_path, dry_run=True)
     mock_rp.assert_called_once_with(dry_run=True)
+
+
+# --- _check_rtk ---
+
+
+def test_check_rtk_found(capsys):
+    """Prints note when rtk is on PATH."""
+    with patch("mcloop.main.shutil.which", return_value="/usr/local/bin/rtk"):
+        _check_rtk()
+    out = capsys.readouterr().out
+    assert "RTK detected" in out
+    assert "rtk init" in out
+
+
+def test_check_rtk_not_found(capsys):
+    """Prints nothing when rtk is not on PATH."""
+    with patch("mcloop.main.shutil.which", return_value=None):
+        _check_rtk()
+    assert capsys.readouterr().out == ""
+
+
+def test_cmd_install_calls_check_rtk(tmp_path):
+    """_cmd_install calls _check_rtk."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
+        patch("mcloop.main._setup_api_key"),
+        patch("mcloop.main._setup_sandbox"),
+        patch("mcloop.main._install_recommended_permissions"),
+        patch("mcloop.main._check_rtk") as mock_rtk,
+    ):
+        _cmd_install(tmp_path)
+    mock_rtk.assert_called_once()
 
 
 def test_load_mcloop_config_missing(tmp_path):

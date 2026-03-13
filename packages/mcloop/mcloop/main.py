@@ -1054,6 +1054,17 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     _setup_api_key(dry_run=dry_run)
     _setup_sandbox(dry_run=dry_run)
     _install_recommended_permissions(dry_run=dry_run)
+    _check_rtk()
+
+
+def _check_rtk() -> None:
+    """Print a note if rtk is on PATH."""
+    if shutil.which("rtk"):
+        print(
+            "\n"
+            "  Note: RTK detected on PATH.\n"
+            "  RTK hooks should be configured separately via: rtk init\n"
+        )
 
 
 _TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
