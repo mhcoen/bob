@@ -82,7 +82,7 @@ def _check_errors_json(
         )
         for i, entry in enumerate(unresolvable, 1):
             exc_type = entry.get("exception_type", "Unknown")
-            desc = entry.get("description", "")
+            desc = entry.get("description", "") or "" or ""
             source = entry.get("source_file", "")
             line = entry.get("line", "")
             location = f" at {source}:{line}" if source else ""
@@ -111,7 +111,7 @@ def _check_errors_json(
     )
     for i, entry in enumerate(resolvable, 1):
         exc_type = entry.get("exception_type", "Unknown")
-        desc = entry.get("description", "")
+        desc = entry.get("description", "") or ""
         ts = entry.get("timestamp", "")
         source = entry.get("source_file", "")
         line = entry.get("line", "")
@@ -161,7 +161,7 @@ def _check_errors_json(
     task_lines: list[str] = []
     for i, entry in enumerate(resolvable, 1):
         exc_type = entry.get("exception_type", "Unknown")
-        desc = entry.get("description", "")
+        desc = entry.get("description", "") or ""
         source_file = entry.get("source_file", "")
         line = entry.get("line", "")
         location = f" at {source_file}:{line}" if source_file else ""

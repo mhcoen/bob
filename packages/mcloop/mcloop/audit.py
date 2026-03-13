@@ -196,7 +196,9 @@ def _run_single_audit_round(
                 # A bug is removed if any REMOVED verdict
                 # matches its title (substring match).
                 confirmed_bugs = [
-                    b for b in parsed_bugs if not any(b["title"] == rh for rh in removed_headers)
+                    b
+                    for b in parsed_bugs
+                    if not any(rh in b["title"] or b["title"] in rh for rh in removed_headers)
                 ]
                 if not confirmed_bugs:
                     print(

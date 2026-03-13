@@ -179,7 +179,7 @@ def match_rule(rule, tool_name, tool_input):
         skill = tool_input.get("skill", "")
         return skill == rule_arg
 
-    return rule_arg in json.dumps(tool_input)
+    return False
 
 
 def _unwrap_rtk(tool_input):

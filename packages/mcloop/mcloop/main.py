@@ -442,7 +442,7 @@ def _main() -> None:
         return
 
     if args.command == "audit":
-        _cmd_audit(checklist_path)
+        _cmd_audit(checklist_path, model=args.model)
         return
 
     if args.command == "investigate":
@@ -1709,7 +1709,7 @@ def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     print("\nDone.")
 
 
-def _cmd_audit(checklist_path: Path) -> None:
+def _cmd_audit(checklist_path: Path, model: str | None = None) -> None:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
     project_dir = checklist_path.parent
     _kill_orphan_sessions(project_dir)
@@ -1717,7 +1717,7 @@ def _cmd_audit(checklist_path: Path) -> None:
     log_dir = project_dir / "logs"
     bugs_path = project_dir / "BUGS.md"
     existing = bugs_path.read_text() if bugs_path.exists() else ""
-    result = run_audit(project_dir, log_dir, existing_bugs=existing)
+    result = run_audit(project_dir, log_dir, model=model, existing_bugs=existing)
     if not result.success:
         print(f"audit: session exited with code {result.exit_code}", file=sys.stderr)
         sys.exit(result.exit_code)
