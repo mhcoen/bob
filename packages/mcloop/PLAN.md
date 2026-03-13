@@ -256,7 +256,7 @@ The debugging playbook this enforces:
   - [x] If the user picks "skip": mark the task `[!]`, delete `interrupted.json`, move to the next task.
   - [x] Tailor the prompt to the interrupted phase. Audit interruptions offer (r)esume audit / (s)kip audit / (q)uit. User prompt interruptions just re-present the `[USER]` prompt with no special handling. Task interruptions get the full (r)etry / (d)escribe / (s)kip / (q)uit menu.
 
-- [ ] `mcloop install` and `mcloop uninstall` subcommands
+- [x] `mcloop install` and `mcloop uninstall` subcommands
   - [x] Add `install` and `uninstall` subcommands to the argument parser, both with `--dry-run` flags
   - [x] `install`: check that `claude` is on PATH, print version, stop with instructions if missing
   - [x] `install`: copy hook scripts (Telegram permission hook, session-start hook) to `~/.mcloop/hooks/`. Skip if already present.
@@ -273,4 +273,4 @@ The debugging playbook this enforces:
   - [x] `uninstall`: remove `~/.mcloop/hooks/` and `~/.mcloop/config.json` and `~/.mcloop/recommended-permissions.json`
   - [x] `uninstall`: leave `permissions.allow` entries, project-level `.mcloop/` directories, PLAN.md files, and logs untouched. Will not disable the sandbox.
   - [x] `uninstall`: print what was removed and what was left in place
-  - [ ] `uninstall --dry-run`: print every file that would be deleted or modified, with diffs for JSON modifications, but make no changes
+  - [x] `uninstall --dry-run`: print every file that would be deleted or modified, with diffs for JSON modifications, but make no changes

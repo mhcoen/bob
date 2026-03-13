@@ -446,7 +446,7 @@ def _detect_from_extensions(project_dir: Path) -> str | None:
         if p.is_dir():
             continue
         # Skip hidden dirs and common non-source dirs
-        parts = p.parts
+        parts = p.relative_to(project_dir).parts
         if any(
             part.startswith(".")
             or part in ("node_modules", "__pycache__", ".build", "venv", ".venv")
@@ -481,7 +481,7 @@ def _find_swift_entry(project_dir: Path) -> Path | None:
     """Find Swift app entry point."""
     swift_files = []
     for p in project_dir.rglob("*.swift"):
-        parts = p.parts
+        parts = p.relative_to(project_dir).parts
         if any(part.startswith(".") or part == ".build" for part in parts):
             continue
         swift_files.append(p)
@@ -512,7 +512,7 @@ def _find_python_entry(project_dir: Path) -> Path | None:
     """Find Python app entry point."""
     # Look for __main__.py in any package
     for p in project_dir.rglob("__main__.py"):
-        parts = p.parts
+        parts = p.relative_to(project_dir).parts
         if any(part.startswith(".") or part in ("node_modules", "__pycache__") for part in parts):
             continue
         return p
@@ -524,7 +524,7 @@ def _find_python_entry(project_dir: Path) -> Path | None:
 
     # Look for main.py anywhere
     for p in project_dir.rglob("main.py"):
-        parts = p.parts
+        parts = p.relative_to(project_dir).parts
         if any(part.startswith(".") or part in ("node_modules", "__pycache__") for part in parts):
             continue
         return p

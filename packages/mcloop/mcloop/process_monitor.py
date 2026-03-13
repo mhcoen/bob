@@ -306,6 +306,8 @@ def run_cli(
                 if data:
                     chunks.append(data)
                     proc.last_output_at = time.monotonic()
+        else:
+            time.sleep(poll_interval)
 
         # Check if process exited.
         ret = proc.process.poll()

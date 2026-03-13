@@ -1050,12 +1050,20 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
         )
         sys.exit(1)
 
-    result = subprocess.run(
-        [claude_path, "--version"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    try:
+        result = subprocess.run(
+            [claude_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            "Error: 'claude --version' timed out after 10 seconds.\n"
+            "Check your Claude Code installation and re-run: mcloop install",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if result.returncode != 0:
         print(
             f"Error: 'claude --version' failed (exit {result.returncode}).\n"
