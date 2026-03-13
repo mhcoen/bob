@@ -41,6 +41,7 @@ from mcloop.main import (
     _parse_args,
     _reinject_wrappers,
     _save_interrupt_state,
+    _setup_telegram,
     _write_eliminated_json,
     _write_ruledout_to_plan,
     run_loop,
@@ -209,6 +210,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
         patch("subprocess.run", return_value=proc),
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -235,6 +237,7 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
         patch("subprocess.run", return_value=proc) as mock_run,
         patch("mcloop.main._install_hooks"),
         patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram"),
     ):
         _cmd_install(tmp_path)
     mock_run.assert_called_once_with(
@@ -491,6 +494,213 @@ def test_merge_settings_not_object(tmp_path, capsys):
     assert exc.value.code == 1
     err = capsys.readouterr().err
     assert "not a JSON object" in err
+
+
+# --- _setup_telegram ---
+
+
+def test_setup_telegram_env_vars(tmp_path, capsys):
+    """Uses credentials from environment when both vars are set."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "123"}),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert env_file.exists()
+    content = env_file.read_text()
+    assert "TELEGRAM_BOT_TOKEN=tok" in content
+    assert "TELEGRAM_CHAT_ID=123" in content
+    out = capsys.readouterr().out
+    assert "using credentials from environment" in out
+    assert "Telegram Desktop" in out
+
+
+def test_setup_telegram_env_vars_dry_run(tmp_path, capsys):
+    """Dry run with env vars prints message but does not write file."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "123"}),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+    ):
+        _setup_telegram(dry_run=True)
+
+    assert not env_file.exists()
+    out = capsys.readouterr().out
+    assert "using credentials from environment" in out
+
+
+def test_setup_telegram_existing_file(tmp_path, capsys):
+    """Skips prompting when env file already exists."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("TELEGRAM_BOT_TOKEN=old\nTELEGRAM_CHAT_ID=old\n")
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+    ):
+        _setup_telegram(dry_run=False)
+
+    out = capsys.readouterr().out
+    assert "existing credentials" in out
+    assert "Telegram Desktop" in out
+    # File should not be overwritten
+    assert "old" in env_file.read_text()
+
+
+def test_setup_telegram_interactive_prompt(tmp_path, capsys):
+    """Prompts interactively and writes env file."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=["my-token", "my-chat"]),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert env_file.exists()
+    content = env_file.read_text()
+    assert "TELEGRAM_BOT_TOKEN=my-token" in content
+    assert "TELEGRAM_CHAT_ID=my-chat" in content
+    out = capsys.readouterr().out
+    assert "Saved credentials" in out
+    assert "Telegram Desktop" in out
+
+
+def test_setup_telegram_interactive_empty_token(tmp_path, capsys):
+    """Skips when user enters empty bot token."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=[""]),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert not env_file.exists()
+    err = capsys.readouterr().err
+    assert "no bot token" in err
+
+
+def test_setup_telegram_interactive_empty_chat_id(tmp_path, capsys):
+    """Skips when user enters empty chat ID."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=["my-token", ""]),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert not env_file.exists()
+    err = capsys.readouterr().err
+    assert "no chat ID" in err
+
+
+def test_setup_telegram_interactive_eof(tmp_path, capsys):
+    """Handles EOFError gracefully."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert not env_file.exists()
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+
+
+def test_setup_telegram_interactive_ctrl_c(tmp_path, capsys):
+    """Handles KeyboardInterrupt gracefully."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+    ):
+        _setup_telegram(dry_run=False)
+
+    assert not env_file.exists()
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+
+
+def test_setup_telegram_dry_run_skips_prompt(tmp_path, capsys):
+    """Dry run without env vars or file prints instructions but skips prompt."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+    ):
+        _setup_telegram(dry_run=True)
+
+    out = capsys.readouterr().out
+    assert "dry run" in out
+
+
+def test_setup_telegram_only_token_set(tmp_path, capsys):
+    """Falls through to interactive when only token is set."""
+    home = tmp_path / "home"
+    env_file = home / ".claude" / "telegram-hook.env"
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok"}, clear=True),
+        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("builtins.input", side_effect=EOFError),
+    ):
+        _setup_telegram(dry_run=False)
+
+    out = capsys.readouterr().out
+    assert "using credentials from environment" not in out
+
+
+def test_cmd_install_calls_setup_telegram(tmp_path):
+    """_cmd_install calls _setup_telegram."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram") as mock_tg,
+    ):
+        _cmd_install(tmp_path)
+    mock_tg.assert_called_once_with(dry_run=False)
+
+
+def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
+    """_cmd_install passes dry_run to _setup_telegram."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks"),
+        patch("mcloop.main._merge_settings"),
+        patch("mcloop.main._setup_telegram") as mock_tg,
+    ):
+        _cmd_install(tmp_path, dry_run=True)
+    mock_tg.assert_called_once_with(dry_run=True)
 
 
 # --- _run_audit_fix_cycle ---

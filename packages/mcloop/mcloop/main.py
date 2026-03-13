@@ -1050,6 +1050,66 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
 
     _install_hooks(dry_run=dry_run)
     _merge_settings(dry_run=dry_run)
+    _setup_telegram(dry_run=dry_run)
+
+
+_TELEGRAM_ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
+
+_TELEGRAM_DESKTOP_MSG = (
+    "\n"
+    "  Tip: install the Telegram Desktop app alongside the mobile app\n"
+    "  so you can approve tool calls from your computer.\n"
+)
+
+
+def _setup_telegram(*, dry_run: bool = False) -> None:
+    """Check for Telegram credentials or prompt interactively."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if token and chat_id:
+        print("Telegram: using credentials from environment variables.")
+        if not dry_run:
+            _TELEGRAM_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _TELEGRAM_ENV_FILE.write_text(
+                f"TELEGRAM_BOT_TOKEN={token}\nTELEGRAM_CHAT_ID={chat_id}\n"
+            )
+        print(_TELEGRAM_DESKTOP_MSG)
+        return
+
+    if _TELEGRAM_ENV_FILE.exists():
+        print(f"Telegram: using existing credentials from {_TELEGRAM_ENV_FILE}")
+        print(_TELEGRAM_DESKTOP_MSG)
+        return
+
+    print("\nTelegram setup (for remote approval notifications):")
+    print("  1. Message @BotFather on Telegram to create a bot")
+    print("  2. Copy the bot token")
+    print("  3. Send a message to your bot, then get your chat ID\n")
+
+    if dry_run:
+        print("  (dry run: skipping interactive prompt)")
+        return
+
+    try:
+        bot_token = input("  Bot token: ").strip()
+        if not bot_token:
+            print("Skipped: no bot token entered.", file=sys.stderr)
+            return
+        chat_id_input = input("  Chat ID: ").strip()
+        if not chat_id_input:
+            print("Skipped: no chat ID entered.", file=sys.stderr)
+            return
+    except (EOFError, KeyboardInterrupt):
+        print("\nSkipped: Telegram setup cancelled.")
+        return
+
+    _TELEGRAM_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TELEGRAM_ENV_FILE.write_text(
+        f"TELEGRAM_BOT_TOKEN={bot_token}\nTELEGRAM_CHAT_ID={chat_id_input}\n"
+    )
+    print(f"  Saved credentials to {_TELEGRAM_ENV_FILE}")
+    print(_TELEGRAM_DESKTOP_MSG)
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)
