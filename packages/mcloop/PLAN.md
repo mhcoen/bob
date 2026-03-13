@@ -257,7 +257,7 @@ The debugging playbook this enforces:
   - [x] Tailor the prompt to the interrupted phase. Audit interruptions offer (r)esume audit / (s)kip audit / (q)uit. User prompt interruptions just re-present the `[USER]` prompt with no special handling. Task interruptions get the full (r)etry / (d)escribe / (s)kip / (q)uit menu.
 
 - [ ] `mcloop install` and `mcloop uninstall` subcommands
-  - [ ] Add `install` and `uninstall` subcommands to the argument parser, both with `--dry-run` flags
+  - [x] Add `install` and `uninstall` subcommands to the argument parser, both with `--dry-run` flags
   - [ ] `install`: check that `claude` is on PATH, print version, stop with instructions if missing
   - [ ] `install`: copy hook scripts (Telegram permission hook, session-start hook) to `~/.mcloop/hooks/`. Skip if already present.
   - [ ] `install`: read `~/.claude/settings.json`, merge in PreToolUse and SessionStart hook entries pointing at `~/.mcloop/hooks/`. Skip entries that already exist. Preserve all other settings in the file.
