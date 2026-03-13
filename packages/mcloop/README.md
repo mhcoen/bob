@@ -2,6 +2,22 @@
 
 McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
 
+### Features at a glance
+
+- **Continuous task execution** with a fresh context per session and rolling summaries between tasks
+- **Automatic bug audit** after all tasks complete: find, verify, and fix confirmed defects in two rounds
+- **Telegram notifications** for progress, failures, and remote command approval from your phone
+- **Interrupt and resume** with state capture: Ctrl-C saves what was happening, restart prompts you
+- **Investigation mode** for runtime bugs that survive the build/test cycle
+- **Self-healing apps** with automatic crash instrumentation (Swift and Python)
+- **Task batching** with `[BATCH]` to combine well-specified subtasks into a single session
+- **Failed approach tracking** with `[RULEDOUT]` so the agent never repeats what already failed
+- **Model fallback** from a cheaper model to a stronger one when tasks fail
+- **Stages** for phased execution with testing between stages
+- **Targeted testing** after each task (full suite only at stage boundaries)
+- **Syncing** PLAN.md with the codebase after manual changes
+- **Visual verification** with deterministic app screenshots
+
 Because McLoop runs Claude Code sessions continuously, it will use
 your plan allowance faster than if you used it interactively. See
 [Best practices](#best-practices) for how to get the most from it.
@@ -214,74 +230,6 @@ auto-checks the parent when all children are done.
 
 You can manually edit any marker. To retry a failed task, change `[!]` back to
 `[ ]` and re-run.
-
-### User tasks
-
-Mark any task with `[USER]` when it requires human action that Claude
-Code cannot perform: testing Ctrl-C in a terminal, observing a GUI,
-confirming behavior on a physical device. When McLoop reaches a
-`[USER]` task, it pauses, prints instructions in the terminal, and
-sends a Telegram notification so you know to check in. You type your
-observation at the terminal and McLoop records it and continues.
-
-This is not limited to the investigation system. Any task in any
-PLAN.md can use `[USER]`:
-
-```markdown
-- [ ] [USER] Verify the app launches and the menu bar icon appears
-- [ ] [USER] Test Ctrl-C, Ctrl-Z, and kill on a live run
-```
-
-### Recording failed approaches
-
-When an approach has been tried and ruled out, add a `[RULEDOUT]`
-line under the task. McLoop parses these and injects them into the
-task prompt so Claude Code knows not to repeat them:
-
-```markdown
-- [ ] Fix Ctrl-C: prevent claude from stealing the terminal foreground
-  [RULEDOUT] pty isolation via pty.openpty(): Ctrl-C still ignored
-  [RULEDOUT] tcsetpgrp/_reclaim_foreground: race condition
-  - [x] Rewrite _run_session with stdin=DEVNULL
-  - [x] Add signal handlers
-```
-
-Subtasks inherit `[RULEDOUT]` entries from their parent. The agent
-sees the full list of ruled out approaches for the current task and
-all its ancestors, with an explicit instruction not to repeat any
-of them.
-
-You can add `[RULEDOUT]` lines manually, or McLoop can add them
-automatically when you describe a failure during the interrupt
-resumption prompt (see below).
-
-### Batching subtasks
-
-Mark a parent task with `[BATCH]` to combine all its unchecked
-children into a single Claude Code session:
-
-```markdown
-- [ ] [BATCH] mcloop install and uninstall subcommands
-  - [ ] Add subcommands to parser with --dry-run flags
-  - [ ] Check claude is on PATH, print version
-  - [ ] Copy hooks to ~/.mcloop/hooks/
-  - [ ] Merge settings.json entries
-  - [ ] Prompt for Telegram credentials
-  - [ ] [USER] Manual verification
-```
-
-McLoop collects all unchecked children up to the first `[USER]`
-or `[AUTO]` boundary, combines their text into a single numbered
-prompt ("Do all of the following in order: 1. ... 2. ... 3. ..."),
-and runs one session. If checks pass, all batched children are
-checked off in a single commit. If the batch fails, McLoop
-automatically falls back to running each subtask individually.
-
-Batching is most effective for late-stage, well-specified tasks
-where each subtask is essentially pseudocode. Early-stage tasks
-with significant design decisions should not be batched. Without
-a `[BATCH]` tag, behavior is unchanged: each subtask runs in its
-own session.
 
 ## How McLoop works
 
@@ -556,6 +504,76 @@ McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task
 is treated as failed and retried.
 
+## Advanced plan features
+
+### User tasks
+
+Mark any task with `[USER]` when it requires human action that Claude
+Code cannot perform: testing Ctrl-C in a terminal, observing a GUI,
+confirming behavior on a physical device. When McLoop reaches a
+`[USER]` task, it pauses, prints instructions in the terminal, and
+sends a Telegram notification so you know to check in. You type your
+observation at the terminal and McLoop records it and continues.
+
+This is not limited to the investigation system. Any task in any
+PLAN.md can use `[USER]`:
+
+```markdown
+- [ ] [USER] Verify the app launches and the menu bar icon appears
+- [ ] [USER] Test Ctrl-C, Ctrl-Z, and kill on a live run
+```
+
+### Batching subtasks
+
+Mark a parent task with `[BATCH]` to combine all its unchecked
+children into a single Claude Code session:
+
+```markdown
+- [ ] [BATCH] mcloop install and uninstall subcommands
+  - [ ] Add subcommands to parser with --dry-run flags
+  - [ ] Check claude is on PATH, print version
+  - [ ] Copy hooks to ~/.mcloop/hooks/
+  - [ ] Merge settings.json entries
+  - [ ] Prompt for Telegram credentials
+  - [ ] [USER] Manual verification
+```
+
+McLoop collects all unchecked children up to the first `[USER]`
+or `[AUTO]` boundary, combines their text into a single numbered
+prompt ("Do all of the following in order: 1. ... 2. ... 3. ..."),
+and runs one session. If checks pass, all batched children are
+checked off in a single commit. If the batch fails, McLoop
+automatically falls back to running each subtask individually.
+
+Batching is most effective for late-stage, well-specified tasks
+where each subtask is essentially pseudocode. Early-stage tasks
+with significant design decisions should not be batched. Without
+a `[BATCH]` tag, behavior is unchanged: each subtask runs in its
+own session.
+
+### Recording failed approaches
+
+When an approach has been tried and ruled out, add a `[RULEDOUT]`
+line under the task. McLoop parses these and injects them into the
+task prompt so Claude Code knows not to repeat them:
+
+```markdown
+- [ ] Fix Ctrl-C: prevent claude from stealing the terminal foreground
+  [RULEDOUT] pty isolation via pty.openpty(): Ctrl-C still ignored
+  [RULEDOUT] tcsetpgrp/_reclaim_foreground: race condition
+  - [x] Rewrite _run_session with stdin=DEVNULL
+  - [x] Add signal handlers
+```
+
+Subtasks inherit `[RULEDOUT]` entries from their parent. The agent
+sees the full list of ruled out approaches for the current task and
+all its ancestors, with an explicit instruction not to repeat any
+of them.
+
+You can add `[RULEDOUT]` lines manually, or McLoop can add them
+automatically when you describe a failure during the interrupt
+resumption prompt (see [Interrupting and resuming](#interrupting-and-resuming)).
+
 ## Bug audit
 
 After all checklist tasks complete, McLoop automatically runs two rounds
@@ -665,6 +683,84 @@ If the investigation does not fully resolve the bug, McLoop
 prints what was learned (from NOTES.md), what tasks remain, and
 leaves the worktree in place. Run `mcloop investigate` again
 with the same description to resume where it left off.
+
+## Self-healing apps
+
+Every app McLoop builds is automatically instrumented with crash
+handlers. You do not need to do anything to enable this. After the
+first task that produces a runnable app, McLoop injects
+error-catching hooks into the source code. If the app crashes during
+normal use, the instrumentation captures the full context and tells
+you exactly what to do:
+
+```
+[McLoop] Crash captured: SIGABRT in Qwen3ASREngine.loadModel()
+  Run mcloop from ~/proj/mcwhisper to fix this bug.
+```
+
+The next time you run `mcloop`, it reads the captured errors before
+doing anything else:
+
+```
+2 runtime bugs detected:
+
+  1. SIGABRT in Qwen3ASREngine.loadModel() -- model path was nil
+     when selecting Parakeet TDT model (3 hours ago)
+
+  2. Audio levels stuck at 0.0 during push-to-talk recording,
+     waveform never animated (1 hour ago)
+
+Fix these bugs before continuing? [Y/n]
+```
+
+If you say yes, McLoop runs a diagnostic session per error, inserts
+fix tasks into a `## Bugs` section in PLAN.md, and works only those
+tasks. It does not touch feature tasks, start the next stage, or run
+the audit cycle. It fixes, verifies (by relaunching the app to
+confirm the error no longer occurs), and exits. You run `mcloop`
+again for feature work once bugs are clear.
+
+If you say no, McLoop skips the bugs and continues with normal
+feature work. The bugs stay in `.mcloop/errors.json` for next time.
+
+The `## Bugs` section in PLAN.md has absolute priority. If it
+contains unchecked items, `find_next` returns those before any
+feature tasks.
+
+### How it works
+
+McLoop detects the project language and injects error-catching
+code into source files, delimited with markers
+(`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift,
+`# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). The
+canonical wrapper source is stored in `.mcloop/wrap/` so McLoop
+can re-inject it if Claude Code strips the markers during a task.
+
+Swift instrumentation includes `NSSetUncaughtExceptionHandler`,
+signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump
+that captures relevant `@Published` properties at crash time.
+
+Python instrumentation includes `sys.excepthook`, signal handlers,
+and logging integration that captures unhandled exceptions with
+full tracebacks and local variables in the crashing frame.
+
+Both write structured error reports to `.mcloop/errors.json` with
+stack traces, app state, timestamps, crash location, and a one-line
+description. The project directory path is baked into the handler
+at injection time so the crash message can tell the user where to
+run mcloop.
+
+After every task that modifies instrumented source files, McLoop
+checks whether the markers are intact and re-injects from
+`.mcloop/wrap/` if they were removed. The wrapper survives Claude
+Code edits automatically.
+
+If the same error triggers diagnostic insertion more than 3 times,
+McLoop marks it as unresolvable, prints the context, and stops
+rather than looping indefinitely.
+
+To instrument a project that was NOT built by McLoop, use
+`mcloop wrap` manually from that project's directory.
 
 ## Syncing PLAN.md
 
@@ -815,84 +911,6 @@ you are not using Claude Code interactively.
 after a McLoop session to see how many tokens were saved. This helps
 you gauge whether the compression is working and how much headroom
 you have.
-
-## Self-healing apps
-
-Every app McLoop builds is automatically instrumented with crash
-handlers. You do not need to do anything to enable this. After the
-first task that produces a runnable app, McLoop injects
-error-catching hooks into the source code. If the app crashes during
-normal use, the instrumentation captures the full context and tells
-you exactly what to do:
-
-```
-[McLoop] Crash captured: SIGABRT in Qwen3ASREngine.loadModel()
-  Run mcloop from ~/proj/mcwhisper to fix this bug.
-```
-
-The next time you run `mcloop`, it reads the captured errors before
-doing anything else:
-
-```
-2 runtime bugs detected:
-
-  1. SIGABRT in Qwen3ASREngine.loadModel() -- model path was nil
-     when selecting Parakeet TDT model (3 hours ago)
-
-  2. Audio levels stuck at 0.0 during push-to-talk recording,
-     waveform never animated (1 hour ago)
-
-Fix these bugs before continuing? [Y/n]
-```
-
-If you say yes, McLoop runs a diagnostic session per error, inserts
-fix tasks into a `## Bugs` section in PLAN.md, and works only those
-tasks. It does not touch feature tasks, start the next stage, or run
-the audit cycle. It fixes, verifies (by relaunching the app to
-confirm the error no longer occurs), and exits. You run `mcloop`
-again for feature work once bugs are clear.
-
-If you say no, McLoop skips the bugs and continues with normal
-feature work. The bugs stay in `.mcloop/errors.json` for next time.
-
-The `## Bugs` section in PLAN.md has absolute priority. If it
-contains unchecked items, `find_next` returns those before any
-feature tasks.
-
-### How it works
-
-McLoop detects the project language and injects error-catching
-code into source files, delimited with markers
-(`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift,
-`# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). The
-canonical wrapper source is stored in `.mcloop/wrap/` so McLoop
-can re-inject it if Claude Code strips the markers during a task.
-
-Swift instrumentation includes `NSSetUncaughtExceptionHandler`,
-signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump
-that captures relevant `@Published` properties at crash time.
-
-Python instrumentation includes `sys.excepthook`, signal handlers,
-and logging integration that captures unhandled exceptions with
-full tracebacks and local variables in the crashing frame.
-
-Both write structured error reports to `.mcloop/errors.json` with
-stack traces, app state, timestamps, crash location, and a one-line
-description. The project directory path is baked into the handler
-at injection time so the crash message can tell the user where to
-run mcloop.
-
-After every task that modifies instrumented source files, McLoop
-checks whether the markers are intact and re-injects from
-`.mcloop/wrap/` if they were removed. The wrapper survives Claude
-Code edits automatically.
-
-If the same error triggers diagnostic insertion more than 3 times,
-McLoop marks it as unresolvable, prints the context, and stops
-rather than looping indefinitely.
-
-To instrument a project that was NOT built by McLoop, use
-`mcloop wrap` manually from that project's directory.
 
 ## License
 
