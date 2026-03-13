@@ -45,6 +45,7 @@ from mcloop.main import (
     _parse_args,
     _print_install_summary,
     _reinject_wrappers,
+    _remove_telegram_env,
     _save_interrupt_state,
     _setup_api_key,
     _setup_sandbox,
@@ -689,21 +690,64 @@ def test_unmerge_settings_empty_hooks(tmp_path, capsys):
 
 
 def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
-    """_cmd_uninstall calls _unmerge_settings."""
-    with patch("mcloop.main._unmerge_settings", return_value=[]) as mock:
+    """_cmd_uninstall calls _unmerge_settings and _remove_telegram_env."""
+    with (
+        patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
+        patch("mcloop.main._remove_telegram_env") as mock_tg,
+    ):
         _cmd_uninstall(tmp_path)
-    mock.assert_called_once_with(dry_run=False)
+    mock_unmerge.assert_called_once_with(dry_run=False)
+    mock_tg.assert_called_once_with(dry_run=False)
     out = capsys.readouterr().out
     assert "uninstall" in out
 
 
 def test_cmd_uninstall_dry_run(tmp_path, capsys):
     """_cmd_uninstall passes dry_run through."""
-    with patch("mcloop.main._unmerge_settings", return_value=[]) as mock:
+    with (
+        patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
+        patch("mcloop.main._remove_telegram_env") as mock_tg,
+    ):
         _cmd_uninstall(tmp_path, dry_run=True)
-    mock.assert_called_once_with(dry_run=True)
+    mock_unmerge.assert_called_once_with(dry_run=True)
+    mock_tg.assert_called_once_with(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
+
+
+# --- _remove_telegram_env ---
+
+
+def test_remove_telegram_env_exists(tmp_path, capsys):
+    """Removes the file when it exists."""
+    env_file = tmp_path / "telegram-hook.env"
+    env_file.write_text("TOKEN=abc\n")
+    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+        component, status = _remove_telegram_env()
+    assert not env_file.exists()
+    assert status == "removed"
+    assert component == "telegram-hook.env"
+    assert "Removed" in capsys.readouterr().out
+
+
+def test_remove_telegram_env_not_found(tmp_path, capsys):
+    """Skips when file does not exist."""
+    env_file = tmp_path / "telegram-hook.env"
+    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+        component, status = _remove_telegram_env()
+    assert "not found" in status
+    assert "not found" in capsys.readouterr().out
+
+
+def test_remove_telegram_env_dry_run(tmp_path, capsys):
+    """Dry run prints but does not delete."""
+    env_file = tmp_path / "telegram-hook.env"
+    env_file.write_text("TOKEN=abc\n")
+    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+        component, status = _remove_telegram_env(dry_run=True)
+    assert env_file.exists()
+    assert "would remove" in status
+    assert "Would remove" in capsys.readouterr().out
 
 
 # --- _setup_telegram ---

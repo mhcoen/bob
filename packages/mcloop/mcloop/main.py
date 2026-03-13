@@ -1575,12 +1575,28 @@ def _unmerge_settings(
     return results
 
 
+def _remove_telegram_env(*, dry_run: bool = False) -> tuple[str, str]:
+    """Remove ~/.claude/telegram-hook.env if it exists."""
+    component = "telegram-hook.env"
+    if not _TELEGRAM_ENV_FILE.exists():
+        print(f"  {_TELEGRAM_ENV_FILE}: not found, nothing to remove")
+        return (component, "skipped (not found)")
+    if dry_run:
+        print(f"  Would remove {_TELEGRAM_ENV_FILE}")
+        return (component, "would remove")
+    _TELEGRAM_ENV_FILE.unlink()
+    print(f"  Removed {_TELEGRAM_ENV_FILE}")
+    return (component, "removed")
+
+
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
-    """Remove mcloop hook entries from settings."""
+    """Remove mcloop hook entries and credential files."""
     prefix = "[dry run] " if dry_run else ""
     print(f"\n{prefix}mcloop uninstall\n")
     print("Removing hook entries from ~/.claude/settings.json...")
     _unmerge_settings(dry_run=dry_run)
+    print("\nRemoving Telegram credentials...")
+    _remove_telegram_env(dry_run=dry_run)
     print("\nDone.")
 
 
