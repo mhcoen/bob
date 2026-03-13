@@ -240,6 +240,7 @@ SILENCE_TIMEOUT = 5  # seconds before checking pending
 PROGRESS_DOT_INTERVAL = 3  # seconds between progress dots
 _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
+_interrupted = False
 
 
 def _run_session(
@@ -314,74 +315,70 @@ def _run_session(
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
-    try:
-        while True:
-            try:
-                line = line_q.get(
-                    timeout=PROGRESS_DOT_INTERVAL,
-                )
-            except queue.Empty:
-                # Silence. Check for pending approvals.
-                if pending_dir.exists():
-                    # Check if a permission was denied
-                    denied_file = pending_dir / "denied"
-                    if denied_file.exists():
+    global _interrupted
+    while True:
+        if _interrupted:
+            break
+        try:
+            line = line_q.get(
+                timeout=PROGRESS_DOT_INTERVAL,
+            )
+        except queue.Empty:
+            if _interrupted:
+                break
+            # Silence. Check for pending approvals.
+            if pending_dir.exists():
+                # Check if a permission was denied
+                denied_file = pending_dir / "denied"
+                if denied_file.exists():
+                    try:
+                        reason = denied_file.read_text()[:200]
+                    except OSError:
+                        reason = "unknown"
+                    denied_file.unlink(missing_ok=True)
+                    print(
+                        f"\n!!! Permission denied, killing session: {reason}",
+                        flush=True,
+                    )
+                    process.kill()
+                    process.wait()
+                    try:
+                        _watchdog.kill()
+                    except OSError:
+                        pass
+                    return "".join(output_lines), 1
+                if not shown_waiting:
+                    try:
+                        pending = list(pending_dir.iterdir())
+                    except OSError:
+                        pending = []
+                    if pending:
+                        count = len(pending)
                         try:
-                            reason = denied_file.read_text()[:200]
+                            desc = pending[0].read_text()[:80]
                         except OSError:
-                            reason = "unknown"
-                        denied_file.unlink(missing_ok=True)
+                            desc = "unknown"
+                        extra = f" ({count} pending)" if count > 1 else ""
                         print(
-                            f"\n!!! Permission denied, killing session: {reason}",
+                            f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
                             flush=True,
                         )
-                        process.kill()
-                        process.wait()
-                        try:
-                            _watchdog.kill()
-                        except OSError:
-                            pass
-                        return "".join(output_lines), 1
-                    if not shown_waiting:
-                        try:
-                            pending = list(pending_dir.iterdir())
-                        except OSError:
-                            pending = []
-                        if pending:
-                            count = len(pending)
-                            try:
-                                desc = pending[0].read_text()[:80]
-                            except OSError:
-                                desc = "unknown"
-                            extra = f" ({count} pending)" if count > 1 else ""
-                            print(
-                                f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
-                                flush=True,
-                            )
-                            shown_waiting = True
-                            continue
-                # Print a progress dot
-                now = time.monotonic()
-                if now - last_dot >= PROGRESS_DOT_INTERVAL:
-                    print(".", end="", flush=True)
-                    last_dot = now
-                continue
-            if line is _SENTINEL:
-                break
-            output_lines.append(line)
-            if len(output_lines) > _MAX_OUTPUT_LINES * 2:
-                output_lines = output_lines[-_MAX_OUTPUT_LINES:]
-            _print_stream_event(line)
-            shown_waiting = False
-            last_dot = time.monotonic()
-    except KeyboardInterrupt:
-        process.kill()
-        process.wait()
-        try:
-            _watchdog.kill()
-        except OSError:
-            pass
-        raise
+                        shown_waiting = True
+                        continue
+            # Print a progress dot
+            now = time.monotonic()
+            if now - last_dot >= PROGRESS_DOT_INTERVAL:
+                print(".", end="", flush=True)
+                last_dot = now
+            continue
+        if line is _SENTINEL:
+            break
+        output_lines.append(line)
+        if len(output_lines) > _MAX_OUTPUT_LINES * 2:
+            output_lines = output_lines[-_MAX_OUTPUT_LINES:]
+        _print_stream_event(line)
+        shown_waiting = False
+        last_dot = time.monotonic()
 
     t.join(timeout=5)
     process.wait()

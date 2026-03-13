@@ -112,10 +112,9 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
 
 
 def _kill_active_process() -> None:
-    """Kill any active claude subprocess and its process group.
+    """Kill any active claude subprocess and its process group with SIGKILL.
 
-    Called by both the signal handler and the atexit handler
-    so orphan claude processes cannot survive mcloop exiting.
+    Used by the atexit handler where graceful shutdown is not possible.
     """
     import mcloop.runner as _runner
 
@@ -132,14 +131,60 @@ def _kill_active_process() -> None:
         _runner._active_process = None
 
 
+def _graceful_kill_active_process() -> None:
+    """Send SIGTERM to the child process group, escalate to SIGKILL after 2s.
+
+    Called by the signal handler. Sends SIGTERM first to give the child
+    process group a chance to clean up. If the group does not exit within
+    2 seconds, escalates to SIGKILL.
+    """
+    import mcloop.runner as _runner
+
+    proc = _runner._active_process
+    if proc is None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (OSError, ProcessLookupError):
+        pgid = proc.pid
+    # Send SIGTERM to the entire process group
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    # Wait up to 2 seconds for graceful exit
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        # Escalate to SIGKILL
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    _runner._active_process = None
+
+
 def main() -> None:
     import atexit
 
     atexit.register(_kill_active_process)
 
     def _handle_sigint(sig, frame):
+        import mcloop.runner as _runner
+
+        _runner._interrupted = True
         print("\nInterrupted.", flush=True)
-        _kill_active_process()
+        _graceful_kill_active_process()
         os._exit(130)
 
     signal.signal(signal.SIGINT, _handle_sigint)

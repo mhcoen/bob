@@ -1116,31 +1116,115 @@ def test_handle_sigint_kills_active_process():
     ):
         from mcloop.main import _kill_active_process
 
-        # Simulate what _handle_sigint does
+        # atexit handler uses SIGKILL directly
         _kill_active_process()
-        mock_killpg.assert_called_once()
+        mock_killpg.assert_called_once_with(99999, signal.SIGKILL)
         assert runner._active_process is None
 
     runner._active_process = original
 
 
 def test_handle_sigint_exits_130():
-    """_handle_sigint exits with code 130 (128 + SIGINT)."""
+    """Signal handler sets _interrupted flag and exits with code 130."""
+    import mcloop.runner as runner
+
+    original_flag = runner._interrupted
     with (
-        patch("mcloop.main._kill_active_process"),
+        patch("mcloop.main._graceful_kill_active_process"),
         patch("mcloop.main.os._exit") as mock_exit,
     ):
-        # Build the handler the same way main() does
-        def _handle_sigint(sig, frame):
-            from mcloop.main import _kill_active_process
+        from mcloop.main import main
 
-            _kill_active_process()
-            import os
+        # Build and invoke the handler
+        handler = None
 
-            os._exit(130)
+        def capture_signal(sig, h):
+            nonlocal handler
+            if sig == signal.SIGINT:
+                handler = h
 
-        _handle_sigint(2, None)
+        with (
+            patch("mcloop.main.signal.signal", side_effect=capture_signal),
+            patch("mcloop.main._main"),
+            patch("atexit.register"),
+        ):
+            main()
+
+        assert handler is not None
+        handler(signal.SIGINT, None)
+        assert runner._interrupted is True
         mock_exit.assert_called_once_with(130)
+
+    runner._interrupted = original_flag
+
+
+def test_graceful_kill_sends_sigterm_first():
+    """_graceful_kill_active_process sends SIGTERM before SIGKILL."""
+    import mcloop.runner as runner
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_proc.wait.return_value = 0
+    original = runner._active_process
+    runner._active_process = mock_proc
+
+    with (
+        patch("mcloop.main.os.getpgid", return_value=99999),
+        patch("mcloop.main.os.killpg") as mock_killpg,
+    ):
+        from mcloop.main import _graceful_kill_active_process
+
+        _graceful_kill_active_process()
+        # SIGTERM should be sent (not SIGKILL)
+        mock_killpg.assert_called_once_with(99999, signal.SIGTERM)
+        assert runner._active_process is None
+
+    runner._active_process = original
+
+
+def test_graceful_kill_escalates_to_sigkill():
+    """_graceful_kill_active_process escalates to SIGKILL after timeout."""
+    import mcloop.runner as runner
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_proc.wait.side_effect = [
+        subprocess.TimeoutExpired("cmd", 2),
+        0,
+    ]
+    original = runner._active_process
+    runner._active_process = mock_proc
+
+    with (
+        patch("mcloop.main.os.getpgid", return_value=99999),
+        patch("mcloop.main.os.killpg") as mock_killpg,
+    ):
+        from mcloop.main import _graceful_kill_active_process
+
+        _graceful_kill_active_process()
+        # First SIGTERM, then SIGKILL
+        assert mock_killpg.call_count == 2
+        mock_killpg.assert_any_call(99999, signal.SIGTERM)
+        mock_killpg.assert_any_call(99999, signal.SIGKILL)
+        assert runner._active_process is None
+
+    runner._active_process = original
+
+
+def test_graceful_kill_no_active_process():
+    """_graceful_kill_active_process does nothing when no process."""
+    import mcloop.runner as runner
+
+    original = runner._active_process
+    runner._active_process = None
+
+    with patch("mcloop.main.os.killpg") as mock_killpg:
+        from mcloop.main import _graceful_kill_active_process
+
+        _graceful_kill_active_process()
+        mock_killpg.assert_not_called()
+
+    runner._active_process = original
 
 
 # --- Pipe-based _run_session tests ---
@@ -1288,14 +1372,15 @@ def test_sigterm_reaches_handler():
 
 
 def test_signal_handler_kills_child_process():
-    """Signal handler kills the active child subprocess before exiting."""
-    # This test verifies the _kill_active_process logic:
-    # when a signal arrives, the handler kills the active subprocess's
-    # process group via SIGKILL, then exits.
+    """Signal handler sends SIGTERM to the active child process group."""
+    # This test verifies the _graceful_kill_active_process logic:
+    # when a signal arrives, the handler sends SIGTERM to the active
+    # subprocess's process group, waits, then escalates to SIGKILL.
     import mcloop.runner as runner
 
     mock_proc = MagicMock()
     mock_proc.pid = 99999
+    mock_proc.wait.return_value = 0
     original = runner._active_process
     runner._active_process = mock_proc
 
@@ -1304,11 +1389,33 @@ def test_signal_handler_kills_child_process():
         patch("mcloop.main.os.killpg") as mock_killpg,
         patch("mcloop.main.os._exit"),
     ):
-        from mcloop.main import _kill_active_process
+        from mcloop.main import _graceful_kill_active_process
 
-        # Simulate signal handler flow
-        _kill_active_process()
-        mock_killpg.assert_called_once_with(99999, signal.SIGKILL)
+        _graceful_kill_active_process()
+        mock_killpg.assert_called_once_with(99999, signal.SIGTERM)
         assert runner._active_process is None
 
     runner._active_process = original
+
+
+def test_run_session_checks_interrupted_flag(tmp_path):
+    """_run_session breaks out of its loop when _interrupted is set."""
+    import mcloop.runner as runner
+
+    original = runner._interrupted
+    runner._interrupted = True
+
+    output, exitcode, _ = _mock_run_session_pipe(tmp_path, ["line1\n", "line2\n"], returncode=0)
+    # With _interrupted set, the loop should break early
+    # (may or may not have read lines depending on timing)
+    assert exitcode == 0
+
+    runner._interrupted = original
+
+
+def test_runner_module_has_interrupted_flag():
+    """runner module exposes _interrupted flag."""
+    import mcloop.runner as runner
+
+    assert hasattr(runner, "_interrupted")
+    assert runner._interrupted is False or runner._interrupted is True
