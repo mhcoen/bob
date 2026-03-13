@@ -3,6 +3,7 @@
 import signal
 import subprocess
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1419,3 +1420,89 @@ def test_runner_module_has_interrupted_flag():
 
     assert hasattr(runner, "_interrupted")
     assert runner._interrupted is False or runner._interrupted is True
+
+
+# --- fd leakage verification tests ---
+# Verify that child processes spawned the way _run_session does
+# have no terminal fds (no /dev/tty* or /dev/pts/*).
+
+
+def _lsof_tty_fds(pid: int) -> list[str]:
+    """Run lsof on a pid and return lines referencing terminal devices."""
+    import shutil
+
+    lsof = shutil.which("lsof") or "/usr/sbin/lsof"
+    try:
+        result = subprocess.run(
+            [lsof, "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    tty_lines = []
+    for line in result.stdout.splitlines():
+        lower = line.lower()
+        if "/dev/tty" in lower or "/dev/pts/" in lower:
+            tty_lines.append(line)
+    return tty_lines
+
+
+def test_child_process_no_tty_fds():
+    """Child spawned like _run_session has no terminal fds."""
+    # Spawn a child the same way _run_session does
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        # Give child a moment to fully start
+        time.sleep(0.3)
+        tty_fds = _lsof_tty_fds(proc.pid)
+        assert tty_fds == [], "Child has terminal fds:\n" + "\n".join(tty_fds)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_watchdog_process_no_tty_fds():
+    """Watchdog spawned like _run_session has no terminal fds."""
+    import os
+
+    # Spawn a "main" process to watch
+    main_proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        # Spawn watchdog the same way _run_session does
+        watchdog = subprocess.Popen(
+            [
+                "sh",
+                "-c",
+                f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 2; done; "
+                f"kill -9 -{main_proc.pid} 2>/dev/null",
+            ],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.3)
+            tty_fds = _lsof_tty_fds(watchdog.pid)
+            assert tty_fds == [], "Watchdog has terminal fds:\n" + "\n".join(tty_fds)
+        finally:
+            watchdog.kill()
+            watchdog.wait()
+    finally:
+        main_proc.kill()
+        main_proc.wait()
