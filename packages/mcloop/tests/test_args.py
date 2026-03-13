@@ -709,6 +709,12 @@ def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
     mock_perms.assert_called_once_with(dry_run=False)
     out = capsys.readouterr().out
     assert "uninstall" in out
+    assert "Not touched:" in out
+    assert "permissions.allow" in out
+    assert "project-level .mcloop/ directories" in out
+    assert "PLAN.md" in out
+    assert "logs/" in out
+    assert "sandbox" in out
 
 
 def test_cmd_uninstall_dry_run(tmp_path, capsys):

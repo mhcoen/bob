@@ -1646,6 +1646,12 @@ def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     _remove_config_json(dry_run=dry_run)
     print("\nRemoving recommended-permissions.json...")
     _remove_recommended_perms(dry_run=dry_run)
+    print("\nNot touched:")
+    print("  - permissions.allow entries in ~/.claude/settings.json")
+    print("  - project-level .mcloop/ directories")
+    print("  - PLAN.md files")
+    print("  - logs/ directories")
+    print("  - sandbox settings")
     print("\nDone.")
 
 
