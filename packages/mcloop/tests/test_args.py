@@ -32,6 +32,7 @@ from mcloop.main import (
     _all_tasks,
     _check_interrupted,
     _check_user_input,
+    _cmd_install,
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
@@ -176,6 +177,66 @@ def test_uninstall_subcommand_with_file():
 def test_invalid_subcommand_exits():
     with pytest.raises(SystemExit):
         _parse("bogus")
+
+
+# --- _cmd_install: claude check ---
+
+
+def test_install_exits_when_claude_not_on_path(tmp_path):
+    with patch("mcloop.main.shutil.which", return_value=None):
+        with pytest.raises(SystemExit) as exc:
+            _cmd_install(tmp_path)
+    assert exc.value.code == 1
+
+
+def test_install_exits_when_claude_not_on_path_message(tmp_path, capsys):
+    with patch("mcloop.main.shutil.which", return_value=None):
+        with pytest.raises(SystemExit):
+            _cmd_install(tmp_path)
+    err = capsys.readouterr().err
+    assert "not found on PATH" in err
+    assert "npm install -g @anthropic-ai/claude-code" in err
+
+
+def test_install_prints_claude_version(tmp_path, capsys):
+    proc = MagicMock(returncode=0, stdout="claude 1.2.3\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+    ):
+        with pytest.raises(SystemExit):
+            _cmd_install(tmp_path)
+    out = capsys.readouterr().out
+    assert "Found claude: claude 1.2.3" in out
+
+
+def test_install_exits_when_version_fails(tmp_path, capsys):
+    proc = MagicMock(returncode=1, stdout="")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            _cmd_install(tmp_path)
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "claude --version" in err
+
+
+def test_install_calls_claude_version_with_found_path(tmp_path):
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/opt/bin/claude"),
+        patch("subprocess.run", return_value=proc) as mock_run,
+    ):
+        with pytest.raises(SystemExit):
+            _cmd_install(tmp_path)
+    mock_run.assert_called_once_with(
+        ["/opt/bin/claude", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 # --- _run_audit_fix_cycle ---

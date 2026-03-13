@@ -8,6 +8,7 @@ import json as _json
 import os
 import select
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -1017,7 +1018,38 @@ def _cmd_wrap(project_dir: Path) -> None:
 
 def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     """Install mcloop into the project directory."""
-    print("install: not yet implemented", file=sys.stderr)
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        print(
+            "Error: 'claude' not found on PATH.\n"
+            "\n"
+            "Install Claude Code:\n"
+            "  npm install -g @anthropic-ai/claude-code\n"
+            "\n"
+            "Then re-run: mcloop install",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    result = subprocess.run(
+        [claude_path, "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        print(
+            f"Error: 'claude --version' failed (exit {result.returncode}).\n"
+            "Check your Claude Code installation and re-run: mcloop install",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    version = result.stdout.strip()
+    print(f"Found claude: {version}")
+
+    # TODO: remaining install steps
+    print("install: remaining steps not yet implemented", file=sys.stderr)
     sys.exit(1)
 
 
