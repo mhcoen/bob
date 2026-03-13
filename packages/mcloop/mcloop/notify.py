@@ -40,9 +40,7 @@ def _send_telegram(text: str) -> None:
     if not bot_token or not chat_id:
         return
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = urllib.parse.urlencode(
-        {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    ).encode()
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
     req = urllib.request.Request(url, data=data)
     try:
         with urllib.request.urlopen(req, timeout=10):

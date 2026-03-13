@@ -225,12 +225,12 @@ def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
         for task in task_list:
             if task.checked or task.failed:
                 continue
+            if task.stage != stage:
+                continue
             if task.children:
                 child = _search(task.children)
                 if child:
                     return child
-            if task.stage != stage:
-                continue
             return task
         return None
 

@@ -1125,7 +1125,9 @@ def test_launch_app_verification_gui_ok(tmp_path, capsys):
         mock_pm.pgrep.return_value = [1234]
         result = _launch_app_verification(tmp_path)
     assert result is None
-    mock_pm.run_gui.assert_called_once_with("swift run MyApp", "MyApp", timeout_seconds=15)
+    mock_pm.run_gui.assert_called_once_with(
+        "swift run MyApp", "MyApp", timeout_seconds=15, kill_on_return=False
+    )
     mock_pm.kill.assert_called_once_with(1234)
     captured = capsys.readouterr()
     assert "running OK" in captured.out
@@ -1241,7 +1243,9 @@ def test_launch_app_verification_gui_process_name_from_app_bundle(tmp_path, caps
         mock_pm.run_gui.return_value = gui_result
         mock_pm.pgrep.return_value = []
         _launch_app_verification(tmp_path)
-    mock_pm.run_gui.assert_called_once_with("open MyApp.app", "MyApp", timeout_seconds=15)
+    mock_pm.run_gui.assert_called_once_with(
+        "open MyApp.app", "MyApp", timeout_seconds=15, kill_on_return=False
+    )
 
 
 # --- _read_repro_steps ---

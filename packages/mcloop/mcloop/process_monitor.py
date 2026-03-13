@@ -426,6 +426,7 @@ def run_gui(
     timeout_seconds: float = 30.0,
     check_interval: float = 1.0,
     settle_seconds: float = 2.0,
+    kill_on_return: bool = True,
 ) -> GUIResult:
     """Launch a GUI app, monitor for crash or hang.
 
@@ -494,12 +495,13 @@ def run_gui(
             sample_output=sample_out if stuck else None,
         )
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        if kill_on_return:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            else:
                 proc.wait()
-        else:
-            proc.wait()

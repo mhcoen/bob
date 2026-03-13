@@ -145,6 +145,7 @@ def _launch_app_verification(wt_path: Path) -> str | None:
             run_cmd,
             process_name,
             timeout_seconds=15,
+            kill_on_return=False,
         )
         failure = None
         if result.crashed:

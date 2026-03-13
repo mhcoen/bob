@@ -342,8 +342,16 @@ def _run_session(
                     )
                     process.kill()
                     process.wait()
+                    _active_process = None
                     try:
                         _watchdog.kill()
+                        _watchdog.wait()
+                    except OSError:
+                        pass
+                    try:
+                        (cwd / ".mcloop" / "active-pid").unlink(
+                            missing_ok=True,
+                        )
                     except OSError:
                         pass
                     return "".join(output_lines), 1

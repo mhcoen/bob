@@ -7,7 +7,7 @@ import subprocess
 
 def _esc(s: str) -> str:
     """Escape a string for embedding in AppleScript double quotes."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "").replace("\r", "")
 
 
 def _run_osascript(script: str, timeout: float = 10.0) -> str:
