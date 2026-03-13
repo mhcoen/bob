@@ -44,6 +44,7 @@ from mcloop.main import (
     _merge_settings,
     _parse_args,
     _print_install_summary,
+    _print_uninstall_summary,
     _reinject_wrappers,
     _remove_config_json,
     _remove_hooks_dir,
@@ -693,13 +694,28 @@ def test_unmerge_settings_empty_hooks(tmp_path, capsys):
 
 
 def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
-    """_cmd_uninstall calls all removal functions."""
+    """_cmd_uninstall calls all removal functions and prints summary."""
     with (
-        patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
-        patch("mcloop.main._remove_telegram_env") as mock_tg,
-        patch("mcloop.main._remove_hooks_dir") as mock_hooks,
-        patch("mcloop.main._remove_config_json") as mock_config,
-        patch("mcloop.main._remove_recommended_perms") as mock_perms,
+        patch(
+            "mcloop.main._unmerge_settings",
+            return_value=[("Settings (PreToolUse)", "removed")],
+        ) as mock_unmerge,
+        patch(
+            "mcloop.main._remove_telegram_env",
+            return_value=("telegram-hook.env", "removed"),
+        ) as mock_tg,
+        patch(
+            "mcloop.main._remove_hooks_dir",
+            return_value=("hooks directory", "removed"),
+        ) as mock_hooks,
+        patch(
+            "mcloop.main._remove_config_json",
+            return_value=("config.json", "removed"),
+        ) as mock_config,
+        patch(
+            "mcloop.main._remove_recommended_perms",
+            return_value=("recommended-permissions.json", "removed"),
+        ) as mock_perms,
     ):
         _cmd_uninstall(tmp_path)
     mock_unmerge.assert_called_once_with(dry_run=False)
@@ -709,7 +725,9 @@ def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
     mock_perms.assert_called_once_with(dry_run=False)
     out = capsys.readouterr().out
     assert "uninstall" in out
-    assert "Not touched:" in out
+    assert "Uninstall summary:" in out
+    assert "Removed:" in out
+    assert "Left in place:" in out
     assert "permissions.allow" in out
     assert "project-level .mcloop/ directories" in out
     assert "PLAN.md" in out
@@ -720,11 +738,26 @@ def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
 def test_cmd_uninstall_dry_run(tmp_path, capsys):
     """_cmd_uninstall passes dry_run through."""
     with (
-        patch("mcloop.main._unmerge_settings", return_value=[]) as mock_unmerge,
-        patch("mcloop.main._remove_telegram_env") as mock_tg,
-        patch("mcloop.main._remove_hooks_dir") as mock_hooks,
-        patch("mcloop.main._remove_config_json") as mock_config,
-        patch("mcloop.main._remove_recommended_perms") as mock_perms,
+        patch(
+            "mcloop.main._unmerge_settings",
+            return_value=[("Settings (PreToolUse)", "would remove (dry run)")],
+        ) as mock_unmerge,
+        patch(
+            "mcloop.main._remove_telegram_env",
+            return_value=("telegram-hook.env", "would remove"),
+        ) as mock_tg,
+        patch(
+            "mcloop.main._remove_hooks_dir",
+            return_value=("hooks directory", "would remove"),
+        ) as mock_hooks,
+        patch(
+            "mcloop.main._remove_config_json",
+            return_value=("config.json", "would remove"),
+        ) as mock_config,
+        patch(
+            "mcloop.main._remove_recommended_perms",
+            return_value=("recommended-permissions.json", "would remove"),
+        ) as mock_perms,
     ):
         _cmd_uninstall(tmp_path, dry_run=True)
     mock_unmerge.assert_called_once_with(dry_run=True)
@@ -734,6 +767,70 @@ def test_cmd_uninstall_dry_run(tmp_path, capsys):
     mock_perms.assert_called_once_with(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
+    assert "Would remove:" in out
+
+
+def test_cmd_uninstall_skipped_items(tmp_path, capsys):
+    """_cmd_uninstall shows 'Already absent' for items not found."""
+    with (
+        patch(
+            "mcloop.main._unmerge_settings",
+            return_value=[("Settings", "skipped (no settings file)")],
+        ),
+        patch(
+            "mcloop.main._remove_telegram_env",
+            return_value=("telegram-hook.env", "skipped (not found)"),
+        ),
+        patch(
+            "mcloop.main._remove_hooks_dir",
+            return_value=("hooks directory", "skipped (not found)"),
+        ),
+        patch(
+            "mcloop.main._remove_config_json",
+            return_value=("config.json", "skipped (not found)"),
+        ),
+        patch(
+            "mcloop.main._remove_recommended_perms",
+            return_value=("recommended-permissions.json", "skipped (not found)"),
+        ),
+    ):
+        _cmd_uninstall(tmp_path)
+    out = capsys.readouterr().out
+    assert "Already absent:" in out
+    assert "Left in place:" in out
+    # No "Removed:" section when nothing was removed
+    assert "Removed:" not in out
+
+
+def test_cmd_uninstall_mixed_results(tmp_path, capsys):
+    """_cmd_uninstall shows mixed removed/skipped/left correctly."""
+    with (
+        patch(
+            "mcloop.main._unmerge_settings",
+            return_value=[("Settings (PreToolUse)", "removed")],
+        ),
+        patch(
+            "mcloop.main._remove_telegram_env",
+            return_value=("telegram-hook.env", "skipped (not found)"),
+        ),
+        patch(
+            "mcloop.main._remove_hooks_dir",
+            return_value=("hooks directory", "removed"),
+        ),
+        patch(
+            "mcloop.main._remove_config_json",
+            return_value=("config.json", "skipped (not found)"),
+        ),
+        patch(
+            "mcloop.main._remove_recommended_perms",
+            return_value=("recommended-permissions.json", "removed"),
+        ),
+    ):
+        _cmd_uninstall(tmp_path)
+    out = capsys.readouterr().out
+    assert "Removed:" in out
+    assert "Already absent:" in out
+    assert "Left in place:" in out
 
 
 # --- _remove_telegram_env ---
@@ -1661,6 +1758,58 @@ def test_print_install_summary_dry_run(capsys):
     _print_install_summary(summary, dry_run=True)
     out = capsys.readouterr().out
     assert "(dry run) Install summary:" in out
+
+
+# --- _print_uninstall_summary ---
+
+
+def test_print_uninstall_summary_removed(capsys):
+    """Shows removed items and left-in-place items."""
+    summary = [
+        ("Settings (PreToolUse)", "removed"),
+        ("telegram-hook.env", "removed"),
+        ("permissions.allow entries", "left in place"),
+    ]
+    _print_uninstall_summary(summary)
+    out = capsys.readouterr().out
+    assert "Uninstall summary:" in out
+    assert "Removed:" in out
+    assert "Settings (PreToolUse)" in out
+    assert "telegram-hook.env" in out
+    assert "Left in place:" in out
+    assert "permissions.allow entries" in out
+
+
+def test_print_uninstall_summary_skipped(capsys):
+    """Shows already-absent items."""
+    summary = [
+        ("telegram-hook.env", "skipped (not found)"),
+        ("hooks directory", "skipped (not found)"),
+    ]
+    _print_uninstall_summary(summary)
+    out = capsys.readouterr().out
+    assert "Already absent:" in out
+    assert "Removed:" not in out
+
+
+def test_print_uninstall_summary_would_remove(capsys):
+    """Shows would-remove items in dry run."""
+    summary = [
+        ("hooks directory", "would remove"),
+        ("config.json", "would remove"),
+    ]
+    _print_uninstall_summary(summary)
+    out = capsys.readouterr().out
+    assert "Would remove:" in out
+    assert "Removed:" not in out
+
+
+def test_print_uninstall_summary_dry_run_prefix(capsys):
+    """Dry run prefix in uninstall summary."""
+    summary = [("Telegram", "would remove")]
+    _print_uninstall_summary(summary, dry_run=True)
+    out = capsys.readouterr().out
+    assert "(dry run) Uninstall summary:" in out
 
 
 def test_cmd_install_prints_summary(tmp_path, capsys):

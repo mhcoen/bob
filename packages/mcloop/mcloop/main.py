@@ -1632,26 +1632,62 @@ def _remove_recommended_perms(*, dry_run: bool = False) -> tuple[str, str]:
     return (component, "removed")
 
 
+def _print_uninstall_summary(summary: list[tuple[str, str]], *, dry_run: bool = False) -> None:
+    """Print a summary table of what was removed and what was left."""
+    prefix = "(dry run) " if dry_run else ""
+    print(f"\n{prefix}Uninstall summary:")
+    print("  " + "-" * 50)
+
+    removed = [(c, s) for c, s in summary if "removed" in s and "would" not in s]
+    would_remove = [(c, s) for c, s in summary if "would remove" in s]
+    skipped = [(c, s) for c, s in summary if "skipped" in s]
+    left = [(c, s) for c, s in summary if s == "left in place"]
+
+    if removed:
+        print("  Removed:")
+        for component, status in removed:
+            print(f"    {component:<28} {status}")
+    if would_remove:
+        print("  Would remove:")
+        for component, status in would_remove:
+            print(f"    {component:<28} {status}")
+    if skipped:
+        print("  Already absent:")
+        for component, status in skipped:
+            print(f"    {component:<28} {status}")
+    if left:
+        print("  Left in place:")
+        for component, _status in left:
+            print(f"    {component}")
+    print("  " + "-" * 50)
+
+
+_UNINSTALL_LEFT_IN_PLACE = [
+    ("permissions.allow entries", "left in place"),
+    ("project-level .mcloop/ directories", "left in place"),
+    ("PLAN.md files", "left in place"),
+    ("logs/ directories", "left in place"),
+    ("sandbox settings", "left in place"),
+]
+
+
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
     """Remove mcloop hook entries and credential files."""
     prefix = "[dry run] " if dry_run else ""
     print(f"\n{prefix}mcloop uninstall\n")
+    summary: list[tuple[str, str]] = []
     print("Removing hook entries from ~/.claude/settings.json...")
-    _unmerge_settings(dry_run=dry_run)
+    summary.extend(_unmerge_settings(dry_run=dry_run))
     print("\nRemoving Telegram credentials...")
-    _remove_telegram_env(dry_run=dry_run)
+    summary.append(_remove_telegram_env(dry_run=dry_run))
     print("\nRemoving hooks directory...")
-    _remove_hooks_dir(dry_run=dry_run)
+    summary.append(_remove_hooks_dir(dry_run=dry_run))
     print("\nRemoving config.json...")
-    _remove_config_json(dry_run=dry_run)
+    summary.append(_remove_config_json(dry_run=dry_run))
     print("\nRemoving recommended-permissions.json...")
-    _remove_recommended_perms(dry_run=dry_run)
-    print("\nNot touched:")
-    print("  - permissions.allow entries in ~/.claude/settings.json")
-    print("  - project-level .mcloop/ directories")
-    print("  - PLAN.md files")
-    print("  - logs/ directories")
-    print("  - sandbox settings")
+    summary.append(_remove_recommended_perms(dry_run=dry_run))
+    summary.extend(_UNINSTALL_LEFT_IN_PLACE)
+    _print_uninstall_summary(summary, dry_run=dry_run)
     print("\nDone.")
 
 
