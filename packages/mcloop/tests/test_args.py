@@ -137,6 +137,42 @@ def test_investigate_with_description_and_log():
     assert args.log == "err.txt"
 
 
+def test_install_subcommand():
+    args = _parse("install")
+    assert args.command == "install"
+    assert args.dry_run is False
+
+
+def test_install_subcommand_dry_run():
+    args = _parse("install", "--dry-run")
+    assert args.command == "install"
+    assert args.dry_run is True
+
+
+def test_uninstall_subcommand():
+    args = _parse("uninstall")
+    assert args.command == "uninstall"
+    assert args.dry_run is False
+
+
+def test_uninstall_subcommand_dry_run():
+    args = _parse("uninstall", "--dry-run")
+    assert args.command == "uninstall"
+    assert args.dry_run is True
+
+
+def test_install_subcommand_with_file():
+    args = _parse("--file", "custom.md", "install")
+    assert args.command == "install"
+    assert args.file == "custom.md"
+
+
+def test_uninstall_subcommand_with_file():
+    args = _parse("--file", "custom.md", "uninstall")
+    assert args.command == "uninstall"
+    assert args.file == "custom.md"
+
+
 def test_invalid_subcommand_exits():
     with pytest.raises(SystemExit):
         _parse("bogus")

@@ -423,6 +423,14 @@ def _main() -> None:
         _cmd_wrap(checklist_path.parent)
         return
 
+    if args.command == "install":
+        _cmd_install(checklist_path.parent, dry_run=args.dry_run)
+        return
+
+    if args.command == "uninstall":
+        _cmd_uninstall(checklist_path.parent, dry_run=args.dry_run)
+        return
+
     if not checklist_path.exists():
         print(f"Checklist not found: {checklist_path}", file=sys.stderr)
         sys.exit(1)
@@ -978,6 +986,14 @@ def _parse_args() -> argparse.Namespace:
     )
     subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
     subparsers.add_parser("wrap", help="Instrument source files with error-catching hooks")
+    install_parser = subparsers.add_parser("install", help="Install mcloop into the project")
+    install_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be installed without doing it"
+    )
+    uninstall_parser = subparsers.add_parser("uninstall", help="Remove mcloop from the project")
+    uninstall_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed without doing it"
+    )
     inv_parser = subparsers.add_parser("investigate", help="Investigate a bug in a worktree")
     inv_parser.add_argument(
         "description", nargs="?", default=None, help="Short description of the bug"
@@ -997,6 +1013,18 @@ def _cmd_wrap(project_dir: Path) -> None:
         sys.exit(1)
     print(f"Instrumented {entry.relative_to(project_dir)} ({language})")
     print("Canonical wrappers saved to .mcloop/wrap/")
+
+
+def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
+    """Install mcloop into the project directory."""
+    print("install: not yet implemented", file=sys.stderr)
+    sys.exit(1)
+
+
+def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
+    """Remove mcloop from the project directory."""
+    print("uninstall: not yet implemented", file=sys.stderr)
+    sys.exit(1)
 
 
 def _cmd_audit(checklist_path: Path) -> None:
