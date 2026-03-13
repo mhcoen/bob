@@ -1493,10 +1493,95 @@ def _merge_settings(
     return results
 
 
+def _unmerge_settings(
+    *,
+    dry_run: bool = False,
+) -> list[tuple[str, str]]:
+    """Remove mcloop hook entries from ~/.claude/settings.json."""
+    settings_path = Path.home() / ".claude" / "settings.json"
+    results: list[tuple[str, str]] = []
+
+    if not settings_path.exists():
+        print("  skip: ~/.claude/settings.json does not exist")
+        results.append(("Settings", "skipped (no settings file)"))
+        return results
+
+    original_content = settings_path.read_text()
+    try:
+        settings = _json.loads(original_content)
+    except _json.JSONDecodeError:
+        print(
+            f"Error: {settings_path} contains invalid JSON.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not isinstance(settings, dict):
+        print(
+            f"Error: {settings_path} is not a JSON object.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        print("  skip: hooks is not an object")
+        results.append(("Settings", "skipped (hooks not an object)"))
+        return results
+
+    changed = False
+    for event_name in list(hooks.keys()):
+        entries = hooks[event_name]
+        if not isinstance(entries, list):
+            continue
+        before = len(entries)
+        kept = [
+            e
+            for e in entries
+            if not (isinstance(e, dict) and "~/.mcloop/hooks/" in e.get("command", ""))
+        ]
+        removed_count = before - len(kept)
+        if removed_count > 0:
+            label = f"Settings ({event_name})"
+            for e in entries:
+                if isinstance(e, dict) and "~/.mcloop/hooks/" in e.get("command", ""):
+                    if dry_run:
+                        print(f"  would remove: hooks.{event_name}: {e['command']}")
+                        results.append((label, "would remove (dry run)"))
+                    else:
+                        print(f"  removed: hooks.{event_name}: {e['command']}")
+                        results.append((label, "removed"))
+            hooks[event_name] = kept
+            changed = True
+            if not kept:
+                del hooks[event_name]
+        else:
+            label = f"Settings ({event_name})"
+            results.append((label, "skipped (no mcloop entries)"))
+
+    if not hooks and "hooks" in settings:
+        del settings["hooks"]
+
+    if changed:
+        new_content = _json.dumps(settings, indent=2) + "\n"
+        if dry_run:
+            _print_file_diff(settings_path, original_content, new_content)
+        else:
+            settings_path.write_text(new_content)
+
+    if not results:
+        results.append(("Settings", "skipped (no hook entries)"))
+
+    return results
+
+
 def _cmd_uninstall(project_dir: Path, *, dry_run: bool = False) -> None:
-    """Remove mcloop from the project directory."""
-    print("uninstall: not yet implemented", file=sys.stderr)
-    sys.exit(1)
+    """Remove mcloop hook entries from settings."""
+    prefix = "[dry run] " if dry_run else ""
+    print(f"\n{prefix}mcloop uninstall\n")
+    print("Removing hook entries from ~/.claude/settings.json...")
+    _unmerge_settings(dry_run=dry_run)
+    print("\nDone.")
 
 
 def _cmd_audit(checklist_path: Path) -> None:

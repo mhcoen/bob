@@ -36,6 +36,7 @@ from mcloop.main import (
     _check_rtk,
     _check_user_input,
     _cmd_install,
+    _cmd_uninstall,
     _install_hooks,
     _install_recommended_permissions,
     _load_mcloop_config,
@@ -48,6 +49,7 @@ from mcloop.main import (
     _setup_api_key,
     _setup_sandbox,
     _setup_telegram,
+    _unmerge_settings,
     _write_eliminated_json,
     _write_ruledout_to_plan,
     run_loop,
@@ -515,6 +517,193 @@ def test_merge_settings_not_object(tmp_path, capsys):
     assert exc.value.code == 1
     err = capsys.readouterr().err
     assert "not a JSON object" in err
+
+
+# --- _unmerge_settings ---
+
+
+def test_unmerge_settings_no_file(tmp_path, capsys):
+    """Skips when settings.json does not exist."""
+    home = tmp_path / "home"
+    with patch.object(Path, "home", return_value=home):
+        results = _unmerge_settings(dry_run=False)
+    assert len(results) == 1
+    assert "no settings file" in results[0][1]
+    out = capsys.readouterr().out
+    assert "does not exist" in out
+
+
+def test_unmerge_settings_removes_mcloop_entries(tmp_path, capsys):
+    """Removes only entries pointing at ~/.mcloop/hooks/."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "type": "command",
+                            "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+                        },
+                        {
+                            "type": "command",
+                            "command": "python3 ~/other-hook.py",
+                        },
+                    ],
+                    "SessionStart": [
+                        {
+                            "type": "command",
+                            "command": "python3 ~/.mcloop/hooks/session-start-hook.py",
+                        },
+                    ],
+                },
+                "other_setting": True,
+            }
+        )
+    )
+
+    with patch.object(Path, "home", return_value=home):
+        results = _unmerge_settings(dry_run=False)
+
+    settings = json.loads(settings_path.read_text())
+    # Other hook preserved
+    assert len(settings["hooks"]["PreToolUse"]) == 1
+    assert "other-hook.py" in settings["hooks"]["PreToolUse"][0]["command"]
+    # SessionStart removed entirely (empty list deleted)
+    assert "SessionStart" not in settings["hooks"]
+    # Other settings preserved
+    assert settings["other_setting"] is True
+    # Results contain removed entries
+    removed = [r for r in results if "removed" in r[1]]
+    assert len(removed) == 2
+
+
+def test_unmerge_settings_no_mcloop_entries(tmp_path, capsys):
+    """No changes when no mcloop entries exist."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    original = json.dumps(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {"type": "command", "command": "python3 ~/other.py"},
+                ],
+            },
+        }
+    )
+    settings_path.write_text(original)
+
+    with patch.object(Path, "home", return_value=home):
+        results = _unmerge_settings(dry_run=False)
+
+    # File unchanged
+    assert settings_path.read_text() == original
+    assert any("no mcloop entries" in r[1] for r in results)
+
+
+def test_unmerge_settings_dry_run(tmp_path, capsys):
+    """Dry run prints diff but does not modify file."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    original = json.dumps(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "type": "command",
+                        "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+                    },
+                ],
+            },
+        }
+    )
+    settings_path.write_text(original)
+
+    with patch.object(Path, "home", return_value=home):
+        results = _unmerge_settings(dry_run=True)
+
+    # File unchanged
+    assert settings_path.read_text() == original
+    out = capsys.readouterr().out
+    assert "would remove" in out
+    assert any("dry run" in r[1] for r in results)
+
+
+def test_unmerge_settings_invalid_json(tmp_path, capsys):
+    """Exits on invalid JSON."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("{bad json")
+
+    with patch.object(Path, "home", return_value=home):
+        with pytest.raises(SystemExit) as exc:
+            _unmerge_settings(dry_run=False)
+    assert exc.value.code == 1
+
+
+def test_unmerge_settings_not_object(tmp_path, capsys):
+    """Exits on non-object JSON."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text('"just a string"')
+
+    with patch.object(Path, "home", return_value=home):
+        with pytest.raises(SystemExit) as exc:
+            _unmerge_settings(dry_run=False)
+    assert exc.value.code == 1
+
+
+def test_unmerge_settings_empty_hooks(tmp_path, capsys):
+    """Removes hooks key when all entries are removed."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "type": "command",
+                            "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+                        },
+                    ],
+                },
+                "other": 1,
+            }
+        )
+    )
+
+    with patch.object(Path, "home", return_value=home):
+        _unmerge_settings(dry_run=False)
+
+    settings = json.loads(settings_path.read_text())
+    assert "hooks" not in settings
+    assert settings["other"] == 1
+
+
+def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
+    """_cmd_uninstall calls _unmerge_settings."""
+    with patch("mcloop.main._unmerge_settings", return_value=[]) as mock:
+        _cmd_uninstall(tmp_path)
+    mock.assert_called_once_with(dry_run=False)
+    out = capsys.readouterr().out
+    assert "uninstall" in out
+
+
+def test_cmd_uninstall_dry_run(tmp_path, capsys):
+    """_cmd_uninstall passes dry_run through."""
+    with patch("mcloop.main._unmerge_settings", return_value=[]) as mock:
+        _cmd_uninstall(tmp_path, dry_run=True)
+    mock.assert_called_once_with(dry_run=True)
+    out = capsys.readouterr().out
+    assert "dry run" in out
 
 
 # --- _setup_telegram ---
