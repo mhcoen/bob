@@ -116,8 +116,9 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     )
     result = run_checks(tmp_path)
     assert result.passed
-    assert mock_run.call_count == 1
-    called_cmd = mock_run.call_args[0][0]
+    # 2 auto-fix calls (ruff check --fix, ruff format) + 1 gate call
+    assert mock_run.call_count == 3
+    called_cmd = mock_run.call_args_list[-1][0][0]
     assert called_cmd == ["ruff", "check", "."]
 
 
@@ -174,7 +175,12 @@ def test_run_checks_first_fails(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_timeout(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
-    mock_run.side_effect = subprocess.TimeoutExpired(cmd="ruff check .", timeout=300)
+    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
+    mock_run.side_effect = [
+        ok,  # ruff check --fix .
+        ok,  # ruff format .
+        subprocess.TimeoutExpired(cmd="ruff check .", timeout=300),
+    ]
     result = run_checks(tmp_path)
     assert not result.passed
     assert "TIMEOUT" in result.output
@@ -183,7 +189,10 @@ def test_run_checks_timeout(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_second_command_fails(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
+    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
     mock_run.side_effect = [
+        ok,  # ruff check --fix .
+        ok,  # ruff format .
         subprocess.CompletedProcess(args="ruff check .", returncode=0, stdout="ok\n", stderr=""),
         subprocess.CompletedProcess(args="pytest", returncode=1, stdout="FAILED\n", stderr=""),
     ]

@@ -84,6 +84,15 @@ def run_checks(
                 output="\n".join(all_output),
                 command=cmd,
             )
+        # Auto-fix ruff violations before the read-only gate
+        if cmd.startswith("ruff check"):
+            for fix_cmd in ["ruff check --fix .", "ruff format ."]:
+                subprocess.run(
+                    shlex.split(fix_cmd),
+                    cwd=project_dir,
+                    capture_output=True,
+                    timeout=120,
+                )
         try:
             result = subprocess.run(
                 parts,
