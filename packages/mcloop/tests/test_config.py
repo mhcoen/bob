@@ -12,7 +12,15 @@ class TestLoadReviewerConfig:
         config_dir = tmp_path / ".mcloop"
         config_dir.mkdir()
         config_dir.joinpath("config.json").write_text(
-            json.dumps({"reviewer": {"model": "gpt-4o", "base_url": "https://api.example.com/v1"}})
+            json.dumps(
+                {
+                    "reviewer": {
+                        "model": "gpt-4o",
+                        "base_url": "https://api.example.com/v1",
+                        "enabled": True,
+                    }
+                }
+            )
         )
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-123")
         result = load_reviewer_config(str(tmp_path))

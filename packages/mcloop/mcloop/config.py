@@ -27,6 +27,8 @@ def load_reviewer_config(project_dir: str) -> dict | None:
     reviewer = data.get("reviewer")
     if not isinstance(reviewer, dict):
         return None
+    if not reviewer.get("enabled", False):
+        return None
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         return None

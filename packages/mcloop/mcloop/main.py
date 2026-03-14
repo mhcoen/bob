@@ -838,7 +838,7 @@ def run_loop(
     if not _check_errors_json(project_dir, model=model):
         return []
 
-    # Reviewer integration
+    # Reviewer integration: requires "enabled": true in config
     reviewer_config = load_reviewer_config(str(project_dir))
     reviewer_status = format_reviewer_status(reviewer_config)
     if reviewer_status:

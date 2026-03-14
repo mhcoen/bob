@@ -958,6 +958,36 @@ after a McLoop session to see how many tokens were saved. This helps
 you gauge whether the compression is working and how much headroom
 you have.
 
+## Suggested reviewer models
+
+Any OpenAI-compatible API works as a reviewer. The model does not
+need to generate code, only read diffs and identify problems, so
+strong reasoning matters more than code generation benchmarks.
+Cheaper models are practical because the reviewer runs in the
+background on every commit.
+
+| Model | Provider | Input /1M | Output /1M | SWE-bench | Context | Notes |
+|-------|----------|-----------|------------|-----------|---------|-------|
+| DeepSeek V3.2 | OpenRouter | $0.28 | $0.42 | 73.1% | 128K | Best value. 90% cache discount on repeated context. |
+| GLM-5 | OpenRouter | $0.72 | $2.30 | 95.8% | 200K | Strongest open model. Near-zero hallucination rate. |
+| Kimi K2.5 | OpenRouter | $0.60 | $2.40 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. |
+| Gemini 2.5 Flash | Google | $0.30 | $2.50 | N/A | 1M | Fast, cheap, very large context window. |
+| Gemini 2.5 Pro | Google | $1.25 | $10.00 | 63.8% | 1M | Strong reasoning, 1M context. Free tier available. |
+| Claude Sonnet 4.6 | Anthropic | $3.00 | $15.00 | 79.6% | 200K | For comparison. McLoop's default task executor. |
+| Claude Opus 4.6 | Anthropic | $5.00 | $25.00 | 80.8% | 200K | For comparison. Strongest overall but 60x DeepSeek output cost. |
+
+To use any of these, set the OpenRouter model string in
+`.mcloop/config.json`:
+
+```json
+{"reviewer": {"model": "zhipu/glm-5", "base_url": "https://openrouter.ai/api/v1"}}
+```
+
+For Google models, use `google/gemini-2.5-pro` or
+`google/gemini-2.5-flash` through OpenRouter (same config format).
+Pricing may vary by provider and change over time. Check
+[OpenRouter](https://openrouter.ai) for current rates.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
