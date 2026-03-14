@@ -8,11 +8,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-def load_reviewer_config(project_dir: str) -> dict | None:
+def load_reviewer_config(
+    project_dir: str,
+    force: bool = False,
+) -> dict | None:
     """Load reviewer config from .mcloop/config.json in the project directory.
 
     Returns the reviewer dict (with api_key added) if the config file has
-    a "reviewer" section AND OPENROUTER_API_KEY env var is set.
+    a "reviewer" section AND OPENROUTER_API_KEY env var is set AND either
+    "enabled": true is in the config or force=True (from --reviewer flag).
     Returns None otherwise.
     """
     config_path = Path(project_dir) / ".mcloop" / "config.json"
@@ -27,7 +31,7 @@ def load_reviewer_config(project_dir: str) -> dict | None:
     reviewer = data.get("reviewer")
     if not isinstance(reviewer, dict):
         return None
-    if not reviewer.get("enabled", False):
+    if not force and not reviewer.get("enabled", False):
         return None
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:

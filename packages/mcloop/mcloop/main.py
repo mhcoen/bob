@@ -603,6 +603,7 @@ def _main() -> None:
         fallback_model=args.fallback_model,
         no_audit=args.no_audit,
         allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
+        enable_reviewer=args.reviewer,
     )
 
 
@@ -810,6 +811,7 @@ def run_loop(
     fallback_model: str | None = None,
     no_audit: bool = False,
     allowed_tools: str | None = None,
+    enable_reviewer: bool = False,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
     global _project_dir, _current_phase, _current_task_label
@@ -838,8 +840,9 @@ def run_loop(
     if not _check_errors_json(project_dir, model=model):
         return []
 
-    # Reviewer integration: requires "enabled": true in config
-    reviewer_config = load_reviewer_config(str(project_dir))
+    # Reviewer integration: enabled by "enabled": true in config
+    # OR by --reviewer flag on the command line
+    reviewer_config = load_reviewer_config(str(project_dir), force=enable_reviewer)
     reviewer_status = format_reviewer_status(reviewer_config)
     if reviewer_status:
         print(
@@ -1390,6 +1393,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-audit", action="store_true", help="Skip the post-completion bug audit cycle"
+    )
+    parser.add_argument(
+        "--reviewer",
+        action="store_true",
+        help="Enable background code reviewer (requires OPENROUTER_API_KEY)",
     )
     parser.add_argument(
         "--allow-web-tools",
