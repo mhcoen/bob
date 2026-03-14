@@ -285,10 +285,10 @@ The debugging playbook this enforces:
   - [x] `python -m mcloop.reviewer <commit_hash> <project_dir>` invokes `run_review_cli` for standalone testing.
   - [x] Use only stdlib (`urllib.request`, `json`) for the HTTP call. No new dependencies.
 
-- [ ] [BATCH] Add reviewer config and loading
-  - [ ] Add `load_reviewer_config(project_dir) -> dict | None` to `mcloop/config.py`. Reads `.mcloop/config.json`, returns the `reviewer` dict if present and `OPENROUTER_API_KEY` env var is set. Returns None otherwise.
-  - [ ] Schema: `{"reviewer": {"model": "...", "base_url": "..."}}`. API key always from `OPENROUTER_API_KEY` env var.
-  - [ ] Add `format_reviewer_status(config) -> str`: returns `"{model} via {host} (API key set)"`, or `"configured but OPENROUTER_API_KEY not set (disabled)"`, or empty string if no config.
+- [x] [BATCH] Add reviewer config and loading
+  - [x] Add `load_reviewer_config(project_dir) -> dict | None` to `mcloop/config.py`. Reads `.mcloop/config.json`, returns the `reviewer` dict if present and `OPENROUTER_API_KEY` env var is set. Returns None otherwise.
+  - [x] Schema: `{"reviewer": {"model": "...", "base_url": "..."}}`. API key always from `OPENROUTER_API_KEY` env var.
+  - [x] Add `format_reviewer_status(config) -> str`: returns `"{model} via {host} (API key set)"`, or `"configured but OPENROUTER_API_KEY not set (disabled)"`, or empty string if no config.
 
 - [ ] [BATCH] Integrate reviewer lifecycle into run_loop
   - [ ] In `run_loop`, after existing startup output, print reviewer status using `format_reviewer_status` if non-empty.
