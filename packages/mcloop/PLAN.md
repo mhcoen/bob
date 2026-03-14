@@ -277,13 +277,13 @@ The debugging playbook this enforces:
 
 ## Stage 3: Continuous code reviewer
 
-- [ ] [BATCH] Add reviewer module (`mcloop/reviewer.py`)
-  - [ ] Create `ReviewFinding` dataclass: file, line_range, severity (error/warning/info), description, confidence (high/medium/low)
-  - [ ] Create `ReviewRequest` dataclass: commit_hash, diff_text, project_description, task_label, task_text
-  - [ ] Create `run_review(request, config) -> list[ReviewFinding]`: POST to OpenAI-compatible chat/completions endpoint with model, base_url, and API key from config. System prompt instructs model to review a diff for bugs, unhandled errors, logic mismatches with the task spec, resource leaks, and missing edge cases. Response must be JSON array of findings. Parse with json.loads, return empty list on parse failure or HTTP error.
-  - [ ] Create `run_review_cli(commit_hash, project_dir)`: entry point for subprocess invocation. Reads config from `.mcloop/config.json`, computes diff with `git diff <hash>^..<hash>`, loads project description from PLAN.md, calls `run_review`, writes results to `.mcloop/reviews/{commit_hash}.json`.
-  - [ ] `python -m mcloop.reviewer <commit_hash> <project_dir>` invokes `run_review_cli` for standalone testing.
-  - [ ] Use only stdlib (`urllib.request`, `json`) for the HTTP call. No new dependencies.
+- [x] [BATCH] Add reviewer module (`mcloop/reviewer.py`)
+  - [x] Create `ReviewFinding` dataclass: file, line_range, severity (error/warning/info), description, confidence (high/medium/low)
+  - [x] Create `ReviewRequest` dataclass: commit_hash, diff_text, project_description, task_label, task_text
+  - [x] Create `run_review(request, config) -> list[ReviewFinding]`: POST to OpenAI-compatible chat/completions endpoint with model, base_url, and API key from config. System prompt instructs model to review a diff for bugs, unhandled errors, logic mismatches with the task spec, resource leaks, and missing edge cases. Response must be JSON array of findings. Parse with json.loads, return empty list on parse failure or HTTP error.
+  - [x] Create `run_review_cli(commit_hash, project_dir)`: entry point for subprocess invocation. Reads config from `.mcloop/config.json`, computes diff with `git diff <hash>^..<hash>`, loads project description from PLAN.md, calls `run_review`, writes results to `.mcloop/reviews/{commit_hash}.json`.
+  - [x] `python -m mcloop.reviewer <commit_hash> <project_dir>` invokes `run_review_cli` for standalone testing.
+  - [x] Use only stdlib (`urllib.request`, `json`) for the HTTP call. No new dependencies.
 
 - [ ] [BATCH] Add reviewer config and loading
   - [ ] Add `load_reviewer_config(project_dir) -> dict | None` to `mcloop/config.py`. Reads `.mcloop/config.json`, returns the `reviewer` dict if present and `OPENROUTER_API_KEY` env var is set. Returns None otherwise.
