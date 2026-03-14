@@ -72,6 +72,7 @@ from mcloop.runner import (
     INVESTIGATION_TOOLS,
     run_audit,
     run_task,
+    warn_unknown_model,
 )
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
@@ -869,7 +870,10 @@ def run_loop(
     completed: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
-    current_model = model  # may switch to fallback_model on rate limit
+    current_model = model or _load_mcloop_config().get("model")
+
+    if current_model:
+        warn_unknown_model(cli, current_model)
 
     # Bug-only mode: when ## Bugs has unchecked items, work only those
     # tasks. Do not fall through to feature tasks, do not start the

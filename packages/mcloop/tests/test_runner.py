@@ -1715,3 +1715,114 @@ def test_build_command_claude_no_regression():
     assert "--model" in cmd
     idx = cmd.index("--model")
     assert cmd[idx + 1] == "sonnet"
+
+
+# --- warn_unknown_model ---
+
+
+def test_warn_unknown_model_known_claude(capsys):
+    """No warning for known claude model."""
+    from mcloop.runner import warn_unknown_model
+
+    warn_unknown_model("claude", "sonnet")
+    assert capsys.readouterr().out == ""
+
+
+def test_warn_unknown_model_unknown_claude(capsys):
+    """Warning printed for unknown claude model."""
+    from mcloop.runner import warn_unknown_model
+
+    warn_unknown_model("claude", "gpt-turbo-9000")
+    out = capsys.readouterr().out
+    assert "Warning" in out
+    assert "gpt-turbo-9000" in out
+
+
+def test_warn_unknown_model_known_codex(capsys):
+    """No warning for known codex model."""
+    from mcloop.runner import warn_unknown_model
+
+    warn_unknown_model("codex", "gpt-5.4")
+    assert capsys.readouterr().out == ""
+
+
+def test_warn_unknown_model_none_cli(capsys):
+    """No warning when CLI has no known models."""
+    from mcloop.runner import warn_unknown_model
+
+    warn_unknown_model("unknown-cli", "any-model")
+    assert capsys.readouterr().out == ""
+
+
+# --- model config in run_loop ---
+
+
+def test_config_model_used_when_no_arg(tmp_path):
+    """Config model is used when --model is None."""
+    from mcloop.main import run_loop
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+    config = {"model": "haiku"}
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main.format_reviewer_status", return_value=""),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("mcloop.main._load_mcloop_config", return_value=config),
+        patch("mcloop.main.warn_unknown_model") as mock_warn,
+    ):
+        run_loop(plan, model=None)
+    mock_warn.assert_called_once_with("claude", "haiku")
+
+
+def test_arg_model_overrides_config(tmp_path):
+    """--model overrides config model."""
+    from mcloop.main import run_loop
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+    config = {"model": "haiku"}
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main.format_reviewer_status", return_value=""),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("mcloop.main._load_mcloop_config", return_value=config),
+        patch("mcloop.main.warn_unknown_model") as mock_warn,
+    ):
+        run_loop(plan, model="opus")
+    mock_warn.assert_called_once_with("claude", "opus")
+
+
+def test_no_warning_when_no_model(tmp_path):
+    """No warning when model is None (no model configured)."""
+    from mcloop.main import run_loop
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main.format_reviewer_status", return_value=""),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.warn_unknown_model") as mock_warn,
+    ):
+        run_loop(plan, model=None)
+    mock_warn.assert_not_called()

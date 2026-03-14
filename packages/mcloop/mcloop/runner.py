@@ -66,6 +66,45 @@ _BILLING_KEY = {
 }
 
 
+_KNOWN_MODELS = {
+    "claude": frozenset(
+        {
+            "opus",
+            "sonnet",
+            "haiku",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-opus-4-5",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-20250514",
+            "claude-haiku-4-5-20251001",
+        }
+    ),
+    "codex": frozenset(
+        {
+            "gpt-5.4",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+            "gpt-5.2-codex",
+            "gpt-5.2",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+        }
+    ),
+}
+
+
+def warn_unknown_model(cli: str, model: str) -> None:
+    """Print a warning if model is not in the known-good list for cli."""
+    known = _KNOWN_MODELS.get(cli, frozenset())
+    if known and model not in known:
+        print(
+            f'Warning: model "{model}" not recognized for {cli} (may still work)',
+            flush=True,
+        )
+
+
 def _build_session_env(
     task_label: str = "",
     cli: str = "claude",
