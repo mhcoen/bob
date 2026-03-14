@@ -274,3 +274,33 @@ The debugging playbook this enforces:
   - [x] `uninstall`: leave `permissions.allow` entries, project-level `.mcloop/` directories, PLAN.md files, and logs untouched. Will not disable the sandbox.
   - [x] `uninstall`: print what was removed and what was left in place
   - [x] `uninstall --dry-run`: print every file that would be deleted or modified, with diffs for JSON modifications, but make no changes
+
+## Stage 3: Continuous code reviewer
+
+- [ ] [BATCH] Add reviewer module (`mcloop/reviewer.py`)
+  - [ ] Create `ReviewFinding` dataclass: file, line_range, severity (error/warning/info), description, confidence (high/medium/low)
+  - [ ] Create `ReviewRequest` dataclass: commit_hash, diff_text, project_description, task_label, task_text
+  - [ ] Create `run_review(request, config) -> list[ReviewFinding]`: POST to OpenAI-compatible chat/completions endpoint with model, base_url, and API key from config. System prompt instructs model to review a diff for bugs, unhandled errors, logic mismatches with the task spec, resource leaks, and missing edge cases. Response must be JSON array of findings. Parse with json.loads, return empty list on parse failure or HTTP error.
+  - [ ] Create `run_review_cli(commit_hash, project_dir)`: entry point for subprocess invocation. Reads config from `.mcloop/config.json`, computes diff with `git diff <hash>^..<hash>`, loads project description from PLAN.md, calls `run_review`, writes results to `.mcloop/reviews/{commit_hash}.json`.
+  - [ ] `python -m mcloop.reviewer <commit_hash> <project_dir>` invokes `run_review_cli` for standalone testing.
+  - [ ] Use only stdlib (`urllib.request`, `json`) for the HTTP call. No new dependencies.
+
+- [ ] [BATCH] Add reviewer config and loading
+  - [ ] Add `load_reviewer_config(project_dir) -> dict | None` to `mcloop/config.py`. Reads `.mcloop/config.json`, returns the `reviewer` dict if present and `OPENROUTER_API_KEY` env var is set. Returns None otherwise.
+  - [ ] Schema: `{"reviewer": {"model": "...", "base_url": "..."}}`. API key always from `OPENROUTER_API_KEY` env var.
+  - [ ] Add `format_reviewer_status(config) -> str`: returns `"{model} via {host} (API key set)"`, or `"configured but OPENROUTER_API_KEY not set (disabled)"`, or empty string if no config.
+
+- [ ] [BATCH] Integrate reviewer lifecycle into run_loop
+  - [ ] In `run_loop`, after existing startup output, print reviewer status using `format_reviewer_status` if non-empty.
+  - [ ] After `_commit()` succeeds, if reviewer is enabled, spawn `subprocess.Popen([sys.executable, "-m", "mcloop.reviewer", commit_hash, str(project_dir)])` with `stdout=DEVNULL`, `stderr=DEVNULL`, `start_new_session=True`. Store Popen object in a list. Do not wait.
+  - [ ] At the top of the `while True` loop, scan `.mcloop/reviews/` for `.json` files. Parse each, filter to high-confidence findings, delete after reading. If findings exist, append a "Review findings from previous tasks" block to session context. If 3+ high-confidence error-severity findings from one commit, insert a fix task into `## Bugs` section of PLAN.md instead.
+  - [ ] In the signal handler and atexit handler, terminate any active reviewer subprocesses from the stored list.
+  - [ ] On startup, remove stale `.mcloop/reviews/*.json` older than 24 hours.
+
+- [ ] Add reviewer to `mcloop install` summary: at the end of the install summary, if `.mcloop/config.json` has a reviewer section, print its status using `format_reviewer_status`. Do not prompt for OpenRouter credentials during install.
+
+- [ ] [BATCH] Update documentation
+  - [ ] Add "Continuous code reviewer" section under "Advanced features" in the mcloop README. Cover: what it does, how to enable it (config.json + env var), what providers work (OpenRouter, any OpenAI-compatible endpoint, Ollama), what it catches, how findings are delivered (context or Bugs escalation), that it never blocks the main loop.
+  - [ ] Add reviewer config example to the README.
+  - [ ] Update the "Features at a glance" list.
+  - [ ] Add a sentence to the duplo README noting that batched tasks are reviewed as a single diff after the batch commit.

@@ -7,7 +7,7 @@ McLoop lets you run Claude Code for hours at a time without babysitting it. You 
 - **Continuous task execution** with a fresh context per session and rolling summaries between tasks
 - **Automatic bug audit** after all tasks complete: find, verify, and fix confirmed defects in two rounds
 - **Telegram notifications** for progress, failures, and remote command approval from your phone
-- **Interrupt and resume** with state capture: Ctrl-C saves what was happening, restart prompts you
+- **Interrupt and resume** with state capture: Ctrl-C saves what was happening so the next run can pick up where you left off
 - **Investigation mode** for runtime bugs that survive the build/test cycle
 - **Self-healing apps** with automatic crash instrumentation (Swift and Python)
 - **Task batching** with `[BATCH]` to combine well-specified subtasks into a single session
