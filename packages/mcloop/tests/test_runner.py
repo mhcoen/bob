@@ -1585,3 +1585,86 @@ def test_run_task_no_eliminated_no_block(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "RULED OUT APPROACHES" not in prompt
+
+
+# --- _build_session_env ---
+
+
+def test_build_session_env_allowlisted_vars_only(monkeypatch):
+    """Only allowlisted vars from os.environ are included."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("HOME", "/home/user")
+    monkeypatch.setenv("SECRET_KEY", "should-not-appear")
+    with patch("mcloop.main._load_mcloop_config", return_value={}):
+        env = _build_session_env()
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/home/user"
+    assert "SECRET_KEY" not in env
+
+
+def test_build_session_env_adds_task_label(monkeypatch):
+    """MCLOOP_TASK_LABEL is added when task_label is non-empty."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    with patch("mcloop.main._load_mcloop_config", return_value={}):
+        env = _build_session_env(task_label="task-1")
+    assert env["MCLOOP_TASK_LABEL"] == "task-1"
+
+
+def test_build_session_env_no_task_label_when_empty(monkeypatch):
+    """MCLOOP_TASK_LABEL is not set when task_label is empty string."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    with patch("mcloop.main._load_mcloop_config", return_value={}):
+        env = _build_session_env(task_label="")
+    assert "MCLOOP_TASK_LABEL" not in env
+
+
+def test_build_session_env_reads_passthrough(monkeypatch):
+    """Includes vars from env_passthrough config list."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("MY_CUSTOM_VAR", "hello")
+    config = {"env_passthrough": ["MY_CUSTOM_VAR"]}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env()
+    assert env["MY_CUSTOM_VAR"] == "hello"
+
+
+def test_build_session_env_excludes_credentials_by_default(monkeypatch):
+    """Credentials are NOT included without explicit passthrough."""
+    from mcloop.runner import _build_session_env
+
+    credentials = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "AWS_SECRET_ACCESS_KEY",
+        "GITHUB_TOKEN",
+    ]
+    for key in credentials:
+        monkeypatch.setenv(key, "secret-value")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    with patch("mcloop.main._load_mcloop_config", return_value={}):
+        env = _build_session_env()
+    for key in credentials:
+        assert key not in env
+
+
+def test_build_session_env_includes_credentials_via_passthrough(monkeypatch):
+    """Credentials ARE included when listed in env_passthrough."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-123")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
+    config = {"env_passthrough": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env()
+    assert env["ANTHROPIC_API_KEY"] == "sk-ant-123"
+    assert env["OPENAI_API_KEY"] == "sk-oai-456"

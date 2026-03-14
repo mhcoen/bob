@@ -1502,7 +1502,7 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     summary.extend(_install_hooks(dry_run=dry_run))
     summary.extend(_merge_settings(dry_run=dry_run))
     summary.append(_setup_telegram(dry_run=dry_run))
-    summary.append(_setup_api_key(dry_run=dry_run))
+    summary.append(_setup_env_security())
     summary.append(_setup_sandbox(dry_run=dry_run))
     summary.append(_install_recommended_permissions(dry_run=dry_run))
     rtk_status = _check_rtk()
@@ -1645,46 +1645,25 @@ def _load_mcloop_config() -> dict:
         return {}
 
 
-def _setup_api_key(*, dry_run: bool = False) -> tuple[str, str]:
-    """Ask whether to keep ANTHROPIC_API_KEY. Default is no."""
-    config = _load_mcloop_config()
-    if "keep_anthropic_api_key" in config:
-        choice = config["keep_anthropic_api_key"]
-        label = "keep (use API credits)" if choice else "strip (use subscription)"
-        print(f"ANTHROPIC_API_KEY: {label} (from {_MCLOOP_CONFIG})")
-        return ("API key", f"skipped ({label})")
-
+def _setup_env_security() -> tuple[str, str]:
+    """Inform the user about the minimal session environment."""
     print(
-        "\nANTHROPIC_API_KEY handling:"
-        "\n  By default, mcloop strips ANTHROPIC_API_KEY from the environment"
-        "\n  so Claude Code uses your subscription instead of billing API credits."
-        "\n  If you want to use API credits instead, answer yes.\n"
+        "\nSession environment:"
+        "\n  mcloop passes only essential variables (PATH, HOME, TERM, etc.)"
+        "\n  to CLI subprocesses. API keys, cloud credentials, and tokens"
+        "\n  are excluded by default, so the CLI uses your subscription."
+        "\n  To use API billing instead, add the key to env_passthrough:"
+        "\n    Claude Code: add ANTHROPIC_API_KEY"
+        "\n    Codex: add OPENAI_API_KEY or CODEX_API_KEY"
+        "\n  If your project tests need other variables, add those too."
+        f"\n  Config: {_MCLOOP_CONFIG}\n"
     )
-
-    if dry_run:
-        new_config = dict(config)
-        new_config["keep_anthropic_api_key"] = False
-        new_content = _json.dumps(new_config, indent=2) + "\n"
-        old = _MCLOOP_CONFIG.read_text() if _MCLOOP_CONFIG.exists() else ""
-        _print_file_diff(_MCLOOP_CONFIG, old, new_content)
-        print("  (dry run: would use default — strip key)")
-        return ("API key", "would configure (dry run)")
-
-    try:
-        answer = input("  Keep ANTHROPIC_API_KEY? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\nSkipped: using default (strip key).")
-        answer = ""
-
-    keep = answer in ("y", "yes")
-    label = "keep (use API credits)" if keep else "strip (use subscription)"
-    print(f"  ANTHROPIC_API_KEY: {label}")
-
-    config["keep_anthropic_api_key"] = keep
-    _MCLOOP_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    _MCLOOP_CONFIG.write_text(_json.dumps(config, indent=2) + "\n")
-    print(f"  Saved to {_MCLOOP_CONFIG}")
-    return ("API key", f"configured ({label})")
+    config = _load_mcloop_config()
+    passthrough = config.get("env_passthrough", [])
+    if passthrough:
+        print(f"  Extra variables: {', '.join(passthrough)}")
+        return ("Environment", f"minimal + {len(passthrough)} extra")
+    return ("Environment", "minimal (subscription billing)")
 
 
 _CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"

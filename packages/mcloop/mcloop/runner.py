@@ -35,6 +35,48 @@ class RunResult:
 
 INVESTIGATION_TOOLS = "Edit,Write,Bash,Read,Glob,Grep,WebFetch,WebSearch"
 
+# Minimal set of environment variables passed to CLI subprocesses.
+# Everything else (API keys, cloud credentials, tokens) is excluded.
+_PASSTHROUGH_VARS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TERM",
+        "LANG",
+        "LC_ALL",
+        "TMPDIR",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "COLORTERM",
+        "FORCE_COLOR",
+        "NO_COLOR",
+    }
+)
+
+
+def _build_session_env(task_label: str = "") -> dict[str, str]:
+    """Build a minimal environment for CLI subprocesses.
+
+    Includes only variables from _PASSTHROUGH_VARS plus any
+    user-specified extras from the env_passthrough config list.
+    Credentials and tokens are excluded by default.
+    """
+    from mcloop.main import _load_mcloop_config
+
+    env = {k: v for k, v in os.environ.items() if k in _PASSTHROUGH_VARS}
+    if task_label:
+        env["MCLOOP_TASK_LABEL"] = task_label
+    passthrough = _load_mcloop_config().get("env_passthrough", [])
+    if isinstance(passthrough, list):
+        for var in passthrough:
+            if isinstance(var, str) and var in os.environ:
+                env[var] = os.environ[var]
+    return env
+
 
 def run_task(
     task_text: str,
@@ -193,13 +235,10 @@ def run_task(
     if allowed_tools:
         build_kwargs["allowed_tools"] = allowed_tools
     cmd = _build_command(cli, prompt, **build_kwargs)
-    env = dict(os.environ)
-    if task_label:
-        env["MCLOOP_TASK_LABEL"] = task_label
     output, returncode = _run_session(
         cmd,
         project_dir,
-        env=env,
+        env=_build_session_env(task_label=task_label),
     )
     log_path = _write_log(
         log_dir,
@@ -262,13 +301,7 @@ def _run_session(
     env: dict | None = None,
 ) -> tuple[str, int]:
     """Run a CLI session, stream output, return (output, exit_code)."""
-    session_env = dict(env or os.environ)
-    # Strip ANTHROPIC_API_KEY so claude -p uses the subscription
-    # instead of billing API credits — unless the user opted to keep it.
-    from mcloop.main import _load_mcloop_config
-
-    if not _load_mcloop_config().get("keep_anthropic_api_key", False):
-        session_env.pop("ANTHROPIC_API_KEY", None)
+    session_env = env if env is not None else _build_session_env()
     _last_output_lines.clear()
     global _active_process
     process = subprocess.Popen(

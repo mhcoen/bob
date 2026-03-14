@@ -304,3 +304,27 @@ The debugging playbook this enforces:
   - [x] Add reviewer config example to the README.
   - [x] Update the "Features at a glance" list.
   - [x] Add a sentence to the duplo README noting that batched tasks are reviewed as a single diff after the batch commit.
+
+## Stage 4: Secure session environment and Codex support
+
+- [ ] [BATCH] Replace inherited environment with minimal allowlist
+  - [x] Define `_PASSTHROUGH_VARS` set in `runner.py`: PATH, HOME, TERM, LANG, LC_ALL, TMPDIR, USER, LOGNAME, SHELL, XDG_CACHE_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, COLORTERM, FORCE_COLOR, NO_COLOR
+  - [x] Add `_build_session_env(task_label)` function that builds env from `_PASSTHROUGH_VARS` only, adds MCLOOP_TASK_LABEL, and reads `env_passthrough` list from mcloop config for user-specified extras
+  - [x] Update `_run_session` to use `_build_session_env()` instead of `dict(env or os.environ)` with single-key stripping
+  - [x] Update `run_task` to stop constructing its own env dict from `os.environ`
+  - [x] Remove `keep_anthropic_api_key` config option from `_run_session`, `_setup_api_key` in main.py, and install flow
+  - [x] Verify all `_run_session` call sites work with minimal env
+  - [ ] Add tests: `_build_session_env` includes only allowlisted vars, `env_passthrough` adds specified vars, credentials (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) are excluded by default, MCLOOP_TASK_LABEL is present
+  - [ ] Document `env_passthrough` in README
+
+- [ ] Add Codex as a CLI backend
+  - [ ] Add `--cli` argument to arg parser (choices: claude, codex, default: claude)
+  - [ ] Add `cli` field to `.mcloop/config.json` as alternative to command line flag
+  - [ ] Update `_build_command` codex branch: `codex exec --ask-for-approval never --sandbox workspace-write --path <dir> --model <model> "prompt"`
+  - [ ] Update `_run_session` env building: for codex, also exclude CODEX_API_KEY unless user opts in via `env_passthrough`
+  - [ ] Update `get_available_cli` to return the configured CLI instead of hardcoded "claude"
+  - [ ] Update rate limit detection for Codex output patterns
+  - [ ] Update session limit detection for Codex output patterns
+  - [ ] Test `_build_command` produces correct codex exec invocation
+  - [ ] Test `_build_command` produces correct claude invocation (no regression)
+  - [ ] Document `--cli codex` in README with security model differences
