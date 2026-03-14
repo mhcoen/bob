@@ -780,14 +780,22 @@ more high-confidence error-severity findings, McLoop escalates by
 inserting a fix task into the `## Bugs` section of PLAN.md, which has
 absolute priority over feature tasks.
 
+The reviewer sends both the diff and the enclosing functions from
+each changed file (imports plus only the functions containing
+changes, with line numbers). This gives the model enough context to
+avoid false positives about undefined variables or missing imports
+without sending entire files.
+
 The reviewer is disabled by default. To enable it, add a `reviewer`
-section to `.mcloop/config.json` in your project directory and set
-the `OPENROUTER_API_KEY` environment variable:
+section to `.mcloop/config.json` in your project directory with
+`"enabled": true`, and set the `OPENROUTER_API_KEY` environment
+variable:
 
 ```json
 {
   "reviewer": {
-    "model": "google/gemini-2.5-flash",
+    "enabled": true,
+    "model": "deepseek/deepseek-v3.2",
     "base_url": "https://openrouter.ai/api/v1"
   }
 }
@@ -797,15 +805,20 @@ the `OPENROUTER_API_KEY` environment variable:
 export OPENROUTER_API_KEY=your-key-here
 ```
 
+Alternatively, pass `--reviewer` on the command line to enable the
+reviewer without setting `"enabled": true` in the config. The config
+file must still contain the `model` and `base_url` fields.
+
 Any OpenAI-compatible endpoint works: [OpenRouter](https://openrouter.ai),
 a direct provider API, or a local server like
 [Ollama](https://ollama.com) (set `base_url` to
 `http://localhost:11434/v1` and `OPENROUTER_API_KEY` to any non-empty
-string). The model is your choice — a fast, cheap model works well
-since it only reviews diffs, not full codebases.
+string). The model is your choice. A fast, cheap model works well
+since it only reviews diffs and surrounding functions, not full
+codebases.
 
 McLoop prints the reviewer status at startup when configured (e.g.,
-`Reviewer: google/gemini-2.5-flash via openrouter.ai (API key set)`).
+`Reviewer: deepseek/deepseek-v3.2 via openrouter.ai (API key set)`).
 Stale review files older than 24 hours are cleaned up automatically.
 
 ## Syncing PLAN.md
@@ -970,23 +983,23 @@ background on every commit.
 |-------|----------|-----------|------------|-----------|---------|-------|
 | DeepSeek V3.2 | OpenRouter | $0.28 | $0.42 | 73.1% | 128K | Best value. 90% cache discount on repeated context. |
 | GLM-5 | OpenRouter | $0.72 | $2.30 | 95.8% | 200K | Strongest open model. Near-zero hallucination rate. |
-| Kimi K2.5 | OpenRouter | $0.60 | $2.40 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. |
+| Kimi K2.5 | OpenRouter | $0.50 | $2.80 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. |
 | Gemini 2.5 Flash | Google | $0.30 | $2.50 | N/A | 1M | Fast, cheap, very large context window. |
 | Gemini 2.5 Pro | Google | $1.25 | $10.00 | 63.8% | 1M | Strong reasoning, 1M context. Free tier available. |
 | Claude Sonnet 4.6 | Anthropic | $3.00 | $15.00 | 79.6% | 200K | For comparison. McLoop's default task executor. |
 | Claude Opus 4.6 | Anthropic | $5.00 | $25.00 | 80.8% | 200K | For comparison. Strongest overall but 60x DeepSeek output cost. |
 
-To use any of these, set the OpenRouter model string in
-`.mcloop/config.json`:
+To use any of these, set the model string in `.mcloop/config.json`:
 
 ```json
-{"reviewer": {"model": "zhipu/glm-5", "base_url": "https://openrouter.ai/api/v1"}}
+{"reviewer": {"enabled": true, "model": "z-ai/glm-5", "base_url": "https://openrouter.ai/api/v1"}}
 ```
 
-For Google models, use `google/gemini-2.5-pro` or
-`google/gemini-2.5-flash` through OpenRouter (same config format).
-Pricing may vary by provider and change over time. Check
-[OpenRouter](https://openrouter.ai) for current rates.
+OpenRouter model strings: `deepseek/deepseek-v3.2`, `z-ai/glm-5`,
+`moonshotai/kimi-k2.5`, `google/gemini-2.5-flash`,
+`google/gemini-2.5-pro`. Pricing may vary by provider and change
+over time. Check [OpenRouter](https://openrouter.ai) for current
+rates.
 
 ## License
 
