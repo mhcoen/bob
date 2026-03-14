@@ -140,3 +140,41 @@ def test_wait_for_reset_calls_notify():
 
     assert any("Pausing" in msg for msg, _ in notifications)
     assert any("Resuming" in msg for msg, _ in notifications)
+
+
+# --- Codex rate limit patterns ---
+
+
+def test_is_rate_limited_codex_5hour():
+    assert is_rate_limited("reached your 5-hour message limit", 1)
+
+
+def test_is_rate_limited_codex_rate_limit_reached():
+    assert is_rate_limited("Rate limit reached for gpt-4o", 1)
+
+
+def test_is_rate_limited_codex_rate_limit_exceeded():
+    assert is_rate_limited("rate_limit_exceeded", 1)
+
+
+def test_is_rate_limited_codex_exceeded_the_rate_limit():
+    assert is_rate_limited("You have exceeded the rate limit", 1)
+
+
+def test_is_rate_limited_codex_429():
+    assert is_rate_limited("429 Too Many Requests", 1)
+
+
+# --- Codex session limit patterns ---
+
+
+def test_is_session_limited_codex_5hour():
+    assert is_session_limited("reached your 5-hour message limit", 1)
+
+
+def test_is_session_limited_codex_weekly_cap():
+    assert is_session_limited("You've reached your weekly usage cap", 1)
+
+
+def test_is_session_limited_codex_weekly_limit():
+    assert is_session_limited("weekly limit reached", 1)

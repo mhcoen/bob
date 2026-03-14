@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 RATE_LIMIT_PATTERNS = [
     "rate limit",
     "rate_limit_error",
+    "rate_limit_exceeded",
     "too many requests",
     "usage limit",
     "quota exceeded",
     "capacity",
+    "5-hour message limit",
 ]
 
 # Substrings in stream JSON metadata that contain "rate_limit"
@@ -37,6 +39,8 @@ SESSION_LIMIT_PATTERNS = [
     "usage cap",
     "you've hit your limit",
     "hit your limit",
+    "5-hour message limit",
+    "weekly limit",
 ]
 
 DEFAULT_COOLDOWN = 300  # 5 minutes
