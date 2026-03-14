@@ -58,23 +58,35 @@ _PASSTHROUGH_VARS = frozenset(
 )
 
 
-def _build_session_env(task_label: str = "") -> dict[str, str]:
+# Map from CLI name to the environment variable that controls
+# whether the CLI bills via API key or subscription.
+_BILLING_KEY = {
+    "claude": "ANTHROPIC_API_KEY",
+    "codex": "OPENAI_API_KEY",
+}
+
+
+def _build_session_env(
+    task_label: str = "",
+    cli: str = "claude",
+) -> dict[str, str]:
     """Build a minimal environment for CLI subprocesses.
 
-    Includes only variables from _PASSTHROUGH_VARS plus any
-    user-specified extras from the env_passthrough config list.
-    Credentials and tokens are excluded by default.
+    Includes only variables from _PASSTHROUGH_VARS. If the config
+    has '"billing": "api"', the appropriate API key for the active
+    CLI is also included so the CLI uses API credits instead of the
+    subscription. Credentials are excluded by default.
     """
     from mcloop.main import _load_mcloop_config
 
     env = {k: v for k, v in os.environ.items() if k in _PASSTHROUGH_VARS}
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
-    passthrough = _load_mcloop_config().get("env_passthrough", [])
-    if isinstance(passthrough, list):
-        for var in passthrough:
-            if isinstance(var, str) and var in os.environ:
-                env[var] = os.environ[var]
+    config = _load_mcloop_config()
+    if config.get("billing") == "api":
+        key_name = _BILLING_KEY.get(cli, "")
+        if key_name and key_name in os.environ:
+            env[key_name] = os.environ[key_name]
     return env
 
 
@@ -238,7 +250,7 @@ def run_task(
     output, returncode = _run_session(
         cmd,
         project_dir,
-        env=_build_session_env(task_label=task_label),
+        env=_build_session_env(task_label=task_label, cli=cli),
     )
     log_path = _write_log(
         log_dir,
@@ -282,7 +294,19 @@ def _build_command(
             cmd.extend(["--model", model])
         return cmd
     elif cli == "codex":
-        return ["codex", "-q"] + ([prompt] if prompt else [])
+        cmd = [
+            "codex",
+            "exec",
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "workspace-write",
+        ]
+        if model:
+            cmd.extend(["--model", model])
+        if prompt:
+            cmd.append(prompt)
+        return cmd
     else:
         raise ValueError(f"Unknown CLI: {cli}")
 

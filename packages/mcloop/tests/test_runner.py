@@ -46,7 +46,8 @@ def test_build_command_claude():
 def test_build_command_codex():
     cmd = _build_command("codex", "fix the bug")
     assert cmd[0] == "codex"
-    assert "-q" in cmd
+    assert "exec" in cmd
+    assert "--sandbox" in cmd
     assert "fix the bug" in cmd
 
 
@@ -1624,47 +1625,93 @@ def test_build_session_env_no_task_label_when_empty(monkeypatch):
     assert "MCLOOP_TASK_LABEL" not in env
 
 
-def test_build_session_env_reads_passthrough(monkeypatch):
-    """Includes vars from env_passthrough config list."""
-    from mcloop.runner import _build_session_env
-
-    monkeypatch.setenv("PATH", "/usr/bin")
-    monkeypatch.setenv("MY_CUSTOM_VAR", "hello")
-    config = {"env_passthrough": ["MY_CUSTOM_VAR"]}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
-        env = _build_session_env()
-    assert env["MY_CUSTOM_VAR"] == "hello"
-
-
 def test_build_session_env_excludes_credentials_by_default(monkeypatch):
-    """Credentials are NOT included without explicit passthrough."""
+    """Credentials are NOT included without billing: api."""
     from mcloop.runner import _build_session_env
 
-    credentials = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "AWS_SECRET_ACCESS_KEY",
-        "GITHUB_TOKEN",
-    ]
-    for key in credentials:
-        monkeypatch.setenv(key, "secret-value")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
     monkeypatch.setenv("PATH", "/usr/bin")
     with patch("mcloop.main._load_mcloop_config", return_value={}):
         env = _build_session_env()
-    for key in credentials:
-        assert key not in env
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "OPENAI_API_KEY" not in env
 
 
-def test_build_session_env_includes_credentials_via_passthrough(monkeypatch):
-    """Credentials ARE included when listed in env_passthrough."""
+def test_build_session_env_api_billing_claude(monkeypatch):
+    """ANTHROPIC_API_KEY included when billing is api and cli is claude."""
     from mcloop.runner import _build_session_env
 
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-123")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
-    config = {"env_passthrough": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]}
+    config = {"billing": "api"}
     with patch("mcloop.main._load_mcloop_config", return_value=config):
-        env = _build_session_env()
+        env = _build_session_env(cli="claude")
     assert env["ANTHROPIC_API_KEY"] == "sk-ant-123"
+
+
+def test_build_session_env_api_billing_codex(monkeypatch):
+    """OPENAI_API_KEY included when billing is api and cli is codex."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
+    config = {"billing": "api"}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env(cli="codex")
     assert env["OPENAI_API_KEY"] == "sk-oai-456"
+
+
+def test_build_session_env_api_billing_wrong_key(monkeypatch):
+    """OPENAI_API_KEY NOT included when billing is api but cli is claude."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
+    config = {"billing": "api"}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env(cli="claude")
+    assert "OPENAI_API_KEY" not in env
+
+
+# --- _build_command codex ---
+
+
+def test_build_command_codex_with_model():
+    """codex command includes model flag."""
+    from mcloop.runner import _build_command
+
+    cmd = _build_command("codex", "test prompt", model="gpt-5.4")
+    assert cmd == [
+        "codex",
+        "exec",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--model",
+        "gpt-5.4",
+        "test prompt",
+    ]
+
+
+def test_build_command_codex_no_model():
+    """codex command omits --model when not specified."""
+    from mcloop.runner import _build_command
+
+    cmd = _build_command("codex", "prompt")
+    assert "--model" not in cmd
+    assert cmd[-1] == "prompt"
+
+
+def test_build_command_claude_no_regression():
+    """claude command still produces correct invocation."""
+    from mcloop.runner import _build_command
+
+    cmd = _build_command("claude", "test prompt", model="sonnet")
+    assert cmd[0] == "claude"
+    assert cmd[1] == "-p"
+    assert "test prompt" in cmd
+    assert "--model" in cmd
+    idx = cmd.index("--model")
+    assert cmd[idx + 1] == "sonnet"

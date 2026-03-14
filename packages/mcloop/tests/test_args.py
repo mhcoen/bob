@@ -1233,8 +1233,8 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
 # --- _setup_env_security ---
 
 
-def test_setup_env_security_no_passthrough(tmp_path, capsys):
-    """Returns minimal status when no env_passthrough configured."""
+def test_setup_env_security_subscription(tmp_path, capsys):
+    """Returns subscription billing status by default."""
     cfg = tmp_path / "config.json"
     cfg.write_text("{}")
     with patch("mcloop.main._MCLOOP_CONFIG", cfg):
@@ -1244,15 +1244,15 @@ def test_setup_env_security_no_passthrough(tmp_path, capsys):
     assert "Session environment" in out
 
 
-def test_setup_env_security_with_passthrough(tmp_path, capsys):
-    """Returns extra count when env_passthrough has entries."""
+def test_setup_env_security_api_billing(tmp_path, capsys):
+    """Returns api billing status when configured."""
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({"env_passthrough": ["ANTHROPIC_API_KEY", "MY_VAR"]}))
+    cfg.write_text(json.dumps({"billing": "api"}))
     with patch("mcloop.main._MCLOOP_CONFIG", cfg):
         result = _setup_env_security()
-    assert result == ("Environment", "minimal + 2 extra")
+    assert result == ("Environment", "minimal (api billing)")
     out = capsys.readouterr().out
-    assert "ANTHROPIC_API_KEY" in out
+    assert "billing" in out.lower()
 
 
 def test_cmd_install_calls_setup_env_security(tmp_path):
@@ -6165,7 +6165,7 @@ def _make_batch_args(tmp_path, children=None):
         "first_label": "1.1",
         "ctx": ctx,
         "rate_state": rate_state,
-        "enabled_clis": ("claude",),
+        "cli": "claude",
         "current_model": None,
         "fallback_model": None,
         "max_retries": 3,

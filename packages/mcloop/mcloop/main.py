@@ -596,9 +596,13 @@ def _main() -> None:
         _dry_run(parse(checklist_path))
         return
 
+    # Resolve CLI: command line overrides config, default is claude
+    cli = args.cli or _load_mcloop_config().get("cli", "claude")
+
     run_loop(
         checklist_path,
         max_retries=args.max_retries,
+        cli=cli,
         model=args.model,
         fallback_model=args.fallback_model,
         no_audit=args.no_audit,
@@ -617,7 +621,7 @@ def _run_batch(
     first_label: str,
     ctx: SessionContext,
     rate_state: RateLimitState,
-    enabled_clis: tuple[str, ...],
+    cli: str,
     current_model: str | None,
     fallback_model: str | None,
     max_retries: int,
@@ -657,9 +661,9 @@ def _run_batch(
         steps.append(f"{i}. {child.text}")
     combined_text = "Do all of the following in order:\n" + "\n".join(steps)
 
-    cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
-    if cli is None:
-        cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+    active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
+    if active_cli is None:
+        active_cli = wait_for_reset(rate_state, notify, enabled_clis=(cli,))
 
     parent_label = first_label.rsplit(".", 1)[0] if "." in first_label else first_label
     ctx.update_group(parent_label, True)
@@ -672,7 +676,7 @@ def _run_batch(
         formatting.task_header(
             label_range,
             f"[BATCH] {n} subtasks",
-            cli,
+            active_cli,
         ),
         flush=True,
     )
@@ -699,7 +703,7 @@ def _run_batch(
     task_start = time.monotonic()
     result = run_task(
         combined_text,
-        cli,
+        active_cli,
         project_dir,
         log_dir,
         description,
@@ -806,7 +810,7 @@ def _run_batch(
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
-    enabled_clis: tuple[str, ...] = ("claude",),
+    cli: str = "claude",
     model: str | None = None,
     fallback_model: str | None = None,
     no_audit: bool = False,
@@ -944,7 +948,7 @@ def run_loop(
                     label,
                     ctx,
                     rate_state,
-                    enabled_clis,
+                    cli,
                     current_model,
                     fallback_model,
                     max_retries,
@@ -967,9 +971,9 @@ def run_loop(
                     # partially modified state
                     continue
 
-        cli = get_available_cli(rate_state, enabled_clis=enabled_clis)
-        if cli is None:
-            cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+        active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
+        if active_cli is None:
+            active_cli = wait_for_reset(rate_state, notify, enabled_clis=(cli,))
 
         has_subtasks = "." in label
         ctx.update_group(label, has_subtasks)
@@ -987,7 +991,7 @@ def run_loop(
             project_dir,
             next_task=f"{label}) {task.text}",
         )
-        print(formatting.task_header(label, task.text, cli), flush=True)
+        print(formatting.task_header(label, task.text, active_cli), flush=True)
 
         _current_phase = "task"
         _current_task_label = label
@@ -1012,7 +1016,7 @@ def run_loop(
                 attempt += 1
                 result = run_task(
                     task.text,
-                    cli,
+                    active_cli,
                     project_dir,
                     log_dir,
                     description,
@@ -1076,15 +1080,15 @@ def run_loop(
                             ),
                             flush=True,
                         )
-                    cli = get_available_cli(
+                    active_cli = get_available_cli(
                         rate_state,
-                        enabled_clis=enabled_clis,
+                        enabled_clis=(cli,),
                     )
-                    if cli is None:
-                        cli = wait_for_reset(
+                    if active_cli is None:
+                        active_cli = wait_for_reset(
                             rate_state,
                             notify,
-                            enabled_clis=enabled_clis,
+                            enabled_clis=(cli,),
                         )
                         # Reset to primary model after cooldown
                         if fallback_model and current_model == fallback_model:
@@ -1385,7 +1389,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
-    parser.add_argument("--model", default=None, help="Claude model to use (e.g., opus, sonnet)")
+    parser.add_argument("--model", default=None, help="Model to use (e.g., opus, sonnet, gpt-5.4)")
+    parser.add_argument(
+        "--cli",
+        default=None,
+        choices=["claude", "codex"],
+        help="CLI backend (default: claude, or set in ~/.mcloop/config.json)",
+    )
     parser.add_argument(
         "--fallback-model",
         default=None,
@@ -1652,18 +1662,13 @@ def _setup_env_security() -> tuple[str, str]:
         "\n  mcloop passes only essential variables (PATH, HOME, TERM, etc.)"
         "\n  to CLI subprocesses. API keys, cloud credentials, and tokens"
         "\n  are excluded by default, so the CLI uses your subscription."
-        "\n  To use API billing instead, add the key to env_passthrough:"
-        "\n    Claude Code: add ANTHROPIC_API_KEY"
-        "\n    Codex: add OPENAI_API_KEY or CODEX_API_KEY"
-        "\n  If your project tests need other variables, add those too."
+        '\n  To use API billing instead, set "billing": "api" in config.'
+        "\n  mcloop will pass the appropriate key for the active CLI."
         f"\n  Config: {_MCLOOP_CONFIG}\n"
     )
     config = _load_mcloop_config()
-    passthrough = config.get("env_passthrough", [])
-    if passthrough:
-        print(f"  Extra variables: {', '.join(passthrough)}")
-        return ("Environment", f"minimal + {len(passthrough)} extra")
-    return ("Environment", "minimal (subscription billing)")
+    billing = config.get("billing", "subscription")
+    return ("Environment", f"minimal ({billing} billing)")
 
 
 _CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"

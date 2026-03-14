@@ -319,12 +319,19 @@ The debugging playbook this enforces:
 
 - [ ] Add Codex as a CLI backend
   - [ ] Add `--cli` argument to arg parser (choices: claude, codex, default: claude)
-  - [ ] Add `cli` field to `.mcloop/config.json` as alternative to command line flag
+  - [ ] Add `cli` field to `~/.mcloop/config.json` as alternative to command line flag
   - [ ] Update `_build_command` codex branch: `codex exec --ask-for-approval never --sandbox workspace-write --path <dir> --model <model> "prompt"`
-  - [ ] Update `_run_session` env building: for codex, also exclude CODEX_API_KEY unless user opts in via `env_passthrough`
+  - [ ] Pass `cli` parameter through to `_build_session_env` so billing key matches the active CLI
   - [ ] Update `get_available_cli` to return the configured CLI instead of hardcoded "claude"
   - [ ] Update rate limit detection for Codex output patterns
   - [ ] Update session limit detection for Codex output patterns
   - [ ] Test `_build_command` produces correct codex exec invocation
   - [ ] Test `_build_command` produces correct claude invocation (no regression)
   - [ ] Document `--cli codex` in README with security model differences
+
+- [ ] Add model config and validation
+  - [ ] Read default model from `"model"` field in `~/.mcloop/config.json` when `--model` is not passed on command line
+  - [ ] Define known-good model lists per CLI: claude (opus, sonnet, haiku plus versioned variants), codex (gpt-5.4, gpt-5.3-codex, gpt-5.3-codex-spark, gpt-4.1, gpt-4.1-mini)
+  - [ ] At startup, if configured model is not in the known-good list for the active CLI, print one warning line and continue
+  - [ ] `--model` flag overrides config, validation runs on whichever value is active
+  - [ ] Add tests for model defaulting from config and for the warning message

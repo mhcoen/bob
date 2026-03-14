@@ -897,26 +897,18 @@ by default. This prevents the agent from accidentally using API
 credits instead of a subscription, and prevents credential leakage
 to commands the agent runs.
 
-To use API billing instead of a subscription, or if your project
-tests require specific environment variables, add them to
-`env_passthrough` in `~/.mcloop/config.json`:
+By default, the CLI uses your subscription. To use API billing
+instead, set `"billing": "api"` in `~/.mcloop/config.json`:
 
 ```json
 {
-  "env_passthrough": ["DATABASE_URL", "REDIS_URL"]
+  "billing": "api"
 }
 ```
 
-To switch Claude Code from subscription to API billing:
-
-```json
-{
-  "env_passthrough": ["ANTHROPIC_API_KEY"]
-}
-```
-
-Variables listed in `env_passthrough` are copied from your shell
-environment into the session. Everything else is excluded.
+mcloop automatically passes the appropriate API key for the active
+CLI: `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for
+Codex. No other credentials are passed through.
 
 ## Requirements
 
