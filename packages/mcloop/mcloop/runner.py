@@ -54,6 +54,9 @@ _PASSTHROUGH_VARS = frozenset(
         "COLORTERM",
         "FORCE_COLOR",
         "NO_COLOR",
+        "RTK_DB_PATH",
+        "RTK_TEE",
+        "RTK_TEE_DIR",
     }
 )
 

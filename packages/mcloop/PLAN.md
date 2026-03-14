@@ -308,7 +308,7 @@ The debugging playbook this enforces:
 ## Stage 4: Secure session environment and Codex support
 
 - [x] [BATCH] Replace inherited environment with minimal allowlist
-  - [x] Define `_PASSTHROUGH_VARS` set in `runner.py`: PATH, HOME, TERM, LANG, LC_ALL, TMPDIR, USER, LOGNAME, SHELL, XDG_CACHE_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, COLORTERM, FORCE_COLOR, NO_COLOR
+  - [x] Define `_PASSTHROUGH_VARS` set in `runner.py`: PATH, HOME, TERM, LANG, LC_ALL, TMPDIR, USER, LOGNAME, SHELL, XDG_CACHE_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, COLORTERM, FORCE_COLOR, NO_COLOR, RTK_DB_PATH, RTK_TEE, RTK_TEE_DIR (RTK needs these to record token savings)
   - [x] Add `_build_session_env(task_label)` function that builds env from `_PASSTHROUGH_VARS` only, adds MCLOOP_TASK_LABEL, and reads `env_passthrough` list from mcloop config for user-specified extras
   - [x] Update `_run_session` to use `_build_session_env()` instead of `dict(env or os.environ)` with single-key stripping
   - [x] Update `run_task` to stop constructing its own env dict from `os.environ`
@@ -317,19 +317,19 @@ The debugging playbook this enforces:
   - [x] Add tests: `_build_session_env` includes only allowlisted vars, `env_passthrough` adds specified vars, credentials (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) are excluded by default, MCLOOP_TASK_LABEL is present
   - [x] Document `env_passthrough` in README
 
-- [ ] Add Codex as a CLI backend
-  - [ ] Add `--cli` argument to arg parser (choices: claude, codex, default: claude)
-  - [ ] Add `cli` field to `~/.mcloop/config.json` as alternative to command line flag
-  - [ ] Update `_build_command` codex branch: `codex exec --ask-for-approval never --sandbox workspace-write --path <dir> --model <model> "prompt"`
-  - [ ] Pass `cli` parameter through to `_build_session_env` so billing key matches the active CLI
-  - [ ] Update `get_available_cli` to return the configured CLI instead of hardcoded "claude"
-  - [ ] Update rate limit detection for Codex output patterns
-  - [ ] Update session limit detection for Codex output patterns
-  - [ ] Test `_build_command` produces correct codex exec invocation
-  - [ ] Test `_build_command` produces correct claude invocation (no regression)
-  - [ ] Document `--cli codex` in README with security model differences
+- [x] Add Codex as a CLI backend
+  - [x] Add `--cli` argument to arg parser (choices: claude, codex, default: claude)
+  - [x] Add `cli` field to `~/.mcloop/config.json` as alternative to command line flag
+  - [x] Update `_build_command` codex branch: `codex exec --ask-for-approval never --sandbox workspace-write --path <dir> --model <model> "prompt"`
+  - [x] Pass `cli` parameter through to `_build_session_env` so billing key matches the active CLI
+  - [x] Update `get_available_cli` to return the configured CLI instead of hardcoded "claude"
+  - [x] Update rate limit detection for Codex output patterns
+  - [x] Update session limit detection for Codex output patterns
+  - [x] Test `_build_command` produces correct codex exec invocation
+  - [x] Test `_build_command` produces correct claude invocation (no regression)
+  - [x] Document `--cli codex` in README with security model differences
 
-- [ ] Add model config and validation
+- [ ] [BATCH] Add model config and validation
   - [ ] Read default model from `"model"` field in `~/.mcloop/config.json` when `--model` is not passed on command line
   - [ ] Define known-good model lists per CLI: claude (opus, sonnet, haiku plus versioned variants), codex (gpt-5.4, gpt-5.3-codex, gpt-5.3-codex-spark, gpt-4.1, gpt-4.1-mini)
   - [ ] At startup, if configured model is not in the known-good list for the active CLI, print one warning line and continue
