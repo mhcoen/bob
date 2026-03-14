@@ -39,8 +39,10 @@ from mcloop.checklist import (
     user_task_instructions,
 )
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
+from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.errors import (
     _check_errors_json,
+    _insert_bugs_section,
 )
 from mcloop.git_ops import (
     _changed_files,
@@ -80,6 +82,123 @@ _current_task_label = ""
 _current_task_text = ""
 _phase_start_time = 0.0
 _project_dir: Path | None = None
+_reviewer_procs: list[subprocess.Popen] = []
+
+
+def _get_commit_hash(project_dir: Path) -> str:
+    """Return the current HEAD commit hash."""
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=project_dir,
+    )
+    return result.stdout.strip()
+
+
+def _spawn_reviewer(project_dir: Path) -> None:
+    """Spawn a background reviewer process for the latest commit."""
+    commit_hash = _get_commit_hash(project_dir)
+    if not commit_hash:
+        return
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mcloop.reviewer", commit_hash, str(project_dir)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    _reviewer_procs.append(proc)
+
+
+def _cleanup_stale_reviews(project_dir: Path) -> None:
+    """Remove .mcloop/reviews/*.json files older than 24 hours."""
+    reviews_dir = project_dir / ".mcloop" / "reviews"
+    if not reviews_dir.exists():
+        return
+    cutoff = time.time() - 86400
+    for f in reviews_dir.iterdir():
+        if f.suffix == ".json":
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
+
+def _collect_review_findings(
+    project_dir: Path,
+    checklist_path: Path,
+    ctx: SessionContext,
+) -> None:
+    """Scan .mcloop/reviews/ for completed reviews.
+
+    High-confidence findings are added to session context.
+    If a single commit has 3+ high-confidence error-severity findings,
+    a fix task is inserted into the Bugs section of PLAN.md instead.
+    """
+    reviews_dir = project_dir / ".mcloop" / "reviews"
+    if not reviews_dir.exists():
+        return
+    for f in list(reviews_dir.iterdir()):
+        if f.suffix != ".json":
+            continue
+        try:
+            data = _json.loads(f.read_text())
+        except (OSError, _json.JSONDecodeError):
+            f.unlink(missing_ok=True)
+            continue
+        f.unlink(missing_ok=True)
+        if not isinstance(data, list):
+            continue
+        high_conf = [
+            item for item in data if isinstance(item, dict) and item.get("confidence") == "high"
+        ]
+        if not high_conf:
+            continue
+        commit = f.stem
+        high_errors = [item for item in high_conf if item.get("severity") == "error"]
+        if len(high_errors) >= 3:
+            # Insert fix task into Bugs section
+            descriptions = [item.get("description", "") for item in high_errors]
+            task_text = f"Fix review findings from commit {commit[:8]}: " + "; ".join(
+                descriptions[:5]
+            )
+            _insert_bugs_section(
+                checklist_path,
+                [f"- [ ] {task_text}"],
+            )
+            print(
+                formatting.system_msg(
+                    f"Review: {len(high_errors)} critical findings"
+                    f" from {commit[:8]} → added to Bugs"
+                ),
+                flush=True,
+            )
+        else:
+            # Add to session context
+            lines = ["Review findings from previous tasks:"]
+            for item in high_conf:
+                file = item.get("file", "?")
+                desc = item.get("description", "")
+                sev = item.get("severity", "info")
+                lines.append(f"  [{sev}] {file}: {desc}")
+            ctx.add_user_input("\n".join(lines))
+            print(
+                formatting.system_msg(
+                    f"Review: {len(high_conf)} finding(s) from {commit[:8]} added to context"
+                ),
+                flush=True,
+            )
+
+
+def _terminate_reviewers() -> None:
+    """Terminate all active reviewer subprocesses."""
+    for proc in _reviewer_procs:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    _reviewer_procs.clear()
 
 
 def _save_interrupt_state() -> None:
@@ -399,6 +518,7 @@ def main() -> None:
     import atexit
 
     atexit.register(_kill_active_process)
+    atexit.register(_terminate_reviewers)
 
     def _handle_sigint(sig, frame):
         import mcloop.runner as _runner
@@ -406,6 +526,7 @@ def main() -> None:
         _runner._interrupted = True
         print("\nInterrupted. Saving state...", flush=True)
         _save_interrupt_state()
+        _terminate_reviewers()
         _graceful_kill_active_process()
         print("State saved. Exiting.", flush=True)
         os._exit(130)
@@ -485,6 +606,7 @@ def _run_batch(
     run_start: float,
     completed: list[str],
     notes_snapshot: tuple[str, int] | None,
+    reviewer_config: dict | None = None,
 ) -> str:
     """Run multiple subtasks in a single session.
 
@@ -621,6 +743,8 @@ def _run_batch(
                 flush=True,
             )
             return "failed"
+        if reviewer_config:
+            _spawn_reviewer(project_dir)
         _maybe_auto_wrap(project_dir)
         _reinject_wrappers(project_dir)
         for child in batch_children:
@@ -695,6 +819,18 @@ def run_loop(
     if not _check_errors_json(project_dir, model=model):
         return []
 
+    # Reviewer integration
+    reviewer_config = load_reviewer_config(str(project_dir))
+    reviewer_status = format_reviewer_status(reviewer_config)
+    if reviewer_status:
+        print(
+            formatting.system_msg(f"Reviewer: {reviewer_status}"),
+            flush=True,
+        )
+
+    # Clean up stale review files from previous runs
+    _cleanup_stale_reviews(project_dir)
+
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
     if pending_dir.exists():
@@ -721,6 +857,9 @@ def run_loop(
         )
 
     while True:
+        # Check for completed reviews from background reviewer processes
+        _collect_review_findings(project_dir, checklist_path, ctx)
+
         tasks = parse(checklist_path)
         task = find_next(tasks)
         if task is None:
@@ -792,6 +931,7 @@ def run_loop(
                     run_start,
                     completed,
                     notes_snapshot,
+                    reviewer_config=reviewer_config,
                 )
                 if batch_handled == "success":
                     continue
@@ -1006,6 +1146,8 @@ def run_loop(
                             notes_snapshot,
                         )
                         sys.exit(1)
+                    if reviewer_config:
+                        _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
                     check_off(checklist_path, task)

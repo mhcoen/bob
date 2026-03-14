@@ -35,8 +35,11 @@ from mcloop.main import (
     _check_interrupted,
     _check_rtk,
     _check_user_input,
+    _cleanup_stale_reviews,
     _cmd_install,
     _cmd_uninstall,
+    _collect_review_findings,
+    _get_commit_hash,
     _install_hooks,
     _install_recommended_permissions,
     _load_mcloop_config,
@@ -50,11 +53,14 @@ from mcloop.main import (
     _remove_hooks_dir,
     _remove_recommended_perms,
     _remove_telegram_env,
+    _reviewer_procs,
     _run_batch,
     _save_interrupt_state,
     _setup_api_key,
     _setup_sandbox,
     _setup_telegram,
+    _spawn_reviewer,
+    _terminate_reviewers,
     _unmerge_settings,
     _write_eliminated_json,
     _write_ruledout_to_plan,
@@ -6357,3 +6363,363 @@ def test_run_loop_batch_detection(tmp_path):
 
         # Verify _run_batch was called (batch detection worked)
         assert mock_batch.call_count >= 1
+
+
+# --- Reviewer integration ---
+
+
+def test_get_commit_hash(tmp_path):
+    """_get_commit_hash returns the HEAD commit hash."""
+    result = MagicMock()
+    result.stdout = "abc123def\n"
+    with patch("mcloop.main.subprocess.run", return_value=result) as mock_run:
+        h = _get_commit_hash(tmp_path)
+    assert h == "abc123def"
+    mock_run.assert_called_once()
+    args = mock_run.call_args
+    assert args[0][0] == ["git", "rev-parse", "HEAD"]
+    assert args[1]["cwd"] == tmp_path
+
+
+def test_get_commit_hash_empty(tmp_path):
+    """_get_commit_hash returns empty string on failure."""
+    result = MagicMock()
+    result.stdout = ""
+    with patch("mcloop.main.subprocess.run", return_value=result):
+        h = _get_commit_hash(tmp_path)
+    assert h == ""
+
+
+def test_spawn_reviewer(tmp_path):
+    """_spawn_reviewer spawns a subprocess and appends to _reviewer_procs."""
+    proc = MagicMock()
+    with (
+        patch("mcloop.main._get_commit_hash", return_value="abc123"),
+        patch("mcloop.main.subprocess.Popen", return_value=proc) as mock_popen,
+    ):
+        saved = list(_reviewer_procs)
+        _reviewer_procs.clear()
+        try:
+            _spawn_reviewer(tmp_path)
+            assert proc in _reviewer_procs
+            mock_popen.assert_called_once()
+            call_args = mock_popen.call_args
+            cmd = call_args[0][0]
+            assert "-m" in cmd
+            assert "mcloop.reviewer" in cmd
+            assert "abc123" in cmd
+            assert str(tmp_path) in cmd
+            assert call_args[1]["start_new_session"] is True
+        finally:
+            _reviewer_procs.clear()
+            _reviewer_procs.extend(saved)
+
+
+def test_spawn_reviewer_no_hash(tmp_path):
+    """_spawn_reviewer does nothing if commit hash is empty."""
+    with (
+        patch("mcloop.main._get_commit_hash", return_value=""),
+        patch("mcloop.main.subprocess.Popen") as mock_popen,
+    ):
+        _spawn_reviewer(tmp_path)
+    mock_popen.assert_not_called()
+
+
+def test_terminate_reviewers():
+    """_terminate_reviewers terminates all procs and clears the list."""
+    p1 = MagicMock()
+    p2 = MagicMock()
+    saved = list(_reviewer_procs)
+    _reviewer_procs.clear()
+    _reviewer_procs.extend([p1, p2])
+    try:
+        _terminate_reviewers()
+        p1.terminate.assert_called_once()
+        p2.terminate.assert_called_once()
+        assert len(_reviewer_procs) == 0
+    finally:
+        _reviewer_procs.clear()
+        _reviewer_procs.extend(saved)
+
+
+def test_terminate_reviewers_oserror():
+    """_terminate_reviewers handles OSError gracefully."""
+    p = MagicMock()
+    p.terminate.side_effect = OSError("no such process")
+    saved = list(_reviewer_procs)
+    _reviewer_procs.clear()
+    _reviewer_procs.append(p)
+    try:
+        _terminate_reviewers()
+        assert len(_reviewer_procs) == 0
+    finally:
+        _reviewer_procs.clear()
+        _reviewer_procs.extend(saved)
+
+
+def test_cleanup_stale_reviews(tmp_path):
+    """_cleanup_stale_reviews removes old files, keeps recent ones."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    old_file = reviews_dir / "old.json"
+    old_file.write_text("[]")
+    import os
+
+    # Set mtime to 48 hours ago
+    old_time = time.time() - 172800
+    os.utime(old_file, (old_time, old_time))
+    new_file = reviews_dir / "new.json"
+    new_file.write_text("[]")
+    _cleanup_stale_reviews(tmp_path)
+    assert not old_file.exists()
+    assert new_file.exists()
+
+
+def test_cleanup_stale_reviews_no_dir(tmp_path):
+    """_cleanup_stale_reviews does nothing if directory doesn't exist."""
+    _cleanup_stale_reviews(tmp_path)  # Should not raise
+
+
+def test_cleanup_stale_reviews_ignores_non_json(tmp_path):
+    """_cleanup_stale_reviews ignores non-.json files."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    txt_file = reviews_dir / "notes.txt"
+    txt_file.write_text("keep me")
+    import os
+
+    old_time = time.time() - 172800
+    os.utime(txt_file, (old_time, old_time))
+    _cleanup_stale_reviews(tmp_path)
+    assert txt_file.exists()
+
+
+def test_collect_review_findings_no_dir(tmp_path):
+    """_collect_review_findings does nothing if reviews dir doesn't exist."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Test\n")
+    ctx = SessionContext()
+    _collect_review_findings(tmp_path, plan, ctx)
+    assert ctx.text() == ""
+
+
+def test_collect_review_findings_adds_to_context(tmp_path):
+    """High-confidence findings (< 3 errors) are added to session context."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Test\n")
+    findings = [
+        {
+            "file": "a.py",
+            "line_range": [1, 5],
+            "severity": "warning",
+            "description": "possible bug",
+            "confidence": "high",
+        }
+    ]
+    (reviews_dir / "abc123.json").write_text(json.dumps(findings))
+    ctx = SessionContext()
+    _collect_review_findings(tmp_path, plan, ctx)
+    assert "possible bug" in ctx.text()
+    assert "Review findings" in ctx.text()
+    assert not (reviews_dir / "abc123.json").exists()
+
+
+def test_collect_review_findings_inserts_bugs(tmp_path):
+    """3+ high-confidence error-severity findings insert a bug task."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Test\n\n- [ ] Do something\n")
+    findings = [
+        {
+            "file": f"f{i}.py",
+            "line_range": [1, 2],
+            "severity": "error",
+            "description": f"critical bug {i}",
+            "confidence": "high",
+        }
+        for i in range(3)
+    ]
+    (reviews_dir / "def456.json").write_text(json.dumps(findings))
+    ctx = SessionContext()
+    _collect_review_findings(tmp_path, plan, ctx)
+    plan_text = plan.read_text()
+    assert "## Bugs" in plan_text
+    assert "Fix review findings from commit def456" in plan_text
+    # Should NOT add to context — went to bugs instead
+    assert "Review findings" not in ctx.text()
+    assert not (reviews_dir / "def456.json").exists()
+
+
+def test_collect_review_findings_skips_low_confidence(tmp_path):
+    """Low-confidence findings are ignored."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Test\n")
+    findings = [
+        {
+            "file": "a.py",
+            "line_range": [1, 2],
+            "severity": "error",
+            "description": "maybe a bug",
+            "confidence": "low",
+        }
+    ]
+    (reviews_dir / "abc.json").write_text(json.dumps(findings))
+    ctx = SessionContext()
+    _collect_review_findings(tmp_path, plan, ctx)
+    assert ctx.text() == ""
+
+
+def test_collect_review_findings_invalid_json(tmp_path):
+    """Invalid JSON review files are deleted without error."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Test\n")
+    (reviews_dir / "bad.json").write_text("not json{{{")
+    ctx = SessionContext()
+    _collect_review_findings(tmp_path, plan, ctx)
+    assert not (reviews_dir / "bad.json").exists()
+
+
+def test_run_loop_prints_reviewer_status(tmp_path):
+    """run_loop prints reviewer status when configured."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\nNo tasks.\n")
+    config = {"model": "gpt-4", "base_url": "https://api.example.com", "api_key": "k"}
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.load_reviewer_config", return_value=config),
+        patch(
+            "mcloop.main.format_reviewer_status",
+            return_value="gpt-4 via api.example.com (API key set)",
+        ),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("builtins.print") as mock_print,
+    ):
+        run_loop(plan)
+
+    printed = " ".join(str(c) for c in mock_print.call_args_list)
+    assert "Reviewer:" in printed
+    assert "gpt-4 via api.example.com" in printed
+
+
+def test_run_loop_spawns_reviewer_after_commit(tmp_path):
+    """run_loop spawns a reviewer after a successful commit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\n- [ ] Fix bug\n")
+
+    task = MagicMock()
+    task.text = "Fix bug"
+    task.checked = False
+    task.failed = False
+    task.children = []
+    task.stage = None
+    task.depth = 0
+
+    call_count = [0]
+
+    def parse_side_effect(path):
+        call_count[0] += 1
+        if call_count[0] <= 1:
+            return [task]
+        return []
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    config = {"model": "m", "api_key": "k"}
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", side_effect=parse_side_effect),
+        patch("mcloop.main.find_next", side_effect=[task, None]),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.check_off"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._collect_review_findings"),
+        patch("mcloop.main.load_reviewer_config", return_value=config),
+        patch("mcloop.main.format_reviewer_status", return_value=""),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("mcloop.main._spawn_reviewer") as mock_spawn,
+    ):
+        run_loop(plan)
+
+    mock_spawn.assert_called_once()
+
+
+def test_run_loop_no_reviewer_when_not_configured(tmp_path):
+    """run_loop does not spawn reviewer when config is None."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Project\n\n- [ ] Fix bug\n")
+
+    task = MagicMock()
+    task.text = "Fix bug"
+    task.checked = False
+    task.failed = False
+    task.children = []
+    task.stage = None
+    task.depth = 0
+
+    call_count = [0]
+
+    def parse_side_effect(path):
+        call_count[0] += 1
+        if call_count[0] <= 1:
+            return [task]
+        return []
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.parse", side_effect=parse_side_effect),
+        patch("mcloop.main.find_next", side_effect=[task, None]),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.check_off"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._collect_review_findings"),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main.format_reviewer_status", return_value=""),
+        patch("mcloop.main._cleanup_stale_reviews"),
+        patch("mcloop.main._spawn_reviewer") as mock_spawn,
+    ):
+        run_loop(plan)
+
+    mock_spawn.assert_not_called()
