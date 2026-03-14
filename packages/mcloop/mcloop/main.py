@@ -157,7 +157,7 @@ def _collect_review_findings(
         if isinstance(raw, dict):
             data = raw.get("findings", [])
             elapsed = raw.get("elapsed_seconds", 0)
-            commit = raw.get("commit", f.stem)[:8]
+            commit = (raw.get("commit") or f.stem)[:8]
         elif isinstance(raw, list):
             data = raw
             elapsed = 0

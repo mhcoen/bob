@@ -16,12 +16,21 @@ _SEVERITIES = frozenset({"error", "warning", "info"})
 _CONFIDENCES = frozenset({"high", "medium", "low"})
 
 _SYSTEM_PROMPT = """\
-You are a code reviewer. Review the following git diff for:
+You are a code reviewer. You will receive a git diff along with the
+enclosing functions from each changed file (imports, then only the
+functions that contain changes, with line numbers). Use this context
+to understand variable definitions, function signatures, and control
+flow before evaluating the diff.
+
+Review for:
 - Bugs and logic errors
 - Unhandled errors or exceptions
 - Logic mismatches with the task specification
 - Resource leaks (file handles, connections, memory)
 - Missing edge cases
+
+Do NOT flag issues that exist in the full file but are unrelated to
+the diff. Only report problems introduced or exposed by the changes.
 
 Respond with a JSON array of findings. Each finding is an object with:
 - "file": string (file path)
@@ -54,6 +63,7 @@ class ReviewRequest:
     project_description: str
     task_label: str
     task_text: str
+    file_contents: dict[str, str] | None = None  # path -> content
 
 
 def _load_config() -> dict:
@@ -114,6 +124,10 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     user_msg += f"## Project\n{request.project_description}\n\n"
     user_msg += f"## Diff (commit {request.commit_hash})\n"
     user_msg += f"```diff\n{request.diff_text}\n```"
+    if request.file_contents:
+        user_msg += "\n\n## Changed file contents\n"
+        for path, content in request.file_contents.items():
+            user_msg += f"\n### {path}\n```\n{content}\n```\n"
 
     payload = {
         "model": model,
@@ -137,7 +151,7 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             body = json.loads(resp.read().decode())
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return []
@@ -161,6 +175,166 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
         return []
 
     return _parse_findings(raw)
+
+
+def _parse_diff_line_ranges(diff_text: str) -> dict[str, list[tuple[int, int]]]:
+    """Parse a unified diff to extract changed line ranges per file.
+
+    Returns {filepath: [(start, end), ...]} where start/end are
+    1-indexed line numbers in the post-change version of the file.
+    """
+    import re
+
+    result: dict[str, list[tuple[int, int]]] = {}
+    current_file = None
+    hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+    for line in diff_text.splitlines():
+        if line.startswith("+++ b/"):
+            current_file = line[6:]
+            if current_file not in result:
+                result[current_file] = []
+        elif line.startswith("+++ /dev/null"):
+            current_file = None  # deleted file
+        elif current_file is not None:
+            m = hunk_re.match(line)
+            if m:
+                start = int(m.group(1))
+                count = int(m.group(2)) if m.group(2) else 1
+                end = start + max(count - 1, 0)
+                result[current_file].append((start, end))
+
+    return result
+
+
+def _extract_enclosing_functions(
+    file_path: Path,
+    line_ranges: list[tuple[int, int]],
+) -> str:
+    """Extract functions/methods that contain the changed lines.
+
+    Uses indentation-based heuristics that work for Python, Swift,
+    and most C-like languages. Returns the concatenated function
+    bodies with "..." separators, plus the file's import block.
+    """
+    try:
+        lines = file_path.read_text().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+    if not lines:
+        return ""
+
+    # Collect all changed line numbers (0-indexed)
+    changed = set()
+    for start, end in line_ranges:
+        for ln in range(start - 1, end):  # convert to 0-indexed
+            if 0 <= ln < len(lines):
+                changed.add(ln)
+
+    if not changed:
+        return ""
+
+    # Find function boundaries using def/func/fn/class patterns
+    import re
+
+    func_re = re.compile(
+        r"^(\s*)"
+        r"(def |async def |class "
+        r"|func |private func |public func |internal func "
+        r"|fn |pub fn "
+        r"|function "
+        r"|static "
+        r")"
+    )
+
+    # Build list of (start_line, indent_level) for each function
+    func_starts: list[tuple[int, int]] = []
+    for i, line in enumerate(lines):
+        m = func_re.match(line)
+        if m:
+            indent = len(m.group(1))
+            func_starts.append((i, indent))
+
+    # For each function start, find its end (next line at same or
+    # less indentation that starts a new definition, or EOF)
+    func_ranges: list[tuple[int, int]] = []
+    for idx, (start, indent) in enumerate(func_starts):
+        end = len(lines) - 1
+        for next_start, next_indent in func_starts[idx + 1 :]:
+            if next_indent <= indent:
+                end = next_start - 1
+                break
+        # Trim trailing blank lines
+        while end > start and not lines[end].strip():
+            end -= 1
+        func_ranges.append((start, end))
+
+    # Find which functions contain changed lines
+    selected: set[int] = set()
+    for i, (fstart, fend) in enumerate(func_ranges):
+        for ln in changed:
+            if fstart <= ln <= fend:
+                selected.add(i)
+                break
+
+    # Also collect the import/header block (lines before first function)
+    header_end = func_starts[0][0] if func_starts else len(lines)
+    header = lines[:header_end]
+    # Trim to just imports and top-level assignments
+    header_text = "\n".join(header).rstrip()
+
+    # If no functions matched (changes in top-level code), return
+    # the header plus surrounding context
+    if not selected:
+        context_lines: list[str] = []
+        for ln in sorted(changed):
+            start = max(0, ln - 5)
+            end = min(len(lines), ln + 6)
+            for j in range(start, end):
+                context_lines.append(f"{j + 1:4d}  {lines[j]}")
+        return (
+            header_text
+            + "\n\n# Changed lines:\n"
+            + "\n".join(
+                dict.fromkeys(context_lines)  # deduplicate, preserve order
+            )
+        )
+
+    # Build output: header + selected functions with line numbers
+    parts = [header_text] if header_text.strip() else []
+    for i in sorted(selected):
+        fstart, fend = func_ranges[i]
+        func_lines = []
+        for j in range(fstart, fend + 1):
+            func_lines.append(f"{j + 1:4d}  {lines[j]}")
+        parts.append("\n".join(func_lines))
+
+    return "\n\n...\n\n".join(parts)
+
+
+def _collect_changed_functions(
+    project_dir: Path,
+    diff_text: str,
+) -> dict[str, str] | None:
+    """Parse a diff and extract enclosing functions from each changed file.
+
+    Returns {filepath: extracted_functions} or None if nothing found.
+    """
+    ranges = _parse_diff_line_ranges(diff_text)
+    if not ranges:
+        return None
+
+    result: dict[str, str] = {}
+    for filepath, line_ranges in ranges.items():
+        fpath = project_dir / filepath
+        if not fpath.exists():
+            continue
+        extracted = _extract_enclosing_functions(fpath, line_ranges)
+        if extracted:
+            result[filepath] = extracted
+
+    return result or None
 
 
 def run_review_cli(commit_hash: str, project_dir: str) -> None:
@@ -188,6 +362,9 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
         print("Empty diff, nothing to review.", file=sys.stderr)
         return
 
+    # Collect changed functions from each modified file for context
+    file_contents = _collect_changed_functions(proj, diff_text)
+
     # Load project description from PLAN.md
     plan_path = proj / "PLAN.md"
     project_description = ""
@@ -203,6 +380,7 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
         project_description=project_description,
         task_label="",
         task_text="",
+        file_contents=file_contents or None,
     )
 
     import time as _time

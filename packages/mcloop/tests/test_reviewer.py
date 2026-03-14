@@ -9,6 +9,9 @@ from unittest.mock import MagicMock, patch
 from mcloop.reviewer import (
     ReviewFinding,
     ReviewRequest,
+    _collect_changed_functions,
+    _extract_enclosing_functions,
+    _parse_diff_line_ranges,
     _parse_findings,
     run_review,
     run_review_cli,
@@ -344,3 +347,219 @@ def test_main_invocation(capsys):
             # Can't easily test __main__ block, test the arg parsing logic
         finally:
             mod.sys.argv = orig_argv
+
+
+# --- _parse_diff_line_ranges ---
+
+
+def test_parse_diff_single_file():
+    diff = (
+        "diff --git a/foo.py b/foo.py\n"
+        "--- a/foo.py\n"
+        "+++ b/foo.py\n"
+        "@@ -10,3 +10,5 @@\n"
+        " context\n"
+        "+added line\n"
+        "+another\n"
+    )
+    result = _parse_diff_line_ranges(diff)
+    assert "foo.py" in result
+    assert result["foo.py"] == [(10, 14)]
+
+
+def test_parse_diff_multiple_files():
+    diff = (
+        "diff --git a/a.py b/a.py\n"
+        "--- a/a.py\n"
+        "+++ b/a.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        "+new\n"
+        "diff --git a/b.py b/b.py\n"
+        "--- a/b.py\n"
+        "+++ b/b.py\n"
+        "@@ -5,2 +5,3 @@\n"
+        "+stuff\n"
+    )
+    result = _parse_diff_line_ranges(diff)
+    assert "a.py" in result
+    assert "b.py" in result
+    assert result["a.py"] == [(1, 4)]
+    assert result["b.py"] == [(5, 7)]
+
+
+def test_parse_diff_deleted_file():
+    diff = "diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n-deleted\n"
+    result = _parse_diff_line_ranges(diff)
+    assert "old.py" not in result
+
+
+def test_parse_diff_hunk_count_one():
+    """Hunk header with count=1 (no comma): @@ -5 +5 @@"""
+    diff = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -5 +5 @@\n+line\n"
+    result = _parse_diff_line_ranges(diff)
+    assert result["x.py"] == [(5, 5)]
+
+
+def test_parse_diff_empty():
+    assert _parse_diff_line_ranges("") == {}
+    assert _parse_diff_line_ranges("not a diff at all") == {}
+
+
+# --- _extract_enclosing_functions ---
+
+
+def test_extract_python_function(tmp_path):
+    src = (
+        "import os\n\ndef foo():\n    x = 1\n    return x\n\ndef bar():\n    y = 2\n    return y\n"
+    )
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+
+    # Changed lines in foo (lines 4-5, 1-indexed)
+    result = _extract_enclosing_functions(f, [(4, 5)])
+    assert "def foo" in result
+    assert "def bar" not in result
+
+
+def test_extract_includes_header(tmp_path):
+    src = "import os\nimport sys\n\ndef main():\n    pass\n"
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+
+    result = _extract_enclosing_functions(f, [(5, 5)])
+    assert "import os" in result
+    assert "import sys" in result
+
+
+def test_extract_top_level_code(tmp_path):
+    src = "import os\n\nX = 42\n"
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+
+    # Change at line 3 (top-level, no function)
+    result = _extract_enclosing_functions(f, [(3, 3)])
+    assert "Changed lines" in result
+    assert "X = 42" in result
+
+
+def test_extract_nonexistent_file(tmp_path):
+    f = tmp_path / "missing.py"
+    assert _extract_enclosing_functions(f, [(1, 5)]) == ""
+
+
+def test_extract_empty_file(tmp_path):
+    f = tmp_path / "empty.py"
+    f.write_text("")
+    assert _extract_enclosing_functions(f, [(1, 1)]) == ""
+
+
+def test_extract_swift_func(tmp_path):
+    src = (
+        "import Foundation\n"
+        "\n"
+        "func doSomething() {\n"
+        "    let x = 1\n"
+        "    print(x)\n"
+        "}\n"
+        "\n"
+        "func other() {\n"
+        "    let y = 2\n"
+        "}\n"
+    )
+    f = tmp_path / "app.swift"
+    f.write_text(src)
+
+    result = _extract_enclosing_functions(f, [(4, 5)])
+    assert "func doSomething" in result
+    assert "func other" not in result
+
+
+def test_extract_functions_separated_by_dots(tmp_path):
+    src = "import os\n\ndef foo():\n    x = 1\n\ndef bar():\n    y = 2\n"
+    f = tmp_path / "mod.py"
+    f.write_text(src)
+
+    # Changes in both functions
+    result = _extract_enclosing_functions(f, [(4, 4), (7, 7)])
+    assert "..." in result
+
+
+# --- _collect_changed_functions ---
+
+
+def test_collect_changed_functions(tmp_path):
+    src = "import os\n\ndef hello():\n    print('hi')\n"
+    (tmp_path / "app.py").write_text(src)
+
+    diff = (
+        "diff --git a/app.py b/app.py\n"
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -3,2 +3,2 @@\n"
+        "-def hello():\n"
+        "+def hello(name):\n"
+    )
+    result = _collect_changed_functions(tmp_path, diff)
+    assert result is not None
+    assert "app.py" in result
+    assert "def hello" in result["app.py"]
+
+
+def test_collect_changed_functions_skips_deleted():
+    diff = "diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n-deleted\n"
+    from pathlib import Path
+
+    result = _collect_changed_functions(Path("/nonexistent"), diff)
+    assert result is None
+
+
+def test_collect_changed_functions_skips_binary(tmp_path):
+    # Create a file with binary content
+    binary_file = tmp_path / "data.bin"
+    binary_file.write_bytes(b"\x00\x01\x02\xff" * 100)
+
+    diff = (
+        "diff --git a/data.bin b/data.bin\n"
+        "--- a/data.bin\n"
+        "+++ b/data.bin\n"
+        "@@ -1,2 +1,2 @@\n"
+        "+stuff\n"
+    )
+    result = _collect_changed_functions(tmp_path, diff)
+    # Binary files produce no extractable functions
+    assert result is None
+
+
+def test_collect_changed_functions_none_when_empty():
+    result = _collect_changed_functions(
+        __import__("pathlib").Path("/tmp"),
+        "",
+    )
+    assert result is None
+
+
+# --- _collect_review_findings null commit ---
+
+
+def test_collect_review_findings_null_commit(tmp_path):
+    """Review JSON with commit: null should not crash."""
+    from mcloop.main import _collect_review_findings
+    from mcloop.session_context import SessionContext
+
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+
+    review_data = {
+        "findings": [],
+        "elapsed_seconds": 1.5,
+        "commit": None,
+    }
+    review_file = reviews_dir / "abc12345.json"
+    review_file.write_text(json.dumps(review_data))
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+
+    ctx = SessionContext()
+    # Should not raise — uses f.stem fallback when commit is null
+    _collect_review_findings(tmp_path, plan, ctx)
