@@ -1463,6 +1463,10 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     if rtk_status:
         summary.append(rtk_status)
 
+    reviewer_status = _check_reviewer(project_dir)
+    if reviewer_status:
+        summary.append(reviewer_status)
+
     _print_install_summary(summary, dry_run=dry_run)
 
 
@@ -1492,6 +1496,29 @@ def _check_rtk() -> tuple[str, str] | None:
             "  RTK hooks should be configured separately via: rtk init\n"
         )
         return ("RTK", "detected — configure manually via rtk init")
+    return None
+
+
+def _check_reviewer(project_dir: Path) -> tuple[str, str] | None:
+    """Check if .mcloop/config.json has a reviewer section."""
+    config_path = project_dir / ".mcloop" / "config.json"
+    if not config_path.exists():
+        return None
+    try:
+        data = _json.loads(config_path.read_text())
+    except (_json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    reviewer = data.get("reviewer")
+    if not isinstance(reviewer, dict):
+        return None
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if api_key:
+        reviewer = dict(reviewer, api_key=api_key)
+    status = format_reviewer_status(reviewer)
+    if status:
+        return ("Reviewer", status)
     return None
 
 

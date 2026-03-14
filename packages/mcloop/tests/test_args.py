@@ -33,6 +33,7 @@ from mcloop.main import (
     _HOOK_SCRIPTS,
     _all_tasks,
     _check_interrupted,
+    _check_reviewer,
     _check_rtk,
     _check_user_input,
     _cleanup_stale_reviews,
@@ -1738,9 +1739,93 @@ def test_cmd_install_calls_check_rtk(tmp_path):
             return_value=("Permissions", "ok"),
         ),
         patch("mcloop.main._check_rtk", return_value=None) as mock_rtk,
+        patch("mcloop.main._check_reviewer", return_value=None),
     ):
         _cmd_install(tmp_path)
     mock_rtk.assert_called_once()
+
+
+# --- _check_reviewer ---
+
+
+def test_check_reviewer_no_config(tmp_path):
+    """Returns None when .mcloop/config.json does not exist."""
+    assert _check_reviewer(tmp_path) is None
+
+
+def test_check_reviewer_no_reviewer_section(tmp_path):
+    """Returns None when config has no reviewer section."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "config.json").write_text('{"other": "stuff"}')
+    assert _check_reviewer(tmp_path) is None
+
+
+def test_check_reviewer_with_api_key(tmp_path):
+    """Returns status tuple when reviewer is configured and API key is set."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "config.json").write_text(
+        '{"reviewer": {"model": "gpt-4", "base_url": "https://openrouter.ai/api/v1"}}'
+    )
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-test"}):
+        result = _check_reviewer(tmp_path)
+    assert result is not None
+    assert result[0] == "Reviewer"
+    assert "gpt-4" in result[1]
+    assert "API key set" in result[1]
+
+
+def test_check_reviewer_without_api_key(tmp_path):
+    """Returns status tuple showing disabled when no API key."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "config.json").write_text(
+        '{"reviewer": {"model": "gpt-4", "base_url": "https://openrouter.ai/api/v1"}}'
+    )
+    with patch.dict("os.environ", {}, clear=True):
+        result = _check_reviewer(tmp_path)
+    assert result is not None
+    assert result[0] == "Reviewer"
+    assert "OPENROUTER_API_KEY not set" in result[1]
+
+
+def test_check_reviewer_invalid_json(tmp_path):
+    """Returns None for invalid JSON."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "config.json").write_text("not json")
+    assert _check_reviewer(tmp_path) is None
+
+
+def test_check_reviewer_non_dict_reviewer(tmp_path):
+    """Returns None when reviewer section is not a dict."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    (mcloop_dir / "config.json").write_text('{"reviewer": "string"}')
+    assert _check_reviewer(tmp_path) is None
+
+
+def test_cmd_install_calls_check_reviewer(tmp_path):
+    """_cmd_install calls _check_reviewer with project_dir."""
+    proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
+    with (
+        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("subprocess.run", return_value=proc),
+        patch("mcloop.main._install_hooks", return_value=[]),
+        patch("mcloop.main._merge_settings", return_value=[]),
+        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.main._setup_api_key", return_value=("API key", "ok")),
+        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch(
+            "mcloop.main._install_recommended_permissions",
+            return_value=("Permissions", "ok"),
+        ),
+        patch("mcloop.main._check_rtk", return_value=None),
+        patch("mcloop.main._check_reviewer", return_value=None) as mock_reviewer,
+    ):
+        _cmd_install(tmp_path)
+    mock_reviewer.assert_called_once_with(tmp_path)
 
 
 # --- _print_install_summary ---
@@ -1856,6 +1941,7 @@ def test_cmd_install_prints_summary(tmp_path, capsys):
             return_value=("Permissions", "installed — merge manually"),
         ),
         patch("mcloop.main._check_rtk", return_value=None),
+        patch("mcloop.main._check_reviewer", return_value=None),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
