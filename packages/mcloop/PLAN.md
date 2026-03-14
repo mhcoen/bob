@@ -290,12 +290,12 @@ The debugging playbook this enforces:
   - [x] Schema: `{"reviewer": {"model": "...", "base_url": "..."}}`. API key always from `OPENROUTER_API_KEY` env var.
   - [x] Add `format_reviewer_status(config) -> str`: returns `"{model} via {host} (API key set)"`, or `"configured but OPENROUTER_API_KEY not set (disabled)"`, or empty string if no config.
 
-- [ ] [BATCH] Integrate reviewer lifecycle into run_loop
-  - [ ] In `run_loop`, after existing startup output, print reviewer status using `format_reviewer_status` if non-empty.
-  - [ ] After `_commit()` succeeds, if reviewer is enabled, spawn `subprocess.Popen([sys.executable, "-m", "mcloop.reviewer", commit_hash, str(project_dir)])` with `stdout=DEVNULL`, `stderr=DEVNULL`, `start_new_session=True`. Store Popen object in a list. Do not wait.
-  - [ ] At the top of the `while True` loop, scan `.mcloop/reviews/` for `.json` files. Parse each, filter to high-confidence findings, delete after reading. If findings exist, append a "Review findings from previous tasks" block to session context. If 3+ high-confidence error-severity findings from one commit, insert a fix task into `## Bugs` section of PLAN.md instead.
-  - [ ] In the signal handler and atexit handler, terminate any active reviewer subprocesses from the stored list.
-  - [ ] On startup, remove stale `.mcloop/reviews/*.json` older than 24 hours.
+- [x] [BATCH] Integrate reviewer lifecycle into run_loop
+  - [x] In `run_loop`, after existing startup output, print reviewer status using `format_reviewer_status` if non-empty.
+  - [x] After `_commit()` succeeds, if reviewer is enabled, spawn `subprocess.Popen([sys.executable, "-m", "mcloop.reviewer", commit_hash, str(project_dir)])` with `stdout=DEVNULL`, `stderr=DEVNULL`, `start_new_session=True`. Store Popen object in a list. Do not wait.
+  - [x] At the top of the `while True` loop, scan `.mcloop/reviews/` for `.json` files. Parse each, filter to high-confidence findings, delete after reading. If findings exist, append a "Review findings from previous tasks" block to session context. If 3+ high-confidence error-severity findings from one commit, insert a fix task into `## Bugs` section of PLAN.md instead.
+  - [x] In the signal handler and atexit handler, terminate any active reviewer subprocesses from the stored list.
+  - [x] On startup, remove stale `.mcloop/reviews/*.json` older than 24 hours.
 
 - [ ] Add reviewer to `mcloop install` summary: at the end of the install summary, if `.mcloop/config.json` has a reviewer section, print its status using `format_reviewer_status`. Do not prompt for OpenRouter credentials during install.
 
