@@ -1674,6 +1674,34 @@ def test_build_session_env_api_billing_wrong_key(monkeypatch):
     assert "OPENAI_API_KEY" not in env
 
 
+def test_build_session_env_openrouter_billing(monkeypatch):
+    """openrouter billing sets BASE_URL, AUTH_TOKEN, and empties API_KEY."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-789")
+    config = {"billing": "openrouter"}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env(cli="claude")
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-789"
+    assert env["ANTHROPIC_API_KEY"] == ""
+
+
+def test_build_session_env_openrouter_billing_no_key(monkeypatch):
+    """openrouter billing without OPENROUTER_API_KEY still sets URL and empty key."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    config = {"billing": "openrouter"}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env(cli="claude")
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert env["ANTHROPIC_API_KEY"] == ""
+
+
 # --- _build_command codex ---
 
 

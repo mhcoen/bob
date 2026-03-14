@@ -129,10 +129,17 @@ def _build_session_env(
     if task_label:
         env["MCLOOP_TASK_LABEL"] = task_label
     config = _load_mcloop_config()
-    if config.get("billing") == "api":
+    billing = config.get("billing")
+    if billing == "api":
         key_name = _BILLING_KEY.get(cli, "")
         if key_name and key_name in os.environ:
             env[key_name] = os.environ[key_name]
+    elif billing == "openrouter":
+        env["ANTHROPIC_BASE_URL"] = "https://openrouter.ai/api"
+        or_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if or_key:
+            env["ANTHROPIC_AUTH_TOKEN"] = or_key
+        env["ANTHROPIC_API_KEY"] = ""
     return env
 
 
