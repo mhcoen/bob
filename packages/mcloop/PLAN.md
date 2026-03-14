@@ -307,15 +307,15 @@ The debugging playbook this enforces:
 
 ## Stage 4: Secure session environment and Codex support
 
-- [ ] [BATCH] Replace inherited environment with minimal allowlist
+- [x] [BATCH] Replace inherited environment with minimal allowlist
   - [x] Define `_PASSTHROUGH_VARS` set in `runner.py`: PATH, HOME, TERM, LANG, LC_ALL, TMPDIR, USER, LOGNAME, SHELL, XDG_CACHE_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, COLORTERM, FORCE_COLOR, NO_COLOR
   - [x] Add `_build_session_env(task_label)` function that builds env from `_PASSTHROUGH_VARS` only, adds MCLOOP_TASK_LABEL, and reads `env_passthrough` list from mcloop config for user-specified extras
   - [x] Update `_run_session` to use `_build_session_env()` instead of `dict(env or os.environ)` with single-key stripping
   - [x] Update `run_task` to stop constructing its own env dict from `os.environ`
   - [x] Remove `keep_anthropic_api_key` config option from `_run_session`, `_setup_api_key` in main.py, and install flow
   - [x] Verify all `_run_session` call sites work with minimal env
-  - [ ] Add tests: `_build_session_env` includes only allowlisted vars, `env_passthrough` adds specified vars, credentials (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) are excluded by default, MCLOOP_TASK_LABEL is present
-  - [ ] Document `env_passthrough` in README
+  - [x] Add tests: `_build_session_env` includes only allowlisted vars, `env_passthrough` adds specified vars, credentials (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) are excluded by default, MCLOOP_TASK_LABEL is present
+  - [x] Document `env_passthrough` in README
 
 - [ ] Add Codex as a CLI backend
   - [ ] Add `--cli` argument to arg parser (choices: claude, codex, default: claude)

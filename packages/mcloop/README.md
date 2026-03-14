@@ -887,6 +887,37 @@ When McLoop finishes, it reminds you if NOTES.md exists.
 One log file per task attempt in `logs/`, named `{timestamp}_{task-slug}.log`.
 Each log captures the full CLI output and exit code.
 
+## Session environment
+
+mcloop runs each CLI session (Claude Code or Codex) with a minimal
+environment. Only essential variables are passed through: PATH, HOME,
+TERM, LANG, and a few others needed for tools and terminal rendering.
+API keys, cloud credentials, tokens, and other secrets are excluded
+by default. This prevents the agent from accidentally using API
+credits instead of a subscription, and prevents credential leakage
+to commands the agent runs.
+
+To use API billing instead of a subscription, or if your project
+tests require specific environment variables, add them to
+`env_passthrough` in `~/.mcloop/config.json`:
+
+```json
+{
+  "env_passthrough": ["DATABASE_URL", "REDIS_URL"]
+}
+```
+
+To switch Claude Code from subscription to API billing:
+
+```json
+{
+  "env_passthrough": ["ANTHROPIC_API_KEY"]
+}
+```
+
+Variables listed in `env_passthrough` are copied from your shell
+environment into the session. Everything else is excluded.
+
 ## Requirements
 
 - Python >= 3.11
