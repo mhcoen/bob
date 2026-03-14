@@ -870,6 +870,7 @@ def run_loop(
     completed: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
+    batch_exhausted: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
 
     if current_model:
@@ -938,8 +939,16 @@ def run_loop(
         # Check for [BATCH] on the parent task.
         # If the parent is marked [BATCH], collect all batchable
         # siblings and combine them into a single session.
+        # Skipped when config has "batch": false.
         parent = find_parent(tasks, task)
-        if parent is not None and is_batch_task(parent):
+        batch_enabled = _load_mcloop_config().get("batch", True)
+        parent_label = _task_label(tasks, parent) if parent else ""
+        if (
+            batch_enabled
+            and parent is not None
+            and is_batch_task(parent)
+            and parent_label not in batch_exhausted
+        ):
             batch_children = get_batch_children(parent)
             if len(batch_children) > 1:
                 batch_handled = _run_batch(
@@ -973,6 +982,7 @@ def run_loop(
                     )
                     # Re-parse and re-find since batch may have
                     # partially modified state
+                    batch_exhausted.add(parent_label)
                     continue
 
         active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
