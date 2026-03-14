@@ -14,6 +14,7 @@ McLoop lets you run Claude Code for hours at a time without babysitting it. You 
 - **Failed approach tracking** with `[RULEDOUT]` so the agent never repeats what already failed
 - **Model fallback** from a cheaper model to a stronger one when tasks fail
 - **Stages** for phased execution with testing between stages
+- **Continuous code review** of every commit via a second AI model, without blocking the main loop
 - **Targeted testing** after each task (full suite only at stage boundaries)
 - **Syncing** PLAN.md with the codebase after manual changes
 - **Visual verification** with deterministic app screenshots
@@ -761,6 +762,51 @@ rather than looping indefinitely.
 
 To instrument a project that was NOT built by McLoop, use
 `mcloop wrap` manually from that project's directory.
+
+## Continuous code reviewer
+
+McLoop can run a second AI model as a reviewer on every commit. After
+each successful commit, McLoop spawns a background process that sends
+the diff to an OpenAI-compatible API for review. The reviewer checks
+for bugs, logic errors, unhandled exceptions, resource leaks, and
+missing edge cases. This never blocks the main loop — the review runs
+in a detached subprocess while McLoop continues to the next task.
+
+Findings are written to `.mcloop/reviews/` as JSON. At the start of
+each loop iteration, McLoop collects any completed reviews. Low- and
+medium-confidence findings are added to the rolling session context so
+the next task is aware of them. If a single commit produces three or
+more high-confidence error-severity findings, McLoop escalates by
+inserting a fix task into the `## Bugs` section of PLAN.md, which has
+absolute priority over feature tasks.
+
+The reviewer is disabled by default. To enable it, add a `reviewer`
+section to `.mcloop/config.json` in your project directory and set
+the `OPENROUTER_API_KEY` environment variable:
+
+```json
+{
+  "reviewer": {
+    "model": "google/gemini-2.5-flash",
+    "base_url": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+```bash
+export OPENROUTER_API_KEY=your-key-here
+```
+
+Any OpenAI-compatible endpoint works: [OpenRouter](https://openrouter.ai),
+a direct provider API, or a local server like
+[Ollama](https://ollama.com) (set `base_url` to
+`http://localhost:11434/v1` and `OPENROUTER_API_KEY` to any non-empty
+string). The model is your choice — a fast, cheap model works well
+since it only reviews diffs, not full codebases.
+
+McLoop prints the reviewer status at startup when configured (e.g.,
+`Reviewer: google/gemini-2.5-flash via openrouter.ai (API key set)`).
+Stale review files older than 24 hours are cleaned up automatically.
 
 ## Syncing PLAN.md
 
