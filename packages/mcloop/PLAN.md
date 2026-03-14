@@ -297,7 +297,7 @@ The debugging playbook this enforces:
   - [x] In the signal handler and atexit handler, terminate any active reviewer subprocesses from the stored list.
   - [x] On startup, remove stale `.mcloop/reviews/*.json` older than 24 hours.
 
-- [ ] Add reviewer to `mcloop install` summary: at the end of the install summary, if `.mcloop/config.json` has a reviewer section, print its status using `format_reviewer_status`. Do not prompt for OpenRouter credentials during install.
+- [x] Add reviewer to `mcloop install` summary: at the end of the install summary, if `.mcloop/config.json` has a reviewer section, print its status using `format_reviewer_status`. Do not prompt for OpenRouter credentials during install.
 
 - [ ] [BATCH] Update documentation
   - [ ] Add "Continuous code reviewer" section under "Advanced features" in the mcloop README. Cover: what it does, how to enable it (config.json + env var), what providers work (OpenRouter, any OpenAI-compatible endpoint, Ollama), what it catches, how findings are delivered (context or Bugs escalation), that it never blocks the main loop.
