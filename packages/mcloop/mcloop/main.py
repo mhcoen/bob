@@ -1152,14 +1152,11 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    last_error = "Task produced no file changes"
                     print(
-                        formatting.error_msg(
-                            f"No-op task (attempt {attempt}/{max_retries}): {task.text}"
-                        ),
+                        formatting.error_msg("No-op task, checks failing on existing code"),
                         flush=True,
                     )
-                    continue
+                    break
 
                 _current_phase = "checks"
                 changed_files = _changed_files(project_dir)
