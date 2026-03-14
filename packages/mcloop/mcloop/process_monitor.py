@@ -511,3 +511,7 @@ def run_gui(
                     proc.wait()
             else:
                 proc.wait()
+        else:
+            # Still wait on the shell wrapper to avoid zombie.
+            if proc.poll() is not None:
+                proc.wait()

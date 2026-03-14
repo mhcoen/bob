@@ -299,8 +299,8 @@ The debugging playbook this enforces:
 
 - [x] Add reviewer to `mcloop install` summary: at the end of the install summary, if `.mcloop/config.json` has a reviewer section, print its status using `format_reviewer_status`. Do not prompt for OpenRouter credentials during install.
 
-- [ ] [BATCH] Update documentation
-  - [ ] Add "Continuous code reviewer" section under "Advanced features" in the mcloop README. Cover: what it does, how to enable it (config.json + env var), what providers work (OpenRouter, any OpenAI-compatible endpoint, Ollama), what it catches, how findings are delivered (context or Bugs escalation), that it never blocks the main loop.
-  - [ ] Add reviewer config example to the README.
-  - [ ] Update the "Features at a glance" list.
-  - [ ] Add a sentence to the duplo README noting that batched tasks are reviewed as a single diff after the batch commit.
+- [x] [BATCH] Update documentation
+  - [x] Add "Continuous code reviewer" section under "Advanced features" in the mcloop README. Cover: what it does, how to enable it (config.json + env var), what providers work (OpenRouter, any OpenAI-compatible endpoint, Ollama), what it catches, how findings are delivered (context or Bugs escalation), that it never blocks the main loop.
+  - [x] Add reviewer config example to the README.
+  - [x] Update the "Features at a glance" list.
+  - [x] Add a sentence to the duplo README noting that batched tasks are reviewed as a single diff after the batch commit.

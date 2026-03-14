@@ -1261,13 +1261,23 @@ def run_loop(
         done_stage = status.split(":", 1)[1]
         next_stg = current_stage(parse(checklist_path))
         print(formatting.system_msg("Running full test suite (stage boundary)..."), flush=True)
+        _full_suite_start = time.monotonic()
         full_check = run_checks(project_dir)
+        _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
         if not full_check.passed:
             print(
-                formatting.error_msg(f"Full suite failed at stage boundary: {full_check.command}"),
+                formatting.error_msg(
+                    f"Full suite failed at stage boundary: "
+                    f"{full_check.command} [{_full_suite_elapsed}]"
+                ),
                 flush=True,
             )
             _print_error_tail(full_check.output)
+        else:
+            print(
+                formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
+                flush=True,
+            )
         _run_build(project_dir)
         total = time.monotonic() - run_start
         _print_summary(
@@ -1288,13 +1298,19 @@ def run_loop(
 
     # Full test suite at end of run
     print(formatting.system_msg("Running full test suite (end of run)..."), flush=True)
+    _full_suite_start = time.monotonic()
     full_check = run_checks(project_dir)
+    _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
     if not full_check.passed:
         print(
-            formatting.error_msg(f"Full suite failed at end of run: {full_check.command}"),
+            formatting.error_msg(
+                f"Full suite failed at end of run: {full_check.command} [{_full_suite_elapsed}]"
+            ),
             flush=True,
         )
         _print_error_tail(full_check.output)
+    else:
+        print(formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"), flush=True)
 
     # Only audit if every task in every stage is complete
     final_for_audit = parse(checklist_path)
@@ -1317,11 +1333,14 @@ def run_loop(
     elif not no_audit:
         _current_phase = "audit"
         _phase_start_time = time.monotonic()
+        _audit_start = time.monotonic()
         _run_audit_fix_cycle(
             project_dir,
             log_dir,
             model=model,
         )
+        _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
+        print(formatting.system_msg(f"Audit completed [{_audit_elapsed}]"), flush=True)
 
     _run_build(project_dir)
 
@@ -2504,17 +2523,23 @@ def _maybe_auto_wrap(project_dir: Path) -> None:
         cwd=project_dir,
         label="auto-wrap commit",
     )
-    push_result = _git(
-        ["git", "push"],
+    remote_result = _git(
+        ["git", "remote"],
         cwd=project_dir,
-        label="auto-wrap push",
-        silent=True,
+        label="auto-wrap remote check",
     )
-    if push_result.returncode != 0:
-        print(
-            formatting.error_msg("Push after auto-wrap failed"),
-            flush=True,
+    if remote_result.stdout.strip():
+        push_result = _git(
+            ["git", "push"],
+            cwd=project_dir,
+            label="auto-wrap push",
+            silent=True,
         )
+        if push_result.returncode != 0:
+            print(
+                formatting.error_msg("Push after auto-wrap failed"),
+                flush=True,
+            )
 
 
 def _reinject_wrappers(project_dir: Path) -> None:
@@ -2568,14 +2593,20 @@ def _reinject_wrappers(project_dir: Path) -> None:
         cwd=project_dir,
         label="reinject commit",
     )
-    push_result = _git(
-        ["git", "push"],
+    remote_result = _git(
+        ["git", "remote"],
         cwd=project_dir,
-        label="reinject push",
-        silent=True,
+        label="reinject remote check",
     )
-    if push_result.returncode != 0:
-        print(
-            formatting.error_msg("Push after re-injection failed"),
-            flush=True,
+    if remote_result.stdout.strip():
+        push_result = _git(
+            ["git", "push"],
+            cwd=project_dir,
+            label="reinject push",
+            silent=True,
         )
+        if push_result.returncode != 0:
+            print(
+                formatting.error_msg("Push after re-injection failed"),
+                flush=True,
+            )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from mcloop import formatting
@@ -16,6 +17,14 @@ from mcloop.prompts import (
     review_found_problems,
 )
 from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as human-readable string."""
+    m, s = divmod(int(seconds), 60)
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
 def _tail(text: str, max_lines: int = 50) -> str:
@@ -134,12 +143,14 @@ def _run_single_audit_round(
             return False
     else:
         print(formatting.system_msg("Running bug audit..."), flush=True)
+        _audit_start = time.monotonic()
         audit_result = run_audit(
             project_dir,
             log_dir,
             model=model,
             existing_bugs="",
         )
+        _audit_el = _format_elapsed(time.monotonic() - _audit_start)
         if not audit_result.success:
             print(
                 f"audit: session exited with code {audit_result.exit_code}, skipping fix",
@@ -149,14 +160,14 @@ def _run_single_audit_round(
 
         if not bugs_path.exists():
             print(
-                "audit: BUGS.md not written, skipping fix",
+                f"audit: BUGS.md not written, skipping fix [{_audit_el}]",
                 flush=True,
             )
             return False
 
         bugs_content = bugs_path.read_text()
         if not bugs_md_has_bugs(bugs_content):
-            print("audit: no bugs found", flush=True)
+            print(f"audit: no bugs found [{_audit_el}]", flush=True)
             bugs_path.unlink()
             return False
 
@@ -168,12 +179,14 @@ def _run_single_audit_round(
             formatting.system_msg(f"Verifying {len(parsed_bugs)} bugs..."),
             flush=True,
         )
+        _verify_start = time.monotonic()
         verify_result = run_bug_verify(
             project_dir,
             log_dir,
             bugs_content,
             model=model,
         )
+        _verify_el = _format_elapsed(time.monotonic() - _verify_start)
         if verify_result.success:
             verdicts = parse_verification_output(
                 verify_result.output,
@@ -202,7 +215,9 @@ def _run_single_audit_round(
                 ]
                 if not confirmed_bugs:
                     print(
-                        formatting.system_msg("All reported bugs were false positives."),
+                        formatting.system_msg(
+                            f"All reported bugs were false positives [{_verify_el}]"
+                        ),
                         flush=True,
                     )
                     bugs_path.unlink(missing_ok=True)
@@ -220,11 +235,13 @@ def _run_single_audit_round(
             formatting.system_msg(f"Fixing bugs (attempt {attempt}/{max_fix_attempts})..."),
             flush=True,
         )
+        _fix_start = time.monotonic()
         fix_result = run_bug_fix(
             project_dir,
             log_dir,
             model=model,
         )
+        _fix_el = _format_elapsed(time.monotonic() - _fix_start)
 
         if not fix_result.success:
             print(
@@ -249,6 +266,7 @@ def _run_single_audit_round(
                     formatting.system_msg("Post-fix review..."),
                     flush=True,
                 )
+                _review_start = time.monotonic()
                 review_result = run_post_fix_review(
                     project_dir,
                     log_dir,
@@ -256,6 +274,7 @@ def _run_single_audit_round(
                     diff,
                     model=model,
                 )
+                _review_el = _format_elapsed(time.monotonic() - _review_start)
                 if review_result.success:
                     found, desc = review_found_problems(
                         review_result.output,
@@ -271,7 +290,9 @@ def _run_single_audit_round(
                         bugs_path.write_text(bugs_content)
                         continue
                     print(
-                        formatting.system_msg("Post-fix review: no new bugs introduced"),
+                        formatting.system_msg(
+                            f"Post-fix review: no new bugs introduced [{_review_el}]"
+                        ),
                         flush=True,
                     )
 

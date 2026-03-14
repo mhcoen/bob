@@ -102,7 +102,8 @@ def test_parse_findings_defaults_missing_fields():
 def test_run_review_no_api_key():
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
     assert run_review(request, {}) == []
-    assert run_review(request, {"review_api_key": ""}) == []
+    assert run_review(request, {"api_key": ""}) == []
+    assert run_review(request, {"api_key": "sk-test"}) == []  # no base_url
 
 
 def test_run_review_success():
@@ -125,7 +126,11 @@ def test_run_review_success():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
-    config = {"review_api_key": "sk-test"}
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
 
     with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp):
         result = run_review(request, config)
@@ -145,7 +150,11 @@ def test_run_review_with_code_fences():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
-    config = {"review_api_key": "sk-test"}
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
 
     with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp):
         result = run_review(request, config)
@@ -155,7 +164,11 @@ def test_run_review_with_code_fences():
 
 def test_run_review_http_error():
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
-    config = {"review_api_key": "sk-test"}
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
 
     with patch(
         "mcloop.reviewer.urllib.request.urlopen",
@@ -171,7 +184,11 @@ def test_run_review_bad_json_response():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
-    config = {"review_api_key": "sk-test"}
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
 
     with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp):
         assert run_review(request, config) == []
@@ -188,7 +205,11 @@ def test_run_review_non_list_response():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
-    config = {"review_api_key": "sk-test"}
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
 
     with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp):
         assert run_review(request, config) == []
@@ -204,9 +225,9 @@ def test_run_review_custom_base_url_and_model():
 
     request = ReviewRequest("abc", "diff", "desc", "1", "task")
     config = {
-        "review_api_key": "sk-test",
-        "review_base_url": "http://localhost:8080/v1/",
-        "review_model": "llama-3",
+        "api_key": "sk-test",
+        "base_url": "http://localhost:8080/v1/",
+        "model": "llama-3",
     }
 
     with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp) as mock_open:
@@ -222,6 +243,13 @@ def test_run_review_custom_base_url_and_model():
 # --- run_review_cli ---
 
 
+_FAKE_CONFIG = {
+    "api_key": "sk-test",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+}
+
+
 def test_run_review_cli_writes_results(tmp_path):
     plan = tmp_path / "PLAN.md"
     plan.write_text("# My Project\nDo stuff\n")
@@ -231,6 +259,7 @@ def test_run_review_cli_writes_results(tmp_path):
     )
 
     with (
+        patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
         patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
         patch(
             "mcloop.reviewer.run_review",
@@ -246,10 +275,21 @@ def test_run_review_cli_writes_results(tmp_path):
     assert data[0]["severity"] == "warning"
 
 
+def test_run_review_cli_no_config(tmp_path, capsys):
+    with patch("mcloop.config.load_reviewer_config", return_value=None):
+        run_review_cli("abc123", str(tmp_path))
+
+    # Should return early without error
+    assert capsys.readouterr().err == ""
+
+
 def test_run_review_cli_empty_diff(tmp_path, capsys):
     diff_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-    with patch("mcloop.reviewer.subprocess.run", return_value=diff_result):
+    with (
+        patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
+        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+    ):
         run_review_cli("abc123", str(tmp_path))
 
     assert "Empty diff" in capsys.readouterr().err
@@ -260,7 +300,10 @@ def test_run_review_cli_git_error(tmp_path, capsys):
         args=[], returncode=1, stdout="", stderr="fatal: bad revision"
     )
 
-    with patch("mcloop.reviewer.subprocess.run", return_value=diff_result):
+    with (
+        patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
+        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+    ):
         run_review_cli("bad", str(tmp_path))
 
     assert "git diff failed" in capsys.readouterr().err
@@ -272,6 +315,7 @@ def test_run_review_cli_no_plan(tmp_path):
     )
 
     with (
+        patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
         patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
         patch("mcloop.reviewer.run_review", return_value=[]) as mock_review,
     ):

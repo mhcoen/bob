@@ -96,17 +96,19 @@ def _parse_findings(raw: list) -> list[ReviewFinding]:
 def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     """Send diff to an OpenAI-compatible endpoint for review.
 
-    Config keys:
-        review_model: model name (default: gpt-4o-mini)
-        review_base_url: API base URL (default: https://api.openai.com/v1)
-        review_api_key: API key (required)
+    Config keys (from load_reviewer_config):
+        model: model name (required)
+        base_url: API base URL (required)
+        api_key: API key (required, from OPENROUTER_API_KEY env var)
     """
-    api_key = config.get("review_api_key", "")
+    api_key = config.get("api_key", "")
     if not api_key:
         return []
 
-    base_url = config.get("review_base_url", "https://api.openai.com/v1").rstrip("/")
-    model = config.get("review_model", "gpt-4o-mini")
+    base_url = config.get("base_url", "").rstrip("/")
+    if not base_url:
+        return []
+    model = config.get("model", "")
 
     user_msg = f"## Task\n{request.task_label}: {request.task_text}\n\n"
     user_msg += f"## Project\n{request.project_description}\n\n"
@@ -163,8 +165,12 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
 
 def run_review_cli(commit_hash: str, project_dir: str) -> None:
     """CLI entry point: review a commit and write results to disk."""
+    from mcloop.config import load_reviewer_config
+
     proj = Path(project_dir)
-    config = _load_config()
+    config = load_reviewer_config(project_dir)
+    if config is None:
+        return
 
     # Get diff
     result = subprocess.run(

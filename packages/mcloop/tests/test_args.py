@@ -3937,7 +3937,10 @@ def test_dispatch_screenshot():
     with patch("mcloop.app_interact.screenshot_window") as mock:
         result = _dispatch_auto_action("screenshot", "MyApp")
 
-    mock.assert_called_once_with("MyApp", "/tmp/auto_screenshot_MyApp.png")
+    call_args = mock.call_args[0]
+    assert call_args[0] == "MyApp"
+    assert call_args[1].endswith("/auto_screenshot_MyApp.png")
+    assert "mcloop_" in call_args[1]
     assert "screenshot saved" in result
 
 
@@ -4633,8 +4636,8 @@ def test_auto_wrap_injects_and_commits(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Injected crash handlers." in captured.out
 
-    # Should have committed: add, commit, push
-    assert mock_git.call_count == 3
+    # Should have committed: add, commit, remote check, push
+    assert mock_git.call_count == 4
     commit_call = mock_git.call_args_list[1]
     assert "Inject mcloop crash handlers" in commit_call[0][0]
 
@@ -4782,7 +4785,7 @@ def test_reinject_markers_stripped_swift(tmp_path):
         _reinject_wrappers(tmp_path)
 
     # Should have committed the re-injection
-    assert mock_git.call_count == 3  # add, commit, push
+    assert mock_git.call_count == 4  # add, commit, remote check, push
     commit_call = mock_git.call_args_list[1]
     assert "Re-inject mcloop crash handlers" in commit_call[0][0]
 
@@ -4826,7 +4829,7 @@ def test_reinject_markers_stripped_python(tmp_path):
     with patch("mcloop.main._git", return_value=git_result) as mock_git:
         _reinject_wrappers(tmp_path)
 
-    assert mock_git.call_count == 3
+    assert mock_git.call_count == 4
     content = entry.read_text()
     assert "# mcloop:wrap:begin" in content
     assert "# mcloop:wrap:end" in content

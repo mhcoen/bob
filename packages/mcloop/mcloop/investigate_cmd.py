@@ -531,9 +531,12 @@ def _dispatch_auto_action(action: str, args: str) -> str:
         return f"window_exists({args.strip()}): {exists}"
 
     if action == "screenshot":
+        import tempfile
+
         app_name = args.strip()
         safe_name = re.sub(r"[^a-zA-Z0-9_\-.]", "_", app_name)
-        path = f"/tmp/auto_screenshot_{safe_name}.png"
+        tmp_dir = tempfile.mkdtemp(prefix="mcloop_")
+        path = str(Path(tmp_dir) / f"auto_screenshot_{safe_name}.png")
         app_interact.screenshot_window(app_name, path)
         return f"screenshot saved to {path}"
 
