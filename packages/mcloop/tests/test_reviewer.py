@@ -271,8 +271,11 @@ def test_run_review_cli_writes_results(tmp_path):
     out_file = tmp_path / ".mcloop" / "reviews" / "abc123.json"
     assert out_file.exists()
     data = json.loads(out_file.read_text())
-    assert len(data) == 1
-    assert data[0]["severity"] == "warning"
+    assert "findings" in data
+    assert "elapsed_seconds" in data
+    assert data["commit"] == "abc123"
+    assert len(data["findings"]) == 1
+    assert data["findings"][0]["severity"] == "warning"
 
 
 def test_run_review_cli_no_config(tmp_path, capsys):

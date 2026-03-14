@@ -245,14 +245,14 @@ def _run_single_audit_round(
 
         if not fix_result.success:
             print(
-                f"bug-fix: session exited with code {fix_result.exit_code}",
+                f"bug-fix: session exited with code {fix_result.exit_code} [{_fix_el}]",
                 flush=True,
             )
             break
 
         if not _has_meaningful_changes(project_dir):
             print(
-                "bug-fix: no changes made",
+                f"bug-fix: no changes made [{_fix_el}]",
                 flush=True,
             )
             break
@@ -309,7 +309,9 @@ def _run_single_audit_round(
 
         error_ctx = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
         print(
-            formatting.error_msg(f"Bug fix checks failed (attempt {attempt}/{max_fix_attempts})"),
+            formatting.error_msg(
+                f"Bug fix checks failed (attempt {attempt}/{max_fix_attempts}) [{_fix_el}]"
+            ),
             flush=True,
         )
         _print_error_tail(check_result.output)

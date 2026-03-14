@@ -205,15 +205,24 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
         task_text="",
     )
 
-    findings = run_review(request, config)
+    import time as _time
 
-    # Write results
+    _start = _time.monotonic()
+    findings = run_review(request, config)
+    _elapsed = _time.monotonic() - _start
+
+    # Write results with elapsed time
     reviews_dir = proj / ".mcloop" / "reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     out_path = reviews_dir / f"{commit_hash}.json"
-    out_path.write_text(json.dumps([asdict(f) for f in findings], indent=2) + "\n")
+    result_data = {
+        "findings": [asdict(f) for f in findings],
+        "elapsed_seconds": round(_elapsed, 1),
+        "commit": commit_hash,
+    }
+    out_path.write_text(json.dumps(result_data, indent=2) + "\n")
 
-    print(f"Review complete: {len(findings)} finding(s) -> {out_path}")
+    print(f"Review complete: {len(findings)} finding(s) [{_elapsed:.0f}s] -> {out_path}")
 
 
 if __name__ == "__main__":
