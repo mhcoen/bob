@@ -1,6 +1,6 @@
 # McLoop
 
-McLoop lets you run Claude Code for hours at a time without babysitting it. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone.
+McLoop lets you run AI coding agents for hours at a time without babysitting them. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone. McLoop supports Claude Code and OpenAI Codex as backends.
 
 ### Features at a glance
 
@@ -19,8 +19,8 @@ McLoop lets you run Claude Code for hours at a time without babysitting it. You 
 - **Syncing** PLAN.md with the codebase after manual changes
 - **Visual verification** with deterministic app screenshots
 
-Because McLoop runs Claude Code sessions continuously, it will use
-your plan allowance faster than if you used it interactively. See
+Because McLoop runs CLI sessions continuously, it will use
+your plan allowance faster than if you used the agent interactively. See
 [Best practices](#best-practices) for how to get the most from it.
 
 Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. This also keeps token usage low, since each session pays only for the current task's context rather than accumulating conversation history from every previous task. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
@@ -95,7 +95,7 @@ design from execution cleanly enough that you can use whatever process
 works for you on the design side, and the execution is mechanical.
 
 McLoop is also not limited to building code from scratch. Any sequence
-of well-defined steps that Claude Code can execute is a valid plan:
+of well-defined steps that an AI coding agent can execute is a valid plan:
 refactoring a module, migrating a database schema, setting up CI/CD,
 auditing dependencies, generating documentation, running a series of
 analyses, or performing scheduled maintenance. If you can describe it
@@ -115,6 +115,7 @@ mcloop --file other.md    # Use a different file
 mcloop --dry-run          # Show what would run, don't execute
 mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 mcloop --model opus       # Use a specific Claude model
+mcloop --cli codex        # Use Codex instead of Claude Code
 mcloop --no-audit         # Skip the post-completion bug audit
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
@@ -132,10 +133,11 @@ A `PLAN.md` has two parts: a **project description**, then a **checklist**.
 ```markdown
 # McLoop
 
-McLoop lets you run Claude Code for hours at a time without babysitting it.
-You write a task list in PLAN.md. McLoop works through it continuously,
-launching a fresh CLI session per task, running your tests and linter,
-committing only if everything passes, and notifying you of progress.
+McLoop lets you run AI coding agents for hours at a time without
+babysitting them. You write a task list in PLAN.md. McLoop works through
+it continuously, launching a fresh CLI session per task, running your
+tests and linter, committing only if everything passes, and notifying
+you of progress.
 
 Python 3.11+, stdlib only, no external dependencies. Ruff for linting, pytest
 for tests. Each task should leave the repo in a passing state: ruff check and
@@ -162,7 +164,7 @@ project is, what technologies to use, and what constraints matter. **Without a
 description, the CLI has no context and will make worse decisions.**
 
 You don't need to duplicate your README or code comments in the description.
-Most of the context Claude Code needs is already in your codebase: the README,
+Most of the context the agent needs is already in your codebase: the README,
 CLAUDE.md, inline comments, and the code itself. Claude reads these during
 each session. That said, a reasonably detailed description is fine and often
 helpful, especially for technology choices, constraints, conventions, or
@@ -174,12 +176,12 @@ markdown docs current. They are the CLI's only memory of decisions made in
 previous sessions.
 
 PLAN.md is a task queue, not a complete record of how the project was built.
-Changes made outside McLoop, whether in an editor, an interactive Claude Code
+Changes made outside McLoop, whether in an editor, an interactive
 session, or by hand, are not reflected in the file. The codebase itself is the
 source of truth. PLAN.md drives what happens next, but it cannot reproduce what
 already happened.
 
-You can close this gap with `mcloop sync`, which launches a Claude Code
+You can close this gap with `mcloop sync`, which launches a
 session to review the codebase and git history, check off tasks that are
 already implemented, append items for work not yet in the plan, and flag
 discrepancies. See [Syncing PLAN.md](#syncing-planmd) for details.
@@ -207,8 +209,11 @@ coverage matters, include it in the implementation task (e.g.
 
 ### Subtasks
 
-Nest subtasks with indentation. McLoop completes children before parents, and
-auto-checks the parent when all children are done.
+Nest subtasks with indentation. McLoop completes children before
+parents, and auto-checks the parent when all children are done.
+The parent task text is never sent to a CLI session. It serves as
+a label for grouping. Only leaf children (the deepest unchecked
+tasks) are executed.
 
 ```markdown
 - [ ] Set up database
@@ -235,22 +240,22 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 ## How McLoop works
 
 ```
-0. Safety commit all tracked modified files (skipped if clean)
+1. Safety commit all tracked modified files (skipped if clean)
 while unchecked items remain:
-    1. Find next unchecked item (depth-first)
-    2. Launch a fresh Claude Code session with a clean context.
-       The CLI receives: project description + current task + your codebase.
+    2. Find next unchecked item (depth-first)
+    3. Launch a fresh CLI session with a clean context.
+       The agent receives: project description + current task + your codebase.
        On retries, the previous error output is included so Claude can fix it.
-    3. Verify the session produced meaningful file changes
-    4. Run targeted checks (lint + tests for changed files only)
-    5. If checks pass  -> commit, push, check the box, notify, continue
-    6. If checks fail  -> retry with error context (up to --max-retries)
-    7. If retries exhausted -> mark [!], notify, stop
-    8. If rate-limited -> pause, wait for reset, resume
+    4. Verify the session produced meaningful file changes
+    5. Run targeted checks (lint + tests for changed files only)
+    6. If checks pass  -> commit, push, check the box, notify, continue
+    7. If checks fail  -> retry with error context (up to --max-retries)
+    8. If retries exhausted -> mark [!], notify, stop
+    9. If rate-limited -> pause, wait for reset, resume
        If session-limited -> poll every 10 minutes, resume when limit resets
-    9. At stage boundaries -> run full test suite
-10. Run bug audit/fix cycle (unless --no-audit)
-11. Print summary with elapsed time and whitelist suggestions
+   10. At stage boundaries -> run full test suite
+11. Run bug audit/fix cycle (unless --no-audit)
+12. Print summary with elapsed time and whitelist suggestions
 ```
 
 Tasks within a single run share a rolling session context. After each task
@@ -527,7 +532,7 @@ PLAN.md can use `[USER]`:
 ### Batching subtasks
 
 Mark a parent task with `[BATCH]` to combine all its unchecked
-children into a single Claude Code session:
+children into a single CLI session:
 
 ```markdown
 - [ ] [BATCH] mcloop install and uninstall subcommands
@@ -556,7 +561,7 @@ own session.
 
 When an approach has been tried and ruled out, add a `[RULEDOUT]`
 line under the task. McLoop parses these and injects them into the
-task prompt so Claude Code knows not to repeat them:
+task prompt so the agent knows not to repeat them:
 
 ```markdown
 - [ ] Fix Ctrl-C: prevent claude from stealing the terminal foreground
@@ -581,7 +586,7 @@ After all checklist tasks complete, McLoop automatically runs two rounds
 of bug auditing (unless `--no-audit` is passed). Each round follows the
 same cycle:
 
-1. **Find bugs.** A Claude Code session reads the entire codebase and
+1. **Find bugs.** A session reads the entire codebase and
    writes findings to `BUGS.md`. Only actual defects are included:
    crashes, incorrect behavior, unhandled errors, and security issues.
    Style issues and refactoring suggestions are excluded. If BUGS.md
@@ -735,7 +740,7 @@ code into source files, delimited with markers
 (`// mcloop:wrap:begin` / `// mcloop:wrap:end` for Swift,
 `# mcloop:wrap:begin` / `# mcloop:wrap:end` for Python). The
 canonical wrapper source is stored in `.mcloop/wrap/` so McLoop
-can re-inject it if Claude Code strips the markers during a task.
+can re-inject it if the agent strips the markers during a task.
 
 Swift instrumentation includes `NSSetUncaughtExceptionHandler`,
 signal handlers (SIGSEGV, SIGABRT, SIGBUS), and an app-state dump
@@ -824,7 +829,7 @@ Stale review files older than 24 hours are cleaned up automatically.
 ## Syncing PLAN.md
 
 Run `mcloop sync` to reconcile PLAN.md with the actual codebase. This
-launches a Claude Code session that reads the project files, git history, and
+launches a session that reads the project files, git history, and
 existing plan, then:
 
 1. Appends checked items for any features, fixes, or changes reflected in the
@@ -839,8 +844,8 @@ confirmation. No existing items are deleted.
 Use `mcloop sync --dry-run` to see the proposed changes without modifying
 PLAN.md.
 
-This is useful for keeping PLAN.md accurate after manual edits, interactive
-Claude Code sessions, or any other changes made outside McLoop.
+This is useful for keeping PLAN.md accurate after manual edits,
+interactive sessions, or any other changes made outside McLoop.
 
 ## Summary and whitelist suggestions
 
@@ -866,13 +871,13 @@ bin/appshot "AppName" screenshot.png --wait 2
 bin/appshot "AppName" screenshot.png --setup 'tell app "AppName" to activate'
 ```
 
-Claude Code sessions are instructed via CLAUDE.md to always use appshot
+Claude Code sessions are instructed via CLAUDE.md to use appshot
 for visual verification rather than reinventing screenshot capture.
 Requires macOS Screen Recording permission (granted once).
 
 ## Implementation notes
 
-During each task session, Claude Code may notice edge cases, design decisions,
+During each task session, the agent may notice edge cases, design decisions,
 assumptions, potential issues, or anything worth revisiting later. When it
 does, it appends a note to `NOTES.md` with the current date and a reference
 to the task being worked on (e.g., "[3.2] Parse Markdown to HTML").
@@ -910,6 +915,68 @@ mcloop automatically passes the appropriate API key for the active
 CLI: `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for
 Codex. No other credentials are passed through.
 
+### CLI backend
+
+mcloop supports two CLI backends: Claude Code (default) and OpenAI
+Codex. Set the backend with `--cli` or in `~/.mcloop/config.json`:
+
+```bash
+mcloop --cli codex
+mcloop --cli codex --model gpt-5.4
+```
+
+Codex sessions use `codex exec --ask-for-approval never --sandbox
+workspace-write`, which gives the agent write access to the project
+directory and `/tmp` but no network access and no ability to modify
+files outside the workspace. Claude Code sessions use PreToolUse
+hooks for permission control instead of an OS-level sandbox.
+
+Both backends default to subscription billing. Set `"billing": "api"`
+to use API credits instead.
+
+### Model configuration
+
+Set a default model in `~/.mcloop/config.json` so you don't need
+`--model` on every invocation:
+
+```json
+{
+  "model": "sonnet"
+}
+```
+
+The `--model` flag overrides the config. If the model is not in
+mcloop's known-good list for the active CLI, a warning is printed
+but execution continues. Both short aliases (`opus`, `sonnet`,
+`haiku`, `opusplan`) and full model strings
+(`claude-opus-4-6`, `gpt-5.4`) are accepted.
+
+### Configuration reference
+
+All keys in `~/.mcloop/config.json`:
+
+```json
+{
+  "cli": "claude",
+  "model": "sonnet",
+  "billing": "subscription",
+  "reviewer": {
+    "enabled": true,
+    "model": "deepseek/deepseek-v3.2",
+    "base_url": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+| Key | Values | Default | Description |
+|-----|--------|---------|-------------|
+| `cli` | `"claude"`, `"codex"` | `"claude"` | CLI backend. Override with `--cli`. |
+| `model` | Any model string | None (CLI default) | Default model. Override with `--model`. |
+| `billing` | `"subscription"`, `"api"` | `"subscription"` | Whether to pass API keys to sessions. |
+| `reviewer.enabled` | `true`, `false` | `false` | Enable background code review. |
+| `reviewer.model` | Model string | Required if reviewer enabled | Model for the reviewer endpoint. |
+| `reviewer.base_url` | URL | Required if reviewer enabled | OpenAI-compatible API endpoint. |
+
 ## Requirements
 
 - Python >= 3.11
@@ -917,7 +984,7 @@ Codex. No other credentials are passed through.
   If no `.git` directory exists, McLoop initializes one automatically
   before the first task. All git errors are reported to the terminal
   and via Telegram.)
-- `claude` CLI on PATH
+- `claude` CLI on PATH (or `codex` CLI when using `--cli codex`)
 - `gh` CLI on PATH (for automatic GitHub repo creation)
 - macOS for iMessage notifications (Telegram works anywhere)
 - Playwright (optional, for web app investigation only)
@@ -941,15 +1008,15 @@ pytest                    # Tests
 ## Best practices
 
 McLoop does not require its own API key or tokens, does not extract
-or borrow OAuth tokens from Claude Code, and does not violate
-Anthropic's Terms of Service. It iteratively runs Claude Code in a
-controlled way through the public `claude -p` CLI, using whatever
-plan you already have (Pro, Max, etc.). There is nothing extra to
-provision.
+or borrow OAuth tokens from the CLI, and does not violate
+Anthropic's or OpenAI's Terms of Service. It runs the CLI in a
+controlled way through the public `claude -p` or `codex exec`
+interface, using whatever plan you already have (Pro, Max, etc.).
+There is nothing extra to provision.
 
 That said, McLoop will use your plan allowance aggressively. A single
 McLoop run can consume in a few hours what you would normally spread
-across days of interactive use. Each task launches a full Claude Code
+across days of interactive use. Each task launches a full CLI
 session that reads files, writes code, runs tests, and iterates on
 failures. The audit cycle after task completion adds further usage.
 This is by design, but you should be aware of it.
@@ -957,14 +1024,14 @@ This is by design, but you should be aware of it.
 Practical advice for getting the most out of your allowance:
 
 **Use [RTK](https://github.com/rtk-ai/rtk).**  RTK is a CLI proxy
-that compresses command output before it reaches Claude Code's
+that compresses command output before it reaches the agent's
 context, reducing token consumption by 60-90%. Install it and run
 `rtk init --global`. McLoop's Telegram permission hook already
 handles RTK-wrapped commands, so no additional configuration is
 needed. This is one of the most effective ways to extend your plan
 usage.
 
-**Write detailed task descriptions.** Vague tasks cause Claude Code
+**Write detailed task descriptions.** Vague tasks cause the agent
 to explore, guess, and backtrack, all of which burn tokens. A
 well-specified task with clear constraints completes faster and in
 fewer tokens. Spend time on the plan.
@@ -987,7 +1054,7 @@ your allowance on the next stage.
 
 **Run overnight or during off-peak hours.** If your plan has
 time-based rate limits, long McLoop runs benefit from starting when
-you are not using Claude Code interactively.
+you are not using the CLI interactively.
 
 **Monitor with `rtk gain`.** If RTK is installed, run `rtk gain`
 after a McLoop session to see how many tokens were saved. This helps

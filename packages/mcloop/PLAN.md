@@ -336,6 +336,12 @@ The debugging playbook this enforces:
    - [x] `--model` flag overrides config, validation runs on whichever value is active
    - [x] Add tests for model defaulting from config and for the warning message
 
+- [ ] [BATCH] OpenRouter billing mode
+   - [ ] Add `"billing": "openrouter"` option to `_build_session_env`: set `ANTHROPIC_BASE_URL` to `https://openrouter.ai/api`, set `ANTHROPIC_AUTH_TOKEN` from `OPENROUTER_API_KEY` in parent env, set `ANTHROPIC_API_KEY` to empty string
+   - [ ] Add `"batch": false` config key. When false, `run_loop` ignores `[BATCH]` tags and runs all children individually
+   - [ ] Add tests for openrouter env setup and batch disable
+   - [ ] Document in README
+
 ## Stage 5: Integration tests
 
 - [ ] Create stub CLI for deterministic integration testing
