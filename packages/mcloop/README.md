@@ -915,6 +915,20 @@ mcloop automatically passes the appropriate API key for the active
 CLI: `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for
 Codex. No other credentials are passed through.
 
+To route sessions through [OpenRouter](https://openrouter.ai), set
+`"billing": "openrouter"`:
+
+```json
+{
+  "billing": "openrouter"
+}
+```
+
+This sets `ANTHROPIC_BASE_URL` to OpenRouter's API, passes your
+`OPENROUTER_API_KEY` as `ANTHROPIC_AUTH_TOKEN`, and clears
+`ANTHROPIC_API_KEY`. The `OPENROUTER_API_KEY` environment variable
+must be set in your shell.
+
 ### CLI backend
 
 mcloop supports two CLI backends: Claude Code (default) and OpenAI
@@ -960,6 +974,7 @@ All keys in `~/.mcloop/config.json`:
   "cli": "claude",
   "model": "sonnet",
   "billing": "subscription",
+  "batch": true,
   "reviewer": {
     "enabled": true,
     "model": "deepseek/deepseek-v3.2",
@@ -972,7 +987,8 @@ All keys in `~/.mcloop/config.json`:
 |-----|--------|---------|-------------|
 | `cli` | `"claude"`, `"codex"` | `"claude"` | CLI backend. Override with `--cli`. |
 | `model` | Any model string | None (CLI default) | Default model. Override with `--model`. |
-| `billing` | `"subscription"`, `"api"` | `"subscription"` | Whether to pass API keys to sessions. |
+| `billing` | `"subscription"`, `"api"`, `"openrouter"` | `"subscription"` | Billing mode. `"openrouter"` routes through OpenRouter. |
+| `batch` | `true`, `false` | `true` | Whether `[BATCH]` tags are honored. Set `false` to run all subtasks individually. |
 | `reviewer.enabled` | `true`, `false` | `false` | Enable background code review. |
 | `reviewer.model` | Model string | Required if reviewer enabled | Model for the reviewer endpoint. |
 | `reviewer.base_url` | URL | Required if reviewer enabled | OpenAI-compatible API endpoint. |
