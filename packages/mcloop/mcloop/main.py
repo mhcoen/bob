@@ -801,7 +801,25 @@ def _run_batch(
         label="batch rollback",
     )
     _git(
-        ["git", "clean", "-fd"],
+        [
+            "git",
+            "clean",
+            "-fd",
+            "-e",
+            "*.env",
+            "-e",
+            "*.env.*",
+            "-e",
+            "*.key",
+            "-e",
+            "*.pem",
+            "-e",
+            "credentials.json",
+            "-e",
+            "secrets",
+            "-e",
+            "secrets/",
+        ],
         cwd=project_dir,
         label="batch clean",
     )
@@ -872,6 +890,7 @@ def run_loop(
     failed_reason: str = ""
     batch_exhausted: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
+    primary_model = current_model
 
     if current_model:
         warn_unknown_model(cli, current_model)
@@ -1114,11 +1133,11 @@ def run_loop(
                         )
                         # Reset to primary model after cooldown
                         if fallback_model and current_model == fallback_model:
-                            current_model = model
-                            task_model = model
+                            current_model = primary_model
+                            task_model = primary_model
                             print(
                                 formatting.system_msg(
-                                    f"Rate limit cleared, back to model: {model}"
+                                    f"Rate limit cleared, back to model: {primary_model}"
                                 ),
                                 flush=True,
                             )

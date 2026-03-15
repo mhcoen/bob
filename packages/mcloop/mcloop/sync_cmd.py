@@ -70,5 +70,9 @@ def _confirm_sync_changes(
         print("No changes to PLAN.md.")
         return True
     _show_diff(original, proposed, checklist_path.name)
-    answer = _input("\nApply these changes? [y/N] ").strip().lower()
+    try:
+        answer = _input("\nApply these changes? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
     return answer == "y"

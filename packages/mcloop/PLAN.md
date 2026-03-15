@@ -362,8 +362,8 @@ The debugging playbook this enforces:
    - [x] Test: reviewer spawned after successful commit when reviewer config is present
    - [x] Test: stage boundary triggers full test suite and stops
 
-- [ ] Real CLI integration tests (gated behind MCLOOP_INTEGRATION=1)
+- [x] Real CLI integration tests (gated behind MCLOOP_INTEGRATION=1)
    - [x] Test: trivial Claude Code task ("create a file called hello.txt containing hello") completes and commits
    - [x] Test: trivial Codex task (same) completes and commits
    - [x] Test: task with intentional check failure ("create hello.txt" but check command is "test -f goodbye.txt") retries and eventually fails
-   - [ ] Skip all tests when MCLOOP_INTEGRATION is not set
+   - [x] Skip all tests when MCLOOP_INTEGRATION is not set
