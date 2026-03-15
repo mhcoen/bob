@@ -140,6 +140,24 @@ def _build_session_env(
         if or_key:
             env["ANTHROPIC_AUTH_TOKEN"] = or_key
         env["ANTHROPIC_API_KEY"] = ""
+    import sys
+
+    print(
+        f"[DEBUG _build_session_env] RTK_DB_PATH in os.environ: {'RTK_DB_PATH' in os.environ}",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        f"[DEBUG _build_session_env] RTK_DB_PATH in session env: {'RTK_DB_PATH' in env}",
+        file=sys.stderr,
+        flush=True,
+    )
+    if "RTK_DB_PATH" in os.environ:
+        print(
+            f"[DEBUG _build_session_env] value: {os.environ['RTK_DB_PATH']}",
+            file=sys.stderr,
+            flush=True,
+        )
     return env
 
 
