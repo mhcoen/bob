@@ -368,10 +368,7 @@ def _build_command(
         cmd = [
             "codex",
             "exec",
-            "--ask-for-approval",
-            "never",
-            "--sandbox",
-            "workspace-write",
+            "--full-auto",
         ]
         if model:
             cmd.extend(["--model", model])

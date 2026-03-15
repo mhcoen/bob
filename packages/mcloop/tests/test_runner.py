@@ -47,7 +47,7 @@ def test_build_command_codex():
     cmd = _build_command("codex", "fix the bug")
     assert cmd[0] == "codex"
     assert "exec" in cmd
-    assert "--sandbox" in cmd
+    assert "--full-auto" in cmd
     assert "fix the bug" in cmd
 
 
@@ -1729,10 +1729,7 @@ def test_build_command_codex_with_model():
     assert cmd == [
         "codex",
         "exec",
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
-        "workspace-write",
+        "--full-auto",
         "--model",
         "gpt-5.4",
         "test prompt",

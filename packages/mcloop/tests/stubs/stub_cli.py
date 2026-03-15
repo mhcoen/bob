@@ -144,8 +144,10 @@ def _parse_codex_args(
         elif found_exec and not args[i].startswith("-"):
             if prompt is None:
                 prompt = args[i]
-        elif args[i] in ("--model", "--ask-for-approval", "--sandbox"):
+        elif args[i] in ("--model", "--sandbox"):
             i += 1  # skip value
+        elif args[i] == "--full-auto":
+            pass  # no value to skip
         i += 1
     return scenario_path, prompt
 

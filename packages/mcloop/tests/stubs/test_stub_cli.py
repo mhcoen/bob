@@ -374,7 +374,7 @@ class TestMain:
         assert "Bug fixed!" in capsys.readouterr().out
 
     def test_codex_mode_with_extra_flags(self, tmp_path, capsys):
-        """Codex mode skips --model, --ask-for-approval, --sandbox."""
+        """Codex mode skips --model, --full-auto, --sandbox."""
         os.chdir(tmp_path)
         scenario_file = self._write_scenario(
             tmp_path,
@@ -393,8 +393,7 @@ class TestMain:
                 "--scenario",
                 scenario_file,
                 "exec",
-                "--ask-for-approval",
-                "never",
+                "--full-auto",
                 "--sandbox",
                 "workspace-write",
                 "--model",

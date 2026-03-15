@@ -79,3 +79,38 @@ def test_real_claude_creates_file_and_commits(tmp_path):
     )
     lines = [line for line in log.stdout.strip().splitlines() if line]
     assert len(lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
+
+
+@pytest.mark.integration
+@unittest.skipUnless(os.environ.get("MCLOOP_INTEGRATION"), _SKIP_REASON)
+def test_real_codex_creates_file_and_commits(tmp_path):
+    """Real Codex: create hello.txt containing 'hello', check off, commit."""
+    plan_md = _setup_repo(
+        tmp_path,
+        "- [ ] Create a file called hello.txt containing hello\n",
+    )
+
+    with patch("mcloop.main.notify"):
+        stuck = run_loop(plan_md, max_retries=2, no_audit=True, cli="codex")
+
+    assert stuck == [], f"Task got stuck: {stuck}"
+
+    # File was created with expected content
+    hello = tmp_path / "hello.txt"
+    assert hello.exists(), "hello.txt was not created"
+    content = hello.read_text()
+    assert "hello" in content.lower(), f"Unexpected content: {content!r}"
+
+    # Task was checked off
+    plan_content = plan_md.read_text()
+    assert "- [x]" in plan_content, f"Task not checked off:\n{plan_content}"
+
+    # A commit was made (beyond the initial one)
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    lines = [line for line in log.stdout.strip().splitlines() if line]
+    assert len(lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
