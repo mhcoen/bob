@@ -10,7 +10,9 @@ from pathlib import Path
 
 from tests.stubs.stub_cli import (
     _apply_files,
+    _detect_mode,
     _find_scenario,
+    _parse_codex_args,
     main,
 )
 
@@ -351,3 +353,179 @@ class TestMain:
         )
         assert result.returncode == 0
         assert "subprocess ok" in result.stdout
+
+    def test_codex_mode_basic(self, tmp_path, capsys):
+        """Codex mode: exec PROMPT as positional arg."""
+        os.chdir(tmp_path)
+        scenario_file = self._write_scenario(
+            tmp_path,
+            {
+                "tasks": [
+                    {
+                        "match": "fix bug",
+                        "output": "Bug fixed!",
+                        "exit_code": 0,
+                    }
+                ]
+            },
+        )
+        code = main(["--scenario", scenario_file, "exec", "fix bug #42"])
+        assert code == 0
+        assert "Bug fixed!" in capsys.readouterr().out
+
+    def test_codex_mode_with_extra_flags(self, tmp_path, capsys):
+        """Codex mode skips --model, --ask-for-approval, --sandbox."""
+        os.chdir(tmp_path)
+        scenario_file = self._write_scenario(
+            tmp_path,
+            {
+                "tasks": [
+                    {
+                        "match": "deploy",
+                        "output": "deployed",
+                        "exit_code": 0,
+                    }
+                ]
+            },
+        )
+        code = main(
+            [
+                "--scenario",
+                scenario_file,
+                "exec",
+                "--ask-for-approval",
+                "never",
+                "--sandbox",
+                "workspace-write",
+                "--model",
+                "gpt-5",
+                "deploy the app",
+            ]
+        )
+        assert code == 0
+        assert "deployed" in capsys.readouterr().out
+
+    def test_codex_mode_file_creation(self, tmp_path):
+        """Codex mode creates files just like claude mode."""
+        os.chdir(tmp_path)
+        scenario_file = self._write_scenario(
+            tmp_path,
+            {
+                "tasks": [
+                    {
+                        "match": "scaffold",
+                        "files": {
+                            str(tmp_path / "app.py"): "# app",
+                        },
+                        "exit_code": 0,
+                    }
+                ]
+            },
+        )
+        code = main(["--scenario", scenario_file, "exec", "scaffold project"])
+        assert code == 0
+        assert (tmp_path / "app.py").read_text() == "# app"
+
+    def test_codex_mode_no_stream_json(self, tmp_path, capsys):
+        """Codex mode always emits plain output, not stream-json."""
+        os.chdir(tmp_path)
+        scenario_file = self._write_scenario(
+            tmp_path,
+            {
+                "tasks": [
+                    {
+                        "match": "hello",
+                        "output": "world",
+                        "exit_code": 0,
+                    }
+                ]
+            },
+        )
+        code = main(["--scenario", scenario_file, "exec", "hello"])
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "world"  # plain text, not JSON
+
+    def test_codex_mode_missing_prompt(self, tmp_path, capsys):
+        """Codex mode without a prompt arg returns error."""
+        scenario_file = self._write_scenario(tmp_path, {"tasks": []})
+        code = main(["--scenario", scenario_file, "exec"])
+        assert code == 2
+        assert "prompt" in capsys.readouterr().err.lower()
+
+    def test_codex_mode_subprocess(self, tmp_path):
+        """Codex mode works via subprocess too."""
+        scenario_file = self._write_scenario(
+            tmp_path,
+            {
+                "tasks": [
+                    {
+                        "match": "test",
+                        "output": "codex ok",
+                        "exit_code": 0,
+                    }
+                ]
+            },
+        )
+        stub_path = Path(__file__).parent / "stub_cli.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(stub_path),
+                "--scenario",
+                scenario_file,
+                "exec",
+                "test prompt",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert "codex ok" in result.stdout
+
+
+class TestDetectMode:
+    def test_claude_mode_default(self):
+        assert _detect_mode(["-p", "hello"]) == "claude"
+
+    def test_codex_mode_with_exec(self):
+        assert _detect_mode(["exec", "hello"]) == "codex"
+
+    def test_codex_mode_exec_after_scenario(self):
+        assert _detect_mode(["--scenario", "s.json", "exec", "prompt"]) == "codex"
+
+    def test_claude_mode_no_exec(self):
+        assert _detect_mode(["--scenario", "s.json", "-p", "prompt"]) == "claude"
+
+    def test_empty_args(self):
+        assert _detect_mode([]) == "claude"
+
+
+class TestParseCodexArgs:
+    def test_basic(self):
+        scenario, prompt = _parse_codex_args(["--scenario", "s.json", "exec", "do stuff"])
+        assert scenario == "s.json"
+        assert prompt == "do stuff"
+
+    def test_skips_flag_values(self):
+        scenario, prompt = _parse_codex_args(
+            [
+                "--scenario",
+                "s.json",
+                "exec",
+                "--model",
+                "gpt-5",
+                "the prompt",
+            ]
+        )
+        assert prompt == "the prompt"
+
+    def test_no_prompt(self):
+        scenario, prompt = _parse_codex_args(["--scenario", "s.json", "exec"])
+        assert scenario == "s.json"
+        assert prompt is None
+
+    def test_takes_first_positional(self):
+        _, prompt = _parse_codex_args(["--scenario", "s.json", "exec", "first", "second"])
+        assert prompt == "first"

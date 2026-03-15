@@ -7,8 +7,13 @@ Reads a prompt from argv, consults a scenario file (JSON) to determine:
 - What exit code to return
 - How long to wait before responding
 
-Usage:
-    python stub_cli.py --scenario SCENARIO_FILE -p PROMPT [--output-format stream-json]
+Supports two invocation modes, detected from argv:
+
+  Claude mode (default):
+    stub_cli.py --scenario FILE -p PROMPT [--output-format stream-json]
+
+  Codex mode (when "exec" is the first non-option arg):
+    stub_cli.py --scenario FILE exec PROMPT [--model MODEL]
 
 Scenario file format:
     {
@@ -85,11 +90,24 @@ def _emit_output(text: str, stream_json: bool) -> None:
         print(text, flush=True)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point. Parse args, load scenario, execute."""
-    args = argv if argv is not None else sys.argv[1:]
+def _detect_mode(args: list[str]) -> str:
+    """Detect invocation mode from argv.
 
-    # Parse arguments
+    Returns "codex" if "exec" appears as a non-option argument
+    (before any prompt), otherwise "claude".
+    """
+    for arg in args:
+        if arg == "exec":
+            return "codex"
+        if arg.startswith("-"):
+            continue
+    return "claude"
+
+
+def _parse_claude_args(
+    args: list[str],
+) -> tuple[str | None, str | None, bool]:
+    """Parse claude-mode args: -p PROMPT, --scenario, --output-format."""
     scenario_path = None
     prompt = None
     stream_json = False
@@ -106,12 +124,50 @@ def main(argv: list[str] | None = None) -> int:
             if args[i] == "stream-json":
                 stream_json = True
         i += 1
+    return scenario_path, prompt, stream_json
+
+
+def _parse_codex_args(
+    args: list[str],
+) -> tuple[str | None, str | None]:
+    """Parse codex-mode args: exec PROMPT (positional after exec)."""
+    scenario_path = None
+    prompt = None
+    found_exec = False
+    i = 0
+    while i < len(args):
+        if args[i] == "--scenario":
+            i += 1
+            scenario_path = args[i]
+        elif args[i] == "exec":
+            found_exec = True
+        elif found_exec and not args[i].startswith("-"):
+            if prompt is None:
+                prompt = args[i]
+        elif args[i] in ("--model", "--ask-for-approval", "--sandbox"):
+            i += 1  # skip value
+        i += 1
+    return scenario_path, prompt
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point. Parse args, load scenario, execute."""
+    args = argv if argv is not None else sys.argv[1:]
+
+    mode = _detect_mode(args)
+
+    # Parse arguments based on mode
+    if mode == "codex":
+        scenario_path, prompt = _parse_codex_args(args)
+        stream_json = False
+    else:
+        scenario_path, prompt, stream_json = _parse_claude_args(args)
 
     if scenario_path is None:
         print("Error: --scenario is required", file=sys.stderr)
         return 2
     if prompt is None:
-        print("Error: -p (prompt) is required", file=sys.stderr)
+        print("Error: prompt is required", file=sys.stderr)
         return 2
 
     # Load scenario
