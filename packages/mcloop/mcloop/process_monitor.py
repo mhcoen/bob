@@ -512,6 +512,7 @@ def run_gui(
             else:
                 proc.wait()
         else:
-            # Still wait on the shell wrapper to avoid zombie.
-            if proc.poll() is not None:
-                proc.wait()
+            # Reap the shell wrapper in a thread to avoid zombie.
+            import threading
+
+            threading.Thread(target=proc.wait, daemon=True).start()

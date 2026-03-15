@@ -109,28 +109,12 @@ private func _mcloopSetupCrashHandlers() {
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
         signal(sig) { signum in
-            // fork() is async-signal-safe. The child process gets its
-            // own address space and can safely use Foundation/JSON to
-            // write the crash report without risking deadlock.
+            // fork() is async-signal-safe. The child uses only POSIX
+            // I/O (open/write/close) — no Foundation calls — to avoid
+            // deadlocking on ObjC/Foundation locks held by other threads.
             let pid = fork()
             if pid == 0 {
-                let state = _McloopState.unsafeSnapshot()
-                let action = _McloopState.unsafeLastAction()
-                let report: [String: Any] = [
-                    "timestamp": ISO8601DateFormatter().string(
-                        from: Date()),
-                    "signal": signum,
-                    "exception_type": "Signal",
-                    "description": "Received signal \\(signum)",
-                    "stack_trace": Thread.callStackSymbols.joined(
-                        separator: "\\n"),
-                    "source_file": "",
-                    "line": 0,
-                    "app_state": state,
-                    "last_action": action,
-                    "fix_attempts": 0,
-                ]
-                _mcloopWriteError(report, dir: errorDir)
+                _mcloopWriteSignalReport(signum, dir: errorDir)
                 _exit(0)
             } else if pid > 0 {
                 var status: Int32 = 0
@@ -145,6 +129,108 @@ private func _mcloopSetupCrashHandlers() {
             Darwin.signal(signum, SIG_DFL)
             Darwin.raise(signum)
         }
+    }
+}
+
+/// Write a signal crash report using only POSIX I/O and Swift stdlib.
+/// No Foundation calls — safe in a forked child inside a signal handler.
+private func _mcloopWriteSignalReport(_ signum: Int32, dir: String) {
+    let state = _McloopState.unsafeSnapshot()
+    let action = _McloopState.unsafeLastAction()
+    let trace = Thread.callStackSymbols.joined(separator: "\\n")
+    var hash: UInt32 = 5381
+    for c in (trace + "Signal").utf8 {
+        hash = hash &* 33 &+ UInt32(c)
+    }
+    let hex = "0123456789abcdef"
+    var hashStr = ""
+    for i in stride(from: 28, through: 0, by: -4) {
+        let nibble = Int((hash >> i) & 0xF)
+        hashStr.append(hex[hex.index(hex.startIndex, offsetBy: nibble)])
+    }
+    // Escape a string for JSON using only Swift stdlib
+    func esc(_ s: String) -> String {
+        var r = ""
+        for c in s {
+            switch c {
+            case "\\\\": r += "\\\\\\\\"
+            case "\\"": r += "\\\\\\""
+            case "\\n": r += "\\\\n"
+            case "\\t": r += "\\\\t"
+            default: r.append(c)
+            }
+        }
+        return r
+    }
+    var stateJson = "{"
+    var first = true
+    for (k, v) in state {
+        if !first { stateJson += "," }
+        stateJson += "\\"\\(esc(k))\\": \\"\\(esc(v))\\""
+        first = false
+    }
+    stateJson += "}"
+    let entry = "{"
+        + "\\"signal\\": \\(signum),"
+        + "\\"exception_type\\": \\"Signal\\","
+        + "\\"description\\": \\"Received signal \\(signum)\\","
+        + "\\"stack_trace\\": \\"\\(esc(trace))\\","
+        + "\\"source_file\\": \\"\\"," + "\\"line\\": 0,"
+        + "\\"app_state\\": \\(stateJson),"
+        + "\\"last_action\\": \\"\\(esc(action))\\","
+        + "\\"fix_attempts\\": 0,"
+        + "\\"id\\": \\"\\(hashStr)\\""
+        + "}"
+    // Read existing errors.json via POSIX, append new entry
+    let path = dir + "/errors.json"
+    var existing = ""
+    let rfd = open(path, O_RDONLY)
+    if rfd >= 0 {
+        var buf = [UInt8](repeating: 0, count: 65536)
+        let n = read(rfd, &buf, buf.count)
+        if n > 0 {
+            existing = String(
+                decoding: buf[0..<n], as: UTF8.self)
+        }
+        close(rfd)
+    }
+    // Find last ] to append into the array
+    var insertIdx = -1
+    for i in stride(from: existing.count - 1, through: 0, by: -1) {
+        let idx = existing.index(existing.startIndex, offsetBy: i)
+        let ch = existing[idx]
+        if ch == "]" { insertIdx = i; break }
+        if ch != " " && ch != "\\n" && ch != "\\r" && ch != "\\t" { break }
+    }
+    let output: String
+    if insertIdx > 0 {
+        // Find if there's a } before the ] (non-empty array)
+        var hasEntry = false
+        for i in stride(from: insertIdx - 1, through: 0, by: -1) {
+            let idx = existing.index(existing.startIndex, offsetBy: i)
+            let ch = existing[idx]
+            if ch == "}" { hasEntry = true; break }
+            if ch != " " && ch != "\\n" && ch != "\\r" && ch != "\\t" {
+                break
+            }
+        }
+        let before = String(
+            existing[existing.startIndex..<existing.index(
+                existing.startIndex, offsetBy: insertIdx)])
+        if hasEntry {
+            output = before + ",\\n" + entry + "\\n]"
+        } else {
+            output = "[\\n" + entry + "\\n]"
+        }
+    } else {
+        output = "[\\n" + entry + "\\n]"
+    }
+    let wfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+    if wfd >= 0 {
+        output.withCString { ptr in
+            _ = write(wfd, ptr, strlen(ptr))
+        }
+        close(wfd)
     }
 }
 
@@ -643,10 +729,18 @@ def _add_swift_init_call(content: str) -> str:
             continue
 
         if in_main_struct and not found_init:
-            if re.match(r"^\s*init\s*\(", stripped) and "{" in stripped:
+            if re.match(r"^\s*init\s*\(", stripped):
+                if "{" in stripped:
+                    found_init = True
+                    indent = len(line) - len(line.lstrip()) + 8
+                    result.append(" " * indent + call + "\n")
+                    continue
+                # Brace may be on the next line; mark for insertion
+                in_main_struct = "pending_init"
+                continue
+            if in_main_struct == "pending_init" and stripped.startswith("{"):
                 found_init = True
-                # Find the opening brace and insert after it
-                indent = len(line) - len(line.lstrip()) + 8
+                indent = len(line) - len(line.lstrip()) + 4
                 result.append(" " * indent + call + "\n")
                 continue
 

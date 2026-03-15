@@ -313,6 +313,11 @@ def _find_task_line(lines: list[str], task: Task) -> int:
         raise IndexError(
             f"Task line {task.line_number} out of range (file has {len(lines)} lines)"
         )
+    # Verify the fallback line is actually a checkbox
+    if not CHECKBOX_RE.match(lines[task.line_number]):
+        raise IndexError(
+            f"Task line {task.line_number} is not a checkbox (text changed since parse)"
+        )
     return task.line_number
 
 

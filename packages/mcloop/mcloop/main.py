@@ -880,7 +880,8 @@ def run_loop(
     pending_dir = project_dir / ".mcloop" / "pending"
     if pending_dir.exists():
         for f in pending_dir.iterdir():
-            f.unlink(missing_ok=True)
+            if f.is_file():
+                f.unlink(missing_ok=True)
 
     notes_snapshot = _snapshot_notes(project_dir)
     ctx = SessionContext()

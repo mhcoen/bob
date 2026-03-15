@@ -416,6 +416,11 @@ def _run_session(
         stderr=subprocess.DEVNULL,
     )
     if process.stdout is None:
+        try:
+            _watchdog.kill()
+            _watchdog.wait()
+        except OSError:
+            pass
         raise RuntimeError("stdout is None despite stdout=PIPE")
 
     # Read lines in a thread so the main thread
