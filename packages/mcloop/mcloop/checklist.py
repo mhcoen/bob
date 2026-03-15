@@ -456,6 +456,40 @@ def parse_auto_task(task: Task) -> tuple[str, str]:
     return (action, after_tag)
 
 
+def purge_completed_bugs(path: str | Path) -> None:
+    """Remove all checked-off items from the ## Bugs section.
+
+    Called after the last open bug is completed. Bug tasks are
+    generated noise from the reviewer, not design decisions
+    worth preserving.
+    """
+    p = Path(path)
+    lines = p.read_text().splitlines()
+    bugs_start = None
+    bugs_end = len(lines)
+
+    for i, line in enumerate(lines):
+        if BUGS_RE.match(line.strip()):
+            bugs_start = i
+        elif bugs_start is not None and line.strip().startswith("## "):
+            bugs_end = i
+            break
+
+    if bugs_start is None:
+        return
+
+    # Keep lines that are not checked-off tasks
+    new_lines = lines[: bugs_start + 1]
+    for line in lines[bugs_start + 1 : bugs_end]:
+        m = CHECKBOX_RE.match(line)
+        if m and m.group(2) in ("x", "X"):
+            continue
+        new_lines.append(line)
+    new_lines.extend(lines[bugs_end:])
+
+    p.write_text("\n".join(new_lines) + "\n")
+
+
 def _auto_check_parents(path: Path) -> None:
     """Re-parse and check off any parent whose children are all done."""
     tasks = parse(path)

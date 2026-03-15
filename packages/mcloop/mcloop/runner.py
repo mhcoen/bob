@@ -143,6 +143,64 @@ def _build_session_env(
     return env
 
 
+# Commands to probe rtk rewrite with at prompt build time.
+# If rtk rewrites them, the agent should use the rewritten form.
+# If not, the agent should use rtk proxy.
+_RTK_PROBE_COMMANDS = [
+    "pytest",
+    "ruff check .",
+    "cargo test",
+    "cargo build",
+    "go test ./...",
+    "go build ./...",
+    "mypy .",
+    "pip list",
+    "git status",
+    "git diff",
+]
+
+
+def _build_rtk_instruction() -> str | None:
+    """Build an RTK instruction by probing rtk rewrite for each command.
+
+    Returns a prompt string listing the correct rtk invocation for
+    each command, or None if rtk is not available.
+    """
+    rewrites = []
+    for cmd in _RTK_PROBE_COMMANDS:
+        try:
+            result = subprocess.run(
+                ["rtk", "rewrite", cmd],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                rewrites.append((cmd, result.stdout.strip()))
+        except Exception:
+            pass
+    if not rewrites:
+        return None
+    lines = []
+    for original, rewritten in rewrites:
+        lines.append(f"  {original} [args] -> {rewritten} [args]")
+    mapping = "\n".join(lines)
+    return (
+        "IMPORTANT: `rtk` is installed and compresses tool output"
+        " to save tokens. Always prefix these commands with their"
+        " rtk equivalent, passing all arguments through:\n"
+        + mapping
+        + "\n\nFor example: `pytest tests/ -x -q` becomes"
+        " `rtk pytest tests/ -x -q`."
+        "\n\nFor tools not listed above, use `rtk proxy <command>`"
+        " (tracks usage, no compression)."
+        " Example: `rtk proxy swift build --disable-sandbox`."
+        "\nDo NOT prefix: cat, ls, head, echo, cd, mkdir, cp, mv, rm."
+        "\nSkip rtk only when debugging a failure and you need"
+        " full uncompressed output."
+    )
+
+
 def run_task(
     task_text: str,
     cli: str,
@@ -191,25 +249,9 @@ def run_task(
             " what is failing. Do not loop more than 3 times."
         )
     if shutil.which("rtk"):
-        parts.append(
-            "IMPORTANT: `rtk` is installed. ALWAYS prefix"
-            " test runners, linters, and build tools with"
-            " `rtk proxy` to compress their output and save"
-            " tokens. Commands to prefix: pytest, ruff,"
-            " swift build, swift test, cargo build, cargo"
-            " test, npm test, make, gcc, clang, javac, go"
-            " build, go test, and similar build/test/lint"
-            " tools. For example: `rtk proxy pytest`,"
-            " `rtk proxy swift build`, `rtk proxy ruff"
-            " check .`. Do NOT prefix short commands like"
-            " cat, ls, head, grep, git, echo, cd, mkdir,"
-            " cp, mv, or rm. The ONLY time you should skip"
-            " `rtk proxy` on a build/test command is when"
-            " you are actively debugging a failure and need"
-            " the full uncompressed output to diagnose the"
-            " error. In that case, run without `rtk proxy`"
-            " and state why you need the raw output."
-        )
+        rtk_instruction = _build_rtk_instruction()
+        if rtk_instruction:
+            parts.append(rtk_instruction)
     parts.append(
         "When debugging crashes or unexpected"
         " behavior, always find and read the actual"

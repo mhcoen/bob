@@ -35,6 +35,7 @@ from mcloop.checklist import (
     parse,
     parse_auto_task,
     parse_description,
+    purge_completed_bugs,
     stage_status,
     user_task_instructions,
 )
@@ -1282,6 +1283,7 @@ def run_loop(
                 formatting.system_msg("Bug-only mode: all bugs fixed"),
                 flush=True,
             )
+            purge_completed_bugs(checklist_path)
             # Verify the fix by launching the app
             failure = _launch_app_verification(project_dir)
             if failure:

@@ -13,8 +13,6 @@ over-abstraction.
 
 ## Bugs
 
-- [ ] Fix review finding from commit 2316b897: test `test_real_claude_check_failure_retries_and_fails` may incorrectly assert that a failed task should be in the `stuck` list returned by `run_loop`. When a task exhausts retries and is marked `[!]`, it should not be in the stuck list. Verify the test expectation and fix if wrong.
-
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)

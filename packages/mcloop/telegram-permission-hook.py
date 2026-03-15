@@ -11,6 +11,8 @@ import fnmatch
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -110,7 +112,23 @@ def remember_session(tool_name, tool_input):
 # --- Permission rules ---
 
 
-def _respond(decision, reason=""):
+def _rtk_rewrite(cmd):
+    """Call rtk rewrite and return the rewritten command, or None."""
+    try:
+        result = subprocess.run(
+            ["rtk", "rewrite", cmd],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _respond(decision, reason="", tool_name="", tool_input=None):
     """Write a properly formatted PreToolUse hook response to stdout."""
     resp = {
         "hookSpecificOutput": {
@@ -120,6 +138,21 @@ def _respond(decision, reason=""):
     }
     if reason:
         resp["hookSpecificOutput"]["permissionDecisionReason"] = reason
+    # On allow for Bash tools, attempt RTK rewrite
+    if (
+        decision == "allow"
+        and tool_name == "Bash"
+        and tool_input is not None
+        and shutil.which("rtk")
+    ):
+        cmd = tool_input.get("command", "").strip()
+        if cmd:
+            rewritten = _rtk_rewrite(cmd)
+            if rewritten and rewritten != cmd:
+                resp["hookSpecificOutput"]["updatedInput"] = {
+                    **tool_input,
+                    "command": rewritten,
+                }
     json.dump(resp, sys.stdout)
 
 
@@ -332,8 +365,10 @@ def _dbg(msg):
 
 
 def main():
-    # Interactive sessions (no MCLOOP_TASK_LABEL) use normal terminal
-    # permission flow — skip Telegram entirely.
+    # Interactive sessions (no MCLOOP_TASK_LABEL) skip Telegram.
+    # RTK rewrite for interactive sessions is handled by the
+    # standalone RTK hook in settings.json (no parallel conflict
+    # since this hook returns {} and does not participate).
     if not os.environ.get("MCLOOP_TASK_LABEL"):
         json.dump({}, sys.stdout)
         return
@@ -368,14 +403,14 @@ def main():
     # Whitelisted commands pass through instantly
     if is_allowed(tool_name, tool_input):
         _dbg("EXIT: allowed by rules")
-        _respond("allow")
+        _respond("allow", tool_name=tool_name, tool_input=tool_input)
         return
 
     # Session-approved patterns pass through
     if is_session_allowed(tool_name, tool_input):
         pattern = _tool_pattern(tool_name, tool_input)
         _dbg(f"EXIT: allowed by session memory ({pattern})")
-        _respond("allow", f"Session-approved: {pattern}")
+        _respond("allow", f"Session-approved: {pattern}", tool_name=tool_name, tool_input=tool_input)
         return
 
     # Not whitelisted. Send Telegram with buttons and wait.
@@ -419,7 +454,7 @@ def main():
     if decision == "approve":
         update_message(message_id, f"{label_prefix}Approved: *{tool_name}*\n{desc}")
         _dbg("EXIT: approved via Telegram")
-        _respond("allow", "Approved via Telegram")
+        _respond("allow", "Approved via Telegram", tool_name=tool_name, tool_input=tool_input)
     elif decision == "allow_session":
         remember_session(tool_name, tool_input)
         msg = (
@@ -428,7 +463,7 @@ def main():
         )
         update_message(message_id, msg)
         _dbg(f"EXIT: session-approved via Telegram ({pattern})")
-        _respond("allow", f"Session-approved via Telegram: {pattern}")
+        _respond("allow", f"Session-approved via Telegram: {pattern}", tool_name=tool_name, tool_input=tool_input)
     elif decision == "deny":
         update_message(message_id, f"{label_prefix}Denied: *{tool_name}*\n{desc}")
         _dbg("EXIT: denied via Telegram")
