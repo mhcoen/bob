@@ -157,7 +157,7 @@ def test_stub_failing_task_retried_and_marked_failed(tmp_path):
         with patch("mcloop.main.notify"):
             stuck = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == ["Impossible task"]
+    assert stuck == []
     content = plan_md.read_text()
     assert "- [!] Impossible task" in content
 
@@ -652,8 +652,8 @@ def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
         with patch("mcloop.main.notify"):
             stuck = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    # Task should be stuck
-    assert stuck == ["Create hello.txt"]
+    # Task failed (exhausted retries)
+    assert stuck == []
 
     # hello.txt was created (task succeeds) but goodbye.txt never exists
     assert (tmp_path / "hello.txt").exists()

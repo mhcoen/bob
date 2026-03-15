@@ -65,7 +65,7 @@ def test_task_marked_failed_after_max_retries(tmp_path):
         with patch("mcloop.main.notify"):
             stuck = run_loop(plan_md, max_retries=3, no_audit=True)
 
-    assert stuck == ["Impossible task"]
+    assert stuck == []
     assert attempt_count[0] == 3, f"Expected 3 attempts, got {attempt_count[0]}"
 
     content = plan_md.read_text()
@@ -103,7 +103,7 @@ def test_loop_stops_after_failed_task_leaving_subsequent_tasks_unchecked(tmp_pat
         with patch("mcloop.main.notify"):
             stuck = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == ["Failing task"]
+    assert stuck == []
     assert "Should not run" not in tasks_attempted, (
         f"Loop should stop after first failed task; tasks run: {tasks_attempted}"
     )

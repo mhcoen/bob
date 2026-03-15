@@ -134,10 +134,8 @@ def test_real_claude_check_failure_retries_and_fails(tmp_path):
     with patch("mcloop.main.notify"):
         stuck = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    # Task should be stuck — check never passes
-    assert stuck == ["Create a file called hello.txt containing hello"], (
-        f"Expected stuck task, got: {stuck}"
-    )
+    # Task failed (exhausted retries), not returned as stuck
+    assert stuck == [], f"Expected empty (failed task is not stuck), got: {stuck}"
 
     # hello.txt was created by Claude (task itself succeeds)
     hello = tmp_path / "hello.txt"

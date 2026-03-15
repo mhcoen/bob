@@ -170,7 +170,7 @@ def test_max_retries_exhausted_stops_loop(
 
     stuck = run_loop(md, max_retries=3)
 
-    assert stuck == ["Hopeless task"]
+    assert stuck == []
     assert mock_run.call_count == 3
     content = md.read_text()
     assert "- [!] Hopeless task" in content
@@ -291,7 +291,7 @@ def test_noop_task_checks_fail_treated_as_failure(
 
     stuck = run_loop(md, max_retries=3)
 
-    assert stuck == ["Already done task"]
+    assert stuck == []
     # No-op + checks fail is a terminal failure (no retry)
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
@@ -351,7 +351,7 @@ def test_noop_then_checks_fail_is_terminal(
     ):
         stuck = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == ["Retry task"]
+    assert stuck == []
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = md.read_text()
@@ -377,7 +377,7 @@ def test_noop_with_max_retries_one(
 
     stuck = run_loop(md, max_retries=1)
 
-    assert stuck == ["One-shot task"]
+    assert stuck == []
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = md.read_text()

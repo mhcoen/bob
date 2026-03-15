@@ -4251,7 +4251,7 @@ def test_fallback_model_also_exhausted(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == ["Do something"]
+    assert stuck == []
     # 2 primary + 2 fallback = 4 total attempts
     assert len(models_used) == 4
     assert models_used[:2] == ["opus", "opus"]
@@ -4335,7 +4335,7 @@ def test_no_fallback_retry_without_flag(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == ["Do something"]
+    assert stuck == []
     # Only 2 attempts, no fallback
     assert len(models_used) == 2
     assert models_used == ["opus", "opus"]
@@ -4379,7 +4379,7 @@ def test_fallback_same_as_primary_skips_fallback(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == ["Do something"]
+    assert stuck == []
     # Same model as fallback: only 2 attempts, not 4
     assert len(models_used) == 2
     assert models_used == ["opus", "opus"]
@@ -5601,8 +5601,8 @@ def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
     ):
         stuck = run_loop(plan)
 
-    # Task fails all retries → returned as stuck, exits before verification
-    assert stuck == ["Fix crash"]
+    # Task fails all retries → returns empty (failed is not stuck)
+    assert stuck == []
     mock_verify.assert_not_called()
 
 

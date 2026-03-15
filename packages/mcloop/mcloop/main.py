@@ -1266,7 +1266,7 @@ def run_loop(
                 project_dir,
                 notes_snapshot,
             )
-            return [task.text]
+            return []
 
     # Bug-only mode: verify the fix by launching the app, then exit.
     # Skip stage transitions, audit cycle, and build.
