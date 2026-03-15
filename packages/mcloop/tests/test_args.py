@@ -6645,7 +6645,9 @@ def test_collect_review_findings_inserts_bugs(tmp_path):
     _collect_review_findings(tmp_path, plan, ctx)
     plan_text = plan.read_text()
     assert "## Bugs" in plan_text
-    assert "Fix review findings from commit def456" in plan_text
+    assert "Fix review finding from commit def456" in plan_text
+    # Each finding gets its own task
+    assert plan_text.count("- [ ] Fix review finding from commit def456") == 3
     # Should NOT add to context — went to bugs instead
     assert "Review findings" not in ctx.text()
     assert not (reviews_dir / "def456.json").exists()

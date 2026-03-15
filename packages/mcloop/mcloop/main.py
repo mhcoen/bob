@@ -177,15 +177,12 @@ def _collect_review_findings(
             continue
         high_errors = [item for item in high_conf if item.get("severity") == "error"]
         if len(high_errors) >= 3:
-            # Insert fix task into Bugs section
-            descriptions = [item.get("description", "") for item in high_errors]
-            task_text = f"Fix review findings from commit {commit[:8]}: " + "; ".join(
-                descriptions[:5]
-            )
-            _insert_bugs_section(
-                checklist_path,
-                [f"- [ ] {task_text}"],
-            )
+            # Insert one task per finding into Bugs section
+            tasks = []
+            for item in high_errors:
+                desc = item.get("description", "")
+                tasks.append(f"- [ ] Fix review finding from commit {commit[:8]}: {desc}")
+            _insert_bugs_section(checklist_path, tasks)
             print(
                 formatting.system_msg(
                     f"Reviewer: {len(high_errors)} critical findings"
