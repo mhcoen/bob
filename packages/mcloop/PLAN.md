@@ -365,5 +365,5 @@ The debugging playbook this enforces:
 - [ ] Real CLI integration tests (gated behind MCLOOP_INTEGRATION=1)
    - [x] Test: trivial Claude Code task ("create a file called hello.txt containing hello") completes and commits
    - [x] Test: trivial Codex task (same) completes and commits
-   - [ ] Test: task with intentional check failure ("create hello.txt" but check command is "test -f goodbye.txt") retries and eventually fails
+   - [x] Test: task with intentional check failure ("create hello.txt" but check command is "test -f goodbye.txt") retries and eventually fails
    - [ ] Skip all tests when MCLOOP_INTEGRATION is not set
