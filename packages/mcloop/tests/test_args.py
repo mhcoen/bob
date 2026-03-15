@@ -1255,6 +1255,17 @@ def test_setup_env_security_api_billing(tmp_path, capsys):
     assert "billing" in out.lower()
 
 
+def test_setup_env_security_openrouter_billing(tmp_path, capsys):
+    """Returns openrouter billing status when configured."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"billing": "openrouter"}))
+    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+        result = _setup_env_security()
+    assert result == ("Environment", "minimal (openrouter billing)")
+    out = capsys.readouterr().out
+    assert "billing" in out.lower()
+
+
 def test_cmd_install_calls_setup_env_security(tmp_path):
     """_cmd_install calls _setup_env_security."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
@@ -6372,6 +6383,84 @@ def test_run_loop_batch_detection(tmp_path):
 
         # Verify _run_batch was called (batch detection worked)
         assert mock_batch.call_count >= 1
+
+
+def test_run_loop_batch_disabled_by_config(tmp_path):
+    """When config has "batch": false, _run_batch is never called."""
+    md = (
+        "# Test project\n\n"
+        "- [ ] [BATCH] Build components\n"
+        "  - [ ] Add feature A\n"
+        "  - [ ] Add feature B\n"
+    )
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(md)
+
+    # Set up git repo
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    call_count = 0
+
+    def run_and_check(*a, **kw):
+        nonlocal call_count
+        call_count += 1
+        content = plan.read_text()
+        if call_count == 1:
+            content = content.replace("- [ ] Add feature A", "- [x] Add feature A", 1)
+        elif call_count == 2:
+            content = content.replace("- [ ] Add feature B", "- [x] Add feature B", 1)
+            # Also check off parent
+            content = content.replace(
+                "- [ ] [BATCH] Build components",
+                "- [x] [BATCH] Build components",
+            )
+        plan.write_text(content)
+        return MagicMock(success=True, output="done")
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._run_batch") as mock_batch,
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._load_mcloop_config", return_value={"batch": False}),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._commit"),
+    ):
+        mock_checks.return_value = MagicMock(passed=True)
+        mock_run.side_effect = run_and_check
+
+        run_loop(plan, max_retries=3)
+
+        # _run_batch should never be called when batch is disabled
+        mock_batch.assert_not_called()
+        # Individual tasks were executed instead
+        assert call_count == 2
 
 
 # --- Reviewer integration ---

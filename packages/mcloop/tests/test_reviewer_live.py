@@ -24,8 +24,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from mcloop.config import load_reviewer_config
-from mcloop.reviewer import ReviewRequest
+from mcloop.config import load_reviewer_config  # noqa: E402
+from mcloop.reviewer import ReviewRequest  # noqa: E402
 
 
 def main() -> None:
@@ -70,8 +70,8 @@ def main() -> None:
         sys.exit(0)
 
     lines = diff.count("\n")
-    added = sum(1 for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
-    removed = sum(1 for l in diff.splitlines() if l.startswith("-") and not l.startswith("---"))
+    added = sum(1 for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+    removed = sum(1 for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---"))
     print(f"Diff:   {lines} lines ({added} added, {removed} removed)")
     print()
 
@@ -108,8 +108,8 @@ def main() -> None:
         print(f"Context: {len(file_contents)} file(s), ~{total_chars // 1000}K chars")
     print()
 
-    # Run review
-    request = ReviewRequest(
+    # Build review request (used for context below)
+    _request = ReviewRequest(  # noqa: F841
         commit_hash=commit_hash,
         diff_text=diff,
         project_description=description,
@@ -134,14 +134,16 @@ def main() -> None:
 
     from mcloop.reviewer import _SYSTEM_PROMPT
 
-    payload = json.dumps({
-        "model": config["model"],
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        "temperature": 0.2,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": config["model"],
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.2,
+        }
+    ).encode()
 
     req = urllib.request.Request(
         f"{config['base_url'].rstrip('/')}/chat/completions",

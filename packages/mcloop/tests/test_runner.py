@@ -1702,6 +1702,22 @@ def test_build_session_env_openrouter_billing_no_key(monkeypatch):
     assert env["ANTHROPIC_API_KEY"] == ""
 
 
+def test_build_session_env_openrouter_billing_codex(monkeypatch):
+    """openrouter billing with codex cli still sets BASE_URL and empty API_KEY."""
+    from mcloop.runner import _build_session_env
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-789")
+    config = {"billing": "openrouter"}
+    with patch("mcloop.main._load_mcloop_config", return_value=config):
+        env = _build_session_env(cli="codex")
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-789"
+    assert env["ANTHROPIC_API_KEY"] == ""
+    # codex-specific key should NOT be set (openrouter doesn't use it)
+    assert "OPENAI_API_KEY" not in env
+
+
 # --- _build_command codex ---
 
 
