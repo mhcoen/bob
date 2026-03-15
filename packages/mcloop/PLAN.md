@@ -363,7 +363,7 @@ The debugging playbook this enforces:
    - [x] Test: stage boundary triggers full test suite and stops
 
 - [ ] Real CLI integration tests (gated behind MCLOOP_INTEGRATION=1)
-   - [ ] Test: trivial Claude Code task ("create a file called hello.txt containing hello") completes and commits
+   - [x] Test: trivial Claude Code task ("create a file called hello.txt containing hello") completes and commits
    - [ ] Test: trivial Codex task (same) completes and commits
    - [ ] Test: task with intentional check failure ("create hello.txt" but check command is "test -f goodbye.txt") retries and eventually fails
    - [ ] Skip all tests when MCLOOP_INTEGRATION is not set
