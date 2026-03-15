@@ -292,10 +292,11 @@ def test_noop_task_checks_fail_treated_as_failure(
     stuck = run_loop(md, max_retries=3)
 
     assert stuck == ["Already done task"]
-    assert mock_run.call_count == 3
+    # No-op + checks fail is a terminal failure (no retry)
+    assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    # Checks are now run on the no-changes path
-    assert mock_checks.call_count == 3
+    # Checks run once on the no-changes path
+    assert mock_checks.call_count == 1
     content = md.read_text()
     assert "- [!] Already done task" in content
 
@@ -336,31 +337,29 @@ def test_noop_task_checks_pass_auto_checks(
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
 @patch("mcloop.main.run_task")
-def test_noop_then_changes_succeeds(mock_run, mock_commit, mock_checkpoint, mock_notify, tmp_path):
-    """Task produces no changes on first attempt but makes changes on retry: succeeds."""
+def test_noop_then_checks_fail_is_terminal(
+    mock_run, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """No file changes + checks fail is terminal — no retry, marked [!]."""
     md = _make_project(tmp_path, "- [ ] Retry task\n")
     mock_run.return_value = _ok_run_result()
 
-    # First attempt: no changes (checks fail → retry). Second attempt: changes present.
+    # No changes, checks fail → terminal failure (no retry)
     with (
-        patch("mcloop.main._has_meaningful_changes", side_effect=[False, True]),
-        patch(
-            "mcloop.main.run_checks",
-            side_effect=[_CHECKS_FAIL, _CHECKS_PASS, _CHECKS_PASS],
-        ),
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+        patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL),
     ):
         stuck = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
-    assert mock_run.call_count == 2
-    mock_commit.assert_called_once()
+    assert stuck == ["Retry task"]
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
     content = md.read_text()
-    assert "- [x] Retry task" in content
+    assert "- [!] Retry task" in content
 
-    # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("All tasks completed!", "info")
+    assert calls[0] == ("Giving up on: Retry task", "error")
 
 
 @patch("mcloop.main.notify")

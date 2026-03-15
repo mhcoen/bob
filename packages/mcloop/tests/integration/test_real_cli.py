@@ -25,8 +25,12 @@ def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(args, cwd=cwd, capture_output=True, check=True)
 
 
-def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
-    """Create a temp git repo with PLAN.md and a trivial check command.
+def _setup_repo(
+    tmp_path: Path,
+    plan_content: str,
+    mcloop_json: str | None = None,
+) -> Path:
+    """Create a temp git repo with PLAN.md and a check command.
 
     Returns the path to PLAN.md.
     """
@@ -37,8 +41,9 @@ def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
     plan_md = tmp_path / "PLAN.md"
     plan_md.write_text(plan_content)
 
-    # No checks — the task is trivial (create a text file)
-    (tmp_path / "mcloop.json").write_text('{"checks": ["true"]}\n')
+    if mcloop_json is None:
+        mcloop_json = '{"checks": ["true"]}\n'
+    (tmp_path / "mcloop.json").write_text(mcloop_json)
 
     _git(["git", "add", "."], tmp_path)
     _git(["git", "commit", "-m", "initial"], tmp_path)
@@ -77,8 +82,8 @@ def test_real_claude_creates_file_and_commits(tmp_path):
         capture_output=True,
         text=True,
     )
-    lines = [line for line in log.stdout.strip().splitlines() if line]
-    assert len(lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
+    commit_lines = [line for line in log.stdout.strip().splitlines() if line]
+    assert len(commit_lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
 
 
 @pytest.mark.integration
@@ -112,5 +117,46 @@ def test_real_codex_creates_file_and_commits(tmp_path):
         capture_output=True,
         text=True,
     )
-    lines = [line for line in log.stdout.strip().splitlines() if line]
-    assert len(lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
+    commit_lines = [line for line in log.stdout.strip().splitlines() if line]
+    assert len(commit_lines) >= 2, f"Expected at least 2 commits, got:\n{log.stdout}"
+
+
+@pytest.mark.integration
+@unittest.skipUnless(os.environ.get("MCLOOP_INTEGRATION"), _SKIP_REASON)
+def test_real_claude_check_failure_retries_and_fails(tmp_path):
+    """Real Claude Code: task succeeds but check always fails → retries, marked [!]."""
+    plan_md = _setup_repo(
+        tmp_path,
+        "- [ ] Create a file called hello.txt containing hello\n",
+        mcloop_json='{"checks": ["test -f goodbye.txt"]}\n',
+    )
+
+    with patch("mcloop.main.notify"):
+        stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+
+    # Task should be stuck — check never passes
+    assert stuck == ["Create a file called hello.txt containing hello"], (
+        f"Expected stuck task, got: {stuck}"
+    )
+
+    # hello.txt was created by Claude (task itself succeeds)
+    hello = tmp_path / "hello.txt"
+    assert hello.exists(), "hello.txt was not created"
+
+    # goodbye.txt was never created (nothing asks for it)
+    assert not (tmp_path / "goodbye.txt").exists()
+
+    # Task was marked failed, not checked off
+    plan_content = plan_md.read_text()
+    assert "- [!]" in plan_content, f"Task not marked failed:\n{plan_content}"
+    assert "- [x]" not in plan_content, f"Task should not be checked off:\n{plan_content}"
+
+    # No commits beyond the initial one (checks never passed)
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    commit_lines = [line for line in log.stdout.strip().splitlines() if line]
+    assert len(commit_lines) == 1, f"Expected only initial commit, got:\n{log.stdout}"

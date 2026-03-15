@@ -610,3 +610,70 @@ def test_stub_stage_boundary_full_suite(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "full test suite" in captured.out.lower()
     assert "stage 1: foundation complete" in captured.out.lower()
+
+
+# -------------------------------------------------------------------
+# Test 11: check command always fails → task retries and marked [!]
+# -------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
+    """Stub task succeeds but check command always fails → retries, marked [!]."""
+    scenario = {
+        "tasks": [
+            {
+                "match": "Create hello",
+                "files": {"hello.txt": "hello\n"},
+                "output": "Created hello.txt",
+                "exit_code": 0,
+            }
+        ],
+    }
+    plan_md, scenario_path = _setup_repo(
+        tmp_path,
+        "- [ ] Create hello.txt\n",
+        scenario,
+        mcloop_json={"checks": ["test -f goodbye.txt"]},
+    )
+
+    prompts_seen = []
+    original_build = _make_stub_build_command(scenario_path)
+
+    def tracking_build(cli, prompt=None, model=None, allowed_tools=None):
+        if prompt:
+            prompts_seen.append(prompt)
+        kw = {}
+        if allowed_tools is not None:
+            kw["allowed_tools"] = allowed_tools
+        return original_build(cli, prompt=prompt, model=model, **kw)
+
+    with patch("mcloop.runner._build_command", tracking_build):
+        with patch("mcloop.main.notify"):
+            stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+
+    # Task should be stuck
+    assert stuck == ["Create hello.txt"]
+
+    # hello.txt was created (task succeeds) but goodbye.txt never exists
+    assert (tmp_path / "hello.txt").exists()
+    assert not (tmp_path / "goodbye.txt").exists()
+
+    # Task marked failed
+    content = plan_md.read_text()
+    assert "- [!] Create hello.txt" in content
+    assert "- [x]" not in content
+
+    # No commits beyond initial (checks never passed)
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    lines = [line for line in log.stdout.strip().splitlines() if line]
+    assert len(lines) == 1
+
+    # Retry prompts should contain the check failure output
+    assert len(prompts_seen) >= 2
+    assert "test -f goodbye.txt" in prompts_seen[1]
