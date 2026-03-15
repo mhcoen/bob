@@ -344,11 +344,11 @@ The debugging playbook this enforces:
 
 ## Stage 5: Integration tests
 
-- [ ] Create stub CLI for deterministic integration testing
+- [x] Create stub CLI for deterministic integration testing
    - [x] Create `tests/stubs/stub_cli.py`: a script that reads a prompt from argv, consults a scenario file (JSON) to determine what files to create/modify, what output to print, what exit code to return, and how long to wait before responding
    - [x] Scenario file format: list of behaviors keyed by prompt substring match (e.g. if prompt contains "create hello.txt", write hello.txt with "hello", exit 0; if prompt contains "rate limit", print rate limit message, exit 1)
    - [x] The stub must be invocable as both `claude -p` and `codex exec` (detect which mode from argv and behave accordingly)
-   - [ ] Add a test fixture that sets up a temp git repo with a PLAN.md, points `_build_command` at the stub, and runs `run_loop`
+   - [x] Add a test fixture that sets up a temp git repo with a PLAN.md, points `_build_command` at the stub, and runs `run_loop`
 
 - [ ] [BATCH] Stub-based integration tests
    - [ ] Test: single task completes, gets checked off, files committed
