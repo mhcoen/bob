@@ -565,17 +565,9 @@ def test_stub_reviewer_spawned_after_commit(tmp_path):
 
 @pytest.mark.integration
 def test_stub_stage_boundary_full_suite(tmp_path, capsys):
-    """Staged plan runs full test suite at end and prints stage info."""
-    # "Create stage2" must precede "Create stage1" in scenario order
-    # because session context from stage1 bleeds into stage2's prompt.
+    """Stage boundary: run_loop completes stage 1, runs full suite, stops before stage 2."""
     scenario = {
         "tasks": [
-            {
-                "match": "Create stage2",
-                "files": {"stage2.txt": "stage 2 done\n"},
-                "output": "Created stage2.txt",
-                "exit_code": 0,
-            },
             {
                 "match": "Create stage1",
                 "files": {"stage1.txt": "stage 1 done\n"},
@@ -605,15 +597,16 @@ def test_stub_stage_boundary_full_suite(tmp_path, capsys):
 
     assert stuck == []
 
-    # Both stages should be checked off
     content = plan_md.read_text()
+    # Stage 1 task checked off
     assert "- [x] Create stage1 file" in content
-    assert "- [x] Create stage2 file" in content
+    # Stage 2 task NOT attempted
+    assert "- [ ] Create stage2 file" in content
 
-    # Both files should exist
     assert (tmp_path / "stage1.txt").exists()
-    assert (tmp_path / "stage2.txt").exists()
+    assert not (tmp_path / "stage2.txt").exists()
 
-    # Full test suite should have run at end of run
+    # Full test suite ran at stage boundary
     captured = capsys.readouterr()
     assert "full test suite" in captured.out.lower()
+    assert "stage 1: foundation complete" in captured.out.lower()
