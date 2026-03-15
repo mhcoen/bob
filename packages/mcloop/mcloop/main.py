@@ -887,11 +887,19 @@ def run_loop(
             flush=True,
         )
 
+    active_stage_at_start = current_stage(parse(checklist_path))
+
     while True:
         # Check for completed reviews from background reviewer processes
         _collect_review_findings(project_dir, checklist_path, ctx)
 
         tasks = parse(checklist_path)
+
+        if active_stage_at_start is not None:
+            now_stage = current_stage(tasks)
+            if now_stage != active_stage_at_start:
+                break
+
         task = find_next(tasks)
         if task is None:
             break
