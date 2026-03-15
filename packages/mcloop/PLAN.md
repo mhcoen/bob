@@ -350,17 +350,17 @@ The debugging playbook this enforces:
    - [x] The stub must be invocable as both `claude -p` and `codex exec` (detect which mode from argv and behave accordingly)
    - [x] Add a test fixture that sets up a temp git repo with a PLAN.md, points `_build_command` at the stub, and runs `run_loop`
 
-- [ ] [BATCH] Stub-based integration tests
-   - [ ] Test: single task completes, gets checked off, files committed
-   - [ ] Test: task fails, retries up to max_retries, marked failed
-   - [ ] Test: check command fails, task retries with check output as prior_errors
-   - [ ] Test: rate limit output triggers pause and retry
-   - [ ] Test: session limit output triggers polling
-   - [ ] Test: [BATCH] parent with multiple children runs one session, all children checked off
-   - [ ] Test: batch failure falls back to individual execution
-   - [ ] Test: no-op task (no file changes, checks pass) gets auto-checked
-   - [ ] Test: reviewer spawned after successful commit when reviewer config is present
-   - [ ] Test: stage boundary triggers full test suite and stops
+- [x] [BATCH] Stub-based integration tests
+   - [x] Test: single task completes, gets checked off, files committed
+   - [x] Test: task fails, retries up to max_retries, marked failed
+   - [x] Test: check command fails, task retries with check output as prior_errors
+   - [x] Test: rate limit output triggers pause and retry
+   - [x] Test: session limit output triggers polling
+   - [x] Test: [BATCH] parent with multiple children runs one session, all children checked off
+   - [x] Test: batch failure falls back to individual execution
+   - [x] Test: no-op task (no file changes, checks pass) gets auto-checked
+   - [x] Test: reviewer spawned after successful commit when reviewer config is present
+   - [x] Test: stage boundary triggers full test suite and stops
 
 - [ ] Real CLI integration tests (gated behind MCLOOP_INTEGRATION=1)
    - [ ] Test: trivial Claude Code task ("create a file called hello.txt containing hello") completes and commits
