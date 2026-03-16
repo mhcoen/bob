@@ -749,7 +749,7 @@ def _add_swift_init_call(content: str) -> str:
 
 def _inject_python(content: str, project_dir: str | None = None) -> str:
     """Inject Python crash handlers at the top of the file."""
-    # Insert after shebang and encoding lines if present
+    # Insert after shebang, encoding, and from __future__ lines
     lines = content.splitlines(keepends=True)
     insert_pos = 0
     for i, line in enumerate(lines):
@@ -759,6 +759,11 @@ def _inject_python(content: str, project_dir: str | None = None) -> str:
             continue
         if i <= 1 and stripped.startswith("# -*- coding"):
             insert_pos = i + 1
+            continue
+        if stripped.startswith("from __future__ "):
+            insert_pos = i + 1
+            continue
+        if stripped == "" or stripped.startswith("#"):
             continue
         break
 

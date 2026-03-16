@@ -233,6 +233,16 @@ def test_inject_python_no_shebang():
     assert "import os" in result
 
 
+def test_inject_python_future_import():
+    """Wrapper must be injected AFTER from __future__ imports."""
+    content = "from __future__ import annotations\n\nimport os\n\ndef main():\n    pass\n"
+    result = inject(content, "python")
+    assert PYTHON_BEGIN in result
+    future_pos = result.index("from __future__ import annotations")
+    wrap_pos = result.index(PYTHON_BEGIN)
+    assert future_pos < wrap_pos, "from __future__ must come before the wrapper"
+
+
 def test_inject_idempotent_swift():
     content = "import Foundation\n\nfunc main() {}\n"
     first = inject(content, "swift")
