@@ -18,6 +18,7 @@ from duplo.main import (
     _detect_and_append_gaps,
     _init_project,
     _partition_features,
+    _plan_has_unchecked_tasks,
     _print_feature_status,
     _print_status,
     _print_summary,
@@ -1014,7 +1015,7 @@ class TestDetectAndAppendGaps:
             _detect_and_append_gaps()
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "Update design: primary: #ff0000" in updated
+        assert "Update color palette: primary: #ff0000" in updated
         out = capsys.readouterr().out
         assert "1 gap task" in out
 
@@ -1166,7 +1167,7 @@ class TestDetectAndAppendGaps:
         assert updated.startswith(plan.rstrip())
         # New tasks appended after existing content.
         assert "- [ ] Implement Websocket" in updated
-        assert "Update design: accent: #00ff00" in updated
+        assert "Update color palette: accent: #00ff00" in updated
 
     def test_original_content_is_prefix_of_updated(self, tmp_path, monkeypatch):
         """Updated PLAN.md must start with the original content (append-only)."""
@@ -1586,7 +1587,7 @@ class TestSubsequentRunReextractsFeatures:
         ):
             main()
 
-        mock_extract.assert_called_once_with("product text")
+        mock_extract.assert_called_once_with("product text", existing_names=["Auth"])
         mock_save.assert_called_once_with([new_feature])
 
     def test_skips_extraction_when_no_scraped_text(self, tmp_path, monkeypatch):
@@ -2346,7 +2347,7 @@ class TestRescrapeDownloadsSiteMedia:
 
         mock_dl.assert_called_once_with(raw_pages)
         out = capsys.readouterr().out
-        assert "1 image" in out
+        assert "1 new image" in out
 
     def test_skips_media_when_no_raw_pages(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -2754,6 +2755,109 @@ class TestCompletePhaseTaskMatching:
 
         out = capsys.readouterr().out
         assert "No feature matches found" in out
+
+
+class TestPlanHasUncheckedTasks:
+    """Tests for _plan_has_unchecked_tasks helper."""
+
+    def test_returns_false_when_no_plan(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert _plan_has_unchecked_tasks() is False
+
+    def test_returns_true_with_unchecked_tasks(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "PLAN.md").write_text("- [ ] Task\n")
+        assert _plan_has_unchecked_tasks() is True
+
+    def test_returns_false_when_all_checked(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "PLAN.md").write_text("- [x] Done\n")
+        assert _plan_has_unchecked_tasks() is False
+
+    def test_returns_true_with_mixed_tasks(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "PLAN.md").write_text("- [x] Done\n- [ ] Pending\n")
+        assert _plan_has_unchecked_tasks() is True
+
+    def test_returns_true_with_failed_task(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "PLAN.md").write_text("- [!] Failed\n")
+        assert _plan_has_unchecked_tasks() is True
+
+    def test_returns_false_with_empty_plan(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "PLAN.md").write_text("# Plan\nNo tasks here.\n")
+        assert _plan_has_unchecked_tasks() is False
+
+
+class TestGapDetectorSkipsWithUncheckedTasks:
+    """Gap detection must be skipped when PLAN.md has unchecked tasks."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [
+            {"name": "Search", "description": "search", "category": "core"},
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core",
+                "features": ["Search"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 0,
+    }
+
+    def test_gap_detector_skipped_when_plan_has_unchecked_tasks(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        """When PLAN.md has unchecked tasks, gap detection must not run."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        plan = "# Phase 0\n- [x] Done task\n- [ ] User-added task\n"
+        (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch(
+                "duplo.main._detect_and_append_gaps",
+                return_value=(0, 0, 0, 0),
+            ) as mock_gaps,
+        ):
+            main()
+
+        mock_gaps.assert_not_called()
+
+    def test_gap_detector_runs_when_no_plan(self, capsys, tmp_path, monkeypatch):
+        """When there is no PLAN.md, gap detection can run."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch(
+                "duplo.main._detect_and_append_gaps",
+                return_value=(0, 0, 0, 0),
+            ) as mock_gaps,
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_gaps.assert_called_once()
 
 
 class TestPhase2NotStartedRunDuplo:

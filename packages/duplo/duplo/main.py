@@ -44,6 +44,11 @@ from duplo.test_generator import (
 )
 from duplo.validator import validate_product_url
 from duplo.frame_describer import describe_frames
+from duplo.verification_extractor import (
+    extract_verification_cases,
+    format_verification_tasks,
+    load_frame_descriptions,
+)
 from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
@@ -253,6 +258,7 @@ def _first_run(*, url: str | None = None) -> None:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
         # Download embedded images and videos from fetched pages.
+        # Only genuinely new files are returned.
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
             scan.images.extend(site_images)
@@ -419,6 +425,15 @@ def _first_run(*, url: str | None = None) -> None:
         test_tasks = generate_plan_test_tasks(doc_examples)
         if test_tasks:
             content = append_test_tasks(content, test_tasks)
+        # Append verification tasks from video frame descriptions.
+        frame_descs = load_frame_descriptions()
+        if frame_descs:
+            print("Extracting verification cases from demo video …")
+            vcases = extract_verification_cases(frame_descs)
+            if vcases:
+                vtasks = format_verification_tasks(vcases)
+                content = content.rstrip() + "\n" + vtasks
+                print(f"  {len(vcases)} verification case(s) added.")
         saved = save_plan(content)
         print(f"Plan saved to {saved}")
         _plan_ready(phase_label)
@@ -651,18 +666,55 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         save_doc_structures(doc_structures)
 
     # Download embedded media from re-scraped pages.
+    # Only genuinely new files are returned (cached files are skipped).
     if raw_pages:
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
-            print(f"  Downloaded {len(site_images)} image(s) from product site.")
+            print(f"  Downloaded {len(site_images)} new image(s) from product site.")
         if site_videos:
-            print(f"  Downloaded {len(site_videos)} video(s) from product site.")
-            # Extract frames from downloaded videos.
+            print(f"  Downloaded {len(site_videos)} new video(s) from product site.")
+            # Run the full frame pipeline on new videos.
             frames_dir = Path(".duplo") / "video_frames"
             results = extract_all_videos(site_videos, frames_dir)
+            video_frames: list[Path] = []
             for vr in results:
-                if vr.frames:
+                if vr.error:
+                    print(f"  {vr.source.name}: {vr.error}")
+                elif vr.frames:
                     print(f"  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
+                    video_frames.extend(vr.frames)
+                else:
+                    print(f"  {vr.source.name}: no scene changes detected")
+            if video_frames:
+                print("  Filtering frames with Vision …")
+                decisions = filter_frames(video_frames)
+                video_frames = apply_filter(decisions)
+                kept = sum(1 for d in decisions if d.keep)
+                rejected = len(decisions) - kept
+                if rejected:
+                    print(f"  Kept {kept}, rejected {rejected} frame(s)")
+                if video_frames:
+                    print("  Describing UI states …")
+                    frame_descs = describe_frames(video_frames)
+                    for fd in frame_descs:
+                        print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                    frame_entries = [
+                        {
+                            "path": fd.path,
+                            "filename": fd.path.name,
+                            "state": fd.state,
+                            "detail": fd.detail,
+                        }
+                        for fd in frame_descs
+                    ]
+                    stored = store_accepted_frames(frame_entries)
+                    if stored:
+                        print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
+                    # Update design requirements from new frames.
+                    design = extract_design(video_frames)
+                    if design.colors or design.fonts or design.layout:
+                        save_design_requirements(dataclasses.asdict(design))
+                        print(f"  Updated design from {len(design.source_images)} frame(s).")
 
     return pages_updated, examples_updated, scraped_text
 
@@ -891,11 +943,19 @@ def _subsequent_run() -> None:
     save_hashes(compute_hashes("."))
 
     # Compare features/examples against current plan and append gap tasks.
-    mf, me, dr, ta = _detect_and_append_gaps()
-    summary.missing_features = mf
-    summary.missing_examples = me
-    summary.design_refinements = dr
-    summary.tasks_appended = ta
+    # Skip gap detection if the plan is fully complete (all tasks checked)
+    # or if the plan has unchecked tasks (user may have manually edited
+    # the plan, and appending gap tasks would create a State 2 deadlock).
+    # Gaps will be incorporated into the next phase's plan instead.
+    plan_path_check = Path("PLAN.md")
+    plan_complete = plan_path_check.exists() and _plan_is_complete()
+    plan_has_unchecked = plan_path_check.exists() and _plan_has_unchecked_tasks()
+    if not plan_complete and not plan_has_unchecked:
+        mf, me, dr, ta = _detect_and_append_gaps()
+        summary.missing_features = mf
+        summary.missing_examples = me
+        summary.design_refinements = dr
+        summary.tasks_appended = ta
 
     _print_summary(summary)
 
@@ -992,12 +1052,17 @@ def _subsequent_run() -> None:
         phase_info = dict(phase_info)
         phase_info["features"] = [f.name for f in selected]
 
-    # Show open issues and let user pick which to address.
+    # Include open issues in the phase plan.
     all_issues = data.get("issues", [])
-    selected_issues = select_issues(all_issues)
-    if selected_issues:
-        phase_info = dict(phase_info)
-        phase_info["issues"] = [iss["description"] for iss in selected_issues]
+    open_issues = [i for i in all_issues if i.get("status", "open") == "open"]
+    if open_issues:
+        print(f"\n{len(open_issues)} open issue(s) will be included in this phase:")
+        for iss in open_issues:
+            print(f"  - {iss['description']}")
+        selected_issues = select_issues(all_issues)
+        if selected_issues:
+            phase_info = dict(phase_info)
+            phase_info["issues"] = [iss["description"] for iss in selected_issues]
 
     # Generate plan for current phase.
     source_url = data.get("source_url", "")
@@ -1032,6 +1097,15 @@ def _subsequent_run() -> None:
     test_tasks = generate_plan_test_tasks(doc_examples)
     if test_tasks:
         content = append_test_tasks(content, test_tasks)
+    # Append verification tasks from video frame descriptions.
+    frame_descs = load_frame_descriptions()
+    if frame_descs:
+        print("Extracting verification cases from demo video …")
+        vcases = extract_verification_cases(frame_descs)
+        if vcases:
+            vtasks = format_verification_tasks(vcases)
+            content = content.rstrip() + "\n" + vtasks
+            print(f"  {len(vcases)} verification case(s) added.")
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
     _plan_ready(phase_label)
@@ -1313,6 +1387,19 @@ def _plan_is_complete() -> bool:
         if stripped.startswith("- [x]") or stripped.startswith("- [X]"):
             has_tasks = True
     return has_tasks
+
+
+def _plan_has_unchecked_tasks() -> bool:
+    """Return True if PLAN.md exists and contains at least one unchecked task."""
+    plan_path = Path("PLAN.md")
+    if not plan_path.exists():
+        return False
+    content = plan_path.read_text(encoding="utf-8")
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- [ ]") or stripped.startswith("- [!]"):
+            return True
+    return False
 
 
 def _plan_ready(phase_label: str) -> None:
