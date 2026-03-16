@@ -13,6 +13,23 @@ structured list of the product's features. Focus on what the product actually
 does—its capabilities, integrations, and notable behaviours—not on marketing
 copy or company information.
 
+CRITICAL RULES:
+1. Only extract features that the product DEMONSTRABLY OFFERS based on the text.
+   A feature must be explicitly described as something the product does or
+   provides. Do not infer features from passing mentions, testimonials, or
+   comparisons to other products.
+2. Do NOT extract features that are merely mentioned in passing (e.g. "works
+   great alongside iCloud" does not mean the product offers iCloud sync).
+3. Do NOT extract features of the PLATFORM or ECOSYSTEM the product runs on.
+   Only extract features of the product itself.
+4. Do NOT hallucinate features that seem plausible but are not described in
+   the text. If the text does not explicitly say the product does something,
+   do not list it.
+5. Do NOT extract marketing claims, company values, or business model details
+   as features (e.g. "free to use", "trusted by thousands" are not features).
+6. When in doubt, OMIT the feature. It is far better to return a short,
+   accurate list than a long list with invented features.
+
 Return ONLY a JSON array. Each element must be an object with these fields:
   "name"        – short feature name (3-6 words)
   "description" – one-sentence description of what the feature does
@@ -37,21 +54,42 @@ class Feature:
     implemented_in: str = ""
 
 
-def extract_features(scraped_text: str) -> list[Feature]:
+def extract_features(
+    scraped_text: str,
+    existing_names: list[str] | None = None,
+) -> list[Feature]:
     """Return a structured feature list extracted from *scraped_text*.
 
     Uses ``claude -p`` to analyse the content. Truncates input to
     *_MAX_CONTENT_CHARS* characters to stay within context limits.
 
+    If *existing_names* is provided, the extraction prompt instructs
+    the LLM to reuse those names for features that match existing
+    ones rather than inventing new names. This prevents near-duplicate
+    features from accumulating across runs.
+
     Args:
         scraped_text: Raw text scraped from a product website.
+        existing_names: Feature names already in duplo.json (optional).
 
     Returns:
         List of :class:`Feature` objects. Empty list if nothing could be extracted.
     """
     content = scraped_text[:_MAX_CONTENT_CHARS]
+    system = _SYSTEM
+    if existing_names:
+        names_list = ", ".join(f'"{n}"' for n in existing_names)
+        system += (
+            "\n\nIMPORTANT: These features have already been extracted "
+            "from previous runs. If you find a feature that matches "
+            "one of these (same concept, even if worded differently), "
+            "use the EXACT existing name instead of inventing a new "
+            "one. Only create a new name for genuinely new features "
+            "not covered by any existing entry.\n"
+            f"Existing features: [{names_list}]"
+        )
     prompt = f"Extract features from this product website content:\n\n{content}"
-    raw = query(prompt, system=_SYSTEM)
+    raw = query(prompt, system=system)
     return _parse_features(raw)
 
 

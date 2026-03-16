@@ -100,6 +100,21 @@ class TestParseFeatures:
         assert feat.implemented_in == "Phase 1"
 
 
+class TestExtractorSystemPrompt:
+    def test_system_prompt_contains_hallucination_constraints(self):
+        from duplo.extractor import _SYSTEM
+
+        assert "DEMONSTRABLY OFFERS" in _SYSTEM
+        assert "Do NOT hallucinate" in _SYSTEM
+        assert "Do NOT extract features of the PLATFORM" in _SYSTEM
+        assert "When in doubt, OMIT" in _SYSTEM
+
+    def test_system_prompt_warns_against_passing_mentions(self):
+        from duplo.extractor import _SYSTEM
+
+        assert "mentioned in passing" in _SYSTEM
+
+
 class TestExtractFeatures:
     def test_returns_feature_list(self):
         response = '[{"name": "Search", "description": "Full-text search.", "category": "core"}]'
