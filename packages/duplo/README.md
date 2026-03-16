@@ -158,8 +158,8 @@ runs the phase-completion flow:
    with a blank line.
 
 3. **Record and advance.** The completed plan is appended to the
-   phase history in `duplo.json`, PLAN.md is deleted, and Duplo
-   falls through to the next-phase flow.
+   phase history in `duplo.json` and Duplo falls through to the
+   next-phase flow. PLAN.md is left in place for reference.
 
 ### Next-phase generation
 
@@ -190,7 +190,8 @@ the next phase:
    track status deterministically. Parent tasks whose subtasks are
    all specific enough to execute without design decisions are
    marked with `[BATCH]` so McLoop combines the subtasks into a
-   single session for efficiency.
+   single session for efficiency. See [Task batching](#task-batching)
+   for how Duplo decides when to batch.
 
 ### Non-destructive updates
 
@@ -299,7 +300,8 @@ children (up to the first `[USER]` or `[AUTO]` boundary) into a
 single numbered prompt and runs one session. If checks pass, all
 children are checked off in one commit. If the batch fails, McLoop
 automatically falls back to running each subtask individually. No
-work is lost on failure.
+work is lost on failure. When the continuous code reviewer is enabled,
+batched tasks are reviewed as a single diff after the batch commit.
 
 For the install/uninstall feature (17 subtasks at ~2 minutes each),
 batching would reduce total time from ~35 minutes to under 10
