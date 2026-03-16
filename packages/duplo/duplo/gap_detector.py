@@ -36,6 +36,9 @@ Return ONLY a JSON object with these fields:
 If everything is covered, return empty arrays.
 Do NOT include features or examples that ARE covered by the plan.
 Do NOT include features that are infeasible for the target platform.
+Do NOT invent new features. Only return features whose "name" field EXACTLY
+matches one of the names in the extracted features list. If a feature is not
+in the input list, it does not exist and must not be reported as missing.
 """
 
 _MAX_PLAN_CHARS = 30_000
@@ -158,13 +161,16 @@ def _parse_result(
     if not isinstance(data, dict):
         return GapResult(missing_features=[], missing_examples=[])
 
+    # Build a set of valid feature names so we can reject hallucinated ones.
+    valid_names = {f.name for f in features}
+
     missing_features: list[MissingFeature] = []
     for item in data.get("missing_features", []):
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", "")).strip()
         reason = str(item.get("reason", "")).strip()
-        if name:
+        if name and name in valid_names:
             missing_features.append(MissingFeature(name=name, reason=reason))
 
     missing_examples: list[MissingExample] = []
@@ -270,8 +276,21 @@ def format_gap_tasks(result: GapResult) -> str:
         reason_suffix = f" ({ex.reason})" if ex.reason else ""
         lines.append(f"- [ ] Add test/implementation for {desc}{reason_suffix}")
 
-    for dr in result.design_refinements:
-        lines.append(f"- [ ] Update design: {dr.detail} ({dr.reason})")
+    # Group design refinements by category into composite tasks
+    # instead of listing one task per raw design token.
+    if result.design_refinements:
+        by_category: dict[str, list[DesignRefinement]] = {}
+        for dr in result.design_refinements:
+            by_category.setdefault(dr.category, []).append(dr)
+        category_labels = {
+            "color": "Update color palette",
+            "font": "Update typography",
+            "component": "Update component styles",
+        }
+        for cat, items in by_category.items():
+            label = category_labels.get(cat, f"Update {cat} design")
+            details = ", ".join(item.detail for item in items)
+            lines.append(f"- [ ] {label}: {details}")
 
     lines.append("")
     return "\n".join(lines)

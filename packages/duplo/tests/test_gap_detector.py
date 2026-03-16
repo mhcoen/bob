@@ -337,7 +337,7 @@ class TestDetectDesignGaps:
 
 
 class TestFormatGapTasksDesign:
-    def test_includes_design_refinements(self):
+    def test_includes_design_refinements_grouped_by_category(self):
         result = GapResult(
             missing_features=[],
             missing_examples=[],
@@ -350,7 +350,7 @@ class TestFormatGapTasksDesign:
             ],
         )
         text = format_gap_tasks(result)
-        assert "- [ ] Update design: primary: #ff0000" in text
+        assert "- [ ] Update color palette: primary: #ff0000" in text
         assert "## Gaps detected" in text
 
     def test_empty_when_no_gaps_at_all(self):
@@ -375,7 +375,51 @@ class TestFormatGapTasksDesign:
         )
         text = format_gap_tasks(result)
         assert "Implement Export" in text
-        assert "Update design: body: Roboto" in text
+        assert "Update typography: body: Roboto" in text
+
+    def test_consolidates_multiple_colors_into_one_task(self):
+        result = GapResult(
+            missing_features=[],
+            missing_examples=[],
+            design_refinements=[
+                DesignRefinement(
+                    category="color",
+                    detail="primary: #ff0000",
+                    reason="not in plan",
+                ),
+                DesignRefinement(
+                    category="color",
+                    detail="secondary: #00ff00",
+                    reason="not in plan",
+                ),
+                DesignRefinement(
+                    category="color",
+                    detail="accent: #0000ff",
+                    reason="not in plan",
+                ),
+            ],
+        )
+        text = format_gap_tasks(result)
+        # All colors in one task, not three separate tasks.
+        color_tasks = [line for line in text.splitlines() if "color palette" in line.lower()]
+        assert len(color_tasks) == 1
+        assert "primary: #ff0000" in color_tasks[0]
+        assert "secondary: #00ff00" in color_tasks[0]
+        assert "accent: #0000ff" in color_tasks[0]
+
+    def test_groups_by_category_separately(self):
+        result = GapResult(
+            missing_features=[],
+            missing_examples=[],
+            design_refinements=[
+                DesignRefinement(category="color", detail="bg: #fff", reason=""),
+                DesignRefinement(category="font", detail="body: Inter", reason=""),
+                DesignRefinement(category="color", detail="fg: #000", reason=""),
+            ],
+        )
+        text = format_gap_tasks(result)
+        task_lines = [line for line in text.splitlines() if line.startswith("- [ ]")]
+        assert len(task_lines) == 2  # one color task, one font task
 
 
 # ---------------------------------------------------------------------------
