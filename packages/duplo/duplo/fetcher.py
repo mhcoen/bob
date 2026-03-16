@@ -63,6 +63,42 @@ _LOW_PRIORITY = re.compile(
     re.IGNORECASE,
 )
 
+# Hosting platform domains whose own documentation should never be
+# followed as cross-domain docs links. When a product is hosted on
+# one of these platforms (e.g. a GitHub repo), the platform's own
+# docs/features/marketing pages are not part of the product.
+_PLATFORM_DOMAINS = {
+    "github.com",
+    "docs.github.com",
+    "gh.io",
+    "gitlab.com",
+    "docs.gitlab.com",
+    "bitbucket.org",
+    "support.atlassian.com",
+    "sourceforge.net",
+    "codeberg.org",
+    "sr.ht",
+    "npmjs.com",
+    "www.npmjs.com",
+    "pypi.org",
+    "crates.io",
+    "hub.docker.com",
+    "formulae.brew.sh",
+    "brew.sh",
+}
+
+
+def _is_platform_domain(domain: str) -> bool:
+    """Return True if *domain* belongs to a known hosting platform.
+
+    Matches exact domains and subdomains (e.g. ``user.github.io``
+    matches ``github.io``).
+    """
+    for platform in _PLATFORM_DOMAINS:
+        if domain == platform or domain.endswith("." + platform):
+            return True
+    return False
+
 
 def is_docs_link(url: str, anchor: str) -> bool:
     """Return True if the link likely points to documentation.
@@ -228,6 +264,10 @@ def fetch_site(
             link_domain = urlparse(link_url).netloc
             if is_docs_link(link_url, anchor):
                 if link_domain != seed_domain:
+                    # Never follow cross-domain links into hosting
+                    # platform docs (e.g. GitHub's own features).
+                    if _is_platform_domain(link_domain):
+                        continue
                     docs_domains.add(link_domain)
                 queue.append((1, link_url))
                 queued.add(link_norm)
@@ -318,40 +358,46 @@ def download_media(
 ) -> tuple[list[Path], list[Path]]:
     """Download images and videos to *output_dir*.
 
-    Skips images smaller than ``_MIN_IMAGE_BYTES``. Returns
-    ``(downloaded_images, downloaded_videos)``.
+    Skips files that already exist locally. Skips images smaller than
+    ``_MIN_IMAGE_BYTES``. Returns ``(new_images, new_videos)`` containing
+    only files that were actually downloaded (not cached).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    downloaded_images: list[Path] = []
-    downloaded_videos: list[Path] = []
+    new_images: list[Path] = []
+    new_videos: list[Path] = []
 
     for url in video_urls:
-        path = _download_file(url, output_dir)
-        if path:
-            downloaded_videos.append(path)
+        path, is_new = _download_file(url, output_dir)
+        if path and is_new:
+            new_videos.append(path)
 
     for url in image_urls:
-        path = _download_file(url, output_dir)
+        path, is_new = _download_file(url, output_dir)
         if path and path.stat().st_size >= _MIN_IMAGE_BYTES:
-            downloaded_images.append(path)
-        elif path:
+            if is_new:
+                new_images.append(path)
+        elif path and is_new:
             # Too small, likely icon
             path.unlink(missing_ok=True)
 
-    return downloaded_images, downloaded_videos
+    return new_images, new_videos
 
 
-def _download_file(url: str, output_dir: Path) -> Path | None:
-    """Download a single file. Returns the local path or None on failure."""
+def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:
+    """Download a single file.
+
+    Returns ``(path, is_new)`` where *is_new* is False if the file
+    already existed locally (cache hit).
+    """
     parsed = urlparse(url)
     filename = Path(parsed.path).name
     if not filename:
-        return None
+        return None, False
     # Avoid collisions by prefixing with domain
     domain = parsed.netloc.replace(".", "_")
     dest = output_dir / f"{domain}_{filename}"
     if dest.exists():
-        return dest
+        return dest, False
     try:
         with httpx.stream(
             "GET", url, follow_redirects=True, timeout=60.0, headers=_HEADERS
@@ -360,7 +406,7 @@ def _download_file(url: str, output_dir: Path) -> Path | None:
             with open(dest, "wb") as f:
                 for chunk in resp.iter_bytes(chunk_size=8192):
                     f.write(chunk)
-        return dest
+        return dest, True
     except Exception:
         dest.unlink(missing_ok=True)
-        return None
+        return None, False

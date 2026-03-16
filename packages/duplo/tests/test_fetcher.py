@@ -346,6 +346,7 @@ class TestFetchSite:
         assert not any("other.com" in url for url in fetch_calls)
 
     def test_follows_cross_domain_docs_links(self):
+        """Cross-domain docs links are followed, but platform domains are skipped."""
         seed_html = (
             "<html><body><p>Home</p>"
             '<a href="https://other.com/docs/intro">Documentation</a>'
@@ -373,8 +374,10 @@ class TestFetchSite:
                 "https://example.com", max_pages=5
             )
 
+        # Non-platform docs domain is followed.
         assert "External docs content" in text
-        assert "Wiki content" in text
+        # github.com is a platform domain — its wiki is NOT followed.
+        assert "Wiki content" not in text
 
     def test_follows_links_within_docs_domain(self):
         """Once a cross-domain docs site is reached, follow its internal links."""
