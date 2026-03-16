@@ -9,7 +9,18 @@ from pathlib import Path
 
 from duplo.saver import DUPLO_DIR
 
-_SKIP_DIRS = {".duplo", ".git", "__pycache__", "node_modules", ".venv", "venv"}
+_SKIP_DIRS = {
+    ".duplo",
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".build",
+    "logs",
+    ".mcloop",
+    ".claude",
+}
 _HASH_FILE = "file_hashes.json"
 _BUF_SIZE = 65536
 
@@ -47,8 +58,8 @@ def compute_hashes(directory: Path | str = ".") -> dict[str, str]:
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        # Skip files inside excluded directories.
-        if any(part in _SKIP_DIRS for part in rel.parts):
+        # Skip files inside excluded directories or .app bundles.
+        if any(part in _SKIP_DIRS or part.endswith(".app") for part in rel.parts):
             continue
         try:
             hashes[str(rel)] = _hash_file(path)

@@ -89,15 +89,17 @@ class TestScanDirectory:
         assert len(result.pdfs) == 0
         assert len(result.text_files) == 0
 
-    def test_extracts_urls_from_non_text_files(self, tmp_path: Path):
+    def test_skips_urls_in_json_files(self, tmp_path: Path):
+        """JSON files are in _SOURCE_EXTS — URLs are config refs, not product URLs."""
         (tmp_path / "config.json").write_text('{"url": "https://product.example.com/api"}')
         result = scan_directory(tmp_path)
-        assert "https://product.example.com/api" in result.urls
+        assert "https://product.example.com/api" not in result.urls
 
-    def test_extracts_urls_from_html_files(self, tmp_path: Path):
+    def test_skips_urls_in_html_files(self, tmp_path: Path):
+        """HTML files are in _SOURCE_EXTS — URLs are code refs, not product URLs."""
         (tmp_path / "page.html").write_text('<a href="https://docs.example.com">Docs</a>')
         result = scan_directory(tmp_path)
-        assert "https://docs.example.com" in result.urls
+        assert "https://docs.example.com" not in result.urls
 
     def test_skips_binary_files_for_url_extraction(self, tmp_path: Path):
         (tmp_path / "image.bin").write_bytes(bytes(range(256)) * 10)
@@ -168,13 +170,13 @@ class TestRelevance:
         assert len(rel) == 1
         assert rel[0].relevant
 
-    def test_url_source_tracked_for_non_text_files(self, tmp_path: Path):
+    def test_yaml_files_skipped_as_source(self, tmp_path: Path):
+        """YAML files are in _SOURCE_EXTS — no URL extraction or relevance."""
         (tmp_path / "links.yaml").write_text("url: https://example.com/product")
         result = scan_directory(tmp_path)
+        assert "https://example.com/product" not in result.urls
         rel = [r for r in result.relevance if r.category == "url_source"]
-        assert len(rel) == 1
-        assert rel[0].relevant
-        assert "URLs" in rel[0].reason
+        assert len(rel) == 0
 
     def test_empty_video_flagged_irrelevant(self, tmp_path: Path):
         (tmp_path / "empty.mp4").write_bytes(b"")
