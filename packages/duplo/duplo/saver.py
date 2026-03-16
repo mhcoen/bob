@@ -321,6 +321,61 @@ def get_current_phase(
     return (current, None)
 
 
+def _deduplicate_features_llm(
+    candidates: list[str],
+    existing: list[str],
+) -> dict[str, str]:
+    """Use an LLM to identify which candidates duplicate existing features.
+
+    Sends a single batch query to ``claude -p`` with all candidate names
+    and existing names. Returns a dict mapping each duplicate candidate
+    name to the existing name it matches. Candidates that are genuinely
+    new are not included in the returned dict.
+
+    Falls back to an empty dict (no dedup) if the LLM call fails.
+    """
+    if not candidates or not existing:
+        return {}
+
+    from duplo.claude_cli import ClaudeCliError, query
+
+    existing_list = json.dumps(existing)
+    candidates_list = json.dumps(candidates)
+    system = (
+        "You are deduplicating a feature list. Given a list of existing "
+        "feature names and a list of candidate new feature names, identify "
+        "which candidates are duplicates of existing features (same concept, "
+        "different wording). Return ONLY a JSON object mapping each duplicate "
+        "candidate name to the existing name it matches. Candidates that are "
+        "genuinely new (not covered by any existing feature) should NOT appear "
+        "in the output. Return {} if no duplicates are found."
+    )
+    prompt = f"Existing features:\n{existing_list}\n\nCandidate features:\n{candidates_list}"
+    try:
+        raw = query(prompt, system=system, model="haiku")
+    except ClaudeCliError:
+        return {}
+
+    text = raw.strip()
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+
+    if not isinstance(result, dict):
+        return {}
+    return {str(k): str(v) for k, v in result.items()}
+
+
 def save_features(
     features: list[Feature],
     *,
@@ -328,22 +383,34 @@ def save_features(
 ) -> Path:
     """Merge *features* into the ``features`` list in *duplo.json*.
 
-    Adds any features whose ``name`` is not already present.  Existing
-    features are never removed or modified.  Returns the path to the
-    updated file.
+    Adds any features whose name is not already present, using an LLM
+    to detect semantic duplicates (e.g. "CLI tool" and "Command-line
+    interface (CLI)"). Existing features are never removed or modified.
+    Returns the path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = _safe_read_json(path)
     existing = data.get("features", [])
     existing_names = {f["name"] for f in existing}
-    for feat in features:
-        if feat.name not in existing_names:
-            d = dataclasses.asdict(feat)
-            d.setdefault("status", "pending")
-            d.setdefault("implemented_in", "")
-            existing.append(d)
-            existing_names.add(feat.name)
+
+    # Quick pass: filter out exact matches.
+    candidates = [f for f in features if f.name not in existing_names]
+    if not candidates:
+        return path
+
+    # LLM pass: detect semantic duplicates in a single batch call.
+    candidate_names = [f.name for f in candidates]
+    duplicates = _deduplicate_features_llm(candidate_names, list(existing_names))
+
+    for feat in candidates:
+        if feat.name in duplicates:
+            continue
+        d = dataclasses.asdict(feat)
+        d.setdefault("status", "pending")
+        d.setdefault("implemented_in", "")
+        existing.append(d)
+        existing_names.add(feat.name)
     data["features"] = existing
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
