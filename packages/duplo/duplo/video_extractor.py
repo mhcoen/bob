@@ -85,6 +85,13 @@ def extract_scene_frames(
             else:
                 frames = []
 
+    # If scene detection found nothing (smooth video with no hard cuts),
+    # fall back to uniform time-based sampling.
+    if len(frames) < min_frames:
+        fallback = _run_ffmpeg_interval_sample(video, output_dir, stem, max_frames)
+        if isinstance(fallback, list) and len(fallback) > len(frames):
+            frames = fallback
+
     before = len(frames)
     frames = deduplicate_frames(frames)
     if before > len(frames):
@@ -137,6 +144,56 @@ def _run_ffmpeg_scene_detect(
 
     # Collect extracted frames in order.
     prefix = f"{stem}_scene_"
+    frames = sorted(
+        p for p in output_dir.iterdir() if p.name.startswith(prefix) and p.name.endswith(".png")
+    )
+    return frames
+
+
+def _run_ffmpeg_interval_sample(
+    video: Path,
+    output_dir: Path,
+    stem: str,
+    max_frames: int,
+    interval: float = 2.0,
+) -> list[Path] | str:
+    """Extract frames at fixed time intervals as a fallback.
+
+    Used when scene detection finds no transitions (smooth screencasts,
+    animations). Extracts one frame every *interval* seconds.
+    """
+    prefix = f"{stem}_interval_"
+    for old in output_dir.iterdir():
+        if old.name.startswith(prefix) and old.name.endswith(".png"):
+            old.unlink()
+
+    safe_stem = stem.replace("%", "%%")
+    pattern = str(output_dir / f"{safe_stem}_interval_%04d.png")
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(video),
+        "-vf",
+        f"fps=1/{interval}",
+        "-frames:v",
+        str(max_frames),
+        "-vsync",
+        "vfr",
+        pattern,
+        "-y",
+        "-loglevel",
+        "error",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "ffmpeg timed out (interval sampling)"
+    except FileNotFoundError:
+        return "ffmpeg not found on PATH"
+
+    if proc.returncode != 0:
+        return f"ffmpeg failed (exit {proc.returncode}): {proc.stderr.strip()}"
+
     frames = sorted(
         p for p in output_dir.iterdir() if p.name.startswith(prefix) and p.name.endswith(".png")
     )
