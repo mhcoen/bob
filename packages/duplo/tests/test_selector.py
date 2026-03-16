@@ -310,9 +310,11 @@ class TestSelectIssues:
         assert result[0]["description"] == "Button misaligned"
         assert result[1]["description"] == "Color too dark"
 
-    def test_blank_input_returns_none(self):
+    def test_blank_input_returns_all(self):
         result, _ = self._run(SAMPLE_ISSUES, "")
-        assert result == []
+        assert len(result) == 2
+        assert result[0]["description"] == "Button misaligned"
+        assert result[1]["description"] == "Color too dark"
 
     def test_none_keyword(self):
         result, _ = self._run(SAMPLE_ISSUES, "none")

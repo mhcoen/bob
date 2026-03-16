@@ -144,11 +144,11 @@ def select_issues(
     print_fn("")
     print_fn("Which issues should be addressed in this phase?")
     print_fn('  Examples: "all", "none", "1,3", "1-3"')
-    raw = input_fn("Issues [none]: ").strip()
+    raw = input_fn("Issues [all]: ").strip()
 
-    if raw.lower() == "all":
+    if not raw or raw.lower() == "all":
         selected = list(open_issues)
-    elif not raw or raw.lower() == "none":
+    elif raw.lower() == "none":
         selected = []
     else:
         indices = _parse_selection(raw, len(open_issues))

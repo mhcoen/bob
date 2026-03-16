@@ -82,9 +82,9 @@ def collect_issues(
         List of issue description strings (may be empty).
     """
     print_fn("Any known issues with this phase?")
-    print_fn('  e.g. bugs ("waveform shows static bars during recording")')
-    print_fn('       incomplete wiring ("qwen3-asr-swift dependency is unused")')
-    print_fn("  Blank line to finish each issue, blank line to stop:")
+    print_fn("  Describe each issue, then press Enter twice to record it.")
+    print_fn("  Press Enter on an empty line (or Ctrl-D) when done.")
+    print_fn("")
     issues: list[str] = []
     lines: list[str] = []
     try:
@@ -99,6 +99,7 @@ def collect_issues(
             if not text:
                 break
             issues.append(text)
+            print_fn(f"  Recorded issue {len(issues)}. Enter another or press Enter to finish.")
     except EOFError:
         text = "\n".join(lines).strip()
         if text:
