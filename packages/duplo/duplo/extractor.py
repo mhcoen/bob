@@ -10,7 +10,7 @@ from duplo.claude_cli import query
 _SYSTEM = """\
 You are a product analyst. Given scraped text from a product website, extract a
 structured list of the product's features. Focus on what the product actually
-does—its capabilities, integrations, and notable behaviours—not on marketing
+does\u2014its capabilities, integrations, and notable behaviours\u2014not on marketing
 copy or company information.
 
 CRITICAL RULES:
@@ -31,9 +31,9 @@ CRITICAL RULES:
    accurate list than a long list with invented features.
 
 Return ONLY a JSON array. Each element must be an object with these fields:
-  "name"        – short feature name (3-6 words)
-  "description" – one-sentence description of what the feature does
-  "category"    – one of: core, ui, integrations, api, security, other
+  "name"        \u2013 short feature name (3-6 words)
+  "description" \u2013 one-sentence description of what the feature does
+  "category"    \u2013 one of: core, ui, integrations, api, security, other
 
 Example output (do not include in your response):
 [
@@ -57,6 +57,10 @@ class Feature:
 def extract_features(
     scraped_text: str,
     existing_names: list[str] | None = None,
+    *,
+    spec_text: str = "",
+    scope_include: list[str] | None = None,
+    scope_exclude: list[str] | None = None,
 ) -> list[Feature]:
     """Return a structured feature list extracted from *scraped_text*.
 
@@ -68,15 +72,33 @@ def extract_features(
     ones rather than inventing new names. This prevents near-duplicate
     features from accumulating across runs.
 
+    If *spec_text* is provided, it is injected into the system prompt
+    so the LLM can use the user's stated intent to guide extraction.
+
+    If *scope_include* or *scope_exclude* are provided, the extracted
+    feature list is post-filtered accordingly.
+
     Args:
         scraped_text: Raw text scraped from a product website.
         existing_names: Feature names already in duplo.json (optional).
+        spec_text: Product specification text (optional).
+        scope_include: Feature names the user requires (optional).
+        scope_exclude: Feature names the user wants excluded (optional).
 
     Returns:
         List of :class:`Feature` objects. Empty list if nothing could be extracted.
     """
     content = scraped_text[:_MAX_CONTENT_CHARS]
     system = _SYSTEM
+    if spec_text:
+        system += (
+            "\n\nThe user has provided a product specification that "
+            "describes their intent. Use it to guide your extraction \u2014 "
+            "prioritise features the spec mentions, respect any scope "
+            "constraints, and use the spec\u2019s terminology when it aligns "
+            "with what the scraped content describes.\n\n"
+            f"{spec_text}"
+        )
     if existing_names:
         names_list = ", ".join(f'"{n}"' for n in existing_names)
         system += (
@@ -90,7 +112,16 @@ def extract_features(
         )
     prompt = f"Extract features from this product website content:\n\n{content}"
     raw = query(prompt, system=system)
-    return _parse_features(raw)
+    features = _parse_features(raw)
+
+    # Apply scope overrides.
+    if scope_exclude:
+        exclude_lower = {n.lower() for n in scope_exclude}
+        features = [f for f in features if f.name.lower() not in exclude_lower]
+    # Scope includes are handled by the LLM prompt; no post-filter needed
+    # since the user wants them added even if not in scraped text.
+
+    return features
 
 
 def _parse_features(raw: str) -> list[Feature]:

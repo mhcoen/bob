@@ -85,6 +85,7 @@ def investigate(
     complaints: list[str],
     *,
     user_screenshots: list[Path] | None = None,
+    spec_text: str = "",
     model: str = "opus",
 ) -> InvestigationResult:
     """Run an intelligent product-level investigation.
@@ -102,6 +103,7 @@ def investigate(
         An :class:`InvestigationResult` with structured diagnoses.
     """
     context = _gather_context()
+    context["spec_text"] = spec_text
     prompt = _build_prompt(complaints, context, user_screenshots=user_screenshots)
 
     # Collect all image paths for the vision call.
@@ -296,6 +298,14 @@ def _build_prompt(
         for iss in issues:
             iss_lines.append(f"  - {iss.get('description', '?')}")
         sections.append("\n".join(iss_lines))
+
+    # Product spec.
+    spec_text = context.get("spec_text", "")
+    if spec_text:
+        sections.append(
+            "PRODUCT SPECIFICATION (authoritative, from the user — "
+            "this defines intended behavior):\n" + spec_text
+        )
 
     # User complaints.
     complaint_lines = ["USER BUG REPORT:"]

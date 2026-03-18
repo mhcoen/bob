@@ -45,6 +45,7 @@ def generate_roadmap(
     preferences: BuildPreferences,
     *,
     completion_history: list[dict] | None = None,
+    spec_text: str = "",
 ) -> list[dict]:
     """Generate a phased build roadmap.
 
@@ -85,6 +86,13 @@ def generate_roadmap(
             + "\n"
         )
 
+    spec_section = ""
+    if spec_text:
+        spec_section = (
+            "\nProduct specification (authoritative, from the user):\n"
+            f"{spec_text}\n"
+        )
+
     prompt = f"""\
 Product: {source_url}
 
@@ -94,7 +102,7 @@ Constraints:
 {constraints}
 Preferences:
 {other_prefs}
-{history_section}
+{history_section}{spec_section}
 Features to include:
 {features_text}
 

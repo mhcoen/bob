@@ -238,6 +238,7 @@ def generate_phase_plan(
     project_name: str = "",
     design_section: str = "",
     phase_number: int | None = None,
+    spec_text: str = "",
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
 
@@ -297,6 +298,13 @@ def generate_phase_plan(
         issues_text = "\n".join(f"- {desc}" for desc in phase_issues)
         issues_block = f"\nKnown issues to fix in this phase:\n{issues_text}\n"
 
+    spec_block = ""
+    if spec_text:
+        spec_block = (
+            "\nProduct specification (authoritative, from the user):\n"
+            f"{spec_text}\n"
+        )
+
     prompt = f"""\
 Project: {project_name or source_url}
 Source: {source_url}
@@ -314,7 +322,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-{design_block}{issues_block}
+{design_block}{issues_block}{spec_block}
 Generate the PLAN.md now.
 """
 
