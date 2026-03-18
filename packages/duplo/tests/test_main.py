@@ -2860,6 +2860,179 @@ class TestGapDetectorSkipsWithUncheckedTasks:
         mock_gaps.assert_called_once()
 
 
+class TestFixMode:
+    """Tests for duplo fix subcommand."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "app_name": "TestApp",
+        "features": [],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": [], "test": "ok"},
+        ],
+        "current_phase": 0,
+    }
+
+    def test_fix_from_cli_args(self, capsys, tmp_path, monkeypatch):
+        """duplo fix 'bug one' 'bug two' appends tasks to PLAN.md."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "bug one", "bug two"])
+
+        main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert '- [ ] Fix: bug one [fix: "bug one"]' in plan
+        assert '- [ ] Fix: bug two [fix: "bug two"]' in plan
+        data = _read_duplo_json(tmp_path)
+        issues = data.get("issues", [])
+        assert len(issues) == 2
+        assert issues[0]["description"] == "bug one"
+        assert issues[0]["source"] == "user"
+        out = capsys.readouterr().out
+        assert "2 fix task" in out
+
+    def test_fix_from_file(self, capsys, tmp_path, monkeypatch):
+        """duplo fix --file reads paragraphs as bugs."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [ ] task\n", encoding="utf-8")
+        bugs_file = tmp_path / "BUGS.md"
+        bugs_file.write_text(
+            "First bug description\n\nSecond bug\nwith details\n\nThird bug\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "--file", str(bugs_file)])
+
+        main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Fix: First bug description" in plan
+        assert "Fix: Second bug with details" in plan
+        assert "Fix: Third bug" in plan
+        out = capsys.readouterr().out
+        assert "3 bug(s) from" in out
+        assert "3 fix task" in out
+
+    def test_fix_preserves_existing_plan(self, tmp_path, monkeypatch):
+        """Fix tasks are appended; existing plan content is preserved."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        original = "# Phase 0\n- [x] done task\n- [ ] pending task\n"
+        (tmp_path / "PLAN.md").write_text(original, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "new bug"])
+
+        main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert plan.startswith(original.rstrip())
+        assert "Fix: new bug" in plan
+
+    def test_fix_no_plan_saves_issues_only(self, capsys, tmp_path, monkeypatch):
+        """Without PLAN.md, issues are saved but no tasks appended."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "a bug"])
+
+        main()
+
+        data = _read_duplo_json(tmp_path)
+        assert len(data.get("issues", [])) == 1
+        out = capsys.readouterr().out
+        assert "No PLAN.md found" in out
+
+    def test_fix_no_bugs_does_nothing(self, capsys, tmp_path, monkeypatch):
+        """duplo fix with no args and empty interactive input does nothing."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix"])
+        monkeypatch.setattr("builtins.input", lambda _="": "")
+
+        main()
+
+        out = capsys.readouterr().out
+        assert "No bugs reported" in out
+
+    def test_fix_exits_without_duplo_json(self, tmp_path, monkeypatch):
+        """duplo fix without a project exits with error."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "a bug"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+
+class TestCompareWithReferences:
+    """Tests for _compare_with_references reference image lookup."""
+
+    def test_uses_duplo_references_over_screenshots(self, tmp_path, monkeypatch, capsys):
+        """Video frames in .duplo/references/ take priority over screenshots/."""
+        monkeypatch.chdir(tmp_path)
+        duplo_refs = tmp_path / ".duplo" / "references"
+        duplo_refs.mkdir(parents=True)
+        (duplo_refs / "frame001.png").write_bytes(b"PNG" * 100)
+        (duplo_refs / "frame002.png").write_bytes(b"PNG" * 100)
+
+        current = tmp_path / "screenshots" / "current" / "main.png"
+        current.parent.mkdir(parents=True)
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.comparator import ComparisonResult
+        from duplo.main import _compare_with_references
+
+        result = ComparisonResult(similar=True, summary="ok", details=[])
+        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+            _compare_with_references(current)
+
+        # Should have used the 2 duplo reference images.
+        call_args = mock_cmp.call_args
+        refs = call_args[0][1]
+        assert len(refs) == 2
+        assert all(".duplo" in str(r) for r in refs)
+
+    def test_falls_back_to_screenshots_dir(self, tmp_path, monkeypatch, capsys):
+        """Falls back to screenshots/ when .duplo/references/ has no PNGs."""
+        monkeypatch.chdir(tmp_path)
+        shot_dir = tmp_path / "screenshots"
+        shot_dir.mkdir()
+        (shot_dir / "page.png").write_bytes(b"PNG" * 100)
+
+        current = tmp_path / "screenshots" / "current" / "main.png"
+        current.parent.mkdir(parents=True, exist_ok=True)
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.comparator import ComparisonResult
+        from duplo.main import _compare_with_references
+
+        result = ComparisonResult(similar=True, summary="ok", details=[])
+        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+            _compare_with_references(current)
+
+        refs = mock_cmp.call_args[0][1]
+        assert len(refs) == 1
+        assert "screenshots" in str(refs[0])
+
+    def test_skips_when_no_references(self, tmp_path, monkeypatch, capsys):
+        """Prints skip message when no reference images found anywhere."""
+        monkeypatch.chdir(tmp_path)
+        current = tmp_path / "main.png"
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.main import _compare_with_references
+
+        _compare_with_references(current)
+        out = capsys.readouterr().out
+        assert "No reference screenshots found" in out
+
+
 class TestPhase2NotStartedRunDuplo:
     """Run duplo when Phase 1 is complete and Phase 2 PLAN.md has unchecked tasks.
 

@@ -52,6 +52,7 @@ from duplo.verification_extractor import (
 from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
+from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -147,16 +148,68 @@ def main() -> None:
 
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
-    parser = argparse.ArgumentParser(
-        description="Duplicate an app from reference materials or a product URL.",
-    )
-    parser.add_argument(
-        "url",
-        nargs="?",
-        default=None,
-        help="Product URL to duplicate (e.g. https://numi.app)",
-    )
-    args = parser.parse_args()
+    # Check for subcommands before parsing, since the default
+    # mode uses a positional 'url' arg that would eat 'fix'/'investigate'.
+    if len(sys.argv) > 1 and sys.argv[1] in ("fix", "investigate"):
+        subcmd = sys.argv[1]
+        fix_parser = argparse.ArgumentParser(
+            prog=f"duplo {subcmd}",
+            description=(
+                "Investigate bugs with product-level AI diagnosis."
+                if subcmd == "investigate"
+                else "Report bugs and append fix tasks to the current PLAN.md."
+            ),
+        )
+        fix_parser.add_argument(
+            "bugs",
+            nargs="*",
+            help="Bug descriptions (one per argument). Use quotes for multi-word.",
+        )
+        fix_parser.add_argument(
+            "--file",
+            "-f",
+            dest="bug_file",
+            default=None,
+            help="Read bug descriptions from a file (one per paragraph, blank-line separated).",
+        )
+        fix_parser.add_argument(
+            "--screenshot",
+            "-s",
+            action="store_true",
+            default=False,
+            help="Capture a screenshot of the running app for context.",
+        )
+        fix_parser.add_argument(
+            "--investigate",
+            "-i",
+            action="store_true",
+            default=False,
+            help="Run intelligent product-level diagnosis instead of simple text pipe.",
+        )
+        fix_parser.add_argument(
+            "--images",
+            nargs="+",
+            default=None,
+            metavar="PATH",
+            help="User-supplied screenshot files showing the bug.",
+        )
+        args = fix_parser.parse_args(sys.argv[2:])
+        args.command = subcmd
+        # 'duplo investigate' implies --investigate.
+        if subcmd == "investigate":
+            args.investigate = True
+    else:
+        parser = argparse.ArgumentParser(
+            description="Duplicate an app from reference materials or a product URL.",
+        )
+        parser.add_argument(
+            "url",
+            nargs="?",
+            default=None,
+            help="Product URL to duplicate (e.g. https://numi.app)",
+        )
+        args = parser.parse_args()
+        args.command = None
 
     def _handle_signal(signum, frame):
         print("\nInterrupted.", flush=True)
@@ -166,12 +219,181 @@ def main() -> None:
     signal.signal(signal.SIGTSTP, _handle_signal)
 
     duplo_path = Path(_DUPLO_JSON)
-    if not duplo_path.exists():
+
+    if args.command in ("fix", "investigate"):
+        if not duplo_path.exists():
+            print("No duplo project found. Run duplo first to initialize.")
+            sys.exit(1)
+        _fix_mode(args)
+    elif not duplo_path.exists():
         _first_run(url=args.url)
     else:
         if args.url:
             print("Project already initialized. URL argument ignored.")
         _subsequent_run()
+
+
+def _fix_mode(args: argparse.Namespace) -> None:
+    """Report bugs and append fix tasks to PLAN.md without phase changes.
+
+    When ``--investigate`` is set (or invoked as ``duplo investigate``),
+    runs intelligent product-level diagnosis using all available context.
+    Otherwise, operates as a simple text pipe.
+
+    Usage:
+        duplo fix "labeled expressions don't evaluate"
+        duplo fix --investigate "expressions don't evaluate"
+        duplo investigate "expressions don't evaluate"
+        duplo fix --images bug1.png bug2.png "wrong layout"
+        duplo fix --file BUGS.md
+        duplo fix --screenshot  # interactive + capture
+        duplo fix               # interactive input
+    """
+    bugs: list[str] = []
+
+    # Source 1: command-line arguments.
+    if args.bugs:
+        bugs.extend(args.bugs)
+
+    # Source 2: file.
+    if args.bug_file:
+        bug_path = Path(args.bug_file)
+        if not bug_path.exists():
+            print(f"File not found: {args.bug_file}")
+            sys.exit(1)
+        text = bug_path.read_text(encoding="utf-8")
+        # Split on blank lines — each paragraph is one bug.
+        for paragraph in re.split(r"\n\s*\n", text):
+            stripped = paragraph.strip()
+            if stripped:
+                bugs.append(stripped)
+        print(f"Read {len(bugs)} bug(s) from {args.bug_file}.")
+
+    # Source 3: interactive input if no bugs provided yet.
+    if not bugs:
+        print("Describe each bug, then press Enter twice to record it.")
+        print("Press Enter on an empty line when done.")
+        print("")
+        try:
+            while True:
+                lines: list[str] = []
+                while True:
+                    line = input("")
+                    if line == "":
+                        break
+                    lines.append(line)
+                text = "\n".join(lines).strip()
+                if not text:
+                    break
+                bugs.append(text)
+                print(f"  Recorded bug {len(bugs)}.")
+        except EOFError:
+            pass
+
+    if not bugs:
+        print("No bugs reported.")
+        return
+
+    # Load project data.
+    duplo_path = Path(_DUPLO_JSON)
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"Error: {duplo_path} contains invalid JSON.")
+        sys.exit(1)
+
+    # Optionally capture a screenshot.
+    if args.screenshot:
+        app_name = data.get("app_name", "")
+        if app_name:
+            output_path = Path("screenshots") / "current" / "main.png"
+            launch_cmd = "./run.sh" if Path("run.sh").exists() else None
+            print(f"Capturing screenshot of {app_name} \u2026")
+            shot_code = capture_appshot(app_name, output_path, launch=launch_cmd)
+            if shot_code == 0:
+                print(f"Screenshot saved to {output_path}")
+            else:
+                print("Screenshot capture failed (continuing without it).")
+        else:
+            print("No app_name in duplo.json \u2014 skipping screenshot.")
+
+    # Collect user-supplied screenshot paths.
+    user_screenshots: list[Path] | None = None
+    if getattr(args, "images", None):
+        user_screenshots = [Path(p) for p in args.images]
+        missing = [p for p in user_screenshots if not p.exists()]
+        if missing:
+            for m in missing:
+                print(f"Warning: screenshot not found: {m}")
+            user_screenshots = [p for p in user_screenshots if p.exists()]
+        if user_screenshots:
+            print(f"Using {len(user_screenshots)} user-supplied screenshot(s).")
+
+    # Save bugs as issues in duplo.json.
+    phase_label = ""
+    phase_num, phase_info = get_current_phase()
+    if phase_info:
+        phase_label = f"Phase {phase_num}: {phase_info['title']}"
+
+    for desc in bugs:
+        save_issue(desc, source="user", phase=phase_label)
+    print(f"Saved {len(bugs)} issue(s) to duplo.json.")
+
+    # Intelligent investigation mode.
+    if getattr(args, "investigate", False):
+        print("\nRunning product-level investigation \u2026")
+        result = investigate(bugs, user_screenshots=user_screenshots)
+        print(format_investigation(result))
+
+        if not result.diagnoses:
+            print("No actionable diagnoses. Issues saved to duplo.json.")
+            print("Run mcloop to start fixing.")
+            return
+
+        # Append diagnosed fix tasks to PLAN.md.
+        plan_path = Path("PLAN.md")
+        if not plan_path.exists():
+            print("No PLAN.md found. Diagnoses printed above but no fix tasks appended.")
+            print("Run duplo to generate a plan, then run mcloop.")
+            return
+
+        fix_tasks = investigation_to_fix_tasks(result)
+        plan_content = plan_path.read_text(encoding="utf-8")
+        fix_lines: list[str] = []
+        fix_lines.append("")
+        fix_lines.append("## Investigated bug fixes")
+        fix_lines.append("")
+        fix_lines.extend(fix_tasks)
+        fix_lines.append("")
+
+        updated = plan_content.rstrip() + "\n" + "\n".join(fix_lines)
+        plan_path.write_text(updated, encoding="utf-8")
+        print(f"Appended {len(fix_tasks)} diagnosed fix task(s) to PLAN.md.")
+        print("Run mcloop to start fixing.")
+        return
+
+    # Simple text pipe mode (original behavior).
+    plan_path = Path("PLAN.md")
+    if not plan_path.exists():
+        print("No PLAN.md found. Issues saved but no fix tasks appended.")
+        print("Run duplo to generate a plan, then run mcloop.")
+        return
+
+    plan_content = plan_path.read_text(encoding="utf-8")
+    fix_lines: list[str] = []
+    fix_lines.append("")
+    fix_lines.append("## Bug fixes")
+    fix_lines.append("")
+    for desc in bugs:
+        # Collapse multi-line descriptions to single line for the task.
+        oneline = desc.replace("\n", " ").strip()
+        fix_lines.append(f'- [ ] Fix: {oneline} [fix: "{oneline}"]')
+    fix_lines.append("")
+
+    updated = plan_content.rstrip() + "\n" + "\n".join(fix_lines)
+    plan_path.write_text(updated, encoding="utf-8")
+    print(f"Appended {len(bugs)} fix task(s) to PLAN.md.")
+    print("Run mcloop to start fixing.")
 
 
 def _first_run(*, url: str | None = None) -> None:
@@ -196,7 +418,7 @@ def _first_run(*, url: str | None = None) -> None:
         )
         sys.exit(1)
 
-    print("Scanning reference materials …")
+    print("Scanning reference materials \u2026")
     if scan.images:
         print(f"  Images: {len(scan.images)}")
     if scan.videos:
@@ -219,7 +441,7 @@ def _first_run(*, url: str | None = None) -> None:
     # Extract text from PDFs.
     relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
     if relevant_pdfs:
-        print("Extracting text from PDFs …")
+        print("Extracting text from PDFs \u2026")
         pdf_text = extract_pdf_text(relevant_pdfs)
         if pdf_text:
             text_content = text_content + pdf_text + "\n"
@@ -250,7 +472,7 @@ def _first_run(*, url: str | None = None) -> None:
             return
 
     if source_url:
-        print(f"\nFetching {source_url} …")
+        print(f"\nFetching {source_url} \u2026")
         scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
             source_url
         )
@@ -296,7 +518,7 @@ def _first_run(*, url: str | None = None) -> None:
     video_frames: list[Path] = []
     relevant_videos = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
     if relevant_videos:
-        print(f"\nExtracting frames from {len(relevant_videos)} video(s) …")
+        print(f"\nExtracting frames from {len(relevant_videos)} video(s) \u2026")
         frames_dir = Path(".duplo") / "video_frames"
         results = extract_all_videos(relevant_videos, frames_dir)
         for vr in results:
@@ -307,7 +529,7 @@ def _first_run(*, url: str | None = None) -> None:
                 video_frames.extend(vr.frames)
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
-            print("Filtering frames with Vision …")
+            print("Filtering frames with Vision \u2026")
             decisions = filter_frames(video_frames)
             video_frames = apply_filter(decisions)
             kept = sum(1 for d in decisions if d.keep)
@@ -315,10 +537,10 @@ def _first_run(*, url: str | None = None) -> None:
             if rejected:
                 print(f"  Kept {kept}, rejected {rejected} frame(s)")
             if video_frames:
-                print("Describing UI states …")
+                print("Describing UI states \u2026")
                 frame_descs = describe_frames(video_frames)
                 for fd in frame_descs:
-                    print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                    print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
                 # Store accepted frames in .duplo/references/.
                 frame_entries = [
                     {
@@ -338,7 +560,7 @@ def _first_run(*, url: str | None = None) -> None:
     relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
     relevant_images.extend(video_frames)
     if relevant_images:
-        print("\nExtracting visual design from images …")
+        print("\nExtracting visual design from images \u2026")
         design = extract_design(relevant_images)
         if design.colors or design.fonts or design.layout:
             print(f"Extracted design details from {len(design.source_images)} image(s).")
@@ -349,7 +571,7 @@ def _first_run(*, url: str | None = None) -> None:
     if text_content:
         combined_text = text_content + "\n" + combined_text
 
-    print("\nExtracting features …")
+    print("\nExtracting features \u2026")
     features = extract_features(combined_text)
     if features:
         print(f"Found {len(features)} feature(s).")
@@ -411,7 +633,7 @@ def _first_run(*, url: str | None = None) -> None:
         phase_label = (
             f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
         )
-        print(f"\nGenerating {phase_label} PLAN.md …")
+        print(f"\nGenerating {phase_label} PLAN.md \u2026")
         design_section = format_design_section(design) if design else ""
         content = generate_phase_plan(
             source_url,
@@ -428,7 +650,7 @@ def _first_run(*, url: str | None = None) -> None:
         # Append verification tasks from video frame descriptions.
         frame_descs = load_frame_descriptions()
         if frame_descs:
-            print("Extracting verification cases from demo video …")
+            print("Extracting verification cases from demo video \u2026")
             vcases = extract_verification_cases(frame_descs)
             if vcases:
                 vtasks = format_verification_tasks(vcases)
@@ -467,7 +689,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     if scan.videos:
         relevant_vids = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
         if relevant_vids:
-            print(f"\nExtracting frames from {len(relevant_vids)} new video(s) …")
+            print(f"\nExtracting frames from {len(relevant_vids)} new video(s) \u2026")
             frames_dir = Path(".duplo") / "video_frames"
             vid_results = extract_all_videos(relevant_vids, frames_dir)
             for vr in vid_results:
@@ -481,7 +703,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
 
             # Filter frames with Vision before design extraction.
             if video_frames:
-                print("Filtering frames with Vision …")
+                print("Filtering frames with Vision \u2026")
                 decisions = filter_frames(video_frames)
                 video_frames = apply_filter(decisions)
                 kept = sum(1 for d in decisions if d.keep)
@@ -489,10 +711,10 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
                 if rejected:
                     print(f"  Kept {kept}, rejected {rejected} frame(s)")
                 if video_frames:
-                    print("Describing UI states …")
+                    print("Describing UI states \u2026")
                     frame_descs = describe_frames(video_frames)
                     for fd in frame_descs:
-                        print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                        print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
                     # Store accepted frames in .duplo/references/.
                     frame_entries = [
                         {
@@ -514,7 +736,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     # Combine user images and accepted video frames for design extraction.
     all_images = relevant_images + video_frames
     if all_images:
-        print(f"\nAnalyzing {len(all_images)} image(s) with Vision …")
+        print(f"\nAnalyzing {len(all_images)} image(s) with Vision \u2026")
         design = extract_design(all_images)
         if design.colors or design.fonts or design.layout:
             save_design_requirements(dataclasses.asdict(design))
@@ -527,7 +749,7 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     # Extract text from new PDFs.
     relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
     if relevant_pdfs:
-        print(f"\nExtracting text from {len(relevant_pdfs)} new PDF(s) …")
+        print(f"\nExtracting text from {len(relevant_pdfs)} new PDF(s) \u2026")
         pdf_text = extract_pdf_text(relevant_pdfs)
         if pdf_text:
             summary.collected_text += pdf_text + "\n"
@@ -554,14 +776,14 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         existing_urls = _load_existing_urls()
         new_urls = [u for u in scan.urls if u not in existing_urls]
         if new_urls:
-            print(f"\nFetching {len(new_urls)} new URL(s) …")
+            print(f"\nFetching {len(new_urls)} new URL(s) \u2026")
             fetched = 0
             all_page_records = []
             all_raw_pages: dict[str, str] = {}
             all_code_examples = []
             all_doc_structures = DocStructures()
             for url in new_urls:
-                print(f"  Fetching {url} …")
+                print(f"  Fetching {url} \u2026")
                 try:
                     url_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
                         url
@@ -640,7 +862,7 @@ def _rescrape_product_url() -> tuple[int, int, str]:
     if not source_url:
         return 0, 0, ""
 
-    print(f"\nRe-scraping {source_url} …")
+    print(f"\nRe-scraping {source_url} \u2026")
     try:
         scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
             source_url
@@ -686,7 +908,7 @@ def _rescrape_product_url() -> tuple[int, int, str]:
                 else:
                     print(f"  {vr.source.name}: no scene changes detected")
             if video_frames:
-                print("  Filtering frames with Vision …")
+                print("  Filtering frames with Vision \u2026")
                 decisions = filter_frames(video_frames)
                 video_frames = apply_filter(decisions)
                 kept = sum(1 for d in decisions if d.keep)
@@ -694,10 +916,10 @@ def _rescrape_product_url() -> tuple[int, int, str]:
                 if rejected:
                     print(f"  Kept {kept}, rejected {rejected} frame(s)")
                 if video_frames:
-                    print("  Describing UI states …")
+                    print("  Describing UI states \u2026")
                     frame_descs = describe_frames(video_frames)
                     for fd in frame_descs:
-                        print(f"  {fd.path.name}: {fd.state} — {fd.detail}")
+                        print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
                     frame_entries = [
                         {
                             "path": fd.path,
@@ -755,7 +977,7 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
     platform = prefs.get("platform", "")
     language = prefs.get("language", "")
 
-    print("\nComparing features and examples against PLAN.md …")
+    print("\nComparing features and examples against PLAN.md \u2026")
     result = detect_gaps(
         plan_content, features, examples or None, platform=platform, language=language
     )
@@ -857,9 +1079,9 @@ def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 
     Three states:
-    1. PLAN.md complete → record phase, advance, fall through to generate next.
-    2. PLAN.md incomplete → tell user to run mcloop, return.
-    3. No PLAN.md → regenerate roadmap if needed, generate plan for current phase.
+    1. PLAN.md complete \u2192 record phase, advance, fall through to generate next.
+    2. PLAN.md incomplete \u2192 tell user to run mcloop, return.
+    3. No PLAN.md \u2192 regenerate roadmap if needed, generate plan for current phase.
     """
     duplo_path = Path(_DUPLO_JSON)
     try:
@@ -915,7 +1137,7 @@ def _subsequent_run() -> None:
     # Re-extract features from the updated content and merge
     # new ones into duplo.json so the gap detector can find them.
     if combined_text:
-        print("\nRe-extracting features …")
+        print("\nRe-extracting features \u2026")
         try:
             old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
         except json.JSONDecodeError:
@@ -969,7 +1191,7 @@ def _subsequent_run() -> None:
 
     plan_path = Path("PLAN.md")
 
-    # State 1: PLAN.md complete → record phase completion, then fall through.
+    # State 1: PLAN.md complete \u2192 record phase completion, then fall through.
     if plan_path.exists() and _plan_is_complete():
         phase_num, phase_info = get_current_phase()
         phase_label = (
@@ -982,7 +1204,7 @@ def _subsequent_run() -> None:
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
         _print_feature_status(data)
 
-    # State 2: PLAN.md incomplete → tell user to continue.
+    # State 2: PLAN.md incomplete \u2192 tell user to continue.
     elif plan_path.exists():
         phase_num, phase_info = get_current_phase()
         phase_label = (
@@ -992,7 +1214,7 @@ def _subsequent_run() -> None:
         print("Run mcloop to continue building.")
         return
 
-    # State 3: No PLAN.md → generate plan for current phase.
+    # State 3: No PLAN.md \u2192 generate plan for current phase.
     phase_num, phase_info = get_current_phase()
 
     # If no roadmap exists or the existing one is fully consumed,
@@ -1013,7 +1235,7 @@ def _subsequent_run() -> None:
             preferences=prefs_data.get("preferences", []),
         )
         history = _build_completion_history(data)
-        print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) …")
+        print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
             source_url, remaining, preferences, completion_history=history
         )
@@ -1078,7 +1300,7 @@ def _subsequent_run() -> None:
         preferences=prefs_data.get("preferences", []),
     )
 
-    print(f"Generating {phase_label} PLAN.md …")
+    print(f"Generating {phase_label} PLAN.md \u2026")
     design_data = data.get("design_requirements", {})
     design_section = ""
     if design_data:
@@ -1100,7 +1322,7 @@ def _subsequent_run() -> None:
     # Append verification tasks from video frame descriptions.
     frame_descs = load_frame_descriptions()
     if frame_descs:
-        print("Extracting verification cases from demo video …")
+        print("Extracting verification cases from demo video \u2026")
         vcases = extract_verification_cases(frame_descs)
         if vcases:
             vtasks = format_verification_tasks(vcases)
@@ -1220,7 +1442,7 @@ def _confirm_product(product_name: str, source_url: str) -> str:
             return new_name
         return product_name
 
-    # No product name identified — ask the user.
+    # No product name identified \u2014 ask the user.
     name = input("What product should Duplo duplicate? ").strip()
     if not name:
         print("No product specified. Cancelled.")
@@ -1237,7 +1459,7 @@ def _validate_url(url: str) -> tuple[str, str]:
     where *product_name* may be empty if unknown.  Returns ``("", "")``
     if the user cancels.
     """
-    print(f"\nValidating {url} …")
+    print(f"\nValidating {url} \u2026")
     try:
         result = validate_product_url(url)
     except Exception as exc:
@@ -1262,7 +1484,7 @@ def _validate_url(url: str) -> tuple[str, str]:
             return "", ""
         if choice.startswith(("http://", "https://")):
             return choice, ""
-        # Treat as a product description — use it as the product name.
+        # Treat as a product description \u2014 use it as the product name.
         return url, choice
 
     print(f"This URL appears to list multiple products: {result.reason}")
@@ -1294,7 +1516,7 @@ def _validate_url(url: str) -> tuple[str, str]:
             return choice, ""
         print(f"Not a valid number or URL: {choice}")
         return "", ""
-    # No product list — ask for a URL.
+    # No product list \u2014 ask for a URL.
     print("\nPlease provide a URL that points to a single product,\nor press Enter to cancel.")
     new_url = input("Product URL: ").strip()
     if new_url:
@@ -1355,20 +1577,20 @@ def _init_project(
     claude_md = write_claude_md(target_dir=project_dir)
     print(f"CLAUDE.md written to {claude_md}")
 
-    print("\nGenerating build roadmap …")
+    print("\nGenerating build roadmap \u2026")
     roadmap = generate_roadmap(url, features, prefs)
 
     urls = _SECTION_URL_RE.findall(text)
     if urls:
         output_dir = project_dir / "screenshots"
-        print(f"\nSaving reference screenshots to {output_dir}/ …")
+        print(f"\nSaving reference screenshots to {output_dir}/ \u2026")
         saved_shots = save_reference_screenshots(urls, output_dir)
         print(f"Saved {len(saved_shots)} screenshot(s).")
         feature_names = [f.name for f in features]
         screenshot_map = map_screenshots_to_features(text, feature_names, output_dir)
         if screenshot_map:
             save_screenshot_feature_map(screenshot_map, target_dir=project_dir)
-            print(f"Screenshot→feature map saved ({len(screenshot_map)} entries).")
+            print(f"Screenshot\u2192feature map saved ({len(screenshot_map)} entries).")
 
     return roadmap
 
@@ -1441,7 +1663,7 @@ def _complete_phase(
         if features:
             unannotated = [t for t in tasks if not t.features and not t.fixes]
             if unannotated:
-                print(f"Matching {len(unannotated)} unannotated task(s) to features …")
+                print(f"Matching {len(unannotated)} unannotated task(s) to features \u2026")
                 matched, new = match_unannotated_tasks(tasks, features, phase_label)
                 if matched:
                     print(f"  Matched {len(matched)} existing feature(s):")
@@ -1479,7 +1701,7 @@ def _complete_phase(
     if app_name:
         output_path = Path("screenshots") / "current" / "main.png"
         launch_cmd = "./run.sh" if Path("run.sh").exists() else None
-        print(f"\nCapturing screenshots with appshot ({app_name}) …")
+        print(f"\nCapturing screenshots with appshot ({app_name}) \u2026")
         shot_code = capture_appshot(app_name, output_path, launch=launch_cmd)
         if shot_code == 0:
             print(f"Screenshot saved to {output_path}")
@@ -1494,13 +1716,20 @@ def _complete_phase(
 
 def _compare_with_references(current: Path) -> None:
     """Compare *current* screenshot against any reference images and print results."""
-    ref_dir = Path("screenshots")
-    references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []
+    # Check .duplo/references/ first (video frames from the product demo),
+    # then fall back to screenshots/ (Playwright website captures).
+    references: list[Path] = []
+    duplo_refs = Path(".duplo") / "references"
+    if duplo_refs.is_dir():
+        references = sorted(duplo_refs.glob("*.png"))
     if not references:
-        print("No reference screenshots found — skipping visual comparison.")
+        ref_dir = Path("screenshots")
+        references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []
+    if not references:
+        print("No reference screenshots found \u2014 skipping visual comparison.")
         return
 
-    print(f"\nComparing screenshot against {len(references)} reference image(s) …")
+    print(f"\nComparing screenshot against {len(references)} reference image(s) \u2026")
     result = compare_screenshots(current, references)
     verdict = "SIMILAR" if result.similar else "DIFFERENT"
     print(f"Visual comparison: {verdict}")
