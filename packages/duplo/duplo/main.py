@@ -89,7 +89,7 @@ from duplo.selector import select_features, select_issues
 _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 _DUPLO_JSON = ".duplo/duplo.json"
 # Files that are project artifacts, not user-provided reference materials.
-_PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md"}
+_PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md", "SPEC.md"}
 
 
 @dataclasses.dataclass
