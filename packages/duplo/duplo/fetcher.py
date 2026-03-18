@@ -88,16 +88,32 @@ _PLATFORM_DOMAINS = {
 }
 
 
-def _is_platform_domain(domain: str) -> bool:
-    """Return True if *domain* belongs to a known hosting platform.
+def _is_platform_domain(url: str) -> bool:
+    """Return True if *url* points to a hosting platform's own pages.
 
-    Matches exact domains and subdomains (e.g. ``user.github.io``
-    matches ``github.io``).
+    Returns False for product-specific documentation hosted on a
+    platform (e.g. ``github.com/org/repo/wiki``) since those are
+    legitimate product docs, not platform marketing pages.
     """
-    for platform in _PLATFORM_DOMAINS:
-        if domain == platform or domain.endswith("." + platform):
-            return True
-    return False
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    path = parsed.path.lower()
+
+    is_platform = False
+    for plat in _PLATFORM_DOMAINS:
+        if domain == plat or domain.endswith("." + plat):
+            is_platform = True
+            break
+    if not is_platform:
+        return False
+
+    # Allow product documentation paths on platform domains.
+    # e.g. github.com/org/repo/wiki, gitlab.com/org/repo/-/wikis
+    _PRODUCT_DOC_PATHS = re.compile(r"^/[^/]+/[^/]+/(wiki|docs|documentation|guide)")
+    if _PRODUCT_DOC_PATHS.search(path):
+        return False
+
+    return True
 
 
 def is_docs_link(url: str, anchor: str) -> bool:
@@ -266,7 +282,7 @@ def fetch_site(
                 if link_domain != seed_domain:
                     # Never follow cross-domain links into hosting
                     # platform docs (e.g. GitHub's own features).
-                    if _is_platform_domain(link_domain):
+                    if _is_platform_domain(link_url):
                         continue
                     docs_domains.add(link_domain)
                 queue.append((1, link_url))

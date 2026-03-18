@@ -346,7 +346,7 @@ class TestFetchSite:
         assert not any("other.com" in url for url in fetch_calls)
 
     def test_follows_cross_domain_docs_links(self):
-        """Cross-domain docs links are followed, but platform domains are skipped."""
+        """Cross-domain docs links are followed, including product wikis on platforms."""
         seed_html = (
             "<html><body><p>Home</p>"
             '<a href="https://other.com/docs/intro">Documentation</a>'
@@ -374,10 +374,28 @@ class TestFetchSite:
                 "https://example.com", max_pages=5
             )
 
-        # Non-platform docs domain is followed.
         assert "External docs content" in text
-        # github.com is a platform domain — its wiki is NOT followed.
-        assert "Wiki content" not in text
+        # github.com/org/repo/wiki is product docs, not platform marketing.
+        assert "Wiki content" in text
+
+    def test_blocks_platform_marketing_pages(self):
+        """Platform root/marketing pages are blocked even if they match docs patterns."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="https://github.com/features">Features</a>'
+            "</body></html>"
+        )
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site("https://example.com", max_pages=5)
+
+        assert not any("github.com" in url for url in fetch_calls)
 
     def test_follows_links_within_docs_domain(self):
         """Once a cross-domain docs site is reached, follow its internal links."""
