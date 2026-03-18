@@ -155,7 +155,7 @@ def _run_ffmpeg_interval_sample(
     output_dir: Path,
     stem: str,
     max_frames: int,
-    interval: float = 2.0,
+    interval: float = 1.0,
 ) -> list[Path] | str:
     """Extract frames at fixed time intervals as a fallback.
 
@@ -227,7 +227,7 @@ def _hamming(a: int, b: int) -> int:
 def deduplicate_frames(
     frames: list[Path],
     *,
-    max_distance: int = 6,
+    max_distance: int = 3,
     hash_size: int = 8,
 ) -> list[Path]:
     """Remove near-duplicate frames using perceptual difference hashing.
@@ -236,10 +236,14 @@ def deduplicate_frames(
     Hamming distance to any kept frame is <= *max_distance*, the frame is
     considered a duplicate and its file is deleted.
 
+    A low threshold (default 3) ensures that frames differing only in
+    minor rendering artifacts are collapsed, while frames with different
+    text content (different expressions on screen) are preserved.
+
     Args:
         frames: Sorted list of frame paths.
         max_distance: Maximum Hamming distance to consider two frames
-            as duplicates. Default 6 (out of 64 bits).
+            as duplicates. Default 3 (out of 64 bits).
         hash_size: Size parameter for dHash. Produces *hash_size*^2 bit
             hashes (default 8 → 64-bit hashes).
 
