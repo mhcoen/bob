@@ -38,11 +38,12 @@ The cycle is: run duplo to generate the plan, run mcloop to build
 it, test, add more reference material if needed, run duplo again.
 
 ```bash
-duplo https://example.com # Analyze, extract features, generate PLAN.md
-mcloop                    # Build it (runs until all tasks complete)
+duplo https://example.com   # Analyze, extract features, generate PLAN.md
+mcloop                      # Build it (runs until all tasks complete)
 # ... test the result ...
-duplo                     # Detect gaps, generate next phase
-mcloop                    # Build the next phase
+duplo investigate "bug"     # Diagnose bugs with product context
+duplo                       # Detect gaps, generate next phase
+mcloop                      # Build the next phase
 ```
 
 ## What Duplo does on first run
@@ -90,6 +91,10 @@ mcloop                    # Build the next phase
 
 9. **Extracts features.** Uses Claude to analyze all collected text
    and produce a structured feature list grouped by category.
+   The extraction prompt enforces strict constraints: only features
+   the product demonstrably offers, not features mentioned in
+   passing, not platform/ecosystem features, not marketing claims.
+   When in doubt, features are omitted rather than hallucinated.
 
 10. **Interactive selection.** Presents the features and asks which to
    include. Then asks about platform, language, constraints, and
@@ -103,11 +108,18 @@ mcloop                    # Build the next phase
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-13. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
+13. **Generates verification cases from video frames.** If demo
+    video frames were captured and described, Duplo extracts
+    expression/result pairs from the frame descriptions (e.g.,
+    "type `Price: $7 × 4`, expect `$28`") and appends them to
+    the plan as functional verification tasks. These are test
+    cases derived directly from the product's own demo.
+
+14. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
     CLAUDE.md, and mcloop.json. Prints "Run mcloop to start
     building." and exits. You run mcloop separately.
 
-14. **Cleans up.** Moves processed reference files to
+15. **Cleans up.** Moves processed reference files to
     `.duplo/references/` and saves a file hash manifest for detecting
     changes on subsequent runs.
 
@@ -123,7 +135,8 @@ since the last run:
 
 - **Incomplete phase:** If PLAN.md has unchecked tasks, Duplo
   prints a status summary and tells you to run mcloop to continue
-  building.
+  building. Gap detection is skipped for incomplete plans to avoid
+  appending hallucinated tasks to plans the user is still editing.
 
 - **No PLAN.md:** Duplo enters the next-phase flow directly.
 
@@ -245,6 +258,57 @@ implemented it. Features come from three sources:
 This means the feature list is a complete record of everything
 built across all phases, not just what was scraped from the
 product site.
+
+## Bug reporting and investigation
+
+When testing reveals bugs, Duplo provides two modes for recording
+and diagnosing them.
+
+### Simple bug reporting
+
+`duplo fix` records bugs and appends fix tasks to PLAN.md:
+
+```bash
+duplo fix "labeled expressions don't evaluate"
+duplo fix "wrong background color" "window should be square"
+duplo fix --file BUGS.md            # one bug per paragraph
+duplo fix --screenshot              # capture app screenshot + interactive input
+duplo fix                           # interactive input
+```
+
+Each bug is saved as an issue in duplo.json and appended to PLAN.md
+as a `- [ ] Fix: ...` checklist item with a `[fix: "..."]` annotation
+so phase completion can track resolution.
+
+### Intelligent investigation
+
+`duplo investigate` gathers all available product context and sends it
+to an LLM for product-level diagnosis:
+
+```bash
+duplo investigate "expressions don't evaluate"
+duplo fix --investigate "wrong colors"
+duplo investigate --images bug1.png bug2.png "layout is broken"
+duplo investigate --screenshot "results not showing"
+```
+
+The investigator automatically collects reference frames from
+`.duplo/references/`, the current app screenshot from
+`screenshots/current/main.png`, frame descriptions, design
+requirements, the feature list, code examples, and open issues
+from `duplo.json`. It combines these with the user's complaint
+and any user-supplied screenshots, sends everything to Claude,
+and produces structured diagnoses with evidence citations.
+
+Each diagnosis includes the symptom, what it should look like
+(citing specific reference frames, design colors, or code
+examples), severity, and the likely area of the codebase to
+investigate. Diagnoses are appended to PLAN.md as fix tasks
+under an "Investigated bug fixes" heading.
+
+User-supplied screenshots (via `--images`) let you show the
+investigator exactly what's wrong without relying on appshot
+capture.
 
 ## Requirements
 
