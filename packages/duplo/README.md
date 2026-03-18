@@ -310,6 +310,61 @@ User-supplied screenshots (via `--images`) let you show the
 investigator exactly what's wrong without relying on appshot
 capture.
 
+## Product specification (SPEC.md)
+
+Create a `SPEC.md` file in the project root to express your intent
+and constraints. Duplo reads it on every run and injects its
+content into all LLM calls that shape the build.
+
+A spec can be as minimal as a single paragraph or as detailed as
+you want. Recognised headings (all optional):
+
+```markdown
+## Purpose
+A macOS text calculator inspired by numi.app.
+
+## Scope
+- include: arithmetic, unit conversion, variables
+- exclude: JavaScript plugin API, Alfred integration
+
+## Behavior
+- `2+3` → `5`
+- `Price: $7 × 4` should produce `$28`
+- `5 km in miles` expect `3.11 mi`
+
+## Architecture
+Swift, SwiftUI, SPM, macOS 14+. No external dependencies.
+
+## Design
+Dark theme (#2b2b2b), monospace font, yellow-green results.
+
+## References
+- The demo video at numi.app is the visual ground truth.
+- The wiki at github.com/nikolaeu/numi/wiki is the behavioral ground truth.
+```
+
+How each section is used:
+
+- **Purpose:** Injected into every LLM prompt so the model
+  understands what is being built.
+- **Scope:** Include/exclude lists filter the feature list after
+  extraction. Includes are added even if the scraper doesn't find
+  them. Excludes are removed even if the scraper does.
+- **Behavior:** Each `` `input` → `expected` `` pair becomes a
+  verification task in PLAN.md, alongside video-frame-derived
+  test cases. Also used as ground truth during investigation.
+- **Architecture:** Injected into roadmap and plan generation
+  prompts. Supplements the interactive build preferences.
+- **Design:** Injected into plan generation. Supplements or
+  overrides what the design extractor finds from screenshots.
+- **References:** Tells the LLM which reference materials are
+  authoritative and for what purpose.
+
+Content under unrecognised headings or outside any heading is
+preserved and still injected into prompts as general guidance.
+The spec is authoritative: when it conflicts with scraped content,
+the spec wins.
+
 ## Requirements
 
 - Python 3.11+
