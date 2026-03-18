@@ -23,8 +23,10 @@ crawled (like notes with GitHub links) in the project directory.
 
 Duplo scans the directory, analyzes everything it finds, identifies
 the product, extracts features and visual design details, asks which
-features you want, and generates a phased build plan. You then run
-mcloop to build it.
+features you want, and generates a phased build plan. If a `SPEC.md`
+file is present, Duplo uses it to guide every decision — feature
+extraction, roadmap generation, plan generation, and bug
+investigation. You then run mcloop to build it.
 
 When you test the result and find things missing or wrong, drop more
 reference material into the directory (a screenshot showing the right
@@ -41,10 +43,16 @@ it, test, add more reference material if needed, run duplo again.
 duplo https://example.com   # Analyze, extract features, generate PLAN.md
 mcloop                      # Build it (runs until all tasks complete)
 # ... test the result ...
-duplo investigate "bug"     # Diagnose bugs with product context
-duplo                       # Detect gaps, generate next phase
-mcloop                      # Build the next phase
+duplo fix "bug description"  # Record bugs, append fix tasks
+duplo investigate "bug"      # Diagnose bugs with product context
+duplo                        # Detect gaps, generate next phase
+mcloop                       # Build the next phase
 ```
+
+Optionally, create a `SPEC.md` before running duplo to express
+your intent, scope constraints, expected behavior, architecture
+decisions, and design direction. See
+[Product specification](#product-specification-specmd) below.
 
 ## What Duplo does on first run
 
@@ -89,39 +97,53 @@ mcloop                      # Build the next phase
    the same way as user-provided videos. Downloaded images are
    used for design extraction alongside user-provided screenshots.
 
-9. **Extracts features.** Uses Claude to analyze all collected text
-   and produce a structured feature list grouped by category.
-   The extraction prompt enforces strict constraints: only features
-   the product demonstrably offers, not features mentioned in
-   passing, not platform/ecosystem features, not marketing claims.
-   When in doubt, features are omitted rather than hallucinated.
+9. **Reads SPEC.md (if present).** If a `SPEC.md` file exists in
+   the project root, Duplo reads it and injects its content into
+   all subsequent LLM calls. Scope overrides filter the feature
+   list; behavior contracts become verification tasks; architecture
+   and design sections guide plan generation.
 
-10. **Interactive selection.** Presents the features and asks which to
-   include. Then asks about platform, language, constraints, and
-   preferences.
+10. **Extracts features.** Uses Claude to analyze all collected text
+   (guided by the product spec if present) and produce a structured
+   feature list grouped by category. The extraction prompt enforces
+   strict constraints: only features the product demonstrably
+   offers, not features mentioned in passing, not platform/ecosystem
+   features, not marketing claims. When in doubt, features are
+   omitted rather than hallucinated. If the spec includes scope
+   overrides, excluded features are removed and required features
+   are included regardless of what the scraper found.
 
-11. **Generates a phased roadmap.** Breaks the selected features into
-    phases, starting with the smallest end-to-end working thing. Each
-    phase has a title, goal, feature list, and test criteria.
+11. **Interactive selection.** Presents the features and asks which
+    to include. Then asks about platform, language, constraints,
+    and preferences.
 
-12. **Generates test cases from documentation.** Every code example
+12. **Generates a phased roadmap.** Breaks the selected features
+    into phases, starting with the smallest end-to-end working
+    thing. Each phase has a title, goal, feature list, and test
+    criteria. The product spec (if present) is included in the
+    roadmap generation prompt.
+
+13. **Generates test cases from documentation.** Every code example
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-13. **Generates verification cases from video frames.** If demo
-    video frames were captured and described, Duplo extracts
-    expression/result pairs from the frame descriptions (e.g.,
-    "type `Price: $7 × 4`, expect `$28`") and appends them to
-    the plan as functional verification tasks. These are test
-    cases derived directly from the product's own demo.
+14. **Generates verification cases from video frames and spec.**
+    If demo video frames were captured and described, Duplo
+    extracts expression/result pairs from the frame descriptions
+    (e.g., "type `Price: $7 × 4`, expect `$28`") and appends
+    them to the plan as functional verification tasks. If
+    `SPEC.md` contains behavior contracts, those become
+    additional verification tasks.
 
-14. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
-    CLAUDE.md, and mcloop.json. Prints "Run mcloop to start
-    building." and exits. You run mcloop separately.
+15. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
+    CLAUDE.md, and mcloop.json. The product spec (if present)
+    is included in the plan generation prompt. Prints "Run
+    mcloop to start building." and exits. You run mcloop
+    separately.
 
-15. **Cleans up.** Moves processed reference files to
-    `.duplo/references/` and saves a file hash manifest for detecting
-    changes on subsequent runs.
+16. **Cleans up.** Moves processed reference files to
+    `.duplo/references/` and saves a file hash manifest for
+    detecting changes on subsequent runs.
 
 ## Subsequent runs
 
@@ -220,6 +242,7 @@ removes or overwrites existing code, plans, or configuration:
   commands are never removed or modified.
 - **README.md:** New sections are appended by heading. Existing
   content is not replaced.
+- **SPEC.md:** Never modified by Duplo. This is your document.
 - **Code and project files:** Duplo never modifies files that
   McLoop or the user created. It only writes to its own state
   directory (`.duplo/`) and the configuration files above.
