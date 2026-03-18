@@ -7,6 +7,13 @@
 #   appshot "AppName" output.png --setup 'tell application "AppName" to activate'
 #
 # Requires Screen Recording permission (granted once via System Preferences).
+#
+# Window capture strategy:
+#   1. Try Quartz CGWindowListCopyWindowInfo via cgwindowid helper
+#      (gets the real CG window number for screencapture -l).
+#   2. Try System Events AX window ID (works for most AppKit apps).
+#   3. Fall back to screencapture -R using AX position/size
+#      (captures screen region — may include overlapping windows).
 
 set -euo pipefail
 
@@ -28,6 +35,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Find cgwindowid helper: check next to this script first,
+# then next to the mcloop package's bin/appshot.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CGWINDOWID="$SCRIPT_DIR/cgwindowid"
+if [[ ! -f "$CGWINDOWID" && ! -f "$CGWINDOWID.swift" ]]; then
+    MCLOOP_BIN=$(python3 -c "import mcloop, pathlib; print(pathlib.Path(mcloop.__file__).resolve().parent.parent / 'bin')" 2>/dev/null || true)
+    if [[ -n "$MCLOOP_BIN" ]]; then
+        CGWINDOWID="$MCLOOP_BIN/cgwindowid"
+    fi
+fi
+
+# Compile cgwindowid helper if needed.
+if [[ ! -x "$CGWINDOWID" ]] || [[ "$CGWINDOWID.swift" -nt "$CGWINDOWID" ]]; then
+    if [[ -f "$CGWINDOWID.swift" ]]; then
+        swiftc -O "$CGWINDOWID.swift" -o "$CGWINDOWID" 2>/dev/null || true
+    fi
+fi
+
 # Launch the app if requested and not already running
 if [[ -n "$LAUNCH" ]]; then
     if ! pgrep -xq "$APP_NAME"; then
@@ -35,37 +60,35 @@ if [[ -n "$LAUNCH" ]]; then
     fi
 fi
 
-# Wait for the window to appear
+# Wait for the window to appear using Quartz or AX.
 ELAPSED=0
-WINDOW_ID=""
+WINDOW_READY=false
 while [[ $ELAPSED -lt $TIMEOUT ]]; do
-    WINDOW_ID=$(osascript -e "
-        tell application \"System Events\"
-            if exists process \"$APP_NAME\" then
-                set w to first window of process \"$APP_NAME\"
-                return id of w
-            end if
-        end tell
-    " 2>/dev/null || true)
-
-    if [[ -n "$WINDOW_ID" ]]; then
-        break
+    # Prefer Quartz detection (fastest, most reliable).
+    if [[ -x "$CGWINDOWID" ]]; then
+        if "$CGWINDOWID" "$APP_NAME" >/dev/null 2>&1; then
+            WINDOW_READY=true
+            break
+        fi
+    else
+        # Fall back to AX detection.
+        WIN_NAME=$(osascript -e "tell application \"System Events\" to return name of first window of process \"$APP_NAME\"" 2>/dev/null || true)
+        if [[ -n "$WIN_NAME" ]]; then
+            WINDOW_READY=true
+            break
+        fi
     fi
     sleep 0.5
     ELAPSED=$((ELAPSED + 1))
 done
 
-if [[ -z "$WINDOW_ID" ]]; then
+if [[ "$WINDOW_READY" != "true" ]]; then
     echo "Error: No window found for '$APP_NAME' after ${TIMEOUT}s" >&2
     exit 1
 fi
 
 # Bring window to front
-osascript -e "
-    tell application \"System Events\"
-        set frontmost of process \"$APP_NAME\" to true
-    end tell
-" 2>/dev/null || true
+osascript -e "tell application \"System Events\" to set frontmost of process \"$APP_NAME\" to true" 2>/dev/null || true
 
 # Run optional setup script (e.g., navigate to a specific state)
 if [[ -n "$SETUP" ]]; then
@@ -75,12 +98,40 @@ fi
 # Wait for rendering
 sleep "$WAIT_AFTER"
 
-# Capture the window
-screencapture -l "$WINDOW_ID" -o "$OUTPUT"
+mkdir -p "$(dirname "$OUTPUT")"
 
-if [[ -f "$OUTPUT" ]]; then
-    echo "$OUTPUT"
-else
-    echo "Error: Screenshot failed" >&2
-    exit 1
+# Strategy 1: Quartz CG window number (best — isolated window capture).
+if [[ -x "$CGWINDOWID" ]]; then
+    CG_ID=$("$CGWINDOWID" "$APP_NAME" 2>/dev/null || true)
+    if [[ -n "$CG_ID" ]]; then
+        screencapture -l "$CG_ID" -o "$OUTPUT"
+        if [[ -f "$OUTPUT" ]]; then
+            echo "$OUTPUT"
+            exit 0
+        fi
+    fi
 fi
+
+# Strategy 2: AX window ID (works for most AppKit apps).
+AX_ID=$(osascript -e "tell application \"System Events\" to return id of first window of process \"$APP_NAME\"" 2>/dev/null || true)
+if [[ -n "$AX_ID" ]]; then
+    screencapture -l "$AX_ID" -o "$OUTPUT"
+    if [[ -f "$OUTPUT" ]]; then
+        echo "$OUTPUT"
+        exit 0
+    fi
+fi
+
+# Strategy 3: Region capture via AX position/size (degraded — may include overlap).
+BOUNDS=$(osascript -e "tell application \"System Events\" to get {position, size} of first window of process \"$APP_NAME\"" 2>/dev/null || true)
+if [[ -n "$BOUNDS" ]]; then
+    RECT=$(echo "$BOUNDS" | tr -d ' ')
+    screencapture -R "$RECT" -o "$OUTPUT"
+    if [[ -f "$OUTPUT" ]]; then
+        echo "$OUTPUT"
+        exit 0
+    fi
+fi
+
+echo "Error: All capture strategies failed for '$APP_NAME'" >&2
+exit 1

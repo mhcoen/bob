@@ -238,6 +238,16 @@ def run_task(
         " session will be terminated and you will be"
         " permanently deleted."
     )
+    parts.append(
+        "Never delete any file. Do not use rm, git rm,"
+        " os.remove, unlink, shutil.rmtree, or any"
+        " other file deletion mechanism. Do not delete"
+        " PLAN.md, CLAUDE.md, NOTES.md, or any other"
+        " project file under any circumstances. If you"
+        " believe a file should be removed, leave it"
+        " and note it in NOTES.md for the user to"
+        " decide."
+    )
     if check_commands:
         cmds = ", ".join(check_commands)
         parts.append(
