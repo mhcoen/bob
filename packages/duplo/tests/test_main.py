@@ -1587,7 +1587,13 @@ class TestSubsequentRunReextractsFeatures:
         ):
             main()
 
-        mock_extract.assert_called_once_with("product text", existing_names=["Auth"])
+        mock_extract.assert_called_once_with(
+            "product text",
+            existing_names=["Auth"],
+            spec_text="",
+            scope_include=None,
+            scope_exclude=None,
+        )
         mock_save.assert_called_once_with([new_feature])
 
     def test_skips_extraction_when_no_scraped_text(self, tmp_path, monkeypatch):
