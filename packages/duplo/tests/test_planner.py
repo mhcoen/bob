@@ -118,6 +118,29 @@ class TestGeneratePhasePlan:
         assert "(none)" in prompt
         assert isinstance(result, str)
 
+    def test_spec_text_injected_into_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                spec_text="Build a calculator app.",
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Build a calculator app." in prompt
+        assert "authoritative" in prompt.lower()
+
+    def test_spec_text_empty_not_in_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                spec_text="",
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Product specification" not in prompt
+
     def test_includes_issues_in_prompt(self):
         phase = {
             "phase": 2,

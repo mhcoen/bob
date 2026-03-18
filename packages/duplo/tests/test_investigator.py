@@ -240,6 +240,35 @@ class TestBuildPrompt:
         assert "something is broken" in prompt
         assert "Analyze all the evidence" in prompt
 
+    def test_includes_spec_text(self):
+        context = {
+            "reference_images": [],
+            "current_screenshot": None,
+            "frame_descriptions": [],
+            "design_requirements": {},
+            "features": [],
+            "code_examples": [],
+            "issues": [],
+            "spec_text": "Must support `2+3` -> `5`.",
+        }
+        prompt = _build_prompt(["bug"], context)
+        assert "PRODUCT SPECIFICATION" in prompt
+        assert "Must support" in prompt
+
+    def test_spec_text_empty_not_in_prompt(self):
+        context = {
+            "reference_images": [],
+            "current_screenshot": None,
+            "frame_descriptions": [],
+            "design_requirements": {},
+            "features": [],
+            "code_examples": [],
+            "issues": [],
+            "spec_text": "",
+        }
+        prompt = _build_prompt(["bug"], context)
+        assert "PRODUCT SPECIFICATION" not in prompt
+
     def test_includes_user_screenshot_legend(self):
         user_img = Path("/tmp/bug_screenshot.png")
         context = {
@@ -476,3 +505,42 @@ class TestInvestigate:
         result = investigate(["bug"])
         assert "failed" in result.summary.lower()
         assert result.diagnoses == []
+
+    @patch("duplo.investigator._gather_context")
+    def test_spec_text_included_in_prompt(self, mock_gather):
+        mock_gather.return_value = {
+            "reference_images": [],
+            "current_screenshot": None,
+            "frame_descriptions": [],
+            "design_requirements": {},
+            "features": [],
+            "code_examples": [],
+            "issues": [],
+            "app_name": "Test",
+            "source_url": "",
+        }
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], spec_text="Must produce $28 for Price: $7 x 4.")
+        prompt = mock_text_query.call_args[0][0]
+        assert "Must produce $28" in prompt
+        assert "PRODUCT SPECIFICATION" in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_spec_text_empty_not_in_prompt(self, mock_gather):
+        mock_gather.return_value = {
+            "reference_images": [],
+            "current_screenshot": None,
+            "frame_descriptions": [],
+            "design_requirements": {},
+            "features": [],
+            "code_examples": [],
+            "issues": [],
+            "app_name": "Test",
+            "source_url": "",
+        }
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], spec_text="")
+        prompt = mock_text_query.call_args[0][0]
+        assert "PRODUCT SPECIFICATION" not in prompt

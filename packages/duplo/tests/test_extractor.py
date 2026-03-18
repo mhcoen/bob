@@ -146,6 +146,58 @@ class TestExtractFeatures:
         assert features == []
 
 
+class TestExtractFeaturesWithSpec:
+    def test_spec_text_injected_into_system_prompt(self):
+        with patch("duplo.extractor.query", return_value="[]") as mock_query:
+            extract_features("content", spec_text="Build a calculator.")
+        system = mock_query.call_args.kwargs.get("system", "")
+        assert "Build a calculator." in system
+
+    def test_spec_text_empty_does_not_modify_system(self):
+        with patch("duplo.extractor.query", return_value="[]") as mock_query:
+            extract_features("content", spec_text="")
+        system = mock_query.call_args.kwargs.get("system", "")
+        assert "product specification" not in system.lower()
+
+    def test_scope_exclude_filters_features(self):
+        raw = json_array([
+            {"name": "Math", "description": "Basic math.", "category": "core"},
+            {"name": "CLI tool", "description": "Command line.", "category": "other"},
+        ])
+        with patch("duplo.extractor.query", return_value=raw):
+            features = extract_features("content", scope_exclude=["CLI tool"])
+        assert len(features) == 1
+        assert features[0].name == "Math"
+
+    def test_scope_exclude_case_insensitive(self):
+        raw = json_array([
+            {"name": "CLI Tool", "description": "Command line.", "category": "other"},
+        ])
+        with patch("duplo.extractor.query", return_value=raw):
+            features = extract_features("content", scope_exclude=["cli tool"])
+        assert features == []
+
+    def test_scope_include_does_not_filter(self):
+        """Scope includes are handled by the LLM prompt, not by post-filtering."""
+        raw = json_array([
+            {"name": "Math", "description": "Basic math.", "category": "core"},
+        ])
+        with patch("duplo.extractor.query", return_value=raw):
+            features = extract_features("content", scope_include=["Variables"])
+        assert len(features) == 1
+
+    def test_combined_spec_and_existing_names(self):
+        with patch("duplo.extractor.query", return_value="[]") as mock_query:
+            extract_features(
+                "content",
+                existing_names=["Search"],
+                spec_text="Build a widget.",
+            )
+        system = mock_query.call_args.kwargs.get("system", "")
+        assert "Build a widget." in system
+        assert "Search" in system
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
