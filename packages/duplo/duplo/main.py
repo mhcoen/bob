@@ -53,6 +53,12 @@ from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
+from duplo.spec_reader import (
+    format_contracts_as_verification,
+    format_scope_override_prompt,
+    format_spec_for_prompt,
+    read_spec,
+)
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -341,8 +347,10 @@ def _fix_mode(args: argparse.Namespace) -> None:
 
     # Intelligent investigation mode.
     if getattr(args, "investigate", False):
+        spec = read_spec()
+        spec_prompt = format_spec_for_prompt(spec) if spec else ""
         print("\nRunning product-level investigation \u2026")
-        result = investigate(bugs, user_screenshots=user_screenshots)
+        result = investigate(bugs, user_screenshots=user_screenshots, spec_text=spec_prompt)
         print(format_investigation(result))
 
         if not result.diagnoses:
@@ -398,6 +406,11 @@ def _fix_mode(args: argparse.Namespace) -> None:
 
 def _first_run(*, url: str | None = None) -> None:
     """Scan reference materials in the current directory and bootstrap the project."""
+    spec = read_spec()
+    if spec:
+        print(f"Product spec loaded from SPEC.md ({len(spec.raw)} chars).")
+    spec_prompt = format_spec_for_prompt(spec) if spec else ""
+
     scan = scan_directory(".")
     if url:
         # URL provided on command line takes priority.
@@ -572,7 +585,12 @@ def _first_run(*, url: str | None = None) -> None:
         combined_text = text_content + "\n" + combined_text
 
     print("\nExtracting features \u2026")
-    features = extract_features(combined_text)
+    features = extract_features(
+        combined_text,
+        spec_text=spec_prompt,
+        scope_include=spec.scope_include if spec else None,
+        scope_exclude=spec.scope_exclude if spec else None,
+    )
     if features:
         print(f"Found {len(features)} feature(s).")
         features = select_features(features)
@@ -605,6 +623,7 @@ def _first_run(*, url: str | None = None) -> None:
         page_records=page_records,
         raw_pages=raw_pages,
         design=design,
+        spec_text=spec_prompt,
     )
 
     # Move processed reference files into .duplo/references/.
@@ -642,6 +661,7 @@ def _first_run(*, url: str | None = None) -> None:
             phase=phase_info,
             project_name=app_name,
             design_section=design_section,
+            spec_text=spec_prompt,
         )
         doc_examples = load_code_examples()
         test_tasks = generate_plan_test_tasks(doc_examples)
@@ -656,6 +676,12 @@ def _first_run(*, url: str | None = None) -> None:
                 vtasks = format_verification_tasks(vcases)
                 content = content.rstrip() + "\n" + vtasks
                 print(f"  {len(vcases)} verification case(s) added.")
+        # Append verification tasks from SPEC.md behavior contracts.
+        if spec:
+            spec_vtasks = format_contracts_as_verification(spec)
+            if spec_vtasks:
+                content = content.rstrip() + "\n" + spec_vtasks
+                print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
         saved = save_plan(content)
         print(f"Plan saved to {saved}")
         _plan_ready(phase_label)
@@ -1083,6 +1109,11 @@ def _subsequent_run() -> None:
     2. PLAN.md incomplete \u2192 tell user to run mcloop, return.
     3. No PLAN.md \u2192 regenerate roadmap if needed, generate plan for current phase.
     """
+    spec = read_spec()
+    if spec:
+        print(f"Product spec loaded from SPEC.md ({len(spec.raw)} chars).")
+    spec_prompt = format_spec_for_prompt(spec) if spec else ""
+
     duplo_path = Path(_DUPLO_JSON)
     try:
         status_data = json.loads(duplo_path.read_text(encoding="utf-8"))
@@ -1143,7 +1174,13 @@ def _subsequent_run() -> None:
         except json.JSONDecodeError:
             old_data = {}
         existing_names = [f["name"] for f in old_data.get("features", [])]
-        new_features = extract_features(combined_text, existing_names=existing_names)
+        new_features = extract_features(
+            combined_text,
+            existing_names=existing_names,
+            spec_text=spec_prompt,
+            scope_include=spec.scope_include if spec else None,
+            scope_exclude=spec.scope_exclude if spec else None,
+        )
         if new_features:
             try:
                 old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
@@ -1237,7 +1274,8 @@ def _subsequent_run() -> None:
         history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
-            source_url, remaining, preferences, completion_history=history
+            source_url, remaining, preferences,
+            completion_history=history, spec_text=spec_prompt,
         )
         if not new_roadmap:
             print("Error: failed to generate roadmap.")
@@ -1314,6 +1352,7 @@ def _subsequent_run() -> None:
         project_name=data.get("app_name", ""),
         design_section=design_section,
         phase_number=history_phase_number,
+        spec_text=spec_prompt,
     )
     doc_examples = load_code_examples()
     test_tasks = generate_plan_test_tasks(doc_examples)
@@ -1328,6 +1367,12 @@ def _subsequent_run() -> None:
             vtasks = format_verification_tasks(vcases)
             content = content.rstrip() + "\n" + vtasks
             print(f"  {len(vcases)} verification case(s) added.")
+            # Append verification tasks from SPEC.md behavior contracts.
+            if spec:
+                spec_vtasks = format_contracts_as_verification(spec)
+        if spec_vtasks:
+            content = content.rstrip() + "\n" + spec_vtasks
+            print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
     _plan_ready(phase_label)
@@ -1539,6 +1584,7 @@ def _init_project(
     page_records: list | None = None,
     raw_pages: dict[str, str] | None = None,
     design: DesignRequirements | None = None,
+    spec_text: str = "",
 ) -> list | None:
     """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
 
@@ -1578,7 +1624,7 @@ def _init_project(
     print(f"CLAUDE.md written to {claude_md}")
 
     print("\nGenerating build roadmap \u2026")
-    roadmap = generate_roadmap(url, features, prefs)
+    roadmap = generate_roadmap(url, features, prefs, spec_text=spec_text)
 
     urls = _SECTION_URL_RE.findall(text)
     if urls:
