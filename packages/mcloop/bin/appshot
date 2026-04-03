@@ -60,29 +60,33 @@ if [[ -n "$LAUNCH" ]]; then
     fi
 fi
 
+# try_capture FLAG VALUE — run screencapture, echo+exit on success.
+try_capture() {
+    screencapture "$1" "$2" -o "$OUTPUT"
+    if [[ -f "$OUTPUT" ]]; then
+        echo "$OUTPUT"
+        exit 0
+    fi
+}
+
 # Wait for the window to appear using Quartz or AX.
 ELAPSED=0
-WINDOW_READY=false
+CG_ID=""
 while [[ $ELAPSED -lt $TIMEOUT ]]; do
     # Prefer Quartz detection (fastest, most reliable).
     if [[ -x "$CGWINDOWID" ]]; then
-        if "$CGWINDOWID" "$APP_NAME" >/dev/null 2>&1; then
-            WINDOW_READY=true
-            break
-        fi
+        CG_ID=$("$CGWINDOWID" "$APP_NAME" 2>/dev/null || true)
+        if [[ -n "$CG_ID" ]]; then break; fi
     else
         # Fall back to AX detection.
-        WIN_NAME=$(osascript -e "tell application \"System Events\" to return name of first window of process \"$APP_NAME\"" 2>/dev/null || true)
-        if [[ -n "$WIN_NAME" ]]; then
-            WINDOW_READY=true
-            break
-        fi
+        AX_CHECK=$(osascript -e "tell application \"System Events\" to return name of first window of process \"$APP_NAME\"" 2>/dev/null || true)
+        if [[ -n "$AX_CHECK" ]]; then break; fi
     fi
     sleep 0.5
     ELAPSED=$((ELAPSED + 1))
 done
 
-if [[ "$WINDOW_READY" != "true" ]]; then
+if [[ -z "$CG_ID" && -z "${AX_CHECK:-}" ]]; then
     echo "Error: No window found for '$APP_NAME' after ${TIMEOUT}s" >&2
     exit 1
 fi
@@ -101,35 +105,30 @@ sleep "$WAIT_AFTER"
 mkdir -p "$(dirname "$OUTPUT")"
 
 # Strategy 1: Quartz CG window number (best — isolated window capture).
-if [[ -x "$CGWINDOWID" ]]; then
-    CG_ID=$("$CGWINDOWID" "$APP_NAME" 2>/dev/null || true)
-    if [[ -n "$CG_ID" ]]; then
-        screencapture -l "$CG_ID" -o "$OUTPUT"
-        if [[ -f "$OUTPUT" ]]; then
-            echo "$OUTPUT"
-            exit 0
-        fi
-    fi
+# Reuse CG_ID from the wait loop if available.
+if [[ -n "$CG_ID" ]]; then
+    try_capture -l "$CG_ID"
 fi
 
-# Strategy 2: AX window ID (works for most AppKit apps).
-AX_ID=$(osascript -e "tell application \"System Events\" to return id of first window of process \"$APP_NAME\"" 2>/dev/null || true)
-if [[ -n "$AX_ID" ]]; then
-    screencapture -l "$AX_ID" -o "$OUTPUT"
-    if [[ -f "$OUTPUT" ]]; then
-        echo "$OUTPUT"
-        exit 0
-    fi
-fi
+# Strategy 2 & 3: Query AX once for id, position, and size.
+AX_INFO=$(osascript -e "
+    tell application \"System Events\"
+        set w to first window of process \"$APP_NAME\"
+        return {id of w, position of w, size of w}
+    end tell
+" 2>/dev/null || true)
 
-# Strategy 3: Region capture via AX position/size (degraded — may include overlap).
-BOUNDS=$(osascript -e "tell application \"System Events\" to get {position, size} of first window of process \"$APP_NAME\"" 2>/dev/null || true)
-if [[ -n "$BOUNDS" ]]; then
-    RECT=$(echo "$BOUNDS" | tr -d ' ')
-    screencapture -R "$RECT" -o "$OUTPUT"
-    if [[ -f "$OUTPUT" ]]; then
-        echo "$OUTPUT"
-        exit 0
+if [[ -n "$AX_INFO" ]]; then
+    # AX_INFO looks like: "12345, 100, 200, 800, 600"
+    AX_ID=$(echo "$AX_INFO" | cut -d',' -f1 | tr -d ' ')
+    # Strategy 2: AX window ID.
+    if [[ -n "$AX_ID" ]]; then
+        try_capture -l "$AX_ID"
+    fi
+    # Strategy 3: Region capture (degraded — may include overlap).
+    RECT=$(echo "$AX_INFO" | cut -d',' -f2- | tr -d ' ')
+    if [[ -n "$RECT" ]]; then
+        try_capture -R "$RECT"
     fi
 fi
 
