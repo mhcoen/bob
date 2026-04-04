@@ -12,12 +12,14 @@ McLoop lets you run AI coding agents for hours at a time without babysitting the
 - **Builds self-healing apps** with automatic crash instrumentation (Swift and Python)
 - **Task batching** with `[BATCH]` to combine well-specified subtasks into a single session
 - **Failed approach tracking** with `[RULEDOUT]` so the agent never repeats what already failed
-- **Model fallback** from a cheaper model to a stronger one when tasks fail
+- **Model fallback** from a cheaper model to a stronger one when tasks fail or hit rate limits
 - **Stages** for phased execution with testing between stages
 - **Continuous code review** of every commit via a second AI model, without blocking the main loop
 - **Targeted testing** after each task (full suite only at stage boundaries)
 - **Syncing** PLAN.md with the codebase after manual changes
 - **Visual verification** with deterministic app screenshots
+- **Guided setup** with `mcloop install` and `mcloop uninstall`
+- **Token auditing** with `bin/mcloop-audit` for per-task cost breakdowns
 
 Because McLoop runs CLI sessions continuously, it will use
 your plan allowance faster than if you used the agent interactively. See
@@ -117,12 +119,17 @@ mcloop --max-retries 5    # Retry failed tasks up to 5 times (default: 3)
 mcloop --model opus       # Use a specific Claude model
 mcloop --cli codex        # Use Codex instead of Claude Code
 mcloop --no-audit         # Skip the post-completion bug audit
+mcloop --reviewer         # Enable background code reviewer
+mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
 mcloop investigate "crash on wake from sleep"  # Debug a specific bug
 mcloop investigate --log crash.log             # Debug from a log file
 mcloop wrap                                    # Instrument an existing project for error capture
+mcloop install            # Guided setup: hooks, sandbox, Telegram, permissions
+mcloop install --dry-run  # Show what install would do without changing anything
+mcloop uninstall          # Remove hooks and credentials installed by mcloop
 mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
 ```
 
@@ -313,16 +320,20 @@ automatically with no prompt.
 ### Model fallback
 
 Use `--fallback-model` to automatically escalate to a stronger model
-when the primary model fails:
+when the primary model fails or is rate-limited:
 
 ```bash
 mcloop --model sonnet --fallback-model opus
 ```
 
-When a task exhausts all retries on the primary model, McLoop retries
-it from scratch using the fallback model (with the same retry count)
-before marking it failed. This lets you run most tasks on a cheaper
-or faster model and only use the stronger model for tasks that need
+The fallback triggers in two situations. First, if the primary model
+is rate-limited mid-task, McLoop switches to the fallback model
+immediately and continues the retry loop. When the rate limit clears,
+it switches back to the primary model. Second, if a task exhausts
+all retries on the primary model, McLoop retries the task from
+scratch using the fallback model (with the same retry count) before
+marking it failed. This lets you run most tasks on a cheaper or
+faster model and only use the stronger model for tasks that need
 it. If no `--fallback-model` is set, behavior is unchanged.
 
 After each successful commit, McLoop pushes to the remote. If the
@@ -364,8 +375,42 @@ call Claude Code makes as a `PreToolUse` hook:
 
 ### Setup
 
-Copy `settings.example.json` from this repo to `~/.claude/settings.json` (or
-merge it with your existing settings), then update the hook path:
+The easiest way to configure unattended operation is `mcloop install`:
+
+```bash
+mcloop install            # Interactive guided setup
+mcloop install --dry-run  # Preview what would be changed
+```
+
+This walks you through the full setup: verifying that Claude Code is
+installed, copying hook scripts to `~/.mcloop/hooks/`, merging hook
+entries into `~/.claude/settings.json`, prompting for Telegram
+credentials (or detecting them from the environment), configuring
+the sandbox, and installing a recommended permissions baseline to
+`~/.mcloop/recommended-permissions.json` for you to review and merge
+manually. It also installs a `SessionStart` hook
+(`session-start-hook.py`) that checks for pending relay messages
+when a Claude Code session begins.
+
+To undo the setup, run `mcloop uninstall` (or `mcloop uninstall
+--dry-run` to preview). This removes hook entries from
+`~/.claude/settings.json`, deletes `~/.claude/telegram-hook.env`,
+`~/.mcloop/hooks/`, `~/.mcloop/config.json`, and
+`~/.mcloop/recommended-permissions.json`. It leaves project-level
+`.mcloop/` directories, PLAN.md files, logs, `permissions.allow`
+entries, and the sandbox setting untouched.
+
+If you prefer to configure manually, copy `settings.example.json`
+from this repo to `~/.claude/settings.json` (or merge it with your
+existing settings), then update the hook path. Note that
+`settings.example.json` uses the `"matcher"` wrapper format with a
+timeout, while `mcloop install` writes a simpler flat format without
+`"matcher"` or `"timeout"`. Both work. The `"matcher": "Bash"` form
+restricts the hook to Bash tool calls only, while the flat form runs
+on all tool calls. The flat form is what McLoop needs since the
+permission hook handles all tool types (including MCP blocking).
+
+Manual example using the `settings.example.json` format:
 
 ```json
 {
@@ -678,6 +723,11 @@ built by McLoop is instrumented with accessibility identifiers
 from the start, which makes this programmatic interaction
 possible.
 
+Investigation sessions have WebFetch and WebSearch tools enabled
+by default so the agent can research APIs and look up known issues.
+For regular task sessions, these tools are disabled unless you pass
+`--allow-web-tools`.
+
 After the investigation produces a fix, McLoop automatically
 launches the app, replays the reproduction steps, and verifies
 the app survives without crashing or hanging. If verification
@@ -892,6 +942,21 @@ When McLoop finishes, it reminds you if NOTES.md exists.
 One log file per task attempt in `logs/`, named `{timestamp}_{task-slug}.log`.
 Each log captures the full CLI output and exit code.
 
+## Token auditing
+
+`bin/mcloop-audit` parses log directories and produces per-task cost
+breakdowns including model, turn count, token usage, estimated cost,
+and RTK adoption. Pass one or more log directories:
+
+```bash
+bin/mcloop-audit ~/proj/mcloop/logs ~/proj/duplo/logs
+bin/mcloop-audit ~/proj/*/logs     # Glob all projects
+```
+
+Output includes per-task detail, per-project summaries, a grand
+total, and an RTK report showing whether commands are being
+rewritten through the proxy.
+
 ## Session environment
 
 mcloop runs each CLI session (Claude Code or Codex) with a minimal
@@ -901,6 +966,21 @@ API keys, cloud credentials, tokens, and other secrets are excluded
 by default. This prevents the agent from accidentally using API
 credits instead of a subscription, and prevents credential leakage
 to commands the agent runs.
+
+If your project needs additional environment variables (for example,
+a database URL or a custom tool path), add them to `env_passthrough`
+in `~/.mcloop/config.json`:
+
+```json
+{
+  "env_passthrough": ["DATABASE_URL", "CUSTOM_TOOL_PATH"]
+}
+```
+
+Variables listed in `env_passthrough` are copied from your shell
+into each CLI session alongside the built-in allowlist. Credentials
+like `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `AWS_SECRET_ACCESS_KEY`
+are still excluded regardless of `env_passthrough`.
 
 By default, the CLI uses your subscription. To use API billing
 instead, set `"billing": "api"` in `~/.mcloop/config.json`:
@@ -975,6 +1055,7 @@ All keys in `~/.mcloop/config.json`:
   "model": "sonnet",
   "billing": "subscription",
   "batch": true,
+  "env_passthrough": [],
   "reviewer": {
     "enabled": true,
     "model": "deepseek/deepseek-v3.2",
@@ -989,6 +1070,7 @@ All keys in `~/.mcloop/config.json`:
 | `model` | Any model string | None (CLI default) | Default model. Override with `--model`. |
 | `billing` | `"subscription"`, `"api"`, `"openrouter"` | `"subscription"` | Billing mode. `"openrouter"` routes through OpenRouter. |
 | `batch` | `true`, `false` | `true` | Whether `[BATCH]` tags are honored. Set `false` to run all subtasks individually. |
+| `env_passthrough` | Array of strings | `[]` | Extra environment variable names to pass through to CLI sessions. |
 | `reviewer.enabled` | `true`, `false` | `false` | Enable background code review. |
 | `reviewer.model` | Model string | Required if reviewer enabled | Model for the reviewer endpoint. |
 | `reviewer.base_url` | URL | Required if reviewer enabled | OpenAI-compatible API endpoint. |

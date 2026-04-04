@@ -79,10 +79,15 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
         "operations that can fail, unchecked return values "
         "that could cause silent failures)\n"
         "- Security issues (command injection, path "
-        "traversal, insecure defaults)\n",
+        "traversal, insecure defaults)\n"
+        "- Dead code (unreachable branches, unused "
+        "functions, unused imports)\n"
+        "- Duplication (near-identical code blocks that "
+        "should share a single implementation)\n"
+        "- Unnecessary complexity (convoluted logic that "
+        "can be simplified without changing behavior)\n",
         "Do NOT include:\n"
         "- Style issues or formatting problems\n"
-        "- Refactoring suggestions\n"
         "- Performance improvements\n"
         "- Missing documentation\n"
         "- Hypothetical issues with no evidence in the "

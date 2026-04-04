@@ -284,7 +284,13 @@ def test_build_audit_prompt_defect_categories():
 def test_build_audit_prompt_exclusions():
     prompt = build_audit_prompt()
     assert "Style" in prompt or "style" in prompt
-    assert "Refactoring" in prompt or "refactoring" in prompt
+
+
+def test_build_audit_prompt_includes_code_quality():
+    prompt = build_audit_prompt()
+    assert "Dead code" in prompt or "dead code" in prompt
+    assert "Duplication" in prompt or "duplication" in prompt
+    assert "complexity" in prompt
 
 
 def test_build_audit_prompt_bugs_md_output():
