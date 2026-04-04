@@ -117,79 +117,69 @@ That's all."""
         assert result.diagnoses[0].symptom == "Real bug"
 
 
+def _base_context(**overrides):
+    ctx = {
+        "reference_images": [],
+        "current_screenshot": None,
+        "frame_descriptions": [],
+        "design_requirements": {},
+        "features": [],
+        "code_examples": [],
+        "issues": [],
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+def _base_gather_context(**overrides):
+    return _base_context(app_name="Test", source_url="", **overrides)
+
+
 class TestBuildPrompt:
     def test_includes_complaints(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
-        prompt = _build_prompt(["app crashes on startup"], context)
+        prompt = _build_prompt(["app crashes on startup"], _base_context())
         assert "app crashes on startup" in prompt
         assert "USER BUG REPORT:" in prompt
 
     def test_includes_frame_descriptions(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [
+        context = _base_context(
+            frame_descriptions=[
                 {"filename": "demo_0003.png", "state": "Main view", "detail": "Shows calculator"}
             ],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
+        )
         prompt = _build_prompt(["bug"], context)
         assert "demo_0003.png" in prompt
         assert "Main view" in prompt
         assert "FRAME DESCRIPTIONS" in prompt
 
     def test_includes_design_requirements(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {"colors": {"background": "#2b2b2b"}},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
+        context = _base_context(
+            design_requirements={"colors": {"background": "#2b2b2b"}},
+        )
         prompt = _build_prompt(["bug"], context)
         assert "#2b2b2b" in prompt
         assert "DESIGN REQUIREMENTS" in prompt
 
     def test_includes_feature_list(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [
-                {"name": "Variables", "description": "Assignment and reference", "status": "implemented"}
+        context = _base_context(
+            features=[
+                {
+                    "name": "Variables",
+                    "description": "Assignment and reference",
+                    "status": "implemented",
+                }
             ],
-            "code_examples": [],
-            "issues": [],
-        }
+        )
         prompt = _build_prompt(["bug"], context)
         assert "Variables" in prompt
         assert "[implemented]" in prompt
 
     def test_includes_image_legend(self):
         ref1 = Path(".duplo/references/frame_001.png")
-        context = {
-            "reference_images": [ref1],
-            "current_screenshot": Path("screenshots/current/main.png"),
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
+        context = _base_context(
+            reference_images=[ref1],
+            current_screenshot=Path("screenshots/current/main.png"),
+        )
         prompt = _build_prompt(["bug"], context)
         assert "REFERENCE IMAGES" in prompt
         assert "frame_001.png" in prompt
@@ -197,91 +187,41 @@ class TestBuildPrompt:
         assert "main.png" in prompt
 
     def test_includes_open_issues(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [{"description": "Colors don't match reference"}],
-        }
+        context = _base_context(
+            issues=[{"description": "Colors don't match reference"}],
+        )
         prompt = _build_prompt(["bug"], context)
         assert "Colors don't match reference" in prompt
         assert "KNOWN OPEN ISSUES" in prompt
 
     def test_code_examples_truncated(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [
-                {"input": "x" * 300, "expected_output": "y" * 300}
-            ],
-            "issues": [],
-        }
+        context = _base_context(
+            code_examples=[{"input": "x" * 300, "expected_output": "y" * 300}],
+        )
         prompt = _build_prompt(["bug"], context)
         assert "CODE EXAMPLES" in prompt
         assert "\u2026" in prompt  # Truncation marker.
 
     def test_empty_context(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
-        prompt = _build_prompt(["something is broken"], context)
+        prompt = _build_prompt(["something is broken"], _base_context())
         assert "something is broken" in prompt
         assert "Analyze all the evidence" in prompt
 
     def test_includes_spec_text(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "spec_text": "Must support `2+3` -> `5`.",
-        }
+        context = _base_context(spec_text="Must support `2+3` -> `5`.")
         prompt = _build_prompt(["bug"], context)
         assert "PRODUCT SPECIFICATION" in prompt
         assert "Must support" in prompt
 
     def test_spec_text_empty_not_in_prompt(self):
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "spec_text": "",
-        }
+        context = _base_context(spec_text="")
         prompt = _build_prompt(["bug"], context)
         assert "PRODUCT SPECIFICATION" not in prompt
 
     def test_includes_user_screenshot_legend(self):
         user_img = Path("/tmp/bug_screenshot.png")
-        context = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-        }
         with patch.object(Path, "exists", return_value=True):
-            prompt = _build_prompt(["bug"], context, user_screenshots=[user_img])
+            prompt = _build_prompt(["bug"], _base_context(), user_screenshots=[user_img])
         assert "USER-SUPPLIED SCREENSHOTS" in prompt
         assert "bug_screenshot.png" in prompt
 
@@ -302,9 +242,7 @@ class TestGatherContext:
             "app_name": "TestApp",
             "source_url": "https://test.app",
             "features": [{"name": "Feat1", "status": "implemented"}],
-            "frame_descriptions": [
-                {"filename": "f.png", "state": "Main", "detail": "Detail"}
-            ],
+            "frame_descriptions": [{"filename": "f.png", "state": "Main", "detail": "Detail"}],
             "design_requirements": {"colors": {"bg": "#000"}},
             "issues": [
                 {"description": "Bug A", "status": "open"},
@@ -420,17 +358,10 @@ class TestInvestigate:
         current = tmp_path / "current.png"
         current.write_bytes(b"png")
 
-        mock_gather.return_value = {
-            "reference_images": [ref_img],
-            "current_screenshot": current,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context(
+            reference_images=[ref_img],
+            current_screenshot=current,
+        )
         mock_query.return_value = '{"diagnosis": [], "summary": "ok"}'
 
         result = investigate(["test bug"])
@@ -448,17 +379,9 @@ class TestInvestigate:
         ref_img = tmp_path / "ref.png"
         ref_img.write_bytes(b"png")
 
-        mock_gather.return_value = {
-            "reference_images": [ref_img],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context(
+            reference_images=[ref_img],
+        )
         mock_query.return_value = '{"diagnosis": [], "summary": "ok"}'
 
         result = investigate(["test"], user_screenshots=[user_img])
@@ -468,17 +391,7 @@ class TestInvestigate:
 
     @patch("duplo.investigator._gather_context")
     def test_falls_back_to_text_query(self, mock_gather):
-        mock_gather.return_value = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context()
         with patch("duplo.investigator.query") as mock_text_query:
             mock_text_query.return_value = '{"diagnosis": [], "summary": "text only"}'
             result = investigate(["bug"])
@@ -490,17 +403,9 @@ class TestInvestigate:
     def test_handles_cli_error(self, mock_gather, mock_query, tmp_path):
         ref_img = tmp_path / "ref.png"
         ref_img.write_bytes(b"png")
-        mock_gather.return_value = {
-            "reference_images": [ref_img],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context(
+            reference_images=[ref_img],
+        )
         mock_query.side_effect = ClaudeCliError("timeout")
         result = investigate(["bug"])
         assert "failed" in result.summary.lower()
@@ -508,17 +413,7 @@ class TestInvestigate:
 
     @patch("duplo.investigator._gather_context")
     def test_spec_text_included_in_prompt(self, mock_gather):
-        mock_gather.return_value = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context()
         with patch("duplo.investigator.query") as mock_text_query:
             mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
             investigate(["bug"], spec_text="Must produce $28 for Price: $7 x 4.")
@@ -528,17 +423,7 @@ class TestInvestigate:
 
     @patch("duplo.investigator._gather_context")
     def test_spec_text_empty_not_in_prompt(self, mock_gather):
-        mock_gather.return_value = {
-            "reference_images": [],
-            "current_screenshot": None,
-            "frame_descriptions": [],
-            "design_requirements": {},
-            "features": [],
-            "code_examples": [],
-            "issues": [],
-            "app_name": "Test",
-            "source_url": "",
-        }
+        mock_gather.return_value = _base_gather_context()
         with patch("duplo.investigator.query") as mock_text_query:
             mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
             investigate(["bug"], spec_text="")
