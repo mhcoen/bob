@@ -1,0 +1,18 @@
+{
+  "source_url": "",
+  "features": [],
+  "design_requirements": {
+    "colors": {
+      "primary": "#fff"
+    },
+    "fonts": {
+      "body": "Arial"
+    },
+    "spacing": {},
+    "layout": {},
+    "components": [],
+    "source_images": [
+      "new_screen.png"
+    ]
+  }
+}

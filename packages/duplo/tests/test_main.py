@@ -15,10 +15,12 @@ from duplo.main import (
     _analyze_new_files,
     _build_completion_history,
     _complete_phase,
+    _current_phase_content,
     _detect_and_append_gaps,
     _init_project,
     _partition_features,
     _plan_has_unchecked_tasks,
+    _plan_is_complete,
     _print_feature_status,
     _print_status,
     _print_summary,
@@ -3560,3 +3562,111 @@ class TestPhase2CompleteRunDuplo:
         out = capsys.readouterr().out
         assert "2 annotated feature" in out
         assert "1 unannotated task" in out
+
+
+# -- Multi-phase helpers ---------------------------------------------------
+
+
+_MULTI_PHASE_PLAN = """\
+# MyApp — Phase 1: Setup
+
+- [x] Create project structure
+- [x] Add build system
+
+# MyApp — Phase 2: Features
+
+- [ ] Add search
+- [ ] Add filters
+"""
+
+
+def _write_phase_data(tmp_path: Path, current_phase: int) -> None:
+    """Write a minimal duplo.json with the given current_phase."""
+    duplo_dir = tmp_path / ".duplo"
+    duplo_dir.mkdir(exist_ok=True)
+    data = {
+        "current_phase": current_phase,
+        "roadmap": [
+            {"phase": 1, "title": "Setup"},
+            {"phase": 2, "title": "Features"},
+        ],
+    }
+    (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+class TestCurrentPhaseContent:
+    """Tests for _current_phase_content helper."""
+
+    def test_extracts_phase_1_section(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 1)
+        result = _current_phase_content(_MULTI_PHASE_PLAN)
+        assert "Phase 1: Setup" in result
+        assert "Create project structure" in result
+        assert "Phase 2" not in result
+        assert "Add search" not in result
+
+    def test_extracts_phase_2_section(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 2)
+        result = _current_phase_content(_MULTI_PHASE_PLAN)
+        assert "Phase 2: Features" in result
+        assert "Add search" in result
+        assert "Phase 1" not in result
+        assert "Create project structure" not in result
+
+    def test_returns_full_content_when_no_duplo_json(self, tmp_path, monkeypatch):
+        """phase_num == 0 when no duplo.json → returns full content."""
+        monkeypatch.chdir(tmp_path)
+        result = _current_phase_content(_MULTI_PHASE_PLAN)
+        assert result == _MULTI_PHASE_PLAN
+
+    def test_returns_full_content_when_heading_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 99)
+        result = _current_phase_content(_MULTI_PHASE_PLAN)
+        assert result == _MULTI_PHASE_PLAN
+
+    def test_last_phase_extends_to_eof(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        content = "# App — Phase 3: Final\n\n- [ ] Deploy\n- [ ] Monitor\n"
+        _write_phase_data(tmp_path, 3)
+        # Override roadmap to include phase 3
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text())
+        data["roadmap"].append({"phase": 3, "title": "Final"})
+        (tmp_path / ".duplo" / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+        result = _current_phase_content(content)
+        assert "Deploy" in result
+        assert "Monitor" in result
+
+
+class TestPlanIsCompleteMultiPhase:
+    """_plan_is_complete must scope to the current phase only."""
+
+    def test_complete_phase1_incomplete_phase2(self, tmp_path, monkeypatch):
+        """Phase 1 all checked, Phase 2 has unchecked → complete for phase 1."""
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 1)
+        (tmp_path / "PLAN.md").write_text(_MULTI_PHASE_PLAN)
+        assert _plan_is_complete() is True
+
+    def test_incomplete_phase2(self, tmp_path, monkeypatch):
+        """Phase 2 has unchecked tasks → not complete for phase 2."""
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 2)
+        (tmp_path / "PLAN.md").write_text(_MULTI_PHASE_PLAN)
+        assert _plan_is_complete() is False
+
+    def test_has_unchecked_scoped_to_phase1(self, tmp_path, monkeypatch):
+        """Phase 1 all checked → no unchecked tasks for phase 1."""
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 1)
+        (tmp_path / "PLAN.md").write_text(_MULTI_PHASE_PLAN)
+        assert _plan_has_unchecked_tasks() is False
+
+    def test_has_unchecked_scoped_to_phase2(self, tmp_path, monkeypatch):
+        """Phase 2 has unchecked tasks → True for phase 2."""
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 2)
+        (tmp_path / "PLAN.md").write_text(_MULTI_PHASE_PLAN)
+        assert _plan_has_unchecked_tasks() is True

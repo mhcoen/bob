@@ -1,0 +1,37 @@
+{
+  "source_url": "https://example.com",
+  "features": [
+    {
+      "name": "Search",
+      "description": "Search",
+      "category": "core",
+      "status": "implemented",
+      "implemented_in": "Phase 0: Scaffold"
+    },
+    {
+      "name": "Export",
+      "description": "Export data",
+      "category": "extra",
+      "status": "pending",
+      "implemented_in": ""
+    }
+  ],
+  "preferences": {
+    "platform": "web",
+    "language": "Python",
+    "constraints": [],
+    "preferences": []
+  },
+  "roadmap": [
+    {
+      "phase": 0,
+      "title": "Export",
+      "goal": "Add export",
+      "features": [
+        "Export"
+      ],
+      "test": "ok"
+    }
+  ],
+  "current_phase": 0
+}

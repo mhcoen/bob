@@ -160,28 +160,34 @@ class TestExtractFeaturesWithSpec:
         assert "product specification" not in system.lower()
 
     def test_scope_exclude_filters_features(self):
-        raw = json_array([
-            {"name": "Math", "description": "Basic math.", "category": "core"},
-            {"name": "CLI tool", "description": "Command line.", "category": "other"},
-        ])
+        raw = json_array(
+            [
+                {"name": "Math", "description": "Basic math.", "category": "core"},
+                {"name": "CLI tool", "description": "Command line.", "category": "other"},
+            ]
+        )
         with patch("duplo.extractor.query", return_value=raw):
             features = extract_features("content", scope_exclude=["CLI tool"])
         assert len(features) == 1
         assert features[0].name == "Math"
 
     def test_scope_exclude_case_insensitive(self):
-        raw = json_array([
-            {"name": "CLI Tool", "description": "Command line.", "category": "other"},
-        ])
+        raw = json_array(
+            [
+                {"name": "CLI Tool", "description": "Command line.", "category": "other"},
+            ]
+        )
         with patch("duplo.extractor.query", return_value=raw):
             features = extract_features("content", scope_exclude=["cli tool"])
         assert features == []
 
     def test_scope_include_does_not_filter(self):
         """Scope includes are handled by the LLM prompt, not by post-filtering."""
-        raw = json_array([
-            {"name": "Math", "description": "Basic math.", "category": "core"},
-        ])
+        raw = json_array(
+            [
+                {"name": "Math", "description": "Basic math.", "category": "core"},
+            ]
+        )
         with patch("duplo.extractor.query", return_value=raw):
             features = extract_features("content", scope_include=["Variables"])
         assert len(features) == 1

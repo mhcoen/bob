@@ -230,8 +230,6 @@ def format_contracts_as_verification(spec: ProductSpec) -> str:
         "",
     ]
     for contract in spec.behavior_contracts:
-        lines.append(
-            f"- [ ] Verify: type `{contract.input}`, expect result `{contract.expected}`"
-        )
+        lines.append(f"- [ ] Verify: type `{contract.input}`, expect result `{contract.expected}`")
     lines.append("")
     return "\n".join(lines)

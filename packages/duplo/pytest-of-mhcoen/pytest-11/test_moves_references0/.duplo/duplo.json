@@ -1,0 +1,16 @@
+{
+  "source_url": "",
+  "features": [],
+  "design_requirements": {
+    "colors": {
+      "primary": "#000"
+    },
+    "fonts": {},
+    "spacing": {},
+    "layout": {},
+    "components": [],
+    "source_images": [
+      "ref.png"
+    ]
+  }
+}

@@ -48,7 +48,9 @@ class TestParseRoadmap:
 
 class TestFormatRoadmap:
     def test_formats_phase(self):
-        roadmap = [{"phase": 0, "title": "Scaffold", "goal": "Window", "test": "Opens", "features": []}]
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "Window", "test": "Opens", "features": []}
+        ]
         text = format_roadmap(roadmap)
         assert "Phase 0: Scaffold" in text
         assert "Window" in text

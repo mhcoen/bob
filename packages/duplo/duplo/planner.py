@@ -300,10 +300,7 @@ def generate_phase_plan(
 
     spec_block = ""
     if spec_text:
-        spec_block = (
-            "\nProduct specification (authoritative, from the user):\n"
-            f"{spec_text}\n"
-        )
+        spec_block = f"\nProduct specification (authoritative, from the user):\n{spec_text}\n"
 
     prompt = f"""\
 Project: {project_name or source_url}

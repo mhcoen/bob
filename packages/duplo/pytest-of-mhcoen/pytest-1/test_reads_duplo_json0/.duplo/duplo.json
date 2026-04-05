@@ -1,1 +1,0 @@
-{"app_name": "TestApp", "source_url": "https://test.app", "features": [{"name": "Feat1", "status": "implemented"}], "frame_descriptions": [{"filename": "f.png", "state": "Main", "detail": "Detail"}], "design_requirements": {"colors": {"bg": "#000"}}, "issues": [{"description": "Bug A", "status": "open"}, {"description": "Bug B", "status": "resolved"}]}

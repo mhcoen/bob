@@ -1,0 +1,22 @@
+{
+  "source_url": "https://example.com",
+  "features": [],
+  "preferences": {
+    "platform": "web",
+    "language": "Python",
+    "constraints": [],
+    "preferences": []
+  },
+  "design_requirements": {
+    "colors": {
+      "primary": "#abc"
+    },
+    "fonts": {},
+    "spacing": {},
+    "layout": {},
+    "components": [],
+    "source_images": [
+      "new.png"
+    ]
+  }
+}

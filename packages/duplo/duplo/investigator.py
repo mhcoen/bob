@@ -234,9 +234,7 @@ def _build_prompt(
     current_shot = context.get("current_screenshot")
     if current_shot:
         image_index += 1
-        sections.append(
-            f"CURRENT APP SCREENSHOT:\n  Image {image_index}: {current_shot.name}"
-        )
+        sections.append(f"CURRENT APP SCREENSHOT:\n  Image {image_index}: {current_shot.name}")
 
     # User-supplied screenshots.
     if user_screenshots:
@@ -254,8 +252,7 @@ def _build_prompt(
         fd_lines = ["FRAME DESCRIPTIONS (from original product demo video):"]
         for fd in frame_descs:
             fd_lines.append(
-                f"  {fd.get('filename', '?')}: "
-                f"[{fd.get('state', '?')}] {fd.get('detail', '')}"
+                f"  {fd.get('filename', '?')}: [{fd.get('state', '?')}] {fd.get('detail', '')}"
             )
         sections.append("\n".join(fd_lines))
 
@@ -270,9 +267,7 @@ def _build_prompt(
         feat_lines = ["FEATURE LIST:"]
         for f in features:
             status = f.get("status", "pending")
-            feat_lines.append(
-                f"  [{status}] {f.get('name', '?')}: {f.get('description', '')}"
-            )
+            feat_lines.append(f"  [{status}] {f.get('name', '?')}: {f.get('description', '')}")
         sections.append("\n".join(feat_lines))
 
     # Code examples (truncated to avoid overwhelming the context).

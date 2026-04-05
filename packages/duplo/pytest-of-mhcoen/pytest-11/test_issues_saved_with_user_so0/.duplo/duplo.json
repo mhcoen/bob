@@ -1,0 +1,24 @@
+{
+  "current_phase": 1,
+  "roadmap": [
+    {
+      "phase": 1
+    }
+  ],
+  "issues": [
+    {
+      "description": "Button misaligned",
+      "source": "user",
+      "phase": "Phase 1",
+      "status": "open",
+      "added_at": "2026-04-05T23:24:05.909759+00:00"
+    },
+    {
+      "description": "Color wrong",
+      "source": "user",
+      "phase": "Phase 1",
+      "status": "open",
+      "added_at": "2026-04-05T23:24:05.910252+00:00"
+    }
+  ]
+}

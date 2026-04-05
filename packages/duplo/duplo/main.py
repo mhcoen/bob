@@ -55,7 +55,6 @@ from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
 from duplo.spec_reader import (
     format_contracts_as_verification,
-    format_scope_override_prompt,
     format_spec_for_prompt,
     read_spec,
 )
@@ -1274,8 +1273,11 @@ def _subsequent_run() -> None:
         history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
-            source_url, remaining, preferences,
-            completion_history=history, spec_text=spec_prompt,
+            source_url,
+            remaining,
+            preferences,
+            completion_history=history,
+            spec_text=spec_prompt,
         )
         if not new_roadmap:
             print("Error: failed to generate roadmap.")
@@ -1641,14 +1643,47 @@ def _init_project(
     return roadmap
 
 
+def _current_phase_content(content: str) -> str:
+    """Return lines belonging to the current phase section in PLAN.md.
+
+    Looks for a heading matching ``# ... Phase N: ...`` where *N* is the
+    current phase number from duplo.json.  Returns text from that heading
+    to the next phase heading (or end of file).  If no matching heading is
+    found, returns the full content as a fallback.
+    """
+    phase_num, _ = get_current_phase()
+    if phase_num == 0:
+        return content
+
+    lines = content.splitlines(keepends=True)
+    phase_pattern = re.compile(rf"^#\s+.*Phase\s+{phase_num}\s*:", re.IGNORECASE)
+    next_phase_pattern = re.compile(r"^#\s+.*Phase\s+\d+\s*:", re.IGNORECASE)
+
+    start: int | None = None
+    end: int | None = None
+    for idx, line in enumerate(lines):
+        if start is None:
+            if phase_pattern.match(line):
+                start = idx
+        else:
+            if next_phase_pattern.match(line):
+                end = idx
+                break
+
+    if start is None:
+        return content  # heading not found – fall back to full file
+    return "".join(lines[start:end])
+
+
 def _plan_is_complete() -> bool:
     """Return True if PLAN.md exists and all checkboxes are checked."""
     plan_path = Path("PLAN.md")
     if not plan_path.exists():
         return False
     content = plan_path.read_text(encoding="utf-8")
+    section = _current_phase_content(content)
     has_tasks = False
-    for line in content.splitlines():
+    for line in section.splitlines():
         stripped = line.strip()
         if stripped.startswith("- [ ]") or stripped.startswith("- [!]"):
             return False
@@ -1663,7 +1698,8 @@ def _plan_has_unchecked_tasks() -> bool:
     if not plan_path.exists():
         return False
     content = plan_path.read_text(encoding="utf-8")
-    for line in content.splitlines():
+    section = _current_phase_content(content)
+    for line in section.splitlines():
         stripped = line.strip()
         if stripped.startswith("- [ ]") or stripped.startswith("- [!]"):
             return True

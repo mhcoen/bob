@@ -88,10 +88,7 @@ def generate_roadmap(
 
     spec_section = ""
     if spec_text:
-        spec_section = (
-            "\nProduct specification (authoritative, from the user):\n"
-            f"{spec_text}\n"
-        )
+        spec_section = f"\nProduct specification (authoritative, from the user):\n{spec_text}\n"
 
     prompt = f"""\
 Product: {source_url}

@@ -1,0 +1,1 @@
+{"source_url": "https://example.com", "features": [{"name": "Auth", "description": "Login.", "category": "core"}], "preferences": {"platform": "web", "language": "Python", "constraints": [], "preferences": []}, "roadmap": [{"phase": 0, "title": "Core", "goal": "Core", "features": ["Auth"], "test": "ok"}], "current_phase": 0}

@@ -364,7 +364,7 @@ class TestInvestigate:
         )
         mock_query.return_value = '{"diagnosis": [], "summary": "ok"}'
 
-        result = investigate(["test bug"])
+        investigate(["test bug"])
         assert mock_query.called
         # Should have passed both images.
         call_args = mock_query.call_args
@@ -384,7 +384,7 @@ class TestInvestigate:
         )
         mock_query.return_value = '{"diagnosis": [], "summary": "ok"}'
 
-        result = investigate(["test"], user_screenshots=[user_img])
+        investigate(["test"], user_screenshots=[user_img])
         call_args = mock_query.call_args
         image_paths = call_args[0][1]
         assert user_img in image_paths

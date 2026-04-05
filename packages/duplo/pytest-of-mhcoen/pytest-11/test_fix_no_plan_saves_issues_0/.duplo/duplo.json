@@ -1,0 +1,30 @@
+{
+  "source_url": "https://example.com",
+  "app_name": "TestApp",
+  "features": [],
+  "preferences": {
+    "platform": "web",
+    "language": "Python",
+    "constraints": [],
+    "preferences": []
+  },
+  "roadmap": [
+    {
+      "phase": 0,
+      "title": "Core",
+      "goal": "Core",
+      "features": [],
+      "test": "ok"
+    }
+  ],
+  "current_phase": 0,
+  "issues": [
+    {
+      "description": "a bug",
+      "source": "user",
+      "phase": "Phase 0: Core",
+      "status": "open",
+      "added_at": "2026-04-05T23:24:10.810931+00:00"
+    }
+  ]
+}
