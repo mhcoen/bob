@@ -2765,6 +2765,77 @@ class TestCompletePhaseTaskMatching:
         assert "No feature matches found" in out
 
 
+class TestCompletePhaseScoping:
+    """_complete_phase must only process tasks from the current phase section."""
+
+    _FEATURES = [
+        {
+            "name": "Search",
+            "description": "Full-text search",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+        {
+            "name": "Export",
+            "description": "Export data",
+            "category": "core",
+            "status": "pending",
+            "implemented_in": "",
+        },
+    ]
+
+    def test_only_processes_current_phase_tasks(self, tmp_path, monkeypatch, capsys):
+        """Phase 2 completion must not re-process Phase 1 tasks."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "features": self._FEATURES,
+                "current_phase": 2,
+                "roadmap": [
+                    {"phase": 1, "title": "Core"},
+                    {"phase": 2, "title": "Extras"},
+                ],
+            },
+        )
+
+        # Multi-phase PLAN.md: Phase 1 has a Search annotation,
+        # Phase 2 has an Export annotation.
+        plan_content = (
+            "# App — Phase 1: Core\n"
+            '- [x] Build search [feat: "Search"]\n'
+            "# App — Phase 2: Extras\n"
+            '- [x] Add export [feat: "Export"]\n'
+        )
+
+        with (
+            patch("duplo.main.append_phase_to_history") as mock_append,
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+                return_value=([], []),
+            ),
+        ):
+            _complete_phase(plan_content, "", "Phase 2: Extras")
+
+        # Only Export should be marked (Phase 2 task), not Search (Phase 1).
+        data = _read_duplo_json(tmp_path)
+        search = next(f for f in data["features"] if f["name"] == "Search")
+        assert search["status"] == "pending", "Phase 1 task was re-processed"
+
+        export = next(f for f in data["features"] if f["name"] == "Export")
+        assert export["status"] == "implemented"
+
+        # append_phase_to_history should receive only the Phase 2 section.
+        recorded = mock_append.call_args[0][0]
+        assert "Phase 2" in recorded
+        assert "Phase 1" not in recorded
+
+
 class TestPlanHasUncheckedTasks:
     """Tests for _plan_has_unchecked_tasks helper."""
 

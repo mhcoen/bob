@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # mcloop:wrap:begin
 import hashlib as _mcloop_hashlib
 import json as _mcloop_json
@@ -54,9 +56,7 @@ def _mcloop_setup_crash_handlers():
         report["id"] = _mcloop_hashlib.md5(raw).hexdigest()[:8]
         entries.append(report)
         try:
-            error_path.write_text(
-                _mcloop_json.dumps(entries, indent=2) + "\n"
-            )
+            error_path.write_text(_mcloop_json.dumps(entries, indent=2) + "\n")
         except OSError:
             pass
 
@@ -69,22 +69,16 @@ def _mcloop_setup_crash_handlers():
             while tb.tb_next:
                 tb = tb.tb_next
             local_vars = {
-                k: repr(v)
-                for k, v in tb.tb_frame.f_locals.items()
-                if not k.startswith("_")
+                k: repr(v) for k, v in tb.tb_frame.f_locals.items() if not k.startswith("_")
             }
         state = _McloopState.snapshot()
         state.update(local_vars)
         report = {
-            "timestamp": _mcloop_datetime.now(
-                _mcloop_tz.utc
-            ).isoformat(),
+            "timestamp": _mcloop_datetime.now(_mcloop_tz.utc).isoformat(),
             "exception_type": exc_type.__name__,
             "description": str(exc_value),
             "stack_trace": "".join(
-                _mcloop_traceback.format_exception(
-                    exc_type, exc_value, exc_tb
-                )
+                _mcloop_traceback.format_exception(exc_type, exc_value, exc_tb)
             ),
             "source_file": last.filename if last else "",
             "line": last.lineno if last else 0,
@@ -116,9 +110,7 @@ def _mcloop_setup_crash_handlers():
         except Exception:
             state = {}
         report = {
-            "timestamp": _mcloop_datetime.now(
-                _mcloop_tz.utc
-            ).isoformat(),
+            "timestamp": _mcloop_datetime.now(_mcloop_tz.utc).isoformat(),
             "signal": signum,
             "exception_type": "Signal",
             "description": f"Received signal {signum}",
@@ -144,6 +136,7 @@ def _mcloop_setup_crash_handlers():
             pass
         _mcloop_signal.signal(signum, _mcloop_signal.SIG_DFL)
         import os
+
         os.kill(os.getpid(), signum)
 
     for _sig in (
@@ -174,15 +167,11 @@ def _mcloop_setup_crash_handlers():
                 state = _McloopState.snapshot()
                 state.update(local_vars)
                 report = {
-                    "timestamp": _mcloop_datetime.now(
-                        _mcloop_tz.utc
-                    ).isoformat(),
+                    "timestamp": _mcloop_datetime.now(_mcloop_tz.utc).isoformat(),
                     "exception_type": exc_type.__name__,
                     "description": str(exc_value),
                     "stack_trace": "".join(
-                        _mcloop_traceback.format_exception(
-                            exc_type, exc_value, exc_tb
-                        )
+                        _mcloop_traceback.format_exception(exc_type, exc_value, exc_tb)
                     ),
                     "source_file": last.filename if last else "",
                     "line": last.lineno if last else 0,
@@ -201,8 +190,6 @@ _mcloop_setup_crash_handlers()
 # mcloop:wrap:end
 
 """Duplo CLI entry point."""
-
-from __future__ import annotations
 
 import argparse
 import dataclasses
@@ -1920,8 +1907,11 @@ def _complete_phase(
     phase_label: str,
 ) -> None:
     """Record a completed phase, capture screenshots, and advance."""
+    # Scope to the current phase section so we don't re-process earlier phases.
+    phase_section = _current_phase_content(plan_content)
+
     # Parse completed tasks and mark features before recording history.
-    tasks = parse_completed_tasks(plan_content)
+    tasks = parse_completed_tasks(phase_section)
     if tasks:
         # Mark features from annotated tasks [feat: "..."].
         marked = mark_implemented_features(tasks, phase_label)
@@ -1960,7 +1950,7 @@ def _complete_phase(
                 if not matched and not new:
                     print("  No feature matches found.")
 
-    append_phase_to_history(plan_content)
+    append_phase_to_history(phase_section)
     advance_phase()
     print(f"{phase_label} complete. Recorded in duplo.json.")
 
