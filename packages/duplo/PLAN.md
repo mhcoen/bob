@@ -202,11 +202,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Bugs
 
-- [ ] Scope `_plan_is_complete` and `_complete_phase` to the current phase only
+- [x] Scope `_plan_is_complete` and `_complete_phase` to the current phase only
   - [x] `_plan_is_complete()` in `main.py` iterates ALL lines in PLAN.md. Now that PLAN.md accumulates phases (no longer deleted between phases), it must only consider lines between the current phase heading (`# ... Phase N: ...`) and the next phase heading (or end of file). Extract a helper `_current_phase_content(content: str) -> str` that returns only the current phase section, using the phase number from `get_current_phase()`. Use this in `_plan_is_complete`.
   - [x] `_complete_phase` passes the full `plan_content` to `parse_completed_tasks`. It must pass only the current phase section (from the same helper). Without this fix, completing Phase 2 re-processes all Phase 1 tasks (re-marks features, re-matches unannotated tasks).
   - [x] `_plan_has_unchecked_tasks()` has the same bug — scope it to the current phase section.
-  - [ ] Add tests: multi-phase PLAN.md where Phase 1 is all `[x]` and Phase 2 has `[ ]` tasks. Verify `_plan_is_complete` returns False, `_plan_has_unchecked_tasks` returns True, and `_complete_phase` only processes Phase 2 tasks.
+  - [x] Add tests: multi-phase PLAN.md where Phase 1 is all `[x]` and Phase 2 has `[ ]` tasks. Verify `_plan_is_complete` returns False, `_plan_has_unchecked_tasks` returns True, and `_complete_phase` only processes Phase 2 tasks.
 
 - [ ] Add timeout to `capture_appshot` in `appshot.py`
   - [ ] `capture_appshot` calls `subprocess.run(cmd)` with no `timeout` parameter. If the app is a menu bar app with no main window, or `run.sh` triggers a long build, this hangs indefinitely and blocks phase completion. Add a `timeout` keyword argument (default 60 seconds). Pass it to `subprocess.run(cmd, timeout=timeout)`. Catch `subprocess.TimeoutExpired`, print a warning, and return a distinct exit code (e.g. -2).
