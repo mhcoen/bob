@@ -2835,6 +2835,103 @@ class TestCompletePhaseScoping:
         assert "Phase 2" in recorded
         assert "Phase 1" not in recorded
 
+    def test_unannotated_tasks_scoped_to_current_phase(self, tmp_path, monkeypatch, capsys):
+        """match_unannotated_tasks receives only Phase 2 unannotated tasks."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "features": self._FEATURES,
+                "current_phase": 2,
+                "roadmap": [
+                    {"phase": 1, "title": "Core"},
+                    {"phase": 2, "title": "Extras"},
+                ],
+            },
+        )
+
+        # Phase 1 has an unannotated task; Phase 2 has one annotated + one not.
+        plan_content = (
+            "# App — Phase 1: Core\n"
+            "- [x] Set up CI\n"
+            "# App — Phase 2: Extras\n"
+            '- [x] Add export [feat: "Export"]\n'
+            "- [x] Write docs\n"
+        )
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch(
+                "duplo.main.match_unannotated_tasks",
+                return_value=([], []),
+            ) as mock_match,
+        ):
+            _complete_phase(plan_content, "", "Phase 2: Extras")
+
+        # match_unannotated_tasks should be called with tasks from Phase 2 only.
+        call_tasks = mock_match.call_args[0][0]
+        task_texts = [t.text for t in call_tasks]
+        assert "Write docs" in task_texts
+        assert "Set up CI" not in task_texts
+
+    def test_fix_annotations_scoped_to_current_phase(self, tmp_path, monkeypatch):
+        """Fix annotations in Phase 1 are not resolved when completing Phase 2."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "features": [],
+                "current_phase": 2,
+                "roadmap": [
+                    {"phase": 1, "title": "Core"},
+                    {"phase": 2, "title": "Extras"},
+                ],
+                "issues": [
+                    {
+                        "description": "Login broken",
+                        "source": "user",
+                        "phase": "Phase 1",
+                        "status": "open",
+                        "added_at": "2026-01-01T00:00:00Z",
+                    },
+                    {
+                        "description": "Search crash",
+                        "source": "user",
+                        "phase": "Phase 2",
+                        "status": "open",
+                        "added_at": "2026-01-01T00:00:00Z",
+                    },
+                ],
+            },
+        )
+
+        plan_content = (
+            "# App — Phase 1: Core\n"
+            '- [x] Fix login page [fix: "Login broken"]\n'
+            "# App — Phase 2: Extras\n"
+            '- [x] Fix search [fix: "Search crash"]\n'
+        )
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+        ):
+            _complete_phase(plan_content, "", "Phase 2: Extras")
+
+        data = _read_duplo_json(tmp_path)
+        login_issue = next(i for i in data["issues"] if i["description"] == "Login broken")
+        assert login_issue["status"] == "open", "Phase 1 fix was re-processed"
+
+        search_issue = next(i for i in data["issues"] if i["description"] == "Search crash")
+        assert search_issue["status"] == "resolved"
+
 
 class TestPlanHasUncheckedTasks:
     """Tests for _plan_has_unchecked_tasks helper."""
