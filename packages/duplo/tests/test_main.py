@@ -10,6 +10,7 @@ import pytest
 
 from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
+from duplo.fetcher import PageRecord
 from duplo.main import (
     UpdateSummary,
     _analyze_new_files,
@@ -843,7 +844,7 @@ class TestRescrapeProductUrl:
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
 
-        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
             "duplo.main.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
@@ -903,6 +904,87 @@ class TestRescrapeProductUrl:
         mock_save_ex.assert_called_once_with(examples)
         out = capsys.readouterr().out
         assert "1 code example" in out
+
+    def test_skips_when_content_unchanged(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "reference_urls": [
+                    {"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"},
+                    {"url": "https://example.com/docs", "fetched_at": "t", "content_hash": "def"},
+                ],
+            },
+        )
+
+        records = [
+            PageRecord("https://example.com", "t2", "abc"),
+            PageRecord("https://example.com/docs", "t2", "def"),
+        ]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {}),
+        ):
+            with patch("duplo.main.save_reference_urls") as mock_save:
+                pages, ex, text = _rescrape_product_url()
+
+        mock_save.assert_not_called()
+        assert pages == 0
+        assert ex == 0
+        assert text == ""
+        out = capsys.readouterr().out
+        assert "Site content unchanged, skipping feature re-extraction." in out
+
+    def test_proceeds_when_content_changed(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "reference_urls": [
+                    {"url": "https://example.com", "fetched_at": "t", "content_hash": "old"},
+                ],
+            },
+        )
+
+        records = [PageRecord("https://example.com", "t2", "new")]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
+        ):
+            with patch("duplo.main.save_reference_urls") as mock_save:
+                with patch("duplo.main.save_raw_content"):
+                    pages, ex, text = _rescrape_product_url()
+
+        mock_save.assert_called_once()
+        assert pages == 1
+        assert text == "text"
+        out = capsys.readouterr().out
+        assert "unchanged" not in out
+
+    def test_proceeds_when_no_stored_hashes(self, capsys, tmp_path, monkeypatch):
+        """First scrape with hashes — no stored reference_urls yet."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {"source_url": "https://example.com", "features": []},
+        )
+
+        records = [PageRecord("https://example.com", "t", "abc")]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
+        ):
+            with patch("duplo.main.save_reference_urls") as mock_save:
+                with patch("duplo.main.save_raw_content"):
+                    pages, ex, text = _rescrape_product_url()
+
+        mock_save.assert_called_once()
+        assert pages == 1
+        assert text == "text"
 
     def test_subsequent_run_calls_rescrape(self, tmp_path, monkeypatch):
         """Integration: _subsequent_run calls _rescrape_product_url."""
@@ -1385,7 +1467,7 @@ class TestRescrapeReturnsCounts:
     def test_returns_counts(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
-        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        records = [PageRecord("https://example.com", "t", "abc")]
         examples = [{"input": "1+1", "expected_output": "2", "source_url": "", "language": "py"}]
         with patch(
             "duplo.main.fetch_site",
@@ -1496,7 +1578,7 @@ class TestRescrapeReturnsText:
     def test_returns_scraped_text(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
-        records = [{"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"}]
+        records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
             "duplo.main.fetch_site",
             return_value=("product content", [], None, records, {}),

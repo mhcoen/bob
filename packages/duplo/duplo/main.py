@@ -1080,6 +1080,15 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         print(f"  Failed to re-scrape {source_url}: {exc}")
         return 0, 0, ""
 
+    # Compare new content hashes against stored hashes to detect changes.
+    # Only skip when we have new pages to compare and all hashes match.
+    old_hashes = {r["content_hash"] for r in data.get("reference_urls", []) if "content_hash" in r}
+    new_hashes = {r.content_hash for r in page_records} if page_records else set()
+
+    if new_hashes and old_hashes == new_hashes:
+        print("  Site content unchanged, skipping feature re-extraction.")
+        return 0, 0, ""
+
     pages_updated = 0
     examples_updated = 0
 
