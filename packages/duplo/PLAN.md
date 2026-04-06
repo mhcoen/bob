@@ -229,7 +229,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add tests: provide a feature list with known near-duplicates, mock the Claude call to return expected groupings, verify the merged list has no duplicates and statuses are preserved.
 
 - [ ] Language-aware test generation
-  - [ ] `test_generator.py` generates Python test files (`generate_test_source`) and `generate_plan_test_tasks` appends Python-specific "wire up doc-example tests" tasks regardless of the target project's language. For non-Python projects (Swift, Rust, Go, etc.) these tasks are invalid. Detect the target language from the project's build system (pyproject.toml → Python, Package.swift → Swift, Cargo.toml → Rust, go.mod → Go, package.json → JS/TS). If not Python, skip `generate_test_source` and `save_test_file` entirely. Print "Test generation skipped (target language: <lang>, only Python supported)."
+  - [x] `test_generator.py` generates Python test files (`generate_test_source`) and `generate_plan_test_tasks` appends Python-specific "wire up doc-example tests" tasks regardless of the target project's language. For non-Python projects (Swift, Rust, Go, etc.) these tasks are invalid. Detect the target language from the project's build system (pyproject.toml → Python, Package.swift → Swift, Cargo.toml → Rust, go.mod → Go, package.json → JS/TS). If not Python, skip `generate_test_source` and `save_test_file` entirely. Print "Test generation skipped (target language: <lang>, only Python supported)."
   - [ ] Add tests: mock a project directory with Package.swift, verify no test file is generated.
 
 - [ ] Verify source-file URL scanning is suppressed on subsequent runs
