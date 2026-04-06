@@ -210,7 +210,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Add timeout to `capture_appshot` in `appshot.py`
   - [x] `capture_appshot` calls `subprocess.run(cmd)` with no `timeout` parameter. If the app is a menu bar app with no main window, or `run.sh` triggers a long build, this hangs indefinitely and blocks phase completion. Add a `timeout` keyword argument (default 60 seconds). Pass it to `subprocess.run(cmd, timeout=timeout)`. Catch `subprocess.TimeoutExpired`, print a warning, and return a distinct exit code (e.g. -2).
-  - [ ] Update `_complete_phase` in `main.py` to handle the timeout exit code gracefully (print "Screenshot capture timed out (skipping)" and continue).
+  - [x] Update `_complete_phase` in `main.py` to handle the timeout exit code gracefully (print "Screenshot capture timed out (skipping)" and continue).
   - [ ] Add tests: mock `subprocess.run` to raise `TimeoutExpired`, verify `capture_appshot` returns -2.
 
 - [ ] Remove `generate_plan_test_tasks` from plan generation
