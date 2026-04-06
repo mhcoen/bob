@@ -198,6 +198,7 @@ import os
 import re
 import signal
 import sys
+import time
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
@@ -1071,6 +1072,14 @@ def _rescrape_product_url() -> tuple[int, int, str]:
     if not source_url:
         return 0, 0, ""
 
+    # Skip re-scrape if last scrape was less than 10 minutes ago.
+    last_scrape = data.get("last_scrape_timestamp", 0)
+    elapsed = time.time() - last_scrape
+    if last_scrape and elapsed < 600:
+        minutes_ago = int(elapsed / 60)
+        print(f"\nUsing recent scrape data ({minutes_ago} minutes ago).")
+        return 0, 0, ""
+
     print(f"\nRe-scraping {source_url} \u2026")
     try:
         scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
@@ -1087,6 +1096,8 @@ def _rescrape_product_url() -> tuple[int, int, str]:
 
     if new_hashes and old_hashes == new_hashes:
         print("  Site content unchanged, skipping feature re-extraction.")
+        data["last_scrape_timestamp"] = time.time()
+        duplo_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return 0, 0, ""
 
     pages_updated = 0
@@ -1155,6 +1166,10 @@ def _rescrape_product_url() -> tuple[int, int, str]:
                     if design.colors or design.fonts or design.layout:
                         save_design_requirements(dataclasses.asdict(design))
                         print(f"  Updated design from {len(design.source_images)} frame(s).")
+
+    # Record scrape timestamp so subsequent runs within 10 minutes skip re-scrape.
+    data["last_scrape_timestamp"] = time.time()
+    duplo_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     return pages_updated, examples_updated, scraped_text
 

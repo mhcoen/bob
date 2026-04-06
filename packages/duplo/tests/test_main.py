@@ -986,6 +986,107 @@ class TestRescrapeProductUrl:
         assert pages == 1
         assert text == "text"
 
+    def test_skips_when_recent_scrape(self, capsys, tmp_path, monkeypatch):
+        """Skip re-scrape if last_scrape_timestamp is less than 10 minutes old."""
+        import time
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "last_scrape_timestamp": time.time() - 120,  # 2 minutes ago
+            },
+        )
+
+        with patch("duplo.main.fetch_site") as mock_fetch:
+            pages, ex, text = _rescrape_product_url()
+
+        mock_fetch.assert_not_called()
+        assert pages == 0
+        assert ex == 0
+        assert text == ""
+        out = capsys.readouterr().out
+        assert "Using recent scrape data (2 minutes ago)" in out
+
+    def test_rescrapes_when_timestamp_old(self, capsys, tmp_path, monkeypatch):
+        """Proceed with re-scrape if last_scrape_timestamp is over 10 minutes."""
+        import time
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "last_scrape_timestamp": time.time() - 700,  # ~11.7 minutes ago
+            },
+        )
+
+        records = [PageRecord("https://example.com", "t", "abc")]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
+        ):
+            with patch("duplo.main.save_reference_urls"):
+                with patch("duplo.main.save_raw_content"):
+                    pages, ex, text = _rescrape_product_url()
+
+        assert pages == 1
+        out = capsys.readouterr().out
+        assert "Re-scraping" in out
+
+    def test_saves_timestamp_after_scrape(self, tmp_path, monkeypatch):
+        """Successful scrape writes last_scrape_timestamp to duplo.json."""
+        import time
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {"source_url": "https://example.com", "features": []},
+        )
+
+        records = [PageRecord("https://example.com", "t", "abc")]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
+        ):
+            with patch("duplo.main.save_reference_urls"):
+                with patch("duplo.main.save_raw_content"):
+                    _rescrape_product_url()
+
+        data = _read_duplo_json(tmp_path)
+        assert "last_scrape_timestamp" in data
+        assert time.time() - data["last_scrape_timestamp"] < 5
+
+    def test_saves_timestamp_when_content_unchanged(self, tmp_path, monkeypatch):
+        """Timestamp is saved even when content didn't change."""
+        import time
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "reference_urls": [
+                    {"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"},
+                ],
+            },
+        )
+
+        records = [PageRecord("https://example.com", "t2", "abc")]
+        with patch(
+            "duplo.main.fetch_site",
+            return_value=("text", [], None, records, {}),
+        ):
+            _rescrape_product_url()
+
+        data = _read_duplo_json(tmp_path)
+        assert "last_scrape_timestamp" in data
+        assert time.time() - data["last_scrape_timestamp"] < 5
+
     def test_subsequent_run_calls_rescrape(self, tmp_path, monkeypatch):
         """Integration: _subsequent_run calls _rescrape_product_url."""
         _write_duplo_json(
