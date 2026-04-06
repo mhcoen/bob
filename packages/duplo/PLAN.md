@@ -208,10 +208,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] `_plan_has_unchecked_tasks()` has the same bug — scope it to the current phase section.
   - [x] Add tests: multi-phase PLAN.md where Phase 1 is all `[x]` and Phase 2 has `[ ]` tasks. Verify `_plan_is_complete` returns False, `_plan_has_unchecked_tasks` returns True, and `_complete_phase` only processes Phase 2 tasks.
 
-- [ ] Add timeout to `capture_appshot` in `appshot.py`
+- [x] Add timeout to `capture_appshot` in `appshot.py`
   - [x] `capture_appshot` calls `subprocess.run(cmd)` with no `timeout` parameter. If the app is a menu bar app with no main window, or `run.sh` triggers a long build, this hangs indefinitely and blocks phase completion. Add a `timeout` keyword argument (default 60 seconds). Pass it to `subprocess.run(cmd, timeout=timeout)`. Catch `subprocess.TimeoutExpired`, print a warning, and return a distinct exit code (e.g. -2).
   - [x] Update `_complete_phase` in `main.py` to handle the timeout exit code gracefully (print "Screenshot capture timed out (skipping)" and continue).
-  - [ ] Add tests: mock `subprocess.run` to raise `TimeoutExpired`, verify `capture_appshot` returns -2.
+  - [x] Add tests: mock `subprocess.run` to raise `TimeoutExpired`, verify `capture_appshot` returns -2.
 
 - [ ] Remove `generate_plan_test_tasks` from plan generation
   - [ ] The mcloop task prompt already instructs every session to write unit tests. Standalone "add tests" / "wire up doc-example tests" tasks appended by `generate_plan_test_tasks` are redundant — they fail as no-ops because the tests already exist by the time mcloop reaches them. Remove the call to `generate_plan_test_tasks` and `append_test_tasks` from `_first_run` in `main.py`. Remove the import of `generate_plan_test_tasks` and `append_test_tasks`. Keep `generate_test_source`, `load_code_examples`, and `save_test_file` (they generate the initial test file from doc examples, which is separate).
