@@ -40,6 +40,7 @@ from mcloop.checklist import (
     user_task_instructions,
 )
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
+from mcloop.claude_md_check import check_claude_md_freshness
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.errors import (
     _check_errors_json,
@@ -755,6 +756,12 @@ def _run_batch(
         changed_files=changed_files,
     )
     if check_result.passed:
+        if not check_claude_md_freshness(changed_files, project_dir):
+            print(
+                formatting.error_msg("Batch: CLAUDE.md not updated alongside source changes"),
+                flush=True,
+            )
+            return "failed"
         try:
             _commit(
                 project_dir,
@@ -1191,6 +1198,15 @@ def run_loop(
                     changed_files=changed_files,
                 )
                 if check_result.passed:
+                    if not check_claude_md_freshness(changed_files, project_dir):
+                        last_error = "CLAUDE.md was not updated alongside source file changes"
+                        print(
+                            formatting.error_msg(
+                                f"CLAUDE.md not updated (attempt {attempt}/{max_retries})"
+                            ),
+                            flush=True,
+                        )
+                        continue
                     try:
                         _commit(project_dir, task.text)
                     except RuntimeError as exc:

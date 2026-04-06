@@ -4644,6 +4644,7 @@ def test_run_loop_calls_auto_wrap_after_commit(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -4837,6 +4838,7 @@ def test_run_loop_calls_reinject_after_commit(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -5555,6 +5557,7 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -6751,6 +6754,7 @@ def test_run_loop_spawns_reviewer_after_commit(tmp_path):
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main.run_checks", return_value=check_result),
         patch("mcloop.main._commit"),
         patch("mcloop.main._maybe_auto_wrap"),
@@ -6806,6 +6810,7 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main.run_checks", return_value=check_result),
         patch("mcloop.main._commit"),
         patch("mcloop.main._maybe_auto_wrap"),
@@ -6823,3 +6828,132 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
         run_loop(plan)
 
     mock_spawn.assert_not_called()
+
+
+# --- CLAUDE.md freshness gate tests ---
+
+
+def test_run_loop_claude_md_freshness_blocks_commit(tmp_path):
+    """run_loop treats CLAUDE.md freshness failure as check failure."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=False),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.mark_failed"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    mock_commit.assert_not_called()
+
+
+def test_run_loop_claude_md_freshness_passes(tmp_path):
+    """run_loop commits when CLAUDE.md freshness check passes."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    mock_commit.assert_called_once()
+
+
+def test_run_loop_claude_md_freshness_feeds_prior_errors(tmp_path, capsys):
+    """CLAUDE.md freshness failure message appears in output."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=False),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result) as mock_run,
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.mark_failed"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    captured = capsys.readouterr()
+    assert "CLAUDE.md not updated" in captured.out
+    # The prior_errors kwarg should contain the freshness message
+    # on the retry call (second call onwards)
+    for c in mock_run.call_args_list[1:]:
+        if "prior_errors" in c.kwargs:
+            assert "CLAUDE.md" in c.kwargs["prior_errors"]
