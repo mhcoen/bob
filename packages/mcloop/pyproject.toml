@@ -17,7 +17,7 @@ mcloop = "mcloop.main:main"
 [tool.ruff]
 target-version = "py311"
 line-length = 99
-exclude = ["telegram-permission-hook.py"]
+exclude = ["telegram-permission-hook.py", "pytest-of-mhcoen"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

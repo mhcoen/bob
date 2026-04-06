@@ -36,7 +36,8 @@ def _git(
         msg = f"git error{context}: `{cmd_str}` exited {result.returncode}"
         if stderr:
             msg += f"\n    {stderr}"
-        print(formatting.error_msg(msg), flush=True)
+        if not silent:
+            print(formatting.error_msg(msg), flush=True)
         # Only notify for real git failures, not missing repos
         if not silent and "not a git repository" not in stderr:
             notify(msg, level="error")
