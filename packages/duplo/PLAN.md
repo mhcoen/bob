@@ -213,10 +213,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Update `_complete_phase` in `main.py` to handle the timeout exit code gracefully (print "Screenshot capture timed out (skipping)" and continue).
   - [x] Add tests: mock `subprocess.run` to raise `TimeoutExpired`, verify `capture_appshot` returns -2.
 
-- [ ] Remove `generate_plan_test_tasks` from plan generation
+- [x] Remove `generate_plan_test_tasks` from plan generation
   - [x] The mcloop task prompt already instructs every session to write unit tests. Standalone "add tests" / "wire up doc-example tests" tasks appended by `generate_plan_test_tasks` are redundant — they fail as no-ops because the tests already exist by the time mcloop reaches them. Remove the call to `generate_plan_test_tasks` and `append_test_tasks` from `_first_run` in `main.py`. Remove the import of `generate_plan_test_tasks` and `append_test_tasks`. Keep `generate_test_source`, `load_code_examples`, and `save_test_file` (they generate the initial test file from doc examples, which is separate).
   - [x] Verify no other call sites use `generate_plan_test_tasks`. If none remain, mark it deprecated or remove it from `test_generator.py`.
-  - [ ] Update `test_main.py` and `test_test_generator.py` to remove tests that assert `generate_plan_test_tasks` output appears in plans.
+  - [x] Update `test_main.py` and `test_test_generator.py` to remove tests that assert `generate_plan_test_tasks` output appears in plans.
 
 - [ ] Skip re-scrape when site content is unchanged
   - [ ] `_rescrape_product_url()` in `main.py` unconditionally fetches 60+ pages on every `_subsequent_run`, even when content has not changed since the last scrape. The page content hashes are already stored in `duplo.json` (via `save_raw_content`). After fetching, compare new content hashes against stored hashes. If no pages changed, skip feature re-extraction (`extract_features` call) and print "Site content unchanged, skipping feature re-extraction."
