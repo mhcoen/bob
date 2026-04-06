@@ -26,6 +26,8 @@ from duplo.saver import (
     PRODUCT_JSON,
     RAW_PAGES_DIR,
     REFERENCES_DIR,
+    _find_duplicate_groups,
+    _merge_duplicate_group,
     add_issue,
     append_phase_to_history,
     resolve_issue,
@@ -1056,6 +1058,223 @@ class TestSaveFeatures:
         for feat in data["features"]:
             assert feat["status"] == "pending"
             assert feat["implemented_in"] == ""
+
+
+class TestFindDuplicateGroups:
+    """Tests for _find_duplicate_groups()."""
+
+    def test_returns_empty_for_single_name(self):
+        assert _find_duplicate_groups(["Auth"]) == []
+
+    def test_returns_empty_for_empty_list(self):
+        assert _find_duplicate_groups([]) == []
+
+    def test_parses_valid_groups(self, monkeypatch):
+        response = json.dumps(
+            [
+                ["Custom vocabulary / glossary", "Custom vocabulary"],
+            ]
+        )
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda *a, **kw: response,
+        )
+        groups = _find_duplicate_groups(
+            [
+                "Custom vocabulary / glossary",
+                "Custom vocabulary",
+                "Search",
+            ]
+        )
+        assert len(groups) == 1
+        assert set(groups[0]) == {
+            "Custom vocabulary / glossary",
+            "Custom vocabulary",
+        }
+
+    def test_returns_empty_on_cli_error(self, monkeypatch):
+        from duplo.claude_cli import ClaudeCliError
+
+        def fail(*a, **kw):
+            raise ClaudeCliError("fail", 1, "err")
+
+        monkeypatch.setattr("duplo.claude_cli.query", fail)
+        assert _find_duplicate_groups(["A", "B"]) == []
+
+    def test_returns_empty_on_bad_json(self, monkeypatch):
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda *a, **kw: "not json",
+        )
+        assert _find_duplicate_groups(["A", "B"]) == []
+
+    def test_ignores_singletons(self, monkeypatch):
+        response = json.dumps([["OnlyOne"], ["A", "B"]])
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda *a, **kw: response,
+        )
+        groups = _find_duplicate_groups(["OnlyOne", "A", "B"])
+        assert len(groups) == 1
+        assert set(groups[0]) == {"A", "B"}
+
+
+class TestMergeDuplicateGroup:
+    """Tests for _merge_duplicate_group()."""
+
+    def test_keeps_longest_name(self):
+        features = [
+            {"name": "Custom vocabulary", "description": "d", "status": "pending"},
+            {
+                "name": "Custom vocabulary / glossary",
+                "description": "d",
+                "status": "pending",
+            },
+            {"name": "Search", "description": "s", "status": "pending"},
+        ]
+        kept = _merge_duplicate_group(
+            features,
+            ["Custom vocabulary", "Custom vocabulary / glossary"],
+        )
+        assert kept == "Custom vocabulary / glossary"
+        names = [f["name"] for f in features]
+        assert "Custom vocabulary" not in names
+        assert "Custom vocabulary / glossary" in names
+        assert "Search" in names
+
+    def test_preserves_implemented_status(self):
+        features = [
+            {
+                "name": "API keys",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 1",
+            },
+            {
+                "name": "Bring your own API keys",
+                "description": "d",
+                "status": "pending",
+                "implemented_in": "",
+            },
+        ]
+        kept = _merge_duplicate_group(
+            features,
+            ["API keys", "Bring your own API keys"],
+        )
+        assert kept == "Bring your own API keys"
+        assert len(features) == 1
+        assert features[0]["status"] == "implemented"
+        assert features[0]["implemented_in"] == "Phase 1"
+
+    def test_returns_none_when_fewer_than_two_members(self):
+        features = [
+            {"name": "Auth", "description": "d", "status": "pending"},
+        ]
+        result = _merge_duplicate_group(features, ["Auth", "Nonexistent"])
+        assert result is None
+        assert len(features) == 1
+
+
+class TestSaveFeaturesSemanticDedup:
+    """Tests for save_features() semantic dedup (post-merge pass)."""
+
+    def _write_features(self, tmp_path, features_data):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"features": features_data}), encoding="utf-8")
+
+    def test_merges_near_duplicates_across_runs(self, tmp_path, monkeypatch, capsys):
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Custom vocabulary",
+                    "description": "Add custom words.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        )
+
+        # Stub the candidate-vs-existing dedup to let the new feature through.
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {},
+        )
+        # Stub the post-merge dedup to find the near-duplicate pair.
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [["Custom vocabulary", "Custom vocabulary / glossary"]],
+        )
+
+        new = [
+            Feature(
+                name="Custom vocabulary / glossary",
+                description="Add custom words and glossary.",
+                category="core",
+            ),
+        ]
+        save_features(new, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+        assert len(names) == 1
+        assert names[0] == "Custom vocabulary / glossary"
+        # Implemented status preserved from the shorter-named original.
+        assert data["features"][0]["status"] == "implemented"
+        assert data["features"][0]["implemented_in"] == "Phase 1"
+
+        captured = capsys.readouterr()
+        assert "Merged 1 duplicate feature(s)." in captured.out
+
+    def test_no_merge_message_when_no_duplicates(self, tmp_path, monkeypatch, capsys):
+        self._write_features(tmp_path, [])
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [],
+        )
+        new = [Feature(name="Auth", description="Login.", category="core")]
+        save_features(new, target_dir=tmp_path)
+
+        captured = capsys.readouterr()
+        assert "Merged" not in captured.out
+
+    def test_skips_dedup_when_no_candidates(self, tmp_path, monkeypatch):
+        """When all new features are exact matches, still run post-merge."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Authentication",
+                    "description": "Login system.",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [["Auth", "Authentication"]],
+        )
+
+        # Pass an exact duplicate — skipped, but post-merge still runs.
+        save_features(
+            [Feature(name="Auth", description="Login.", category="core")],
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["features"]) == 1
+        assert data["features"][0]["name"] == "Authentication"
 
 
 class TestSaveFeatureStatus:

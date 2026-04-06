@@ -376,6 +376,91 @@ def _deduplicate_features_llm(
     return {str(k): str(v) for k, v in result.items()}
 
 
+def _find_duplicate_groups(names: list[str]) -> list[list[str]]:
+    """Use an LLM to find groups of semantically identical feature names.
+
+    Returns a list of groups, where each group is a list of names that
+    refer to the same concept. Only groups with 2+ members are returned.
+    Falls back to an empty list if the LLM call fails.
+    """
+    if len(names) < 2:
+        return []
+
+    from duplo.claude_cli import ClaudeCliError, query
+
+    names_json = json.dumps(names)
+    system = (
+        "You are deduplicating a feature list. Given a list of feature "
+        "names, identify groups of names that refer to the SAME concept "
+        "(e.g. 'Custom vocabulary / glossary' and 'Custom vocabulary', "
+        "or 'Bring-your-own API keys' and 'Bring your own API keys'). "
+        "Return ONLY a JSON array of arrays, where each inner array is "
+        "a group of 2+ names that are semantically identical. Names that "
+        "are unique should NOT appear. Return [] if no duplicates exist."
+    )
+    prompt = f"Feature names:\n{names_json}"
+    try:
+        raw = query(prompt, system=system, model="haiku")
+    except ClaudeCliError:
+        return []
+
+    text = raw.strip()
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(result, list):
+        return []
+
+    groups: list[list[str]] = []
+    for item in result:
+        if isinstance(item, list) and len(item) >= 2:
+            group = [str(n) for n in item]
+            groups.append(group)
+    return groups
+
+
+def _merge_duplicate_group(
+    features: list[dict],
+    group: list[str],
+) -> str | None:
+    """Merge a group of duplicate feature dicts, keeping the best name.
+
+    Picks the longest name as "most descriptive". Preserves
+    ``status: "implemented"`` if any member has it. Returns the name
+    that was kept, or ``None`` if no members were found.
+    """
+    name_set = set(group)
+    members = [f for f in features if f["name"] in name_set]
+    if len(members) < 2:
+        return None
+
+    # Keep the longest name (most descriptive).
+    best = max(members, key=lambda f: len(f["name"]))
+
+    # Preserve implemented status from any member.
+    any_implemented = any(f.get("status") == "implemented" for f in members)
+    if any_implemented and best.get("status") != "implemented":
+        impl_member = next(f for f in members if f.get("status") == "implemented")
+        best["status"] = "implemented"
+        best["implemented_in"] = impl_member.get("implemented_in", "")
+
+    # Remove all members except the best from the feature list.
+    remove_names = name_set - {best["name"]}
+    features[:] = [f for f in features if f["name"] not in remove_names]
+    return best["name"]
+
+
 def save_features(
     features: list[Feature],
     *,
@@ -385,8 +470,9 @@ def save_features(
 
     Adds any features whose name is not already present, using an LLM
     to detect semantic duplicates (e.g. "CLI tool" and "Command-line
-    interface (CLI)"). Existing features are never removed or modified.
-    Returns the path to the updated file.
+    interface (CLI)"). After merging, runs a second LLM pass over all
+    feature names to find and merge near-duplicates that accumulated
+    across runs. Returns the path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
@@ -396,21 +482,34 @@ def save_features(
 
     # Quick pass: filter out exact matches.
     candidates = [f for f in features if f.name not in existing_names]
-    if not candidates:
-        return path
 
-    # LLM pass: detect semantic duplicates in a single batch call.
-    candidate_names = [f.name for f in candidates]
-    duplicates = _deduplicate_features_llm(candidate_names, list(existing_names))
+    if candidates:
+        # LLM pass: detect semantic duplicates in a single batch call.
+        candidate_names = [f.name for f in candidates]
+        duplicates = _deduplicate_features_llm(candidate_names, list(existing_names))
 
-    for feat in candidates:
-        if feat.name in duplicates:
-            continue
-        d = dataclasses.asdict(feat)
-        d.setdefault("status", "pending")
-        d.setdefault("implemented_in", "")
-        existing.append(d)
-        existing_names.add(feat.name)
+        for feat in candidates:
+            if feat.name in duplicates:
+                continue
+            d = dataclasses.asdict(feat)
+            d.setdefault("status", "pending")
+            d.setdefault("implemented_in", "")
+            existing.append(d)
+            existing_names.add(feat.name)
+
+    # Post-merge pass: find and merge semantic duplicates across ALL
+    # features (existing + newly added) that accumulated over runs.
+    all_names = [f["name"] for f in existing]
+    groups = _find_duplicate_groups(all_names)
+    merged_count = 0
+    for group in groups:
+        kept = _merge_duplicate_group(existing, group)
+        if kept is not None:
+            merged_count += len(group) - 1
+
+    if merged_count:
+        print(f"Merged {merged_count} duplicate feature(s).")
+
     data["features"] = existing
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
