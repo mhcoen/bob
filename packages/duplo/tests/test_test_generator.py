@@ -9,7 +9,6 @@ from duplo.test_generator import (
     _category_class_name,
     _group_by_source,
     generate_parametrized_test_source,
-    generate_plan_test_tasks,
     generate_test_source,
     load_code_examples,
     save_test_file,
@@ -283,26 +282,3 @@ class TestSaveTestFile:
         subdir = tmp_path / "tests" / "generated"
         path = save_test_file("x", target_dir=subdir)
         assert path.exists()
-
-
-class TestGeneratePlanTestTasks:
-    def test_empty_returns_empty(self):
-        assert generate_plan_test_tasks([]) == []
-
-    def test_returns_checklist_items(self):
-        examples = [_make_example()]
-        tasks = generate_plan_test_tasks(examples)
-        assert len(tasks) == 3
-        assert "- [ ]" in tasks[0]
-        assert "1 documentation-example test(s)" in tasks[0]
-
-    def test_includes_language(self):
-        examples = [_make_example(language="python"), _make_example(language="ruby")]
-        tasks = generate_plan_test_tasks(examples)
-        assert "python" in tasks[0]
-        assert "ruby" in tasks[0]
-
-    def test_count_reflects_examples(self):
-        examples = [_make_example(input=f"ex{i}") for i in range(5)]
-        tasks = generate_plan_test_tasks(examples)
-        assert "5 documentation-example test(s)" in tasks[0]

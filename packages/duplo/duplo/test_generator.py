@@ -230,23 +230,3 @@ def save_test_file(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
-
-
-def generate_plan_test_tasks(examples: list[CodeExample]) -> list[str]:
-    """Return PLAN.md checklist items for wiring up doc-example tests.
-
-    These tasks guide McLoop to replace the ``run_example()`` stub with
-    actual project logic so the generated tests pass.
-    """
-    if not examples:
-        return []
-
-    languages = {ex.language for ex in examples if ex.language}
-    lang_note = f" ({', '.join(sorted(languages))})" if languages else ""
-
-    return [
-        f"- [ ] Wire up {len(examples)} documentation-example test(s){lang_note}",
-        "  - [ ] Replace `run_example()` stub in test_doc_examples_generated.py "
-        "with actual project imports",
-        "  - [ ] Run pytest and fix any failing doc-example tests",
-    ]
