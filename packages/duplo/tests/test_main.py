@@ -1087,6 +1087,75 @@ class TestRescrapeProductUrl:
         assert "last_scrape_timestamp" in data
         assert time.time() - data["last_scrape_timestamp"] < 5
 
+    def test_unchanged_content_skips_extract_features(self, capsys, tmp_path, monkeypatch):
+        """Integration: when fetch_site returns identical hashes, extract_features is skipped."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "F1", "description": "d", "category": "c"}],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "reference_urls": [
+                    {"url": "https://example.com", "fetched_at": "t", "content_hash": "abc"},
+                ],
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        # Create PLAN.md with unchecked tasks so _subsequent_run hits State 2 and returns.
+        (tmp_path / "PLAN.md").write_text("# Phase 1\n- [ ] Build UI\n", encoding="utf-8")
+
+        records = [PageRecord("https://example.com", "t2", "abc")]
+        with (
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("text", [], None, records, {}),
+            ),
+            patch("duplo.main.extract_features") as mock_extract,
+        ):
+            main()
+
+        mock_extract.assert_not_called()
+        out = capsys.readouterr().out
+        assert "Site content unchanged" in out
+
+    def test_recent_timestamp_skips_fetch_site(self, capsys, tmp_path, monkeypatch):
+        """Integration: when last_scrape_timestamp < 10 min old, fetch_site is skipped."""
+        import time
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [{"name": "F1", "description": "d", "category": "c"}],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "last_scrape_timestamp": time.time() - 180,  # 3 minutes ago
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        # Create PLAN.md with unchecked tasks so _subsequent_run hits State 2 and returns.
+        (tmp_path / "PLAN.md").write_text("# Phase 1\n- [ ] Build UI\n", encoding="utf-8")
+
+        with patch("duplo.main.fetch_site") as mock_fetch:
+            main()
+
+        mock_fetch.assert_not_called()
+        out = capsys.readouterr().out
+        assert "Using recent scrape data (3 minutes ago)" in out
+
     def test_subsequent_run_calls_rescrape(self, tmp_path, monkeypatch):
         """Integration: _subsequent_run calls _rescrape_product_url."""
         _write_duplo_json(
