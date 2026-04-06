@@ -1,0 +1,1 @@
+{"hooks": {"PreToolUse": [{"type": "command", "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py"}], "SessionStart": [{"type": "command", "command": "python3 ~/.mcloop/hooks/session-start-hook.py"}]}}

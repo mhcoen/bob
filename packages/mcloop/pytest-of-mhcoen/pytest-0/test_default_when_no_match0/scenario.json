@@ -1,0 +1,1 @@
+{"tasks": [{"match": "xyz", "output": "matched"}], "default": {"output": "fallback", "exit_code": 3}}

@@ -1,0 +1,1 @@
+{"tasks": [{"match": "test", "output": "subprocess ok", "exit_code": 0}]}

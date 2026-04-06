@@ -1,0 +1,1 @@
+{"tasks": [{"match": "create hello\\.txt", "files": {"hello.txt": "hello"}, "output": "Created hello.txt", "exit_code": 0}, {"match": "rate limit", "output": "Rate limit exceeded. Try again later.", "exit_code": 1}, {"match": "delete everything", "output": "Deleted all files", "exit_code": 0}], "default": {"output": "Unknown task", "exit_code": 1}}

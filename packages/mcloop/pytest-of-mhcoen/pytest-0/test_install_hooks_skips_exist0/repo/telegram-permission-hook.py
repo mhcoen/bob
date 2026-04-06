@@ -1,0 +1,1 @@
+# telegram-permission-hook.py
