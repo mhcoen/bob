@@ -96,6 +96,15 @@ def _ensure_git(project_dir: Path) -> None:
         sys.exit(1)
 
 
+def _sanitize_commit_msg(text: str, max_len: int = 200) -> str:
+    """Strip characters that break shell quoting in git commit messages."""
+    cleaned = text.replace("`", "").replace("\u2014", "--").replace("\u2192", "->")
+    cleaned = cleaned.replace('"', "'").replace("\n", " ")
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len] + "..."
+    return cleaned
+
+
 def _checkpoint(
     project_dir: Path,
     next_task: str = "",
@@ -126,7 +135,7 @@ def _checkpoint(
         print(formatting.system_msg("Committing pending changes..."), flush=True)
     msg = "mcloop: checkpoint"
     if next_task:
-        msg += f" (next: {next_task})"
+        msg += f" (next: {_sanitize_commit_msg(next_task)})"
     _git(["git", "add", "-u"], cwd=project_dir, label="checkpoint add -u")
     # Stage untracked files individually, skipping sensitive patterns
     untracked = _git(
@@ -190,7 +199,7 @@ def _commit(project_dir: Path, task_text: str) -> None:
         return
     _git(["git", "add", "-A"], cwd=project_dir, label="commit add")
     _git(
-        ["git", "commit", "-m", f"Complete: {task_text}"],
+        ["git", "commit", "-m", f"Complete: {_sanitize_commit_msg(task_text)}"],
         cwd=project_dir,
         label="commit",
     )
