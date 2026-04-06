@@ -659,6 +659,40 @@ class TestInitProject:
         m_gen.assert_called_once_with(examples, project_name="example")
         m_save.assert_called_once()
 
+    def test_skips_test_generation_for_swift_project(self, capsys, tmp_path):
+        """Package.swift in target dir → no test file generated."""
+        (tmp_path / "Package.swift").write_text("// swift-tools-version:5.9")
+        examples = [{"input": "1+1", "expected_output": "2"}]
+        with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
+            with patch("duplo.main.save_examples"):
+                with patch(
+                    "duplo.main.write_claude_md",
+                    return_value=tmp_path / "CLAUDE.md",
+                ):
+                    with patch("duplo.main.generate_roadmap", return_value=None):
+                        with patch(
+                            "duplo.main.generate_test_source",
+                        ) as m_gen:
+                            with patch(
+                                "duplo.main.save_test_file",
+                            ) as m_save:
+                                _init_project(
+                                    url="https://example.com",
+                                    project_name="example",
+                                    project_dir=tmp_path,
+                                    features=[],
+                                    prefs=self._PREFS,
+                                    app_name="Example",
+                                    text="page text",
+                                    code_examples=examples,
+                                    doc_structures=None,
+                                )
+        m_gen.assert_not_called()
+        m_save.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Test generation skipped" in captured.out
+        assert "Swift" in captured.out
+
     def test_writes_claude_md(self, tmp_path):
         with patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON):
             with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md") as m:
