@@ -8,6 +8,29 @@ from pathlib import Path
 from duplo.doc_examples import CodeExample
 from duplo.saver import load_examples
 
+# Build-system file → language mapping, checked in order.
+_BUILD_SYSTEM_FILES: list[tuple[str, str]] = [
+    ("pyproject.toml", "Python"),
+    ("setup.py", "Python"),
+    ("Package.swift", "Swift"),
+    ("Cargo.toml", "Rust"),
+    ("go.mod", "Go"),
+    ("package.json", "JS/TS"),
+]
+
+
+def detect_target_language(target_dir: Path | str = ".") -> str:
+    """Detect the target project's language from build-system files.
+
+    Returns the language name (e.g. ``"Python"``, ``"Swift"``) or
+    ``"unknown"`` if no recognised build file is found.
+    """
+    root = Path(target_dir)
+    for filename, language in _BUILD_SYSTEM_FILES:
+        if (root / filename).exists():
+            return language
+    return "unknown"
+
 
 def load_code_examples(target_dir: Path | str = ".") -> list[CodeExample]:
     """Load code examples from ``.duplo/examples/`` (or ``duplo.json`` fallback).

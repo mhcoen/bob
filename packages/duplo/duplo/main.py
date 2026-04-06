@@ -226,6 +226,7 @@ from duplo.roadmap import format_roadmap, generate_roadmap
 
 from duplo.scanner import FileRelevance, scan_directory, scan_files
 from duplo.test_generator import (
+    detect_target_language,
     generate_test_source,
     save_test_file,
 )
@@ -1815,11 +1816,17 @@ def _init_project(
     if code_examples:
         save_examples(code_examples, target_dir=project_dir)
         print(f"Saved {len(code_examples)} code example(s) to .duplo/examples/.")
-        test_source = generate_test_source(code_examples, project_name=project_name)
-        if test_source:
-            tests_dir = project_dir / "tests"
-            test_path = save_test_file(test_source, target_dir=tests_dir)
-            print(f"Generated {len(code_examples)} test case(s) in {test_path}")
+        target_lang = detect_target_language(project_dir)
+        if target_lang == "Python" or target_lang == "unknown":
+            test_source = generate_test_source(code_examples, project_name=project_name)
+            if test_source:
+                tests_dir = project_dir / "tests"
+                test_path = save_test_file(test_source, target_dir=tests_dir)
+                print(f"Generated {len(code_examples)} test case(s) in {test_path}")
+        else:
+            print(
+                f"Test generation skipped (target language: {target_lang}, only Python supported)."
+            )
     if doc_structures:
         print("Saved doc structures to duplo.json.")
     if design and (design.colors or design.fonts or design.layout):

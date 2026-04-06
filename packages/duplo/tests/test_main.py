@@ -634,23 +634,28 @@ class TestInitProject:
                 with patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"):
                     with patch("duplo.main.generate_roadmap", return_value=None):
                         with patch(
-                            "duplo.main.generate_test_source", return_value="test code"
-                        ) as m_gen:
+                            "duplo.main.detect_target_language",
+                            return_value="Python",
+                        ):
                             with patch(
-                                "duplo.main.save_test_file",
-                                return_value=tmp_path / "tests" / "test_doc.py",
-                            ) as m_save:
-                                _init_project(
-                                    url="https://example.com",
-                                    project_name="example",
-                                    project_dir=tmp_path,
-                                    features=[],
-                                    prefs=self._PREFS,
-                                    app_name="Example",
-                                    text="page text",
-                                    code_examples=examples,
-                                    doc_structures=None,
-                                )
+                                "duplo.main.generate_test_source",
+                                return_value="test code",
+                            ) as m_gen:
+                                with patch(
+                                    "duplo.main.save_test_file",
+                                    return_value=tmp_path / "tests" / "test_doc.py",
+                                ) as m_save:
+                                    _init_project(
+                                        url="https://example.com",
+                                        project_name="example",
+                                        project_dir=tmp_path,
+                                        features=[],
+                                        prefs=self._PREFS,
+                                        app_name="Example",
+                                        text="page text",
+                                        code_examples=examples,
+                                        doc_structures=None,
+                                    )
         m_gen.assert_called_once_with(examples, project_name="example")
         m_save.assert_called_once()
 

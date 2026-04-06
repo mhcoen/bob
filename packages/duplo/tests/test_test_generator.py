@@ -8,6 +8,7 @@ from duplo.doc_examples import CodeExample
 from duplo.test_generator import (
     _category_class_name,
     _group_by_source,
+    detect_target_language,
     generate_parametrized_test_source,
     generate_test_source,
     load_code_examples,
@@ -27,6 +28,40 @@ def _make_example(
         source_url=source_url,
         language=language,
     )
+
+
+class TestDetectTargetLanguage:
+    def test_python_pyproject(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]")
+        assert detect_target_language(tmp_path) == "Python"
+
+    def test_python_setup_py(self, tmp_path):
+        (tmp_path / "setup.py").write_text("setup()")
+        assert detect_target_language(tmp_path) == "Python"
+
+    def test_swift(self, tmp_path):
+        (tmp_path / "Package.swift").write_text("// swift")
+        assert detect_target_language(tmp_path) == "Swift"
+
+    def test_rust(self, tmp_path):
+        (tmp_path / "Cargo.toml").write_text("[package]")
+        assert detect_target_language(tmp_path) == "Rust"
+
+    def test_go(self, tmp_path):
+        (tmp_path / "go.mod").write_text("module example")
+        assert detect_target_language(tmp_path) == "Go"
+
+    def test_js_ts(self, tmp_path):
+        (tmp_path / "package.json").write_text("{}")
+        assert detect_target_language(tmp_path) == "JS/TS"
+
+    def test_unknown_when_empty(self, tmp_path):
+        assert detect_target_language(tmp_path) == "unknown"
+
+    def test_python_takes_priority_over_package_json(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]")
+        (tmp_path / "package.json").write_text("{}")
+        assert detect_target_language(tmp_path) == "Python"
 
 
 class TestCategoryClassName:
