@@ -242,6 +242,28 @@ class TestScanFiles:
         assert len(result.pdfs) == 1
         assert len(result.text_files) == 1
 
+    def test_source_files_excluded_from_all_categories(self, tmp_path: Path):
+        """Source code files must not appear in any ScanResult category."""
+        source_files = []
+        # Extension-based source files
+        for ext in (".py", ".swift", ".rs", ".go", ".js", ".ts", ".java", ".c", ".cpp", ".rb"):
+            p = tmp_path / f"code{ext}"
+            p.write_text("https://example.com/should-not-be-extracted")
+            source_files.append(p)
+        # Name-based source files
+        for name in ("Makefile", "Dockerfile", "Package.swift", "Cargo.toml", "go.mod"):
+            p = tmp_path / name
+            p.write_text("https://example.com/should-not-be-extracted")
+            source_files.append(p)
+
+        result = scan_files(source_files)
+
+        assert result.images == []
+        assert result.videos == []
+        assert result.pdfs == []
+        assert result.text_files == []
+        assert result.urls == []
+
     def test_assesses_relevance(self, tmp_path: Path):
         tiny = tmp_path / "tiny.png"
         tiny.write_bytes(b"P" * 100)
