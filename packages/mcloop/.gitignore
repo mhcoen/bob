@@ -9,6 +9,7 @@ build/
 *.egg
 .ruff_cache/
 .pytest_cache/
+pytest-of-*/
 logs/
 local
 .mcloop-last-audit
@@ -18,3 +19,4 @@ BUGS.md
 \#*\#
 .#*
 CLAUDE.md
+AGENTS.md
