@@ -216,7 +216,6 @@ from duplo.notifier import notify_phase_complete
 from duplo.fetcher import download_media, extract_media_urls, fetch_site
 from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
-    append_test_tasks,
     generate_phase_plan,
     parse_completed_tasks,
     save_plan,
@@ -226,9 +225,7 @@ from duplo.roadmap import format_roadmap, generate_roadmap
 
 from duplo.scanner import FileRelevance, scan_directory, scan_files
 from duplo.test_generator import (
-    generate_plan_test_tasks,
     generate_test_source,
-    load_code_examples,
     save_test_file,
 )
 from duplo.validator import validate_product_url
@@ -853,10 +850,6 @@ def _first_run(*, url: str | None = None) -> None:
             design_section=design_section,
             spec_text=spec_prompt,
         )
-        doc_examples = load_code_examples()
-        test_tasks = generate_plan_test_tasks(doc_examples)
-        if test_tasks:
-            content = append_test_tasks(content, test_tasks)
         # Append verification tasks from video frame descriptions.
         frame_descs = load_frame_descriptions()
         if frame_descs:
@@ -1547,10 +1540,6 @@ def _subsequent_run() -> None:
         phase_number=history_phase_number,
         spec_text=spec_prompt,
     )
-    doc_examples = load_code_examples()
-    test_tasks = generate_plan_test_tasks(doc_examples)
-    if test_tasks:
-        content = append_test_tasks(content, test_tasks)
     # Append verification tasks from video frame descriptions.
     frame_descs = load_frame_descriptions()
     if frame_descs:

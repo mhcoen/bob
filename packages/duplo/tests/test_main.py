@@ -456,37 +456,6 @@ class TestPhaseCompletionFlow:
 
         assert mock_gen.call_args.kwargs["phase_number"] == 3
 
-    def test_appends_test_tasks_to_generated_plan(self, tmp_path, monkeypatch):
-        data = {
-            **self._BASE_DATA,
-            "code_examples": [
-                {
-                    "input": "1+1",
-                    "expected_output": "2",
-                    "source_url": "",
-                    "language": "python",
-                }
-            ],
-        }
-        _write_duplo_json(tmp_path, data)
-        monkeypatch.chdir(tmp_path)
-
-        with (
-            patch(
-                "duplo.main.generate_phase_plan",
-                return_value="# Phase 0\n- [ ] Task",
-            ),
-            patch(
-                "duplo.main.save_plan",
-                return_value=tmp_path / "PLAN.md",
-            ) as mock_save,
-        ):
-            main()
-
-        saved_content = mock_save.call_args.args[0]
-        assert "Wire up" in saved_content
-        assert "run_example()" in saved_content
-
 
 class TestSubsequentRunFileChanges:
     """Tests for file change detection on subsequent runs."""
