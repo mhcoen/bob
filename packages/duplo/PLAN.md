@@ -225,7 +225,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Semantic feature deduplication in `save_features`
   - [x] `save_features` in `saver.py` only deduplicates by exact name match. Near-duplicates like "Custom vocabulary / glossary" vs "Custom vocabulary", or "Bring-your-own API keys" vs "Bring your own API keys" accumulate with every re-scrape. After merging new features by exact name, collect all feature names (including existing ones) and run a single `claude -p` call to identify groups of semantically identical features. For each group, keep the most descriptive name and merge the others (preserving `status: implemented` if any member has it). Print "Merged N duplicate feature(s)."
-  - [ ] Also deduplicate against already-implemented features: if a remaining feature is semantically identical to an implemented one (e.g. "Local offline transcription" remaining when "Local on-device transcription" is implemented), mark it implemented.
+  - [x] Also deduplicate against already-implemented features: if a remaining feature is semantically identical to an implemented one (e.g. "Local offline transcription" remaining when "Local on-device transcription" is implemented), mark it implemented.
   - [ ] Add tests: provide a feature list with known near-duplicates, mock the Claude call to return expected groupings, verify the merged list has no duplicates and statuses are preserved.
 
 - [ ] Language-aware test generation
