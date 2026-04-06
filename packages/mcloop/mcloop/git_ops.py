@@ -151,11 +151,17 @@ def _checkpoint(
         if any(s in f for s in _sensitive):
             continue
         _git(["git", "add", "--", f], cwd=project_dir, label=f"checkpoint add {f}")
-    _git(
+    result = _git(
         ["git", "commit", "-m", msg],
         cwd=project_dir,
         label="checkpoint commit",
+        silent=True,
     )
+    if result.returncode != 0:
+        # Nothing to commit is normal — status can report changes
+        # that add -u doesn't stage (e.g. untracked files that were
+        # skipped by the sensitive-file filter). Not an error.
+        pass
 
 
 def _push_or_die(project_dir: Path) -> None:
