@@ -218,10 +218,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Verify no other call sites use `generate_plan_test_tasks`. If none remain, mark it deprecated or remove it from `test_generator.py`.
   - [x] Update `test_main.py` and `test_test_generator.py` to remove tests that assert `generate_plan_test_tasks` output appears in plans.
 
-- [ ] Skip re-scrape when site content is unchanged
+- [x] Skip re-scrape when site content is unchanged
   - [x] `_rescrape_product_url()` in `main.py` unconditionally fetches 60+ pages on every `_subsequent_run`, even when content has not changed since the last scrape. The page content hashes are already stored in `duplo.json` (via `save_raw_content`). After fetching, compare new content hashes against stored hashes. If no pages changed, skip feature re-extraction (`extract_features` call) and print "Site content unchanged, skipping feature re-extraction."
   - [x] When entering the next-phase flow (no PLAN.md exists) immediately after phase completion, the re-scrape from minutes ago is still current. Add a `last_scrape_timestamp` to `duplo.json` (set by `_rescrape_product_url`). If the timestamp is less than 10 minutes old, skip the entire re-scrape and print "Using recent scrape data (N minutes ago)."
-  - [ ] Add tests: mock `fetch_site` to return identical content, verify `extract_features` is not called. Mock timestamp within 10 minutes, verify `fetch_site` is not called.
+  - [x] Add tests: mock `fetch_site` to return identical content, verify `extract_features` is not called. Mock timestamp within 10 minutes, verify `fetch_site` is not called.
 
 - [ ] Semantic feature deduplication in `save_features`
   - [ ] `save_features` in `saver.py` only deduplicates by exact name match. Near-duplicates like "Custom vocabulary / glossary" vs "Custom vocabulary", or "Bring-your-own API keys" vs "Bring your own API keys" accumulate with every re-scrape. After merging new features by exact name, collect all feature names (including existing ones) and run a single `claude -p` call to identify groups of semantically identical features. For each group, keep the most descriptive name and merge the others (preserving `status: implemented` if any member has it). Print "Merged N duplicate feature(s)."
