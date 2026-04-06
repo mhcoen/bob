@@ -506,6 +506,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             shot_code = capture_appshot(app_name, output_path, launch=launch_cmd)
             if shot_code == 0:
                 print(f"Screenshot saved to {output_path}")
+            elif shot_code == -2:
+                print("Screenshot capture timed out (skipping)")
             else:
                 print("Screenshot capture failed (continuing without it).")
         else:
@@ -1982,6 +1984,8 @@ def _complete_phase(
             _compare_with_references(output_path)
         elif shot_code == -1:
             print("appshot not found, skipping screenshot.")
+        elif shot_code == -2:
+            print("Screenshot capture timed out (skipping)")
         else:
             print(f"appshot exited with code {shot_code} (screenshot skipped)")
 

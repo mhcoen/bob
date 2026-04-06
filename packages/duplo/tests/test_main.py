@@ -2933,6 +2933,28 @@ class TestCompletePhaseScoping:
         assert search_issue["status"] == "resolved"
 
 
+class TestCompletePhaseAppshotTimeout:
+    """_complete_phase handles capture_appshot timeout exit code."""
+
+    def test_timeout_prints_message_and_continues(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"current_phase": 1})
+        (tmp_path / "PLAN.md").write_text("- [x] task\n")
+
+        with (
+            patch("duplo.main.append_phase_to_history"),
+            patch("duplo.main.advance_phase"),
+            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.main.capture_appshot", return_value=-2),
+        ):
+            _complete_phase("- [x] task\n", "MyApp", "Phase 1")
+
+        out = capsys.readouterr().out
+        assert "Screenshot capture timed out (skipping)" in out
+
+
 class TestPlanHasUncheckedTasks:
     """Tests for _plan_has_unchecked_tasks helper."""
 
