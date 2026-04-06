@@ -1386,6 +1386,346 @@ class TestPropagateImplementedStatus:
         assert features[1]["status"] == "pending"
 
 
+class TestSaveFeaturesFullDedupPipeline:
+    """End-to-end tests for save_features() dedup pipeline.
+
+    Provides realistic feature lists with known near-duplicates, mocks
+    all LLM calls, and verifies the merged list has no duplicates with
+    statuses preserved.
+    """
+
+    def _write_features(self, tmp_path, features_data):
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(parents=True, exist_ok=True)
+        path = duplo_dir / "duplo.json"
+        path.write_text(json.dumps({"features": features_data}), encoding="utf-8")
+
+    def test_multiple_duplicate_groups_merged(self, tmp_path, monkeypatch, capsys):
+        """Three groups of near-duplicates collapse to one feature each."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Custom vocabulary",
+                    "description": "Add custom words.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Bring-your-own API keys",
+                    "description": "User provides keys.",
+                    "category": "integrations",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+                {
+                    "name": "Dark mode",
+                    "description": "Dark theme.",
+                    "category": "ui",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+
+        new_features = [
+            Feature(
+                name="Custom vocabulary / glossary",
+                description="Add custom words and glossary terms.",
+                category="core",
+            ),
+            Feature(
+                name="Bring your own API keys (BYOK)",
+                description="User provides their own keys.",
+                category="integrations",
+            ),
+            Feature(
+                name="Dark mode / night theme",
+                description="Dark color scheme.",
+                category="ui",
+            ),
+        ]
+
+        # Let all candidates through the initial dedup pass.
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {},
+        )
+        # Return three groups of duplicates.
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [
+                ["Custom vocabulary", "Custom vocabulary / glossary"],
+                ["Bring-your-own API keys", "Bring your own API keys (BYOK)"],
+                ["Dark mode", "Dark mode / night theme"],
+            ],
+        )
+        # No propagation needed (separate test covers that).
+        monkeypatch.setattr(
+            "duplo.saver._propagate_implemented_status",
+            lambda feats: [],
+        )
+
+        save_features(new_features, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+        assert len(names) == 3
+        # Longest names kept.
+        assert "Custom vocabulary / glossary" in names
+        assert "Bring your own API keys (BYOK)" in names
+        assert "Dark mode / night theme" in names
+        # Short duplicates gone.
+        assert "Custom vocabulary" not in names
+        assert "Bring-your-own API keys" not in names
+        assert "Dark mode" not in names
+
+        # Implemented status preserved from "Custom vocabulary".
+        vocab = next(f for f in data["features"] if "glossary" in f["name"])
+        assert vocab["status"] == "implemented"
+        assert vocab["implemented_in"] == "Phase 1"
+
+        captured = capsys.readouterr()
+        assert "Merged 3 duplicate feature(s)." in captured.out
+
+    def test_candidate_dedup_blocks_duplicates(self, tmp_path, monkeypatch):
+        """Candidate-vs-existing LLM dedup prevents adding a semantic dup."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "CLI tool",
+                    "description": "Command-line interface.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        )
+
+        new_features = [
+            Feature(
+                name="Command-line interface (CLI)",
+                description="CLI for the tool.",
+                category="core",
+            ),
+            Feature(
+                name="Search",
+                description="Full-text search.",
+                category="core",
+            ),
+        ]
+
+        # LLM says "Command-line interface (CLI)" duplicates "CLI tool".
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {"Command-line interface (CLI)": "CLI tool"},
+        )
+        # No post-merge duplicates.
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [],
+        )
+        monkeypatch.setattr(
+            "duplo.saver._propagate_implemented_status",
+            lambda feats: [],
+        )
+
+        save_features(new_features, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+        assert len(names) == 2
+        assert "CLI tool" in names
+        assert "Search" in names
+        assert "Command-line interface (CLI)" not in names
+
+    def test_propagation_marks_pending_after_merge(self, tmp_path, monkeypatch, capsys):
+        """After merging, propagation marks a pending dup of an implemented one."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Local on-device transcription",
+                    "description": "On-device speech-to-text.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 2",
+                },
+            ],
+        )
+
+        new_features = [
+            Feature(
+                name="Local offline transcription",
+                description="Offline speech-to-text.",
+                category="core",
+            ),
+        ]
+
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {},
+        )
+        # No post-merge name duplicates — they have distinct names.
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [],
+        )
+
+        # Propagation recognizes the pending feature duplicates the implemented one.
+        def fake_propagate(feats):
+            for f in feats:
+                if f["name"] == "Local offline transcription":
+                    f["status"] = "implemented"
+                    f["implemented_in"] = "Phase 2"
+                    return ["Local offline transcription"]
+            return []
+
+        monkeypatch.setattr(
+            "duplo.saver._propagate_implemented_status",
+            fake_propagate,
+        )
+
+        save_features(new_features, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        offline = next(f for f in data["features"] if f["name"] == "Local offline transcription")
+        assert offline["status"] == "implemented"
+        assert offline["implemented_in"] == "Phase 2"
+
+        captured = capsys.readouterr()
+        assert "Marked 1 feature(s) as implemented" in captured.out
+
+    def test_full_pipeline_merge_then_propagate(self, tmp_path, monkeypatch, capsys):
+        """End-to-end: merge duplicates, then propagate implemented status."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Authentication.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+                {
+                    "name": "Export CSV",
+                    "description": "CSV export.",
+                    "category": "data",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+        )
+
+        new_features = [
+            Feature(
+                name="Authentication / login",
+                description="Login and auth.",
+                category="core",
+            ),
+            Feature(
+                name="CSV data export",
+                description="Export data as CSV.",
+                category="data",
+            ),
+            Feature(
+                name="Search",
+                description="Full-text search.",
+                category="core",
+            ),
+        ]
+
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {},
+        )
+        # "Auth" and "Authentication / login" are near-duplicates;
+        # "Export CSV" and "CSV data export" are near-duplicates.
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [
+                ["Auth", "Authentication / login"],
+                ["Export CSV", "CSV data export"],
+            ],
+        )
+
+        # After merge, "Authentication / login" is implemented (from "Auth").
+        # "CSV data export" kept longer name; propagation not needed (both pending).
+        # But let's say Search is semantically identical to nothing — no propagation.
+        monkeypatch.setattr(
+            "duplo.saver._propagate_implemented_status",
+            lambda feats: [],
+        )
+
+        save_features(new_features, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+
+        # 3 features after merging 2 groups from 5 total.
+        assert len(names) == 3
+        assert "Authentication / login" in names
+        assert "CSV data export" in names
+        assert "Search" in names
+        assert "Auth" not in names
+        assert "Export CSV" not in names
+
+        # "Authentication / login" inherited implemented status from "Auth".
+        auth = next(f for f in data["features"] if f["name"] == "Authentication / login")
+        assert auth["status"] == "implemented"
+        assert auth["implemented_in"] == "Phase 1"
+
+        captured = capsys.readouterr()
+        assert "Merged 2 duplicate feature(s)." in captured.out
+
+    def test_no_duplicates_no_merge_no_propagation(self, tmp_path, monkeypatch, capsys):
+        """Clean feature list with no duplicates passes through unchanged."""
+        self._write_features(
+            tmp_path,
+            [
+                {
+                    "name": "Auth",
+                    "description": "Login.",
+                    "category": "core",
+                    "status": "implemented",
+                    "implemented_in": "Phase 1",
+                },
+            ],
+        )
+
+        new_features = [
+            Feature(name="Search", description="Full-text search.", category="core"),
+            Feature(name="Export", description="Data export.", category="data"),
+        ]
+
+        monkeypatch.setattr(
+            "duplo.saver._deduplicate_features_llm",
+            lambda cands, exist: {},
+        )
+        monkeypatch.setattr(
+            "duplo.saver._find_duplicate_groups",
+            lambda names: [],
+        )
+        monkeypatch.setattr(
+            "duplo.saver._propagate_implemented_status",
+            lambda feats: [],
+        )
+
+        save_features(new_features, target_dir=tmp_path)
+
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        names = [f["name"] for f in data["features"]]
+        assert len(names) == 3
+        assert set(names) == {"Auth", "Search", "Export"}
+
+        captured = capsys.readouterr()
+        assert "Merged" not in captured.out
+        assert "Marked" not in captured.out
+
+
 class TestSaveFeatureStatus:
     """Tests for save_feature_status()."""
 
