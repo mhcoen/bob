@@ -1,1 +1,0 @@
-{"tasks": [{"match": "update", "files": {"/Users/mhcoen/proj/mcloop/pytest-of-mhcoen/pytest-0/test_mixed_create_and_patch0/new.py": "brand new", "/Users/mhcoen/proj/mcloop/pytest-of-mhcoen/pytest-0/test_mixed_create_and_patch0/existing.py": {"patch": "line2\n"}}, "exit_code": 0}]}

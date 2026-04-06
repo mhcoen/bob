@@ -1,1 +1,0 @@
-{"tasks": [{"match": "hello", "output": "world", "exit_code": 0}]}

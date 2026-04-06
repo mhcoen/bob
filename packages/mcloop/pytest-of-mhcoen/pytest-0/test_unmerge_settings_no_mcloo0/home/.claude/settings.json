@@ -1,1 +1,0 @@
-{"hooks": {"PreToolUse": [{"type": "command", "command": "python3 ~/other.py"}]}}
