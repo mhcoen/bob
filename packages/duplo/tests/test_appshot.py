@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from duplo.appshot import capture_appshot
@@ -21,7 +22,9 @@ class TestCaptureAppshot:
         ):
             code = capture_appshot("MyApp", output)
 
-        mock_run.assert_called_once_with(["appshot", "MyApp", str(output), "--wait", "2"])
+        mock_run.assert_called_once_with(
+            ["appshot", "MyApp", str(output), "--wait", "2"], timeout=60
+        )
         assert code == 0
 
     def test_creates_output_directory(self, tmp_path):
@@ -103,3 +106,43 @@ class TestCaptureAppshot:
 
         args = mock_run.call_args[0][0]
         assert output in args
+
+    def test_returns_neg2_on_timeout(self, tmp_path):
+        output = tmp_path / "main.png"
+        with (
+            _PATCH_FIND,
+            patch(
+                "duplo.appshot.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="appshot", timeout=60),
+            ),
+        ):
+            code = capture_appshot("MyApp", output)
+
+        assert code == -2
+
+    def test_custom_timeout(self, tmp_path):
+        output = tmp_path / "main.png"
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with (
+            _PATCH_FIND,
+            patch("duplo.appshot.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            capture_appshot("MyApp", output, timeout=120)
+
+        assert mock_run.call_args[1]["timeout"] == 120
+
+    def test_timeout_prints_warning(self, tmp_path, capsys):
+        output = tmp_path / "main.png"
+        with (
+            _PATCH_FIND,
+            patch(
+                "duplo.appshot.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="appshot", timeout=30),
+            ),
+        ):
+            capture_appshot("MyApp", output, timeout=30)
+
+        captured = capsys.readouterr()
+        assert "timed out" in captured.out
+        assert "MyApp" in captured.out

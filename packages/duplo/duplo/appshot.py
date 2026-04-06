@@ -34,6 +34,7 @@ def capture_appshot(
     *,
     launch: str | None = None,
     wait: int = 2,
+    timeout: int = 60,
 ) -> int:
     """Run ``appshot`` to capture a window screenshot of *app_name*.
 
@@ -45,10 +46,12 @@ def capture_appshot(
         launch: Optional shell command to launch the app before capturing,
             passed as ``--launch <launch>``.
         wait: Seconds to wait after launch before capturing (``--wait``).
+        timeout: Maximum seconds to wait for appshot to finish before
+            killing the process and returning -2.
 
     Returns:
         Exit code of the appshot process (0 on success),
-        or -1 if appshot is not found.
+        -1 if appshot is not found, or -2 if the process timed out.
     """
     appshot = _find_appshot()
     if appshot is None:
@@ -62,7 +65,10 @@ def capture_appshot(
         cmd += ["--launch", launch]
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"Warning: appshot timed out after {timeout}s capturing '{app_name}'")
+        return -2
     except FileNotFoundError:
         return -1
     return result.returncode
