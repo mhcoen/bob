@@ -228,9 +228,9 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Also deduplicate against already-implemented features: if a remaining feature is semantically identical to an implemented one (e.g. "Local offline transcription" remaining when "Local on-device transcription" is implemented), mark it implemented.
   - [x] Add tests: provide a feature list with known near-duplicates, mock the Claude call to return expected groupings, verify the merged list has no duplicates and statuses are preserved.
 
-- [ ] Language-aware test generation
+- [x] Language-aware test generation
   - [x] `test_generator.py` generates Python test files (`generate_test_source`) and `generate_plan_test_tasks` appends Python-specific "wire up doc-example tests" tasks regardless of the target project's language. For non-Python projects (Swift, Rust, Go, etc.) these tasks are invalid. Detect the target language from the project's build system (pyproject.toml → Python, Package.swift → Swift, Cargo.toml → Rust, go.mod → Go, package.json → JS/TS). If not Python, skip `generate_test_source` and `save_test_file` entirely. Print "Test generation skipped (target language: <lang>, only Python supported)."
-  - [ ] Add tests: mock a project directory with Package.swift, verify no test file is generated.
+  - [x] Add tests: mock a project directory with Package.swift, verify no test file is generated.
 
 - [ ] Verify source-file URL scanning is suppressed on subsequent runs
   - [ ] `_analyze_new_files` calls `scan_files` which calls `_classify_file`. Verify that `_SOURCE_EXTS` and `_SOURCE_NAMES` filtering in `scanner.py` excludes source code files (`.py`, `.swift`, `.rs`, etc.) from being classified as analyzable reference materials. Add an explicit test: pass a list of source files to `scan_files`, verify none appear in `scan.urls`, `scan.images`, `scan.pdfs`, or `scan.text_files`.
