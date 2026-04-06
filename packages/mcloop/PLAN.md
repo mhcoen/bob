@@ -13,6 +13,10 @@ over-abstraction.
 
 ## Bugs
 
+- [ ] Enforce CLAUDE.md update when source files change
+  - [x] Create mcloop/claude_md_check.py with check_claude_md_freshness function. Takes changed_files list and project_dir Path, returns bool. Returns False if any source file was modified but CLAUDE.md was not also modified. Source extensions: .py .swift .rs .go .js .ts .java .c .cpp .rb .sh, plus files in src/ lib/ or package directories. Returns True if no source files changed or CLAUDE.md was also touched. Exclude test files -- test_*.py and *_test.go should not trigger the check.
+  - [x] In run_loop in main.py, after checks pass and before _commit, call check_claude_md_freshness with the changed_files list. If it returns False, treat as check failure -- print that CLAUDE.md was not updated, feed as prior_errors on retry, do not commit. Hard gate, not a prompt suggestion.
+  - [ ] Add tests for check_claude_md_freshness. Source file changed without CLAUDE.md returns False. Source file changed with CLAUDE.md returns True. Only test files changed returns True. Only non-source files like README.md or PLAN.md changed returns True.
 
 ## Stage 1: Core
 
