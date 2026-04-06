@@ -461,6 +461,80 @@ def _merge_duplicate_group(
     return best["name"]
 
 
+def _propagate_implemented_status(features: list[dict]) -> list[str]:
+    """Mark pending features as implemented if semantically identical to one.
+
+    Compares all pending feature names against all implemented feature names
+    using an LLM call. For each match, sets the pending feature's status to
+    ``"implemented"`` and copies the ``implemented_in`` value from its match.
+
+    Returns the list of feature names that were newly marked as implemented.
+    """
+    implemented = [f for f in features if f.get("status") == "implemented"]
+    pending = [f for f in features if f.get("status") != "implemented"]
+    if not implemented or not pending:
+        return []
+
+    impl_names = [f["name"] for f in implemented]
+    pend_names = [f["name"] for f in pending]
+
+    from duplo.claude_cli import ClaudeCliError, query
+
+    impl_json = json.dumps(impl_names)
+    pend_json = json.dumps(pend_names)
+    system = (
+        "You are deduplicating a feature list. Given a list of IMPLEMENTED "
+        "feature names and a list of PENDING feature names, identify which "
+        "pending features are semantically identical to an implemented feature "
+        "(same concept, different wording — e.g. 'Local offline transcription' "
+        "and 'Local on-device transcription'). Return ONLY a JSON object "
+        "mapping each matching pending name to the implemented name it matches. "
+        "Pending features that are genuinely different should NOT appear. "
+        "Return {} if no matches are found."
+    )
+    prompt = f"Implemented features:\n{impl_json}\n\nPending features:\n{pend_json}"
+    try:
+        raw = query(prompt, system=system, model="haiku")
+    except ClaudeCliError:
+        return []
+
+    text = raw.strip()
+    fence_pos = text.find("```")
+    if fence_pos != -1:
+        text = text[fence_pos:]
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(result, dict):
+        return []
+
+    # Build lookup for implemented features by name.
+    impl_by_name = {f["name"]: f for f in implemented}
+    marked: list[str] = []
+    for pend_name, impl_name in result.items():
+        pend_name = str(pend_name)
+        impl_name = str(impl_name)
+        if impl_name not in impl_by_name:
+            continue
+        # Find the pending feature dict and update it.
+        for feat in features:
+            if feat["name"] == pend_name and feat.get("status") != "implemented":
+                impl_feat = impl_by_name[impl_name]
+                feat["status"] = "implemented"
+                feat["implemented_in"] = impl_feat.get("implemented_in", "")
+                marked.append(pend_name)
+                break
+    return marked
+
+
 def save_features(
     features: list[Feature],
     *,
@@ -509,6 +583,12 @@ def save_features(
 
     if merged_count:
         print(f"Merged {merged_count} duplicate feature(s).")
+
+    # Propagate implemented status: if a pending feature is semantically
+    # identical to an implemented one, mark it implemented too.
+    propagated = _propagate_implemented_status(existing)
+    if propagated:
+        print(f"Marked {len(propagated)} feature(s) as implemented (duplicate of implemented).")
 
     data["features"] = existing
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

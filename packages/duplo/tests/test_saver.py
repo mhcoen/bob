@@ -28,6 +28,7 @@ from duplo.saver import (
     REFERENCES_DIR,
     _find_duplicate_groups,
     _merge_duplicate_group,
+    _propagate_implemented_status,
     add_issue,
     append_phase_to_history,
     resolve_issue,
@@ -1275,6 +1276,114 @@ class TestSaveFeaturesSemanticDedup:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert len(data["features"]) == 1
         assert data["features"][0]["name"] == "Authentication"
+
+
+class TestPropagateImplementedStatus:
+    """Tests for _propagate_implemented_status()."""
+
+    def test_marks_pending_duplicate_as_implemented(self, monkeypatch):
+        features = [
+            {
+                "name": "Local on-device transcription",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 2",
+            },
+            {
+                "name": "Local offline transcription",
+                "description": "d",
+                "status": "pending",
+                "implemented_in": "",
+            },
+        ]
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda prompt, system=None, model=None: json.dumps(
+                {"Local offline transcription": "Local on-device transcription"}
+            ),
+        )
+        marked = _propagate_implemented_status(features)
+        assert marked == ["Local offline transcription"]
+        assert features[1]["status"] == "implemented"
+        assert features[1]["implemented_in"] == "Phase 2"
+
+    def test_no_matches_returns_empty(self, monkeypatch):
+        features = [
+            {
+                "name": "Auth",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 1",
+            },
+            {"name": "Search", "description": "d", "status": "pending", "implemented_in": ""},
+        ]
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda prompt, system=None, model=None: "{}",
+        )
+        marked = _propagate_implemented_status(features)
+        assert marked == []
+        assert features[1]["status"] == "pending"
+
+    def test_no_pending_features_skips_llm(self):
+        features = [
+            {
+                "name": "Auth",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 1",
+            },
+        ]
+        # No monkeypatch needed — should return early without calling LLM.
+        marked = _propagate_implemented_status(features)
+        assert marked == []
+
+    def test_no_implemented_features_skips_llm(self):
+        features = [
+            {"name": "Auth", "description": "d", "status": "pending", "implemented_in": ""},
+        ]
+        marked = _propagate_implemented_status(features)
+        assert marked == []
+
+    def test_llm_failure_returns_empty(self, monkeypatch):
+        from duplo.claude_cli import ClaudeCliError
+
+        features = [
+            {
+                "name": "Auth",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 1",
+            },
+            {"name": "Login", "description": "d", "status": "pending", "implemented_in": ""},
+        ]
+
+        def fail(prompt, system=None, model=None):
+            raise ClaudeCliError("fail", 1)
+
+        monkeypatch.setattr("duplo.claude_cli.query", fail)
+        marked = _propagate_implemented_status(features)
+        assert marked == []
+        assert features[1]["status"] == "pending"
+
+    def test_ignores_invalid_impl_name(self, monkeypatch):
+        """LLM returns a mapping to a non-existent implemented feature."""
+        features = [
+            {
+                "name": "Auth",
+                "description": "d",
+                "status": "implemented",
+                "implemented_in": "Phase 1",
+            },
+            {"name": "Login", "description": "d", "status": "pending", "implemented_in": ""},
+        ]
+        monkeypatch.setattr(
+            "duplo.claude_cli.query",
+            lambda prompt, system=None, model=None: json.dumps({"Login": "Nonexistent feature"}),
+        )
+        marked = _propagate_implemented_status(features)
+        assert marked == []
+        assert features[1]["status"] == "pending"
 
 
 class TestSaveFeatureStatus:
