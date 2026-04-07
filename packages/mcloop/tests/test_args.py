@@ -14,6 +14,27 @@ from mcloop.errors import (
     _error_signature_hash,
     _insert_bugs_section,
 )
+from mcloop.install_cmd import (
+    _HOOK_SCRIPTS,
+    _check_reviewer,
+    _check_rtk,
+    _cmd_install,
+    _cmd_uninstall,
+    _install_hooks,
+    _install_recommended_permissions,
+    _load_mcloop_config,
+    _merge_settings,
+    _print_install_summary,
+    _print_uninstall_summary,
+    _remove_config_json,
+    _remove_hooks_dir,
+    _remove_recommended_perms,
+    _remove_telegram_env,
+    _setup_env_security,
+    _setup_sandbox,
+    _setup_telegram,
+    _unmerge_settings,
+)
 from mcloop.investigate_cmd import (
     MAX_VERIFICATION_ROUNDS,
     _append_verification_failure,
@@ -30,39 +51,20 @@ from mcloop.investigate_cmd import (
 )
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
-    _HOOK_SCRIPTS,
     _all_tasks,
     _check_interrupted,
-    _check_reviewer,
-    _check_rtk,
     _check_user_input,
     _cleanup_stale_reviews,
-    _cmd_install,
-    _cmd_uninstall,
     _collect_review_findings,
     _get_commit_hash,
-    _install_hooks,
-    _install_recommended_permissions,
-    _load_mcloop_config,
     _maybe_auto_wrap,
-    _merge_settings,
     _parse_args,
-    _print_install_summary,
-    _print_uninstall_summary,
     _reinject_wrappers,
-    _remove_config_json,
-    _remove_hooks_dir,
-    _remove_recommended_perms,
-    _remove_telegram_env,
     _reviewer_procs,
     _run_batch,
     _save_interrupt_state,
-    _setup_env_security,
-    _setup_sandbox,
-    _setup_telegram,
     _spawn_reviewer,
     _terminate_reviewers,
-    _unmerge_settings,
     _write_eliminated_json,
     _write_ruledout_to_plan,
     run_loop,
@@ -209,14 +211,14 @@ def test_invalid_subcommand_exits():
 
 
 def test_install_exits_when_claude_not_on_path(tmp_path):
-    with patch("mcloop.main.shutil.which", return_value=None):
+    with patch("mcloop.install_cmd.shutil.which", return_value=None):
         with pytest.raises(SystemExit) as exc:
             _cmd_install(tmp_path)
     assert exc.value.code == 1
 
 
 def test_install_exits_when_claude_not_on_path_message(tmp_path, capsys):
-    with patch("mcloop.main.shutil.which", return_value=None):
+    with patch("mcloop.install_cmd.shutil.which", return_value=None):
         with pytest.raises(SystemExit):
             _cmd_install(tmp_path)
     err = capsys.readouterr().err
@@ -227,15 +229,15 @@ def test_install_exits_when_claude_not_on_path_message(tmp_path, capsys):
 def test_install_prints_claude_version(tmp_path, capsys):
     proc = MagicMock(returncode=0, stdout="claude 1.2.3\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -247,7 +249,7 @@ def test_install_prints_claude_version(tmp_path, capsys):
 def test_install_exits_when_version_fails(tmp_path, capsys):
     proc = MagicMock(returncode=1, stdout="")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -260,15 +262,15 @@ def test_install_exits_when_version_fails(tmp_path, capsys):
 def test_install_calls_claude_version_with_found_path(tmp_path):
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/opt/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/opt/bin/claude"),
         patch("subprocess.run", return_value=proc) as mock_run,
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -301,15 +303,15 @@ def test_install_hooks_copies_scripts(tmp_path, capsys):
     repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
     home = tmp_path / "home"
 
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         with patch.object(Path, "home", return_value=home):
             _install_hooks(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
 
     dest_dir = home / ".mcloop" / "hooks"
     for name in _HOOK_SCRIPTS:
@@ -330,15 +332,15 @@ def test_install_hooks_skips_existing(tmp_path, capsys):
     for name in _HOOK_SCRIPTS:
         (hooks_dir / name).write_text(f"# old {name}\n")
 
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         with patch.object(Path, "home", return_value=home):
             _install_hooks(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
 
     # Files should NOT be overwritten
     for name in _HOOK_SCRIPTS:
@@ -353,15 +355,15 @@ def test_install_hooks_dry_run(tmp_path, capsys):
     repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
     home = tmp_path / "home"
 
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         with patch.object(Path, "home", return_value=home):
             _install_hooks(dry_run=True)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
 
     hooks_dir = home / ".mcloop" / "hooks"
     assert not hooks_dir.exists()
@@ -375,15 +377,15 @@ def test_install_hooks_warns_missing_source(tmp_path, capsys):
     _repo_root, fake_mcloop_dir = _setup_hooks(tmp_path, create_sources=False)
     home = tmp_path / "home"
 
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         with patch.object(Path, "home", return_value=home):
             _install_hooks(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
 
     err = capsys.readouterr().err
     assert "Warning: hook source not found" in err
@@ -705,23 +707,23 @@ def test_cmd_uninstall_calls_unmerge(tmp_path, capsys):
     """_cmd_uninstall calls all removal functions and prints summary."""
     with (
         patch(
-            "mcloop.main._unmerge_settings",
+            "mcloop.install_cmd._unmerge_settings",
             return_value=[("Settings (PreToolUse)", "removed")],
         ) as mock_unmerge,
         patch(
-            "mcloop.main._remove_telegram_env",
+            "mcloop.install_cmd._remove_telegram_env",
             return_value=("telegram-hook.env", "removed"),
         ) as mock_tg,
         patch(
-            "mcloop.main._remove_hooks_dir",
+            "mcloop.install_cmd._remove_hooks_dir",
             return_value=[("hooks directory", "removed")],
         ) as mock_hooks,
         patch(
-            "mcloop.main._remove_config_json",
+            "mcloop.install_cmd._remove_config_json",
             return_value=("config.json", "removed"),
         ) as mock_config,
         patch(
-            "mcloop.main._remove_recommended_perms",
+            "mcloop.install_cmd._remove_recommended_perms",
             return_value=("recommended-permissions.json", "removed"),
         ) as mock_perms,
     ):
@@ -747,23 +749,23 @@ def test_cmd_uninstall_dry_run(tmp_path, capsys):
     """_cmd_uninstall passes dry_run through."""
     with (
         patch(
-            "mcloop.main._unmerge_settings",
+            "mcloop.install_cmd._unmerge_settings",
             return_value=[("Settings (PreToolUse)", "would remove (dry run)")],
         ) as mock_unmerge,
         patch(
-            "mcloop.main._remove_telegram_env",
+            "mcloop.install_cmd._remove_telegram_env",
             return_value=("telegram-hook.env", "would remove"),
         ) as mock_tg,
         patch(
-            "mcloop.main._remove_hooks_dir",
+            "mcloop.install_cmd._remove_hooks_dir",
             return_value=[("hooks directory", "would remove")],
         ) as mock_hooks,
         patch(
-            "mcloop.main._remove_config_json",
+            "mcloop.install_cmd._remove_config_json",
             return_value=("config.json", "would remove"),
         ) as mock_config,
         patch(
-            "mcloop.main._remove_recommended_perms",
+            "mcloop.install_cmd._remove_recommended_perms",
             return_value=("recommended-permissions.json", "would remove"),
         ) as mock_perms,
     ):
@@ -782,23 +784,23 @@ def test_cmd_uninstall_skipped_items(tmp_path, capsys):
     """_cmd_uninstall shows 'Already absent' for items not found."""
     with (
         patch(
-            "mcloop.main._unmerge_settings",
+            "mcloop.install_cmd._unmerge_settings",
             return_value=[("Settings", "skipped (no settings file)")],
         ),
         patch(
-            "mcloop.main._remove_telegram_env",
+            "mcloop.install_cmd._remove_telegram_env",
             return_value=("telegram-hook.env", "skipped (not found)"),
         ),
         patch(
-            "mcloop.main._remove_hooks_dir",
+            "mcloop.install_cmd._remove_hooks_dir",
             return_value=[("hooks directory", "skipped (not found)")],
         ),
         patch(
-            "mcloop.main._remove_config_json",
+            "mcloop.install_cmd._remove_config_json",
             return_value=("config.json", "skipped (not found)"),
         ),
         patch(
-            "mcloop.main._remove_recommended_perms",
+            "mcloop.install_cmd._remove_recommended_perms",
             return_value=("recommended-permissions.json", "skipped (not found)"),
         ),
     ):
@@ -814,23 +816,23 @@ def test_cmd_uninstall_mixed_results(tmp_path, capsys):
     """_cmd_uninstall shows mixed removed/skipped/left correctly."""
     with (
         patch(
-            "mcloop.main._unmerge_settings",
+            "mcloop.install_cmd._unmerge_settings",
             return_value=[("Settings (PreToolUse)", "removed")],
         ),
         patch(
-            "mcloop.main._remove_telegram_env",
+            "mcloop.install_cmd._remove_telegram_env",
             return_value=("telegram-hook.env", "skipped (not found)"),
         ),
         patch(
-            "mcloop.main._remove_hooks_dir",
+            "mcloop.install_cmd._remove_hooks_dir",
             return_value=[("hooks directory", "removed")],
         ),
         patch(
-            "mcloop.main._remove_config_json",
+            "mcloop.install_cmd._remove_config_json",
             return_value=("config.json", "skipped (not found)"),
         ),
         patch(
-            "mcloop.main._remove_recommended_perms",
+            "mcloop.install_cmd._remove_recommended_perms",
             return_value=("recommended-permissions.json", "removed"),
         ),
     ):
@@ -848,7 +850,7 @@ def test_remove_telegram_env_exists(tmp_path, capsys):
     """Removes the file when it exists."""
     env_file = tmp_path / "telegram-hook.env"
     env_file.write_text("TOKEN=abc\n")
-    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+    with patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file):
         component, status = _remove_telegram_env()
     assert not env_file.exists()
     assert status == "removed"
@@ -859,7 +861,7 @@ def test_remove_telegram_env_exists(tmp_path, capsys):
 def test_remove_telegram_env_not_found(tmp_path, capsys):
     """Skips when file does not exist."""
     env_file = tmp_path / "telegram-hook.env"
-    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+    with patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file):
         component, status = _remove_telegram_env()
     assert "not found" in status
     assert "not found" in capsys.readouterr().out
@@ -869,7 +871,7 @@ def test_remove_telegram_env_dry_run(tmp_path, capsys):
     """Dry run prints but does not delete."""
     env_file = tmp_path / "telegram-hook.env"
     env_file.write_text("TOKEN=abc\n")
-    with patch("mcloop.main._TELEGRAM_ENV_FILE", env_file):
+    with patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file):
         component, status = _remove_telegram_env(dry_run=True)
     assert env_file.exists()
     assert "would remove" in status
@@ -887,7 +889,7 @@ def test_remove_hooks_dir_exists(tmp_path, capsys):
     fake_hooks = fake_mcloop / "hooks"
     fake_hooks.mkdir()
     (fake_hooks / "some-hook.py").write_text("# hook\n")
-    with patch("mcloop.main.Path.home", return_value=fake_home):
+    with patch("mcloop.install_cmd.Path.home", return_value=fake_home):
         results = _remove_hooks_dir()
     assert not fake_hooks.exists()
     assert len(results) == 1
@@ -899,7 +901,7 @@ def test_remove_hooks_dir_not_found(tmp_path, capsys):
     """Skips when hooks directory does not exist."""
     fake_home = tmp_path / "fake_home"
     fake_home.mkdir()
-    with patch("mcloop.main.Path.home", return_value=fake_home):
+    with patch("mcloop.install_cmd.Path.home", return_value=fake_home):
         results = _remove_hooks_dir()
     assert len(results) == 1
     assert "not found" in results[0][1]
@@ -913,7 +915,7 @@ def test_remove_hooks_dir_dry_run(tmp_path, capsys):
     fake_hooks.mkdir(parents=True)
     (fake_hooks / "hook-a.py").write_text("# a\n")
     (fake_hooks / "hook-b.py").write_text("# b\n")
-    with patch("mcloop.main.Path.home", return_value=fake_home):
+    with patch("mcloop.install_cmd.Path.home", return_value=fake_home):
         results = _remove_hooks_dir(dry_run=True)
     assert fake_hooks.exists()
     assert len(results) == 2
@@ -933,7 +935,7 @@ def test_remove_hooks_dir_dry_run_empty(tmp_path, capsys):
     fake_home = tmp_path / "fake_home"
     fake_hooks = fake_home / ".mcloop" / "hooks"
     fake_hooks.mkdir(parents=True)
-    with patch("mcloop.main.Path.home", return_value=fake_home):
+    with patch("mcloop.install_cmd.Path.home", return_value=fake_home):
         results = _remove_hooks_dir(dry_run=True)
     assert results == [("hooks directory", "would remove")]
     assert "empty" in capsys.readouterr().out
@@ -946,7 +948,7 @@ def test_remove_config_json_exists(tmp_path, capsys):
     """Removes config.json when it exists."""
     config_file = tmp_path / "config.json"
     config_file.write_text('{"keep_anthropic_api_key": true}\n')
-    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", config_file):
         component, status = _remove_config_json()
     assert not config_file.exists()
     assert status == "removed"
@@ -957,7 +959,7 @@ def test_remove_config_json_exists(tmp_path, capsys):
 def test_remove_config_json_not_found(tmp_path, capsys):
     """Skips when config.json does not exist."""
     config_file = tmp_path / "config.json"
-    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", config_file):
         component, status = _remove_config_json()
     assert "not found" in status
     assert "not found" in capsys.readouterr().out
@@ -967,7 +969,7 @@ def test_remove_config_json_dry_run(tmp_path, capsys):
     """Dry run prints but does not delete."""
     config_file = tmp_path / "config.json"
     config_file.write_text('{"keep_anthropic_api_key": true}\n')
-    with patch("mcloop.main._MCLOOP_CONFIG", config_file):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", config_file):
         component, status = _remove_config_json(dry_run=True)
     assert config_file.exists()
     assert "would remove" in status
@@ -981,7 +983,7 @@ def test_remove_recommended_perms_exists(tmp_path, capsys):
     """Removes recommended-permissions.json when it exists."""
     perms_file = tmp_path / "recommended-permissions.json"
     perms_file.write_text('["/some/path"]\n')
-    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+    with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", perms_file):
         component, status = _remove_recommended_perms()
     assert not perms_file.exists()
     assert status == "removed"
@@ -992,7 +994,7 @@ def test_remove_recommended_perms_exists(tmp_path, capsys):
 def test_remove_recommended_perms_not_found(tmp_path, capsys):
     """Skips when file does not exist."""
     perms_file = tmp_path / "recommended-permissions.json"
-    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+    with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", perms_file):
         component, status = _remove_recommended_perms()
     assert "not found" in status
     assert "not found" in capsys.readouterr().out
@@ -1002,7 +1004,7 @@ def test_remove_recommended_perms_dry_run(tmp_path, capsys):
     """Dry run prints but does not delete."""
     perms_file = tmp_path / "recommended-permissions.json"
     perms_file.write_text('["/some/path"]\n')
-    with patch("mcloop.main._RECOMMENDED_PERMS_DEST", perms_file):
+    with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", perms_file):
         component, status = _remove_recommended_perms(dry_run=True)
     assert perms_file.exists()
     assert "would remove" in status
@@ -1019,7 +1021,7 @@ def test_setup_telegram_env_vars(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "123"}),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
     ):
         _setup_telegram(dry_run=False)
 
@@ -1039,7 +1041,7 @@ def test_setup_telegram_env_vars_dry_run(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "123"}),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
     ):
         _setup_telegram(dry_run=True)
 
@@ -1059,7 +1061,7 @@ def test_setup_telegram_existing_file(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
     ):
         _setup_telegram(dry_run=False)
 
@@ -1077,7 +1079,7 @@ def test_setup_telegram_interactive_prompt(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=["my-token", "my-chat"]),
     ):
         _setup_telegram(dry_run=False)
@@ -1098,7 +1100,7 @@ def test_setup_telegram_interactive_empty_token(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=[""]),
     ):
         _setup_telegram(dry_run=False)
@@ -1115,7 +1117,7 @@ def test_setup_telegram_interactive_empty_chat_id(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=["my-token", ""]),
     ):
         _setup_telegram(dry_run=False)
@@ -1132,7 +1134,7 @@ def test_setup_telegram_interactive_eof(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=EOFError),
     ):
         _setup_telegram(dry_run=False)
@@ -1149,7 +1151,7 @@ def test_setup_telegram_interactive_ctrl_c(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=KeyboardInterrupt),
     ):
         _setup_telegram(dry_run=False)
@@ -1166,7 +1168,7 @@ def test_setup_telegram_dry_run_skips_prompt(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
     ):
         _setup_telegram(dry_run=True)
 
@@ -1181,7 +1183,7 @@ def test_setup_telegram_only_token_set(tmp_path, capsys):
 
     with (
         patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok"}, clear=True),
-        patch("mcloop.main._TELEGRAM_ENV_FILE", env_file),
+        patch("mcloop.install_cmd._TELEGRAM_ENV_FILE", env_file),
         patch("builtins.input", side_effect=EOFError),
     ):
         _setup_telegram(dry_run=False)
@@ -1194,15 +1196,15 @@ def test_cmd_install_calls_setup_telegram(tmp_path):
     """_cmd_install calls _setup_telegram."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -1214,15 +1216,15 @@ def test_cmd_install_passes_dry_run_to_setup_telegram(tmp_path):
     """_cmd_install passes dry_run to _setup_telegram."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")) as mock_tg,
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -1237,7 +1239,7 @@ def test_setup_env_security_subscription(tmp_path, capsys):
     """Returns subscription billing status by default."""
     cfg = tmp_path / "config.json"
     cfg.write_text("{}")
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         result = _setup_env_security()
     assert result == ("Environment", "minimal (subscription billing)")
     out = capsys.readouterr().out
@@ -1248,7 +1250,7 @@ def test_setup_env_security_api_billing(tmp_path, capsys):
     """Returns api billing status when configured."""
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"billing": "api"}))
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         result = _setup_env_security()
     assert result == ("Environment", "minimal (api billing)")
     out = capsys.readouterr().out
@@ -1259,7 +1261,7 @@ def test_setup_env_security_openrouter_billing(tmp_path, capsys):
     """Returns openrouter billing status when configured."""
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"billing": "openrouter"}))
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         result = _setup_env_security()
     assert result == ("Environment", "minimal (openrouter billing)")
     out = capsys.readouterr().out
@@ -1270,18 +1272,18 @@ def test_cmd_install_calls_setup_env_security(tmp_path):
     """_cmd_install calls _setup_env_security."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
         patch(
-            "mcloop.main._setup_env_security",
+            "mcloop.install_cmd._setup_env_security",
             return_value=("Environment", "ok"),
         ) as mock_env,
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -1296,7 +1298,7 @@ def test_setup_sandbox_already_enabled(tmp_path, capsys):
     """Skips when sandbox is already enabled."""
     sf = tmp_path / "settings.json"
     sf.write_text(json.dumps({"sandbox": {"enabled": True}}))
-    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+    with patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf):
         _setup_sandbox(dry_run=False)
     out = capsys.readouterr().out
     assert "already enabled" in out
@@ -1307,7 +1309,7 @@ def test_setup_sandbox_default_yes(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", return_value=""),
     ):
         _setup_sandbox(dry_run=False)
@@ -1324,7 +1326,7 @@ def test_setup_sandbox_explicit_yes(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", return_value="y"),
     ):
         _setup_sandbox(dry_run=False)
@@ -1337,7 +1339,7 @@ def test_setup_sandbox_no(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", return_value="n"),
     ):
         _setup_sandbox(dry_run=False)
@@ -1352,7 +1354,7 @@ def test_setup_sandbox_eof(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", side_effect=EOFError),
     ):
         _setup_sandbox(dry_run=False)
@@ -1365,7 +1367,7 @@ def test_setup_sandbox_ctrl_c(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", side_effect=KeyboardInterrupt),
     ):
         _setup_sandbox(dry_run=False)
@@ -1377,7 +1379,7 @@ def test_setup_sandbox_dry_run(tmp_path, capsys):
     """Dry run shows diff with sandbox defaults but does not write."""
     sf = tmp_path / "settings.json"
     sf.write_text("{}")
-    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+    with patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf):
         result = _setup_sandbox(dry_run=True)
     out = capsys.readouterr().out
     assert "dry run" in out
@@ -1392,7 +1394,7 @@ def test_setup_sandbox_no_settings_file(tmp_path, capsys):
     """Creates settings.json if it doesn't exist."""
     sf = tmp_path / "settings.json"
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", return_value=""),
     ):
         _setup_sandbox(dry_run=False)
@@ -1406,7 +1408,7 @@ def test_setup_sandbox_preserves_existing_settings(tmp_path, capsys):
     sf = tmp_path / "settings.json"
     sf.write_text(json.dumps({"permissions": {"allow": ["Read"]}}))
     with (
-        patch("mcloop.main._CLAUDE_SETTINGS", sf),
+        patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf),
         patch("builtins.input", return_value="y"),
     ):
         _setup_sandbox(dry_run=False)
@@ -1419,7 +1421,7 @@ def test_setup_sandbox_invalid_json(tmp_path, capsys):
     """Exits on invalid JSON."""
     sf = tmp_path / "settings.json"
     sf.write_text("not json")
-    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+    with patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf):
         with pytest.raises(SystemExit) as exc:
             _setup_sandbox(dry_run=False)
     assert exc.value.code == 1
@@ -1429,7 +1431,7 @@ def test_setup_sandbox_non_object_json(tmp_path, capsys):
     """Exits on non-object JSON."""
     sf = tmp_path / "settings.json"
     sf.write_text('"just a string"')
-    with patch("mcloop.main._CLAUDE_SETTINGS", sf):
+    with patch("mcloop.install_cmd._CLAUDE_SETTINGS", sf):
         with pytest.raises(SystemExit) as exc:
             _setup_sandbox(dry_run=False)
     assert exc.value.code == 1
@@ -1439,15 +1441,15 @@ def test_cmd_install_calls_setup_sandbox(tmp_path):
     """_cmd_install calls _setup_sandbox."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -1459,15 +1461,15 @@ def test_cmd_install_passes_dry_run_to_setup_sandbox(tmp_path):
     """_cmd_install passes dry_run to _setup_sandbox."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")) as mock_sb,
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
     ):
@@ -1501,15 +1503,15 @@ def test_install_recommended_permissions_writes_file(tmp_path, capsys):
         ),
     )
     dest = tmp_path / "recommended-permissions.json"
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
-        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+        with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", dest):
             _install_recommended_permissions(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
     assert dest.exists()
     content = json.loads(dest.read_text())
     assert content == {"permissions": {"allow": ["Bash(git:*)", "WebSearch"]}}
@@ -1525,15 +1527,15 @@ def test_install_recommended_permissions_dry_run(tmp_path, capsys):
         json.dumps({"permissions": {"allow": ["Bash(git:*)"]}}),
     )
     dest = tmp_path / "recommended-permissions.json"
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
-        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+        with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", dest):
             _install_recommended_permissions(dry_run=True)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
     assert not dest.exists()
     out = capsys.readouterr().out
     assert "---" in out
@@ -1544,14 +1546,14 @@ def test_install_recommended_permissions_dry_run(tmp_path, capsys):
 def test_install_recommended_permissions_missing_example(tmp_path, capsys):
     """Warns when settings.example.json is missing."""
     repo_root, fake_mcloop_dir = _setup_perms(tmp_path)
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         _install_recommended_permissions(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
     err = capsys.readouterr().err
     assert "settings.example.json not found" in err
 
@@ -1559,14 +1561,14 @@ def test_install_recommended_permissions_missing_example(tmp_path, capsys):
 def test_install_recommended_permissions_invalid_json(tmp_path, capsys):
     """Warns on invalid JSON in settings.example.json."""
     repo_root, fake_mcloop_dir = _setup_perms(tmp_path, "not json")
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         _install_recommended_permissions(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
     err = capsys.readouterr().err
     assert "invalid JSON" in err
 
@@ -1578,15 +1580,15 @@ def test_install_recommended_permissions_no_permissions_key(tmp_path, capsys):
         json.dumps({"sandbox": {"enabled": True}}),
     )
     dest = tmp_path / "recommended-permissions.json"
-    import mcloop.main as main_mod
+    import mcloop.install_cmd as install_mod
 
-    orig_file = main_mod.__file__
-    main_mod.__file__ = str(fake_mcloop_dir / "main.py")
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
-        with patch("mcloop.main._RECOMMENDED_PERMS_DEST", dest):
+        with patch("mcloop.install_cmd._RECOMMENDED_PERMS_DEST", dest):
             _install_recommended_permissions(dry_run=False)
     finally:
-        main_mod.__file__ = orig_file
+        install_mod.__file__ = orig_file
     assert dest.exists()
     content = json.loads(dest.read_text())
     assert content == {"permissions": {"allow": []}}
@@ -1596,15 +1598,15 @@ def test_cmd_install_calls_install_recommended_permissions(tmp_path):
     """_cmd_install calls _install_recommended_permissions."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ) as mock_rp,
     ):
@@ -1616,15 +1618,15 @@ def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
     """_cmd_install passes dry_run to _install_recommended_permissions."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ) as mock_rp,
     ):
@@ -1637,7 +1639,7 @@ def test_cmd_install_passes_dry_run_to_recommended_permissions(tmp_path):
 
 def test_check_rtk_found(capsys):
     """Prints note and returns status when rtk is on PATH."""
-    with patch("mcloop.main.shutil.which", return_value="/usr/local/bin/rtk"):
+    with patch("mcloop.install_cmd.shutil.which", return_value="/usr/local/bin/rtk"):
         result = _check_rtk()
     out = capsys.readouterr().out
     assert "RTK detected" in out
@@ -1648,7 +1650,7 @@ def test_check_rtk_found(capsys):
 
 def test_check_rtk_not_found(capsys):
     """Returns None when rtk is not on PATH."""
-    with patch("mcloop.main.shutil.which", return_value=None):
+    with patch("mcloop.install_cmd.shutil.which", return_value=None):
         result = _check_rtk()
     assert capsys.readouterr().out == ""
     assert result is None
@@ -1658,19 +1660,19 @@ def test_cmd_install_calls_check_rtk(tmp_path):
     """_cmd_install calls _check_rtk."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
-        patch("mcloop.main._check_rtk", return_value=None) as mock_rtk,
-        patch("mcloop.main._check_reviewer", return_value=None),
+        patch("mcloop.install_cmd._check_rtk", return_value=None) as mock_rtk,
+        patch("mcloop.install_cmd._check_reviewer", return_value=None),
     ):
         _cmd_install(tmp_path)
     mock_rtk.assert_called_once()
@@ -1741,19 +1743,19 @@ def test_cmd_install_calls_check_reviewer(tmp_path):
     """_cmd_install calls _check_reviewer with project_dir."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[]),
-        patch("mcloop.main._merge_settings", return_value=[]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "ok")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "ok")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "ok")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "ok")),
+        patch("mcloop.install_cmd._setup_env_security", return_value=("Environment", "ok")),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "ok")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "ok"),
         ),
-        patch("mcloop.main._check_rtk", return_value=None),
-        patch("mcloop.main._check_reviewer", return_value=None) as mock_reviewer,
+        patch("mcloop.install_cmd._check_rtk", return_value=None),
+        patch("mcloop.install_cmd._check_reviewer", return_value=None) as mock_reviewer,
     ):
         _cmd_install(tmp_path)
     mock_reviewer.assert_called_once_with(tmp_path)
@@ -1860,19 +1862,22 @@ def test_cmd_install_prints_summary(tmp_path, capsys):
     """_cmd_install prints install summary at the end."""
     proc = MagicMock(returncode=0, stdout="claude 1.0.0\n")
     with (
-        patch("mcloop.main.shutil.which", return_value="/usr/bin/claude"),
+        patch("mcloop.install_cmd.shutil.which", return_value="/usr/bin/claude"),
         patch("subprocess.run", return_value=proc),
-        patch("mcloop.main._install_hooks", return_value=[("Hooks", "installed")]),
-        patch("mcloop.main._merge_settings", return_value=[("Settings", "ok")]),
-        patch("mcloop.main._setup_telegram", return_value=("Telegram", "configured")),
-        patch("mcloop.main._setup_env_security", return_value=("Environment", "configured")),
-        patch("mcloop.main._setup_sandbox", return_value=("Sandbox", "configured")),
+        patch("mcloop.install_cmd._install_hooks", return_value=[("Hooks", "installed")]),
+        patch("mcloop.install_cmd._merge_settings", return_value=[("Settings", "ok")]),
+        patch("mcloop.install_cmd._setup_telegram", return_value=("Telegram", "configured")),
         patch(
-            "mcloop.main._install_recommended_permissions",
+            "mcloop.install_cmd._setup_env_security",
+            return_value=("Environment", "configured"),
+        ),
+        patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "configured")),
+        patch(
+            "mcloop.install_cmd._install_recommended_permissions",
             return_value=("Permissions", "installed — merge manually"),
         ),
-        patch("mcloop.main._check_rtk", return_value=None),
-        patch("mcloop.main._check_reviewer", return_value=None),
+        patch("mcloop.install_cmd._check_rtk", return_value=None),
+        patch("mcloop.install_cmd._check_reviewer", return_value=None),
     ):
         _cmd_install(tmp_path)
     out = capsys.readouterr().out
@@ -1885,7 +1890,7 @@ def test_cmd_install_prints_summary(tmp_path, capsys):
 def test_load_mcloop_config_missing(tmp_path):
     """Returns empty dict when config file doesn't exist."""
     cfg = tmp_path / "config.json"
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         assert _load_mcloop_config() == {}
 
 
@@ -1893,7 +1898,7 @@ def test_load_mcloop_config_invalid_json(tmp_path):
     """Returns empty dict on invalid JSON."""
     cfg = tmp_path / "config.json"
     cfg.write_text("not json")
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         assert _load_mcloop_config() == {}
 
 
@@ -1901,7 +1906,7 @@ def test_load_mcloop_config_valid(tmp_path):
     """Returns parsed config."""
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"keep_anthropic_api_key": True}))
-    with patch("mcloop.main._MCLOOP_CONFIG", cfg):
+    with patch("mcloop.install_cmd._MCLOOP_CONFIG", cfg):
         result = _load_mcloop_config()
     assert result == {"keep_anthropic_api_key": True}
 

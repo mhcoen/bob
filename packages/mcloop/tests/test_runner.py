@@ -1604,7 +1604,7 @@ def test_build_session_env_allowlisted_vars_only(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("HOME", "/home/user")
     monkeypatch.setenv("SECRET_KEY", "should-not-appear")
-    with patch("mcloop.main._load_mcloop_config", return_value={}):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
         env = _build_session_env()
     assert env["PATH"] == "/usr/bin"
     assert env["HOME"] == "/home/user"
@@ -1616,7 +1616,7 @@ def test_build_session_env_adds_task_label(monkeypatch):
     from mcloop.runner import _build_session_env
 
     monkeypatch.setenv("PATH", "/usr/bin")
-    with patch("mcloop.main._load_mcloop_config", return_value={}):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
         env = _build_session_env(task_label="task-1")
     assert env["MCLOOP_TASK_LABEL"] == "task-1"
 
@@ -1626,7 +1626,7 @@ def test_build_session_env_no_task_label_when_empty(monkeypatch):
     from mcloop.runner import _build_session_env
 
     monkeypatch.setenv("PATH", "/usr/bin")
-    with patch("mcloop.main._load_mcloop_config", return_value={}):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
         env = _build_session_env(task_label="")
     assert "MCLOOP_TASK_LABEL" not in env
 
@@ -1638,7 +1638,7 @@ def test_build_session_env_excludes_credentials_by_default(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
     monkeypatch.setenv("PATH", "/usr/bin")
-    with patch("mcloop.main._load_mcloop_config", return_value={}):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
         env = _build_session_env()
     assert "ANTHROPIC_API_KEY" not in env
     assert "OPENAI_API_KEY" not in env
@@ -1651,7 +1651,7 @@ def test_build_session_env_api_billing_claude(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-123")
     config = {"billing": "api"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="claude")
     assert env["ANTHROPIC_API_KEY"] == "sk-ant-123"
 
@@ -1663,7 +1663,7 @@ def test_build_session_env_api_billing_codex(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
     config = {"billing": "api"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="codex")
     assert env["OPENAI_API_KEY"] == "sk-oai-456"
 
@@ -1675,7 +1675,7 @@ def test_build_session_env_api_billing_wrong_key(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
     config = {"billing": "api"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="claude")
     assert "OPENAI_API_KEY" not in env
 
@@ -1687,7 +1687,7 @@ def test_build_session_env_openrouter_billing(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-789")
     config = {"billing": "openrouter"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="claude")
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-789"
@@ -1701,7 +1701,7 @@ def test_build_session_env_openrouter_billing_no_key(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     config = {"billing": "openrouter"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="claude")
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert "ANTHROPIC_AUTH_TOKEN" not in env
@@ -1715,7 +1715,7 @@ def test_build_session_env_openrouter_billing_codex(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-789")
     config = {"billing": "openrouter"}
-    with patch("mcloop.main._load_mcloop_config", return_value=config):
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value=config):
         env = _build_session_env(cli="codex")
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-789"

@@ -123,7 +123,7 @@ def _build_session_env(
     CLI is also included so the CLI uses API credits instead of the
     subscription. Credentials are excluded by default.
     """
-    from mcloop.main import _load_mcloop_config
+    from mcloop.install_cmd import _load_mcloop_config
 
     env = {k: v for k, v in os.environ.items() if k in _PASSTHROUGH_VARS}
     if task_label:
