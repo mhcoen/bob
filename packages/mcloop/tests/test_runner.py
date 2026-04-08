@@ -1095,7 +1095,7 @@ def test_signal_handlers_installed():
         handlers[sig] = handler
 
     with (
-        patch("mcloop.main.signal.signal", side_effect=fake_signal),
+        patch("mcloop.lifecycle.signal.signal", side_effect=fake_signal),
         patch("mcloop.main._main"),
         patch("atexit.register"),
     ):
@@ -1142,8 +1142,8 @@ def test_handle_sigint_exits_130():
 
     original_flag = runner._interrupted
     with (
-        patch("mcloop.main._graceful_kill_active_process"),
-        patch("mcloop.main.os._exit") as mock_exit,
+        patch("mcloop.lifecycle._graceful_kill_active_process"),
+        patch("mcloop.lifecycle.os._exit") as mock_exit,
     ):
         from mcloop.main import main
 
@@ -1156,7 +1156,7 @@ def test_handle_sigint_exits_130():
                 handler = h
 
         with (
-            patch("mcloop.main.signal.signal", side_effect=capture_signal),
+            patch("mcloop.lifecycle.signal.signal", side_effect=capture_signal),
             patch("mcloop.main._main"),
             patch("atexit.register"),
         ):
@@ -1393,7 +1393,6 @@ def test_signal_handler_kills_child_process():
     with (
         patch("mcloop.lifecycle.os.getpgid", return_value=99999),
         patch("mcloop.lifecycle.os.killpg") as mock_killpg,
-        patch("mcloop.main.os._exit"),
     ):
         from mcloop.main import _graceful_kill_active_process
 

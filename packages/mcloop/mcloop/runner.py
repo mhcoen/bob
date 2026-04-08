@@ -227,6 +227,13 @@ def run_task(
         parts.append(f"Recent session history:\n{session_context}")
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
+    parts.append(
+        "Do not run any test, lint, or verification commands"
+        " yourself except the exact check commands listed"
+        " below. No import checks, no individual test files,"
+        " no ad-hoc pytest runs. Make your code changes and"
+        " stop. The orchestrator handles all verification."
+    )
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     parts.append(
@@ -298,22 +305,6 @@ def run_task(
         " crashes. Compiling is not enough."
     )
     parts.append(
-        "CLAUDE.md MAINTENANCE (mandatory, will fail the task if skipped):\n"
-        "CLAUDE.md contains a description of every"
-        " source file in the project. Read it at the"
-        " start of every task to understand the codebase."
-        " If you create a new source file, add its entry"
-        " to CLAUDE.md. If you rename or move a file,"
-        " update the old entry. If you significantly"
-        " change a file's purpose, update the description."
-        " If you move functions between files, update"
-        " both the source and destination entries."
-        " The orchestrator checks CLAUDE.md after every"
-        " task. If source files changed and CLAUDE.md"
-        " did not, the task is marked as failed."
-        " Do this BEFORE running check commands."
-    )
-    parts.append(
         "Do not remove or modify code between"
         " mcloop:wrap markers (e.g. `// mcloop:wrap:begin`"
         " ... `// mcloop:wrap:end` or the Python `#`"
@@ -374,6 +365,23 @@ def run_task(
             " approach, stop and try a fundamentally"
             " different strategy.\n" + elim_text
         )
+    parts.append(
+        "FINAL STEP BEFORE FINISHING (this is checked and enforced):\n"
+        "Update CLAUDE.md. This file describes every source file"
+        " in the project. The orchestrator compares changed source"
+        " files against CLAUDE.md after every task. If any .py, .swift,"
+        " .rs, .go, .js, .ts, .java, .c, .cpp, .rb, or .sh file was"
+        " modified and CLAUDE.md was not, THE TASK FAILS AUTOMATICALLY."
+        " This is not optional. This is not a suggestion. This is a"
+        " hard gate that will reject your work.\n"
+        "What to update in CLAUDE.md:\n"
+        "- New file created: add an entry describing it\n"
+        "- File renamed or moved: update the old entry\n"
+        "- Functions moved between files: update both entries\n"
+        "- File purpose changed significantly: update description\n"
+        "Do this BEFORE running check commands. Read CLAUDE.md now"
+        " if you have not already."
+    )
     prompt = "\n\n".join(parts)
     build_kwargs: dict = {"model": model}
     if allowed_tools:

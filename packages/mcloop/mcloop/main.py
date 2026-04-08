@@ -70,6 +70,7 @@ from mcloop.lifecycle import (
     _graceful_kill_active_process,  # noqa: F401 — re-exported for tests
     _kill_active_process,
     _kill_orphan_sessions,
+    _save_interrupt_state,  # noqa: F401 — re-exported for tests
     _write_eliminated_json,  # noqa: F401 — re-exported for tests
     _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
     register_signal_handlers,
