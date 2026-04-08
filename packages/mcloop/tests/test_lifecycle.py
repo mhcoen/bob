@@ -136,6 +136,73 @@ def test_kill_orphan_alive_process(tmp_path):
     assert not pid_file.exists()
 
 
+def test_kill_orphan_json_format(tmp_path):
+    """Parses JSON active-pid format with cmd and started fields."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_json_dead_process(tmp_path):
+    """Cleans up JSON-format pid file when process is already dead."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {"pid": 999999, "pgid": 999999, "cmd": "claude", "started": "2026-04-08T10:00:00"}
+        )
+    )
+    with patch("mcloop.lifecycle.os.kill", side_effect=ProcessLookupError):
+        _kill_orphan_sessions(tmp_path)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_json_missing_pgid(tmp_path):
+    """Falls back to pid when pgid is absent in JSON format."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps({"pid": 54321, "cmd": "claude", "started": "2026-04-08T10:00:00"})
+    )
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(54321, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_invalid_json_falls_back(tmp_path):
+    """Falls back to legacy format when JSON is malformed."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text("{bad json")
+    # Falls through to legacy parsing which also fails → cleans up
+    _kill_orphan_sessions(tmp_path)
+    assert not pid_file.exists()
+
+
 # ── _kill_active_process ──
 
 

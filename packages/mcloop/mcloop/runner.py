@@ -468,12 +468,25 @@ def _run_session(
     pid_dir = cwd / ".mcloop"
     pid_dir.mkdir(exist_ok=True)
     pid_file = pid_dir / "active-pid"
+    import json as _pid_json
+
+    start_iso = datetime.now().isoformat()
+    cmd_line = shlex.join(cmd)
     try:
         pgid = os.getpgid(process.pid)
-        pid_file.write_text(f"{process.pid} {pgid}\n")
     except OSError:
         pgid = process.pid
-        pid_file.write_text(f"{process.pid} {process.pid}\n")
+    pid_file.write_text(
+        _pid_json.dumps(
+            {
+                "pid": process.pid,
+                "pgid": pgid,
+                "cmd": cmd_line,
+                "started": start_iso,
+            }
+        )
+        + "\n"
+    )
     # Watchdog: a tiny shell process that kills claude if mcloop dies.
     # Survives kill -9 on mcloop because it's in its own session.
     # Polls every 2 seconds. When mcloop's PID disappears, kills

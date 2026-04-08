@@ -245,9 +245,15 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
         return
     try:
         content = pid_file.read_text().strip()
-        parts = content.split()
-        pid = int(parts[0])
-        pgid = int(parts[1]) if len(parts) > 1 else pid
+        try:
+            data = _json.loads(content)
+            pid = int(data["pid"])
+            pgid = int(data.get("pgid", pid))
+        except (_json.JSONDecodeError, KeyError, TypeError):
+            # Fallback: legacy "pid pgid" format
+            parts = content.split()
+            pid = int(parts[0])
+            pgid = int(parts[1]) if len(parts) > 1 else pid
     except (OSError, ValueError, IndexError):
         pid_file.unlink(missing_ok=True)
         return
