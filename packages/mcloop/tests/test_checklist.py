@@ -909,3 +909,100 @@ def test_check_off_line_number_preferred_over_earlier_text_match(tmp_path):
 
     content = f.read_text()
     assert content.count("[x] Run tests") == 2
+
+
+def test_fallback_validates_indent_level(tmp_path):
+    """Fallback text match skips tasks with different indent levels."""
+    md = "- [ ] Build\n  - [ ] Build\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Simulate stale line_number: insert header to shift lines
+    f.write_text("# Header\n- [ ] Build\n  - [ ] Build\n")
+
+    # tasks[0] has indent_level=0; fallback should match the root "Build", not the child
+    check_off(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].checked  # root Build
+    assert not tasks2[0].children[0].checked  # child Build untouched
+
+
+def test_fallback_validates_stage(tmp_path):
+    """Fallback text match skips tasks in a different stage."""
+    md = "## Stage 1: Setup\n- [ ] Deploy\n## Stage 2: Launch\n- [ ] Deploy\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Both tasks have text "Deploy" but different stages
+    # Simulate stale line_number by inserting a line
+    f.write_text("# Title\n## Stage 1: Setup\n- [ ] Deploy\n## Stage 2: Launch\n- [ ] Deploy\n")
+
+    # tasks[1] is in Stage 2; fallback should match the Stage 2 "Deploy"
+    check_off(f, tasks[1])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].checked  # Stage 1 Deploy untouched
+    assert tasks2[1].checked  # Stage 2 Deploy checked
+
+
+def test_mark_failed_fallback_validates_indent_level(tmp_path):
+    """mark_failed fallback skips tasks with different indent levels."""
+    md = "- [ ] Test\n  - [ ] Test\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Shift lines
+    f.write_text("# Header\n- [ ] Test\n  - [ ] Test\n")
+
+    # Fail the child (indent_level=2), not the root
+    mark_failed(f, tasks[0].children[0])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].failed  # root Test
+    assert tasks2[0].children[0].failed  # child Test
+
+
+def test_mark_failed_fallback_validates_stage(tmp_path):
+    """mark_failed fallback skips tasks in a different stage."""
+    md = "## Stage 1: A\n- [ ] Run\n## Stage 2: B\n- [ ] Run\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    f.write_text("# Title\n## Stage 1: A\n- [ ] Run\n## Stage 2: B\n- [ ] Run\n")
+
+    mark_failed(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].failed  # Stage 1 Run
+    assert not tasks2[1].failed  # Stage 2 Run
+
+
+def test_fallback_raises_when_no_match_with_validation(tmp_path):
+    """Fallback raises IndexError when text matches but indent/stage don't."""
+    from mcloop.checklist import Task as CTask
+
+    md = "- [ ] Only task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+
+    # Create a task with matching text but wrong indent and stage
+    fake = CTask(
+        text="Only task",
+        checked=False,
+        failed=False,
+        line_number=99,  # stale
+        indent_level=4,  # wrong indent
+        stage="Stage 5: Missing",  # wrong stage
+    )
+    import pytest
+
+    with pytest.raises(IndexError, match="no text match"):
+        from mcloop.checklist import _find_task_line
+
+        lines = f.read_text().splitlines()
+        _find_task_line(lines, fake)

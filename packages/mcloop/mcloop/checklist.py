@@ -331,21 +331,47 @@ def _find_task_line(lines: list[str], task: Task) -> int:
     edited PLAN.md during execution), the stored line_number may be
     stale, so we fall back to searching by text.
     """
-    # Primary: use stored line_number if it still points to the right task
+    # Primary: use stored line_number if it still points to the right task.
+    # Validate text, indent_level, and stage to detect stale line numbers
+    # (e.g. file was edited externally and lines shifted).
     if task.line_number < len(lines):
         m = CHECKBOX_RE.match(lines[task.line_number])
-        if m and m.group(3).strip() == task.text:
-            return task.line_number
+        if m and m.group(3).strip() == task.text and len(m.group(1)) == task.indent_level:
+            # Verify stage by scanning headers above this line
+            line_stage = ""
+            for j in range(task.line_number):
+                if STAGE_RE.match(lines[j]):
+                    line_stage = lines[j].lstrip("#").strip()
+                elif BUGS_RE.match(lines[j]):
+                    line_stage = "Bugs"
+            if line_stage == task.stage:
+                return task.line_number
 
-    # Fallback: text search (file was rewritten, lines shifted)
+    # Fallback: text search with indent_level and stage validation.
+    # Track the current stage as we scan so we can disambiguate
+    # duplicate task texts that appear in different stages or at
+    # different indentation levels.
+    current_stage = ""
     fallback = None
     for i, line in enumerate(lines):
+        if STAGE_RE.match(line):
+            current_stage = line.lstrip("#").strip()
+            continue
+        if BUGS_RE.match(line):
+            current_stage = "Bugs"
+            continue
         m = CHECKBOX_RE.match(line)
-        if m and m.group(3).strip() == task.text:
-            if m.group(2) == " ":
-                return i
-            if fallback is None:
-                fallback = i
+        if not m or m.group(3).strip() != task.text:
+            continue
+        indent = len(m.group(1))
+        if indent != task.indent_level:
+            continue
+        if current_stage != task.stage:
+            continue
+        if m.group(2) == " ":
+            return i
+        if fallback is None:
+            fallback = i
     if fallback is not None:
         return fallback
 
