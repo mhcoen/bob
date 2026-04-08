@@ -44,5 +44,11 @@ def targeted_pytest_command(
 
 def is_test_command(cmd: str) -> bool:
     """Return True if cmd is a test-runner command (not a linter)."""
-    first = cmd.split()[0] if cmd.split() else ""
-    return first in ("pytest", "python")
+    parts = cmd.split()
+    if not parts:
+        return False
+    if parts[0] == "pytest":
+        return True
+    if parts[0] == "python" and len(parts) >= 3 and parts[1] == "-m" and parts[2] == "pytest":
+        return True
+    return False

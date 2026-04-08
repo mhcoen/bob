@@ -82,7 +82,7 @@ def _check_errors_json(
         )
         for i, entry in enumerate(unresolvable, 1):
             exc_type = entry.get("exception_type", "Unknown")
-            desc = entry.get("description", "") or "" or ""
+            desc = entry.get("description", "") or ""
             source = entry.get("source_file", "")
             line = entry.get("line", "")
             location = f" at {source}:{line}" if source else ""

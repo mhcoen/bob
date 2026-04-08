@@ -342,7 +342,7 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
     from mcloop.config import load_reviewer_config
 
     proj = Path(project_dir)
-    config = load_reviewer_config(project_dir)
+    config = load_reviewer_config(project_dir, force=True)
     if config is None:
         return
 

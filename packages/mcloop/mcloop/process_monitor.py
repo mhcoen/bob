@@ -412,7 +412,6 @@ def is_main_thread_stuck(sample_output: str) -> bool:
         "__select",
         "__sigwait",
         "kevent",
-        "CFRunLoopRunSpecific",
     ]
     frame_text = "\n".join(main_thread_frames)
     for pattern in stuck_patterns:

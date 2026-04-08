@@ -575,7 +575,6 @@ def run_loop(
             instructions = user_task_instructions(task)
             response = _handle_user_task(label, instructions)
             check_off(checklist_path, task)
-            elapsed = _format_elapsed(time.monotonic() - run_start)
             completed.append(f"{label}) {task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[USER] {instructions[:80]}")

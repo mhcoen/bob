@@ -221,19 +221,17 @@ def _commit(project_dir: Path, task_text: str) -> None:
             flush=True,
         )
         return
-    if result.stdout.strip():
-        print(formatting.system_msg("Pushing..."), flush=True)
-        push_result = _git(
-            ["git", "push"],
-            cwd=project_dir,
-            label="push",
-            silent=True,
+    print(formatting.system_msg("Pushing..."), flush=True)
+    push_result = _git(
+        ["git", "push"],
+        cwd=project_dir,
+        label="push",
+        silent=True,
+    )
+    if push_result.returncode != 0:
+        raise RuntimeError(
+            f"git push failed (exit {push_result.returncode}). Fix the remote and re-run mcloop."
         )
-        if push_result.returncode != 0:
-            raise RuntimeError(
-                f"git push failed (exit {push_result.returncode})."
-                f" Fix the remote and re-run mcloop."
-            )
 
 
 def _has_meaningful_changes(project_dir: Path) -> bool:

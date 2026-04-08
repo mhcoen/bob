@@ -335,14 +335,14 @@ class TestIsMainThreadStuck:
         sample_text = "Thread 5\n  + 100 worker (in MyApp)\n"
         assert process_monitor.is_main_thread_stuck(sample_text) is False
 
-    def test_stuck_on_cfrunloop(self):
+    def test_not_stuck_on_cfrunloop(self):
         sample_text = (
             "Thread 0\n"
             "  + 100 main (in MyApp)\n"
             "  +   50 CFRunLoopRunSpecific (in CoreFoundation)\n"
             "Thread 1\n"
         )
-        assert process_monitor.is_main_thread_stuck(sample_text) is True
+        assert process_monitor.is_main_thread_stuck(sample_text) is False
 
 
 class TestRunGUI:
