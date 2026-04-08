@@ -389,5 +389,5 @@ The debugging playbook this enforces:
    - [x] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
 - [ ] Remove pytest-of-mhcoen/ from version control
    - [x] Add pytest-of-*/ to .gitignore
-   - [ ] git rm -r --cached pytest-of-mhcoen/
+   - [x] git rm -r --cached pytest-of-mhcoen/
    - [ ] Commit the removal and .gitignore update
