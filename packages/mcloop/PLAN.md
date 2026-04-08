@@ -26,7 +26,7 @@ over-abstraction.
    - [x] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
 
 - [ ] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
-   - [ ] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
+   - [x] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
    - [ ] Fall back to text matching only when line_number is unavailable or stale (e.g. file was edited externally), with validation that indent_level and stage also match
    - [ ] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
    - [ ] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
