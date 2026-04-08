@@ -823,3 +823,89 @@ def test_task_label_with_stages(tmp_path):
     tasks = parse(f)
     assert task_label(tasks, tasks[0]) == "2.1"
     assert task_label(tasks, tasks[1]) == "2.2"
+
+
+# ── line_number as primary key ──
+
+
+def test_check_off_duplicate_text_uses_line_number(tmp_path):
+    """With duplicate task texts, check_off targets the correct one by line_number."""
+    md = "- [ ] Run tests\n- [ ] Run tests\n- [ ] Run tests\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Check off the second duplicate (line 1)
+    check_off(f, tasks[1])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].checked
+    assert tasks2[1].checked
+    assert not tasks2[2].checked
+
+
+def test_mark_failed_duplicate_text_uses_line_number(tmp_path):
+    """With duplicate task texts, mark_failed targets the correct one by line_number."""
+    md = "- [ ] Deploy\n- [ ] Deploy\n- [ ] Deploy\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Fail the third duplicate (line 2)
+    mark_failed(f, tasks[2])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].failed
+    assert not tasks2[1].failed
+    assert tasks2[2].failed
+
+
+def test_check_off_stale_line_number_falls_back_to_text(tmp_path):
+    """When line_number is stale (file modified), falls back to text match."""
+    md = "- [ ] First task\n- [ ] Second task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Simulate file modification: insert a line at the top, shifting everything
+    f.write_text("# Added header\n- [ ] First task\n- [ ] Second task\n")
+
+    # task.line_number is 0 but "First task" is now on line 1
+    check_off(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].checked
+    assert tasks2[0].text == "First task"
+
+
+def test_mark_failed_stale_line_number_falls_back_to_text(tmp_path):
+    """When line_number is stale, mark_failed falls back to text match."""
+    md = "- [ ] Alpha\n- [ ] Beta\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Shift lines by inserting a header
+    f.write_text("# Header\n- [ ] Alpha\n- [ ] Beta\n")
+
+    mark_failed(f, tasks[1])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].failed
+    assert tasks2[1].failed
+
+
+def test_check_off_line_number_preferred_over_earlier_text_match(tmp_path):
+    """line_number is used even when an earlier line has the same text."""
+    md = "- [x] Run tests\n- [ ] Run tests\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # tasks[1] has line_number=1 and text "Run tests"
+    # Line 0 also has text "Run tests" but is already checked
+    # line_number should take priority and target line 1
+    check_off(f, tasks[1])
+
+    content = f.read_text()
+    assert content.count("[x] Run tests") == 2

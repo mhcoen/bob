@@ -324,8 +324,20 @@ def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
 
 
 def _find_task_line(lines: list[str], task: Task) -> int:
-    """Find task line by text match, falling back to line_number."""
-    # Prefer unchecked match to avoid targeting an already-checked duplicate
+    """Find task line by line_number, falling back to text match.
+
+    Primary key is the line_number recorded at parse time.  If the
+    file was modified between parse and check-off (e.g. Claude Code
+    edited PLAN.md during execution), the stored line_number may be
+    stale, so we fall back to searching by text.
+    """
+    # Primary: use stored line_number if it still points to the right task
+    if task.line_number < len(lines):
+        m = CHECKBOX_RE.match(lines[task.line_number])
+        if m and m.group(3).strip() == task.text:
+            return task.line_number
+
+    # Fallback: text search (file was rewritten, lines shifted)
     fallback = None
     for i, line in enumerate(lines):
         m = CHECKBOX_RE.match(line)
@@ -336,16 +348,10 @@ def _find_task_line(lines: list[str], task: Task) -> int:
                 fallback = i
     if fallback is not None:
         return fallback
-    if task.line_number >= len(lines):
-        raise IndexError(
-            f"Task line {task.line_number} out of range (file has {len(lines)} lines)"
-        )
-    # Verify the fallback line is actually a checkbox
-    if not CHECKBOX_RE.match(lines[task.line_number]):
-        raise IndexError(
-            f"Task line {task.line_number} is not a checkbox (text changed since parse)"
-        )
-    return task.line_number
+
+    raise IndexError(
+        f"Task not found: line {task.line_number} stale and no text match for '{task.text}'"
+    )
 
 
 def check_off(path: str | Path, task: Task) -> None:
