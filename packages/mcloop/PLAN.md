@@ -22,7 +22,7 @@ over-abstraction.
 
 - [ ] Full-suite failure at stage boundary still reports success (main.py:965-1062)
    - [x] After full-suite check failure at a stage boundary or end-of-run, skip _run_build(), skip audit, skip stage-complete and all-done notifications
-   - [ ] Send an explicit failure notification instead (distinct from per-task failure) so the user knows the run ended with a red repo
+   - [x] Send an explicit failure notification instead (distinct from per-task failure) so the user knows the run ended with a red repo
    - [ ] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
 
 - [ ] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
