@@ -1822,3 +1822,68 @@ def test_no_warning_when_no_model(tmp_path):
     ):
         run_loop(plan, model=None)
     mock_warn.assert_not_called()
+
+
+# --- PID file writing ---
+
+
+def test_run_session_writes_pid_file_json_format(tmp_path):
+    """_run_session writes .mcloop/active-pid as JSON with pid, pgid, cmd, started."""
+    import json
+
+    from mcloop.runner import _run_session
+
+    pid_content = {}
+
+    original_unlink = type(tmp_path / "x").unlink
+
+    def skip_pid_unlink(self, *args, **kwargs):
+        if "active-pid" in str(self):
+            # Capture content before it would be deleted
+            try:
+                pid_content["data"] = self.read_text()
+            except OSError:
+                pass
+            return original_unlink(self, *args, **kwargs)
+        return original_unlink(self, *args, **kwargs)
+
+    with patch.object(type(tmp_path / "x"), "unlink", skip_pid_unlink):
+        _run_session([sys.executable, "-c", "pass"], tmp_path)
+
+    assert "data" in pid_content, "PID file was never written"
+    data = json.loads(pid_content["data"])
+    assert "pid" in data
+    assert "pgid" in data
+    assert "cmd" in data
+    assert "started" in data
+    assert isinstance(data["pid"], int)
+    assert isinstance(data["pgid"], int)
+    assert isinstance(data["cmd"], str)
+    assert isinstance(data["started"], str)
+
+
+def test_run_session_pid_file_cmd_matches_command(tmp_path):
+    """The cmd field in the PID file matches the launched command."""
+    import json
+    import shlex
+
+    from mcloop.runner import _run_session
+
+    pid_content = {}
+
+    original_unlink = type(tmp_path / "x").unlink
+
+    def capture_before_unlink(self, *args, **kwargs):
+        if "active-pid" in str(self):
+            try:
+                pid_content["data"] = self.read_text()
+            except OSError:
+                pass
+        return original_unlink(self, *args, **kwargs)
+
+    cmd = [sys.executable, "-c", "pass"]
+    with patch.object(type(tmp_path / "x"), "unlink", capture_before_unlink):
+        _run_session(cmd, tmp_path)
+
+    data = json.loads(pid_content["data"])
+    assert data["cmd"] == shlex.join(cmd)
