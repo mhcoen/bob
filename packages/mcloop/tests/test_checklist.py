@@ -1063,3 +1063,95 @@ def test_auto_check_parents_duplicate_text_different_indent(tmp_path):
     assert tasks2[0].checked, "Outer should be auto-checked"
     # Top-level "Setup" should NOT be auto-checked (Top B still unchecked)
     assert not tasks2[1].checked, "Top-level Setup should NOT be auto-checked"
+
+
+def test_check_off_identical_text_different_indent_levels(tmp_path):
+    """check_off targets the correct task when identical text appears at different indents."""
+    md = """\
+- [ ] Build
+  - [ ] Build
+  - [ ] Other child
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Both tasks have text "Build" but at different indent levels.
+    # check_off the child (indent_level=2) using line_number identity.
+    child = tasks[0].children[0]
+    assert child.text == "Build"
+    check_off(f, child)
+
+    tasks2 = parse(f)
+    # Root should remain unchecked (it still has "Other child" unchecked)
+    assert not tasks2[0].checked, "Root 'Build' should remain unchecked"
+    assert tasks2[0].children[0].checked, "Child 'Build' should be checked off"
+    assert not tasks2[0].children[1].checked, "Other child should remain unchecked"
+
+
+def test_check_off_identical_text_different_indent_targets_root(tmp_path):
+    """check_off targets the root task when identical text exists as a child."""
+    md = """\
+- [ ] Build
+- [ ] Build
+  - [ ] Sub-task
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # check_off the first root (indent_level=0, no children)
+    assert tasks[0].text == "Build"
+    assert tasks[0].indent_level == 0
+    check_off(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].checked, "First root 'Build' should be checked off"
+    assert not tasks2[1].checked, "Second root 'Build' should remain unchecked"
+
+
+def test_mark_failed_identical_text_different_stages(tmp_path):
+    """mark_failed targets the correct task when identical text appears in different stages."""
+    md = """\
+## Stage 1: Alpha
+- [ ] Deploy service
+
+## Stage 2: Beta
+- [ ] Deploy service
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Both tasks have text "Deploy service" but in different stages.
+    # mark_failed the Stage 2 task using line_number identity.
+    assert tasks[1].text == "Deploy service"
+    assert tasks[1].stage == "Stage 2: Beta"
+    mark_failed(f, tasks[1])
+
+    tasks2 = parse(f)
+    assert not tasks2[0].failed, "Stage 1 'Deploy service' should not be failed"
+    assert tasks2[1].failed, "Stage 2 'Deploy service' should be marked failed"
+
+
+def test_mark_failed_identical_text_different_stages_targets_first(tmp_path):
+    """mark_failed targets Stage 1 task when identical text exists in Stage 2."""
+    md = """\
+## Stage 1: Alpha
+- [ ] Deploy service
+
+## Stage 2: Beta
+- [ ] Deploy service
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # mark_failed the Stage 1 task
+    assert tasks[0].text == "Deploy service"
+    assert tasks[0].stage == "Stage 1: Alpha"
+    mark_failed(f, tasks[0])
+
+    tasks2 = parse(f)
+    assert tasks2[0].failed, "Stage 1 'Deploy service' should be marked failed"
+    assert not tasks2[1].failed, "Stage 2 'Deploy service' should not be failed"
