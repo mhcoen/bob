@@ -380,7 +380,7 @@ The debugging playbook this enforces:
 - [ ] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
    - [x] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
    - [x] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
-   - [ ] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
+   - [ ] [USER] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
 - [ ] Extract run summary and display helpers from main.py into mcloop/display.py
    - [ ] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
    - [ ] These are pure formatting functions with no orchestration side effects

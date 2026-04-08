@@ -228,11 +228,16 @@ def run_task(
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
     parts.append(
-        "Do not run any test, lint, or verification commands"
-        " yourself except the exact check commands listed"
-        " below. No import checks, no individual test files,"
-        " no ad-hoc pytest runs. Make your code changes and"
-        " stop. The orchestrator handles all verification."
+        "ABSOLUTELY FORBIDDEN: Do not run ANY test, lint,"
+        " import check, or verification command yourself."
+        " This includes pytest, python -c 'import ...', ruff,"
+        " mypy, and any other command that checks whether code"
+        " works. The ONLY commands you may run are the exact"
+        " check commands listed in the CHECK COMMANDS section"
+        " below. Running any other verification command is a"
+        " violation that wastes time and money. Make your code"
+        " changes, update CLAUDE.md, run the listed check"
+        " commands, and stop. Nothing else."
     )
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
