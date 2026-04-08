@@ -20,10 +20,10 @@ over-abstraction.
    - [x] Update _record_active_pid (or wherever the pid file is written) to write the new format
    - [x] Add tests: stale pid file with reused PID is not killed, valid pid file with matching process is killed, missing pid file is a no-op
 
-- [ ] Full-suite failure at stage boundary still reports success (main.py:965-1062)
+- [x] Full-suite failure at stage boundary still reports success (main.py:965-1062)
    - [x] After full-suite check failure at a stage boundary or end-of-run, skip _run_build(), skip audit, skip stage-complete and all-done notifications
    - [x] Send an explicit failure notification instead (distinct from per-task failure) so the user knows the run ended with a red repo
-   - [ ] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
+   - [x] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
 
 - [ ] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
    - [ ] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
