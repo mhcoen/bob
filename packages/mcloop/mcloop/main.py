@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
 from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
@@ -44,6 +45,7 @@ from mcloop.errors import (
     _check_errors_json,
     _insert_bugs_section,
 )
+from mcloop.formatting import format_elapsed as _format_elapsed
 from mcloop.git_ops import (
     _changed_files,
     _checkpoint,
@@ -64,6 +66,16 @@ from mcloop.investigate_cmd import (
     _handle_user_task,
     _launch_app_verification,
 )
+from mcloop.lifecycle import (
+    _all_tasks,  # noqa: F401 — re-exported for tests
+    _check_interrupted,
+    _graceful_kill_active_process,
+    _kill_active_process,
+    _kill_orphan_sessions,
+    _save_interrupt_state,
+    _write_eliminated_json,  # noqa: F401 — re-exported for tests
+    _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
+)
 from mcloop.notify import notify
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
@@ -82,12 +94,6 @@ from mcloop.runner import (
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
 
-# Phase tracking for interrupt state capture
-_current_phase = ""  # task, checks, audit, user_prompt
-_current_task_label = ""
-_current_task_text = ""
-_phase_start_time = 0.0
-_project_dir: Path | None = None
 _reviewer_procs: list[subprocess.Popen] = []
 
 
@@ -223,319 +229,6 @@ def _terminate_reviewers() -> None:
     _reviewer_procs.clear()
 
 
-def _save_interrupt_state() -> None:
-    """Write .mcloop/interrupted.json with current state.
-
-    Called from the signal handler. Uses only synchronous file
-    I/O and module-level state. No API calls.
-    """
-    import mcloop.runner as _runner
-
-    if _project_dir is None:
-        return
-    mcloop_dir = _project_dir / ".mcloop"
-    mcloop_dir.mkdir(exist_ok=True)
-    elapsed = time.monotonic() - _phase_start_time if _phase_start_time else 0
-    last_lines = list(_runner._last_output_lines)
-    state = {
-        "task_label": _current_task_label,
-        "task_text": _current_task_text,
-        "phase": _current_phase,
-        "elapsed_seconds": round(elapsed, 1),
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "last_output": last_lines,
-    }
-    try:
-        (mcloop_dir / "interrupted.json").write_text(_json.dumps(state, indent=2) + "\n")
-    except OSError:
-        pass
-
-
-def _check_interrupted(
-    project_dir: Path,
-    checklist_path: Path,
-) -> str | None:
-    """Check for interrupted.json and prompt the user.
-
-    Returns:
-        "retry" to proceed normally
-        "skip" to mark task [!] and move on
-        "quit" to exit
-        None if no interrupted state found
-    """
-    state_file = project_dir / ".mcloop" / "interrupted.json"
-    if not state_file.exists():
-        return None
-    try:
-        state = _json.loads(state_file.read_text())
-    except (OSError, _json.JSONDecodeError):
-        state_file.unlink(missing_ok=True)
-        return None
-
-    phase = state.get("phase", "task")
-    label = state.get("task_label", "?")
-    text = state.get("task_text", "unknown")
-    elapsed = state.get("elapsed_seconds", 0)
-    last_output = state.get("last_output", [])
-    timestamp = state.get("timestamp", "")
-
-    print(
-        formatting.summary_header(),
-        flush=True,
-    )
-    print(
-        f"  Previous run was interrupted during {phase} phase ({timestamp})",
-        flush=True,
-    )
-    print(
-        f"  Task {label}: {text}",
-        flush=True,
-    )
-    print(
-        f"  Running for {_format_elapsed(elapsed)}",
-        flush=True,
-    )
-    if last_output:
-        print("  Last output:", flush=True)
-        for line in last_output[-5:]:
-            print(f"    {line}", flush=True)
-    print(
-        formatting.summary_footer(),
-        flush=True,
-    )
-
-    if phase == "user_prompt":
-        print(
-            "  Resuming where you left off.",
-            flush=True,
-        )
-        state_file.unlink(missing_ok=True)
-        return "retry"
-
-    if phase == "audit":
-        print(
-            "  (r)esume audit / (s)kip audit / (q)uit",
-            flush=True,
-        )
-    else:
-        print(
-            "  (r)etry / (d)escribe what went wrong / (s)kip / (q)uit",
-            flush=True,
-        )
-
-    try:
-        choice = input("  > ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        choice = "q"
-
-    if choice == "q":
-        state_file.unlink(missing_ok=True)
-        print("Exiting.", flush=True)
-        sys.exit(0)
-
-    if choice == "s":
-        # Mark task as failed
-        tasks = parse(checklist_path)
-        for t in _all_tasks(tasks):
-            if t.text.strip() == text.strip() and not t.checked:
-                mark_failed(checklist_path, t)
-                break
-        state_file.unlink(missing_ok=True)
-        return "skip"
-
-    if choice == "d" and phase != "audit":
-        print(
-            "  Describe what went wrong (press Enter twice to finish):",
-            flush=True,
-        )
-        lines: list[str] = []
-        try:
-            while True:
-                line = input()
-                if line == "":
-                    break
-                lines.append(line)
-        except (EOFError, KeyboardInterrupt):
-            pass
-        description = " ".join(lines).strip()
-        if description:
-            _write_ruledout_to_plan(
-                checklist_path,
-                text,
-                description,
-            )
-            _write_eliminated_json(
-                project_dir,
-                label,
-                description,
-            )
-            print(
-                f"  Recorded: [RULEDOUT] {description}",
-                flush=True,
-            )
-        state_file.unlink(missing_ok=True)
-        return "retry"
-
-    # Default: retry
-    state_file.unlink(missing_ok=True)
-    return "retry"
-
-
-def _all_tasks(tasks: list[Task]) -> list[Task]:
-    """Flatten the task tree into a list."""
-    result: list[Task] = []
-    for t in tasks:
-        result.append(t)
-        result.extend(_all_tasks(t.children))
-    return result
-
-
-def _write_ruledout_to_plan(
-    checklist_path: Path,
-    task_text: str,
-    description: str,
-) -> None:
-    """Append a [RULEDOUT] line under a task in PLAN.md."""
-    lines = checklist_path.read_text().splitlines()
-    from mcloop.checklist import CHECKBOX_RE
-
-    for i, line in enumerate(lines):
-        m = CHECKBOX_RE.match(line)
-        if m and m.group(3).strip() == task_text.strip():
-            indent = len(m.group(1))
-            ruledout_line = " " * (indent + 2) + f"[RULEDOUT] {description}"
-            lines.insert(i + 1, ruledout_line)
-            checklist_path.write_text("\n".join(lines) + "\n")
-            return
-
-
-def _write_eliminated_json(
-    project_dir: Path,
-    task_label: str,
-    description: str,
-) -> None:
-    """Append an entry to .mcloop/eliminated.json."""
-    elim_path = project_dir / ".mcloop" / "eliminated.json"
-    try:
-        data = _json.loads(elim_path.read_text())
-    except (OSError, _json.JSONDecodeError):
-        data = {}
-    if task_label not in data:
-        data[task_label] = []
-    data[task_label].append(
-        {
-            "approach": description,
-            "timestamp": time.strftime("%Y-%m-%d"),
-        }
-    )
-    elim_path.write_text(_json.dumps(data, indent=2) + "\n")
-
-
-def _kill_orphan_sessions(project_dir: Path) -> None:
-    """Kill orphan claude processes from a previous mcloop run.
-
-    When mcloop is killed with kill -9, the claude subprocess
-    survives because it runs in its own session. The PID is
-    recorded in .mcloop/active-pid so the next run can kill it.
-    """
-    pid_file = project_dir / ".mcloop" / "active-pid"
-    if not pid_file.exists():
-        return
-    try:
-        content = pid_file.read_text().strip()
-        parts = content.split()
-        pid = int(parts[0])
-        pgid = int(parts[1]) if len(parts) > 1 else pid
-    except (OSError, ValueError, IndexError):
-        pid_file.unlink(missing_ok=True)
-        return
-    # Check if the process is still alive
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        # Already dead
-        pid_file.unlink(missing_ok=True)
-        return
-    except PermissionError:
-        pass  # alive but we can't signal it
-    # Kill the entire process group
-    print(
-        formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),
-        flush=True,
-    )
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            pass
-    pid_file.unlink(missing_ok=True)
-
-
-def _kill_active_process() -> None:
-    """Kill any active claude subprocess and its process group with SIGKILL.
-
-    Used by the atexit handler where graceful shutdown is not possible.
-    """
-    import mcloop.runner as _runner
-
-    proc = _runner._active_process
-    if proc is not None:
-        try:
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            try:
-                proc.kill()
-            except OSError:
-                pass
-        _runner._active_process = None
-
-
-def _graceful_kill_active_process() -> None:
-    """Send SIGTERM to the child process group, escalate to SIGKILL after 2s.
-
-    Called by the signal handler. Sends SIGTERM first to give the child
-    process group a chance to clean up. If the group does not exit within
-    2 seconds, escalates to SIGKILL.
-    """
-    import mcloop.runner as _runner
-
-    proc = _runner._active_process
-    if proc is None:
-        return
-    try:
-        pgid = os.getpgid(proc.pid)
-    except (OSError, ProcessLookupError):
-        pgid = proc.pid
-    # Send SIGTERM to the entire process group
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
-        try:
-            proc.terminate()
-        except OSError:
-            pass
-    # Wait up to 2 seconds for graceful exit
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        # Escalate to SIGKILL
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            try:
-                proc.kill()
-            except OSError:
-                pass
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
-    _runner._active_process = None
-
-
 def main() -> None:
     import atexit
 
@@ -644,9 +337,6 @@ def _run_batch(
 
     Returns "success" or "failed".
     """
-    global _current_phase, _current_task_label
-    global _current_task_text, _phase_start_time
-
     n = len(batch_children)
     labels = []
     for child in batch_children:
@@ -686,10 +376,10 @@ def _run_batch(
     for step in steps:
         print(f"  {step}", flush=True)
 
-    _current_phase = "task"
-    _current_task_label = label_range
-    _current_task_text = f"[BATCH] {n} subtasks"
-    _phase_start_time = time.monotonic()
+    _lifecycle._current_phase = "task"
+    _lifecycle._current_task_label = label_range
+    _lifecycle._current_task_text = f"[BATCH] {n} subtasks"
+    _lifecycle._phase_start_time = time.monotonic()
 
     # Collect eliminated from all children and parent
     all_eliminated: list[str] = []
@@ -752,7 +442,7 @@ def _run_batch(
         )
         return "failed"
 
-    _current_phase = "checks"
+    _lifecycle._current_phase = "checks"
     changed_files = _changed_files(project_dir)
     check_result = run_checks(
         project_dir,
@@ -845,10 +535,8 @@ def run_loop(
     enable_reviewer: bool = False,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
-    global _project_dir, _current_phase, _current_task_label
-    global _current_task_text, _phase_start_time
     project_dir = checklist_path.parent
-    _project_dir = project_dir
+    _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
     description = parse_description(checklist_path)
 
@@ -1003,10 +691,10 @@ def run_loop(
 
         # Handle [USER] tasks: pause for human observation
         if is_user_task(task):
-            _current_phase = "user_prompt"
-            _current_task_label = label
-            _current_task_text = task.text
-            _phase_start_time = time.monotonic()
+            _lifecycle._current_phase = "user_prompt"
+            _lifecycle._current_task_label = label
+            _lifecycle._current_task_text = task.text
+            _lifecycle._phase_start_time = time.monotonic()
             has_subtasks = find_parent(tasks, task) is not None
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
@@ -1089,10 +777,10 @@ def run_loop(
         )
         print(formatting.task_header(label, task.text, active_cli), flush=True)
 
-        _current_phase = "task"
-        _current_task_label = label
-        _current_task_text = task.text
-        _phase_start_time = time.monotonic()
+        _lifecycle._current_phase = "task"
+        _lifecycle._current_task_label = label
+        _lifecycle._current_task_text = task.text
+        _lifecycle._phase_start_time = time.monotonic()
 
         eliminated = get_eliminated(tasks, task)
         task_start = time.monotonic()
@@ -1240,7 +928,7 @@ def run_loop(
                     )
                     break
 
-                _current_phase = "checks"
+                _lifecycle._current_phase = "checks"
                 changed_files = _changed_files(project_dir)
                 check_result = run_checks(
                     project_dir,
@@ -1464,8 +1152,8 @@ def run_loop(
             flush=True,
         )
     elif not no_audit:
-        _current_phase = "audit"
-        _phase_start_time = time.monotonic()
+        _lifecycle._current_phase = "audit"
+        _lifecycle._phase_start_time = time.monotonic()
         _audit_start = time.monotonic()
         _run_audit_fix_cycle(
             project_dir,
@@ -1622,19 +1310,6 @@ def _check_user_input() -> str:
     except (OSError, ValueError):
         return ""
     return "\n".join(lines).strip()
-
-
-def _format_elapsed(seconds: float) -> str:
-    """Format seconds into human-readable elapsed time."""
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    if minutes < 60:
-        return f"{minutes}m {secs}s"
-    hours = int(minutes // 60)
-    mins = minutes % 60
-    return f"{hours}h {mins}m {secs}s"
 
 
 def _tail(text: str, max_lines: int = 50) -> str:
@@ -1822,7 +1497,7 @@ def _task_label(tasks: list[Task], target: Task) -> str:
     # Extract stage number from the stage string (e.g. "Stage 6: ..." -> "6")
     stage_num = ""
     if target.stage and target.stage.startswith("Stage "):
-        rest = target.stage[len("Stage "):]
+        rest = target.stage[len("Stage ") :]
         num_part = rest.split(":")[0].split()[0]
         if num_part.isdigit():
             stage_num = num_part

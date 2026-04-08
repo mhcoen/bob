@@ -1,0 +1,338 @@
+"""Process lifecycle: interrupt state, orphan cleanup, active process management."""
+
+from __future__ import annotations
+
+import json as _json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from mcloop import formatting
+from mcloop.checklist import (
+    CHECKBOX_RE,
+    Task,
+    mark_failed,
+    parse,
+)
+from mcloop.formatting import format_elapsed
+
+# Phase tracking for interrupt state capture
+_current_phase = ""  # task, checks, audit, user_prompt
+_current_task_label = ""
+_current_task_text = ""
+_phase_start_time = 0.0
+_project_dir: Path | None = None
+
+
+def _save_interrupt_state() -> None:
+    """Write .mcloop/interrupted.json with current state.
+
+    Called from the signal handler. Uses only synchronous file
+    I/O and module-level state. No API calls.
+    """
+    import mcloop.runner as _runner
+
+    if _project_dir is None:
+        return
+    mcloop_dir = _project_dir / ".mcloop"
+    mcloop_dir.mkdir(exist_ok=True)
+    elapsed = time.monotonic() - _phase_start_time if _phase_start_time else 0
+    last_lines = list(_runner._last_output_lines)
+    state = {
+        "task_label": _current_task_label,
+        "task_text": _current_task_text,
+        "phase": _current_phase,
+        "elapsed_seconds": round(elapsed, 1),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "last_output": last_lines,
+    }
+    try:
+        (mcloop_dir / "interrupted.json").write_text(_json.dumps(state, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def _check_interrupted(
+    project_dir: Path,
+    checklist_path: Path,
+) -> str | None:
+    """Check for interrupted.json and prompt the user.
+
+    Returns:
+        "retry" to proceed normally
+        "skip" to mark task [!] and move on
+        "quit" to exit
+        None if no interrupted state found
+    """
+    state_file = project_dir / ".mcloop" / "interrupted.json"
+    if not state_file.exists():
+        return None
+    try:
+        state = _json.loads(state_file.read_text())
+    except (OSError, _json.JSONDecodeError):
+        state_file.unlink(missing_ok=True)
+        return None
+
+    phase = state.get("phase", "task")
+    label = state.get("task_label", "?")
+    text = state.get("task_text", "unknown")
+    elapsed = state.get("elapsed_seconds", 0)
+    last_output = state.get("last_output", [])
+    timestamp = state.get("timestamp", "")
+
+    print(
+        formatting.summary_header(),
+        flush=True,
+    )
+    print(
+        f"  Previous run was interrupted during {phase} phase ({timestamp})",
+        flush=True,
+    )
+    print(
+        f"  Task {label}: {text}",
+        flush=True,
+    )
+    print(
+        f"  Running for {format_elapsed(elapsed)}",
+        flush=True,
+    )
+    if last_output:
+        print("  Last output:", flush=True)
+        for line in last_output[-5:]:
+            print(f"    {line}", flush=True)
+    print(
+        formatting.summary_footer(),
+        flush=True,
+    )
+
+    if phase == "user_prompt":
+        print(
+            "  Resuming where you left off.",
+            flush=True,
+        )
+        state_file.unlink(missing_ok=True)
+        return "retry"
+
+    if phase == "audit":
+        print(
+            "  (r)esume audit / (s)kip audit / (q)uit",
+            flush=True,
+        )
+    else:
+        print(
+            "  (r)etry / (d)escribe what went wrong / (s)kip / (q)uit",
+            flush=True,
+        )
+
+    try:
+        choice = input("  > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        choice = "q"
+
+    if choice == "q":
+        state_file.unlink(missing_ok=True)
+        print("Exiting.", flush=True)
+        sys.exit(0)
+
+    if choice == "s":
+        # Mark task as failed
+        tasks = parse(checklist_path)
+        for t in _all_tasks(tasks):
+            if t.text.strip() == text.strip() and not t.checked:
+                mark_failed(checklist_path, t)
+                break
+        state_file.unlink(missing_ok=True)
+        return "skip"
+
+    if choice == "d" and phase != "audit":
+        print(
+            "  Describe what went wrong (press Enter twice to finish):",
+            flush=True,
+        )
+        lines: list[str] = []
+        try:
+            while True:
+                line = input()
+                if line == "":
+                    break
+                lines.append(line)
+        except (EOFError, KeyboardInterrupt):
+            pass
+        description = " ".join(lines).strip()
+        if description:
+            _write_ruledout_to_plan(
+                checklist_path,
+                text,
+                description,
+            )
+            _write_eliminated_json(
+                project_dir,
+                label,
+                description,
+            )
+            print(
+                f"  Recorded: [RULEDOUT] {description}",
+                flush=True,
+            )
+        state_file.unlink(missing_ok=True)
+        return "retry"
+
+    # Default: retry
+    state_file.unlink(missing_ok=True)
+    return "retry"
+
+
+def _all_tasks(tasks: list[Task]) -> list[Task]:
+    """Flatten the task tree into a list."""
+    result: list[Task] = []
+    for t in tasks:
+        result.append(t)
+        result.extend(_all_tasks(t.children))
+    return result
+
+
+def _write_ruledout_to_plan(
+    checklist_path: Path,
+    task_text: str,
+    description: str,
+) -> None:
+    """Append a [RULEDOUT] line under a task in PLAN.md."""
+    lines = checklist_path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        m = CHECKBOX_RE.match(line)
+        if m and m.group(3).strip() == task_text.strip():
+            indent = len(m.group(1))
+            ruledout_line = " " * (indent + 2) + f"[RULEDOUT] {description}"
+            lines.insert(i + 1, ruledout_line)
+            checklist_path.write_text("\n".join(lines) + "\n")
+            return
+
+
+def _write_eliminated_json(
+    project_dir: Path,
+    task_label: str,
+    description: str,
+) -> None:
+    """Append an entry to .mcloop/eliminated.json."""
+    elim_path = project_dir / ".mcloop" / "eliminated.json"
+    try:
+        data = _json.loads(elim_path.read_text())
+    except (OSError, _json.JSONDecodeError):
+        data = {}
+    if task_label not in data:
+        data[task_label] = []
+    data[task_label].append(
+        {
+            "approach": description,
+            "timestamp": time.strftime("%Y-%m-%d"),
+        }
+    )
+    elim_path.write_text(_json.dumps(data, indent=2) + "\n")
+
+
+def _kill_orphan_sessions(project_dir: Path) -> None:
+    """Kill orphan claude processes from a previous mcloop run.
+
+    When mcloop is killed with kill -9, the claude subprocess
+    survives because it runs in its own session. The PID is
+    recorded in .mcloop/active-pid so the next run can kill it.
+    """
+    pid_file = project_dir / ".mcloop" / "active-pid"
+    if not pid_file.exists():
+        return
+    try:
+        content = pid_file.read_text().strip()
+        parts = content.split()
+        pid = int(parts[0])
+        pgid = int(parts[1]) if len(parts) > 1 else pid
+    except (OSError, ValueError, IndexError):
+        pid_file.unlink(missing_ok=True)
+        return
+    # Check if the process is still alive
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        # Already dead
+        pid_file.unlink(missing_ok=True)
+        return
+    except PermissionError:
+        pass  # alive but we can't signal it
+    # Kill the entire process group
+    print(
+        formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),
+        flush=True,
+    )
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    pid_file.unlink(missing_ok=True)
+
+
+def _kill_active_process() -> None:
+    """Kill any active claude subprocess and its process group with SIGKILL.
+
+    Used by the atexit handler where graceful shutdown is not possible.
+    """
+    import mcloop.runner as _runner
+
+    proc = _runner._active_process
+    if proc is not None:
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        _runner._active_process = None
+
+
+def _graceful_kill_active_process() -> None:
+    """Send SIGTERM to the child process group, escalate to SIGKILL after 2s.
+
+    Called by the signal handler. Sends SIGTERM first to give the child
+    process group a chance to clean up. If the group does not exit within
+    2 seconds, escalates to SIGKILL.
+    """
+    import mcloop.runner as _runner
+
+    proc = _runner._active_process
+    if proc is None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (OSError, ProcessLookupError):
+        pgid = proc.pid
+    # Send SIGTERM to the entire process group
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    # Wait up to 2 seconds for graceful exit
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        # Escalate to SIGKILL
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    _runner._active_process = None

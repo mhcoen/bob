@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+import mcloop.lifecycle as lifecycle_mod
 from mcloop.audit import _run_audit_fix_cycle, _run_single_audit_round
 from mcloop.errors import (
     _MAX_FIX_ATTEMPTS,
@@ -5821,25 +5822,24 @@ def test_all_tasks_empty():
 
 def test_save_interrupt_state_writes_json(tmp_path):
     """Writes interrupted.json with all expected fields."""
-    import mcloop.main as main_mod
     import mcloop.runner as runner_mod
 
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
 
     orig = (
-        main_mod._project_dir,
-        main_mod._current_task_label,
-        main_mod._current_task_text,
-        main_mod._current_phase,
-        main_mod._phase_start_time,
+        lifecycle_mod._project_dir,
+        lifecycle_mod._current_task_label,
+        lifecycle_mod._current_task_text,
+        lifecycle_mod._current_phase,
+        lifecycle_mod._phase_start_time,
     )
     try:
-        main_mod._project_dir = tmp_path
-        main_mod._current_task_label = "1.2"
-        main_mod._current_task_text = "Fix the bug"
-        main_mod._current_phase = "task"
-        main_mod._phase_start_time = time.monotonic() - 10
+        lifecycle_mod._project_dir = tmp_path
+        lifecycle_mod._current_task_label = "1.2"
+        lifecycle_mod._current_task_text = "Fix the bug"
+        lifecycle_mod._current_phase = "task"
+        lifecycle_mod._phase_start_time = time.monotonic() - 10
         runner_mod._last_output_lines.clear()
         runner_mod._last_output_lines.append("some output")
 
@@ -5856,45 +5856,42 @@ def test_save_interrupt_state_writes_json(tmp_path):
         assert data["last_output"] == ["some output"]
     finally:
         (
-            main_mod._project_dir,
-            main_mod._current_task_label,
-            main_mod._current_task_text,
-            main_mod._current_phase,
-            main_mod._phase_start_time,
+            lifecycle_mod._project_dir,
+            lifecycle_mod._current_task_label,
+            lifecycle_mod._current_task_text,
+            lifecycle_mod._current_phase,
+            lifecycle_mod._phase_start_time,
         ) = orig
 
 
 def test_save_interrupt_state_noop_when_no_project_dir():
     """Does nothing when _project_dir is None."""
-    import mcloop.main as main_mod
-
-    orig = main_mod._project_dir
+    orig = lifecycle_mod._project_dir
     try:
-        main_mod._project_dir = None
+        lifecycle_mod._project_dir = None
         _save_interrupt_state()
     finally:
-        main_mod._project_dir = orig
+        lifecycle_mod._project_dir = orig
 
 
 def test_save_interrupt_state_handles_write_oserror(tmp_path):
     """Handles OSError on write gracefully."""
-    import mcloop.main as main_mod
     import mcloop.runner as runner_mod
 
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
-    orig = main_mod._project_dir
+    orig = lifecycle_mod._project_dir
     try:
-        main_mod._project_dir = tmp_path
-        main_mod._current_phase = "task"
-        main_mod._phase_start_time = time.monotonic()
+        lifecycle_mod._project_dir = tmp_path
+        lifecycle_mod._current_phase = "task"
+        lifecycle_mod._phase_start_time = time.monotonic()
         runner_mod._last_output_lines.clear()
         # Make the target a directory so write_text fails
         (mcloop_dir / "interrupted.json").mkdir()
         # Should not raise
         _save_interrupt_state()
     finally:
-        main_mod._project_dir = orig
+        lifecycle_mod._project_dir = orig
 
 
 # ── _check_interrupted ──

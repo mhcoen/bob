@@ -378,7 +378,7 @@ The debugging playbook this enforces:
    - [x] Update main.py imports to delegate to install_cmd
    - [x] Verify mcloop install and mcloop uninstall still work (including --dry-run)
 - [ ] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
-   - [ ] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
+   - [!] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
    - [ ] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
    - [ ] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
 - [ ] Extract run summary and display helpers from main.py into mcloop/display.py

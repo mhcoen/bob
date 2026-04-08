@@ -230,6 +230,12 @@ def run_task(
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     parts.append(
+        "Never set, unset, or override environment variables"
+        " in Bash commands. Do not use VAR=value command,"
+        " env -u, unset, or export. The environment is"
+        " controlled by the orchestrator."
+    )
+    parts.append(
         "Never run destructive commands like rm -rf,"
         " sudo rm, mkfs, or dd, even for testing."
         " Test dangerous behavior with mocks, not"
@@ -251,12 +257,26 @@ def run_task(
     if check_commands:
         cmds = ", ".join(check_commands)
         parts.append(
-            "Before finishing, run these check commands"
-            f" and fix any failures: {cmds}."
-            " Run them, read the output, fix issues,"
-            " and re-run. Repeat up to 3 times. If checks"
-            " still fail after 3 attempts, stop and report"
-            " what is failing. Do not loop more than 3 times."
+            "CHECK COMMANDS (mandatory, strict rules):\n"
+            f"Commands: {cmds}\n"
+            "1. Run each check command EXACTLY ONCE before finishing.\n"
+            "2. Run the command exactly as listed. Do not append"
+            " | tail, | head, or any pipe. Do not truncate output."
+            " Do not modify the command in any way.\n"
+            "3. If a check fails, fix the issue, then re-run that"
+            " same exact check command ONCE.\n"
+            "4. Maximum 3 total runs of any single check command."
+            " If it still fails after 3 runs, stop and report"
+            " what is failing.\n"
+            "5. NEVER run the same check command twice in a row"
+            " without making a code change between runs."
+            " Re-running a passing test is forbidden.\n"
+            "6. ONLY run the exact check commands listed above."
+            " Do not run subsets, individual test files, or"
+            " any variation. Do not run pytest on a single file."
+            " Do not run any test command other than the ones"
+            " listed here. The orchestrator runs its own"
+            " verification after this session ends."
         )
     if shutil.which("rtk"):
         rtk_instruction = _build_rtk_instruction()
@@ -278,13 +298,20 @@ def run_task(
         " crashes. Compiling is not enough."
     )
     parts.append(
+        "CLAUDE.md MAINTENANCE (mandatory, will fail the task if skipped):\n"
         "CLAUDE.md contains a description of every"
-        " source file in the project. Read it first"
-        " to understand the codebase instead of"
-        " searching files. If you add, rename, or"
-        " significantly change any source file,"
-        " update the relevant entry in CLAUDE.md"
-        " before finishing."
+        " source file in the project. Read it at the"
+        " start of every task to understand the codebase."
+        " If you create a new source file, add its entry"
+        " to CLAUDE.md. If you rename or move a file,"
+        " update the old entry. If you significantly"
+        " change a file's purpose, update the description."
+        " If you move functions between files, update"
+        " both the source and destination entries."
+        " The orchestrator checks CLAUDE.md after every"
+        " task. If source files changed and CLAUDE.md"
+        " did not, the task is marked as failed."
+        " Do this BEFORE running check commands."
     )
     parts.append(
         "Do not remove or modify code between"

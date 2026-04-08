@@ -133,3 +133,16 @@ def summary_footer() -> str:
         return f"{BOLD}{'=' * width}{RESET}"
     else:
         return "=" * width
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format seconds into human-readable elapsed time."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = int(minutes // 60)
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"

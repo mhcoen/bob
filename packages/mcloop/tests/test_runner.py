@@ -1123,8 +1123,8 @@ def test_handle_sigint_kills_active_process():
     runner._active_process = mock_proc
 
     with (
-        patch("mcloop.main.os.getpgid", return_value=99999),
-        patch("mcloop.main.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.os.getpgid", return_value=99999),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
     ):
         from mcloop.main import _kill_active_process
 
@@ -1181,8 +1181,8 @@ def test_graceful_kill_sends_sigterm_first():
     runner._active_process = mock_proc
 
     with (
-        patch("mcloop.main.os.getpgid", return_value=99999),
-        patch("mcloop.main.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.os.getpgid", return_value=99999),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
     ):
         from mcloop.main import _graceful_kill_active_process
 
@@ -1208,8 +1208,8 @@ def test_graceful_kill_escalates_to_sigkill():
     runner._active_process = mock_proc
 
     with (
-        patch("mcloop.main.os.getpgid", return_value=99999),
-        patch("mcloop.main.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.os.getpgid", return_value=99999),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
     ):
         from mcloop.main import _graceful_kill_active_process
 
@@ -1230,7 +1230,7 @@ def test_graceful_kill_no_active_process():
     original = runner._active_process
     runner._active_process = None
 
-    with patch("mcloop.main.os.killpg") as mock_killpg:
+    with patch("mcloop.lifecycle.os.killpg") as mock_killpg:
         from mcloop.main import _graceful_kill_active_process
 
         _graceful_kill_active_process()
@@ -1391,8 +1391,8 @@ def test_signal_handler_kills_child_process():
     runner._active_process = mock_proc
 
     with (
-        patch("mcloop.main.os.getpgid", return_value=99999),
-        patch("mcloop.main.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.os.getpgid", return_value=99999),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
         patch("mcloop.main.os._exit"),
     ):
         from mcloop.main import _graceful_kill_active_process
