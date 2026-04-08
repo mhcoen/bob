@@ -383,6 +383,111 @@ def test_kill_orphan_ps_empty_output_proceeds(tmp_path):
     assert not pid_file.exists()
 
 
+def test_kill_orphan_no_mcloop_dir(tmp_path):
+    """No-op when .mcloop directory does not exist at all."""
+    assert not (tmp_path / ".mcloop").exists()
+    _kill_orphan_sessions(tmp_path)
+    # Should return without error; no directory created
+    assert not (tmp_path / ".mcloop").exists()
+
+
+def test_kill_orphan_reused_pid_permission_error(tmp_path, capsys):
+    """Stale PID with reused process detected via PermissionError path."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="/usr/sbin/cron\n")
+
+    def kill_side_effect(pid, sig):
+        if sig == 0:
+            raise PermissionError("Operation not permitted")
+        raise AssertionError("Should not send a real signal")
+
+    with (
+        patch("mcloop.lifecycle.os.kill", side_effect=kill_side_effect),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_not_called()
+    assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+
+
+def test_kill_orphan_matching_process_via_permission_error(tmp_path):
+    """Kills matching process discovered via PermissionError on os.kill(pid, 0)."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="claude -p --model opus\n")
+
+    def kill_side_effect(pid, sig):
+        if sig == 0:
+            raise PermissionError("Operation not permitted")
+
+    with (
+        patch("mcloop.lifecycle.os.kill", side_effect=kill_side_effect),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_killpg_fails_falls_back_to_kill(tmp_path):
+    """Falls back to os.kill when os.killpg raises OSError."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="claude -p --model opus\n")
+    kill_calls = []
+
+    def kill_side_effect(pid, sig):
+        kill_calls.append((pid, sig))
+
+    with (
+        patch("mcloop.lifecycle.os.kill", side_effect=kill_side_effect),
+        patch("mcloop.lifecycle.os.killpg", side_effect=OSError("No such process")),
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    # os.kill(pid, 0) for alive check, then os.kill(pid, SIGKILL) as fallback
+    assert (12345, signal.SIGKILL) in kill_calls
+    assert not pid_file.exists()
+
+
 # ── _kill_active_process ──
 
 
