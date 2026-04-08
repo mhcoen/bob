@@ -1,4 +1,10 @@
-"""Reviewer integration: spawn, collect, and manage reviewer subprocesses."""
+"""Reviewer integration: spawn, collect, and manage reviewer subprocesses.
+
+reviewer.py owns the review logic itself (API calls, diff parsing,
+finding extraction). This module owns spawning reviewer subprocesses,
+collecting their results from disk, and managing their lifecycle
+within run_loop.
+"""
 
 from __future__ import annotations
 
