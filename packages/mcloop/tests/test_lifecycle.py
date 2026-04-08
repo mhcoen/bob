@@ -229,7 +229,7 @@ def test_kill_orphan_verifies_cmd_match(tmp_path):
     assert not pid_file.exists()
 
 
-def test_kill_orphan_skips_when_cmd_mismatch(tmp_path):
+def test_kill_orphan_skips_when_cmd_mismatch(tmp_path, capsys):
     """Does not kill when live process command differs from stored cmd."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -253,6 +253,11 @@ def test_kill_orphan_skips_when_cmd_mismatch(tmp_path):
         _kill_orphan_sessions(tmp_path)
     mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "pid=12345" in captured.out
+    assert "/usr/bin/vim myfile.py" in captured.out
+    assert "claude -p --model opus" in captured.out
 
 
 def test_kill_orphan_proceeds_when_ps_fails(tmp_path):

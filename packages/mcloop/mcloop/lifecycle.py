@@ -284,6 +284,13 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
             live_cmd = result.stdout.strip()
             if live_cmd and stored_cmd not in live_cmd and live_cmd not in stored_cmd:
                 # PID was reused by a different process — do not kill
+                print(
+                    formatting.system_msg(
+                        f"Stale PID file removed (pid={pid} is now '{live_cmd}', "
+                        f"was '{stored_cmd}')"
+                    ),
+                    flush=True,
+                )
                 pid_file.unlink(missing_ok=True)
                 return
         except (OSError, subprocess.TimeoutExpired):
