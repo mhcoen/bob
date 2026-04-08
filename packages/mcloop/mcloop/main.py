@@ -988,6 +988,11 @@ def run_loop(
                 project_dir,
                 notes_snapshot,
             )
+            notify(
+                "Run ended with red repo: full suite failed"
+                f" at stage boundary ({full_check.command})",
+                level="error",
+            )
             return []
         else:
             print(
@@ -1034,6 +1039,10 @@ def run_loop(
             total,
             project_dir,
             notes_snapshot,
+        )
+        notify(
+            f"Run ended with red repo: full suite failed at end of run ({full_check.command})",
+            level="error",
         )
         return []
 

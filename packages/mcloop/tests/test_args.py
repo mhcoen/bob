@@ -7025,6 +7025,8 @@ def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, c
     # Stage-complete notification should not have been sent
     notify_messages = [str(c) for c in mock_notify.call_args_list]
     assert not any("complete" in m for m in notify_messages)
+    # Explicit failure notification should have been sent
+    assert any("red repo" in m and "stage boundary" in m for m in notify_messages)
     captured = capsys.readouterr()
     assert "Full suite failed at stage boundary" in captured.out
 
@@ -7079,5 +7081,7 @@ def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, cap
     # All-done notification should not have been sent
     notify_messages = [str(c) for c in mock_notify.call_args_list]
     assert not any("completed" in m for m in notify_messages)
+    # Explicit failure notification should have been sent
+    assert any("red repo" in m and "end of run" in m for m in notify_messages)
     captured = capsys.readouterr()
     assert "Full suite failed at end of run" in captured.out
