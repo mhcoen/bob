@@ -275,6 +275,35 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
     pid_file.unlink(missing_ok=True)
 
 
+def register_signal_handlers(
+    process_ref: object,
+    cleanup_callback: object = None,
+) -> None:
+    """Install signal handlers for graceful shutdown.
+
+    Args:
+        process_ref: The runner module (must have ``_interrupted`` and
+            ``_active_process`` attributes).
+        cleanup_callback: Optional callable invoked before killing the
+            active process (e.g. to terminate reviewer subprocesses).
+    """
+
+    def _handle_signal(sig, frame):
+        process_ref._interrupted = True  # type: ignore[attr-defined]
+        print("\nInterrupted. Saving state...", flush=True)
+        _save_interrupt_state()
+        if cleanup_callback is not None:
+            cleanup_callback()  # type: ignore[operator]
+        _graceful_kill_active_process()
+        print("State saved. Exiting.", flush=True)
+        os._exit(130)
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTSTP, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGHUP, _handle_signal)
+
+
 def _kill_active_process() -> None:
     """Kill any active claude subprocess and its process group with SIGKILL.
 

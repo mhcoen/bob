@@ -16,6 +16,7 @@ from mcloop.lifecycle import (
     _save_interrupt_state,
     _write_eliminated_json,
     _write_ruledout_to_plan,
+    register_signal_handlers,
 )
 
 # ── _all_tasks ──
@@ -331,3 +332,114 @@ def test_check_interrupted_retry_on_r(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _="": "r")
     result = _check_interrupted(tmp_path, plan)
     assert result == "retry"
+
+
+# ── register_signal_handlers ──
+
+
+def test_register_signal_handlers_installs_all_signals():
+    """Installs handlers for SIGINT, SIGTSTP, SIGTERM, and SIGHUP."""
+    process_ref = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        register_signal_handlers(process_ref)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP):
+            handler = signal.getsignal(sig)
+            assert callable(handler)
+            assert handler is not originals[sig]
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_register_signal_handlers_handler_sets_interrupted():
+    """The installed handler sets _interrupted on the process_ref."""
+    process_ref = MagicMock()
+    process_ref._interrupted = False
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit"),
+        ):
+            handler(signal.SIGINT, None)
+        assert process_ref._interrupted is True
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_register_signal_handlers_calls_cleanup_callback():
+    """The handler invokes the cleanup callback before killing."""
+    process_ref = MagicMock()
+    cleanup = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        register_signal_handlers(process_ref, cleanup_callback=cleanup)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit"),
+        ):
+            handler(signal.SIGINT, None)
+        cleanup.assert_called_once()
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_register_signal_handlers_no_cleanup_callback():
+    """Works without a cleanup callback."""
+    process_ref = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        register_signal_handlers(process_ref, cleanup_callback=None)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit"),
+        ):
+            handler(signal.SIGINT, None)
+        # No exception raised — cleanup_callback=None is handled
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_register_signal_handlers_exits_with_130():
+    """The handler exits with code 130."""
+    process_ref = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit") as mock_exit,
+        ):
+            handler(signal.SIGINT, None)
+        mock_exit.assert_called_once_with(130)
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)

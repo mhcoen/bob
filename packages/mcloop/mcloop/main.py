@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json as _json
-import os
 import select
 import shlex
-import signal
 import subprocess
 import sys
 import time
@@ -69,12 +67,12 @@ from mcloop.investigate_cmd import (
 from mcloop.lifecycle import (
     _all_tasks,  # noqa: F401 — re-exported for tests
     _check_interrupted,
-    _graceful_kill_active_process,
+    _graceful_kill_active_process,  # noqa: F401 — re-exported for tests
     _kill_active_process,
     _kill_orphan_sessions,
-    _save_interrupt_state,
     _write_eliminated_json,  # noqa: F401 — re-exported for tests
     _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
+    register_signal_handlers,
 )
 from mcloop.notify import notify
 from mcloop.ratelimit import (
@@ -232,24 +230,12 @@ def _terminate_reviewers() -> None:
 def main() -> None:
     import atexit
 
+    import mcloop.runner as _runner
+
     atexit.register(_kill_active_process)
     atexit.register(_terminate_reviewers)
 
-    def _handle_sigint(sig, frame):
-        import mcloop.runner as _runner
-
-        _runner._interrupted = True
-        print("\nInterrupted. Saving state...", flush=True)
-        _save_interrupt_state()
-        _terminate_reviewers()
-        _graceful_kill_active_process()
-        print("State saved. Exiting.", flush=True)
-        os._exit(130)
-
-    signal.signal(signal.SIGINT, _handle_sigint)
-    signal.signal(signal.SIGTSTP, _handle_sigint)
-    signal.signal(signal.SIGTERM, _handle_sigint)
-    signal.signal(signal.SIGHUP, _handle_sigint)
+    register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
     _main()
 
 
@@ -535,6 +521,10 @@ def run_loop(
     enable_reviewer: bool = False,
 ) -> list[str]:
     """Run the main loop. Returns list of stuck task texts."""
+    import mcloop.runner as _runner
+
+    register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
+
     project_dir = checklist_path.parent
     _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
