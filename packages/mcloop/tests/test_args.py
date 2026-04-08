@@ -7085,3 +7085,127 @@ def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, cap
     assert any("red repo" in m and "end of run" in m for m in notify_messages)
     captured = capsys.readouterr()
     assert "Full suite failed at end of run" in captured.out
+
+
+def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
+    """Full suite pass at stage boundary runs build and sends stage-complete notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        "# Plan\n\n"
+        "## Stage 1: Setup\n\n"
+        "- [ ] Init project\n\n"
+        "## Stage 2: Build\n\n"
+        "- [ ] Build app\n"
+    )
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+
+    full_suite_check = MagicMock()
+    full_suite_check.passed = True
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", side_effect=checks_side_effect),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary") as mock_summary,
+        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+    ):
+        run_loop(plan)
+
+    # Build should run after full suite passes
+    mock_build.assert_called_once()
+    # Audit should NOT run at stage boundary (only at end of run)
+    mock_audit.assert_not_called()
+    # Stage-complete notification should be sent
+    notify_messages = [str(c) for c in mock_notify.call_args_list]
+    assert any("Stage 1: Setup" in m and "complete" in m for m in notify_messages)
+    # No failure notification
+    assert not any("red repo" in m for m in notify_messages)
+    # Summary should include completed_stage
+    mock_summary.assert_called_once()
+    _, kwargs = mock_summary.call_args
+    assert kwargs.get("completed_stage") == "Stage 1: Setup"
+    captured = capsys.readouterr()
+    assert "Full test suite passed" in captured.out
+
+
+def test_full_suite_pass_at_end_of_run_proceeds_normally(tmp_path, capsys):
+    """Full suite pass at end of run runs build, audit, and sends all-done notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+
+    full_suite_check = MagicMock()
+    full_suite_check.passed = True
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["bar.py"]),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", side_effect=checks_side_effect),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary") as mock_summary,
+        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+    ):
+        run_loop(plan)
+
+    # Build should run after full suite passes
+    mock_build.assert_called_once()
+    # Audit should run at end of run
+    mock_audit.assert_called_once()
+    # All-done notification should be sent
+    notify_messages = [str(c) for c in mock_notify.call_args_list]
+    assert any("All tasks completed" in m for m in notify_messages)
+    # No failure notification
+    assert not any("red repo" in m for m in notify_messages)
+    # Summary should be called
+    mock_summary.assert_called_once()
+    captured = capsys.readouterr()
+    assert "Full test suite passed" in captured.out
