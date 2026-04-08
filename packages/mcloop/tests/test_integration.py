@@ -398,23 +398,34 @@ def test_noop_with_max_retries_one(
 # --- _commit unit tests ---
 
 
-@patch("mcloop.main.subprocess.run")
-def test_commit_stages_all_files(mock_run, tmp_path):
-    """_commit uses git add -A to include new and tracked files."""
+def _commit_side_effect(*args, **kwargs):
+    """Mock subprocess.run for _commit tests.
+
+    Returns returncode=1 for 'git diff --cached --quiet' (staged changes exist),
+    returncode=0 for everything else.
+    """
+    cmd = args[0] if args else kwargs.get("args", [])
+    if cmd[:3] == ["git", "diff", "--cached"]:
+        return MagicMock(returncode=1, stdout="", stderr="")
+    return MagicMock(returncode=0, stdout="", stderr="")
+
+
+@patch("mcloop.main.subprocess.run", side_effect=_commit_side_effect)
+def test_commit_filters_sensitive_files(mock_run, tmp_path):
+    """_commit skips sensitive files like _checkpoint does."""
     (tmp_path / ".git").mkdir()
-    mock_run.return_value = MagicMock(returncode=0, stdout="")
 
     _commit(tmp_path, "some task")
 
     commands = [call_args.args[0] for call_args in mock_run.call_args_list]
-    assert ["git", "add", "-A"] in commands
+    assert ["git", "add", "-u"] in commands
+    assert ["git", "add", "-A"] not in commands
 
 
-@patch("mcloop.main.subprocess.run")
+@patch("mcloop.main.subprocess.run", side_effect=_commit_side_effect)
 def test_commit_commits_with_task_message(mock_run, tmp_path):
     """_commit creates a commit with the task text in the message."""
     (tmp_path / ".git").mkdir()
-    mock_run.return_value = MagicMock(returncode=0, stdout="")
 
     _commit(tmp_path, "my task description")
 
@@ -427,16 +438,23 @@ def test_commit_commits_with_task_message(mock_run, tmp_path):
 def test_commit_pushes_after_commit(mock_run, tmp_path):
     """_commit calls git push after committing when a remote exists."""
     (tmp_path / ".git").mkdir()
-    remote_result = MagicMock(returncode=0)
-    remote_result.stdout = "origin\n"
-    mock_run.return_value = remote_result
+
+    def side_effect(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if cmd[:3] == ["git", "diff", "--cached"]:
+            return MagicMock(returncode=1, stdout="", stderr="")
+        result = MagicMock(returncode=0, stderr="")
+        result.stdout = "origin\n" if cmd == ["git", "remote"] else ""
+        return result
+
+    mock_run.side_effect = side_effect
 
     _commit(tmp_path, "some task")
 
     commands = [call_args.args[0] for call_args in mock_run.call_args_list]
     assert ["git", "push"] in commands
     # push must come after commit
-    commit_idx = commands.index(["git", "commit", "-m", "Complete: some task"])
+    commit_idx = next(i for i, c in enumerate(commands) if c[0:2] == ["git", "commit"])
     push_idx = commands.index(["git", "push"])
     assert push_idx > commit_idx
 
@@ -445,16 +463,53 @@ def test_commit_pushes_after_commit(mock_run, tmp_path):
 def test_commit_skips_push_when_no_remote(mock_run, tmp_path):
     """_commit skips push when no remote is configured."""
     (tmp_path / ".git").mkdir()
-    no_remote = MagicMock()
-    no_remote.stdout = ""
-    mock_run.return_value = no_remote
+
+    def side_effect(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if cmd[:3] == ["git", "diff", "--cached"]:
+            return MagicMock(returncode=1, stdout="", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = side_effect
 
     _commit(tmp_path, "some task")
 
     commands = [call_args.args[0] for call_args in mock_run.call_args_list]
-    gh_calls = [c for c in commands if c and c[0] == "gh"]
-    assert len(gh_calls) == 0
     assert ["git", "push"] not in commands
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_raises_on_nothing_staged(mock_run, tmp_path):
+    """_commit raises RuntimeError when nothing is staged."""
+    import pytest
+
+    (tmp_path / ".git").mkdir()
+    # git diff --cached --quiet returns 0 = nothing staged
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+    with pytest.raises(RuntimeError, match="nothing to commit"):
+        _commit(tmp_path, "task")
+
+
+@patch("mcloop.main.subprocess.run")
+def test_commit_raises_on_commit_failure(mock_run, tmp_path):
+    """_commit raises RuntimeError when git commit fails."""
+    import pytest
+
+    (tmp_path / ".git").mkdir()
+
+    def side_effect(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if cmd[:3] == ["git", "diff", "--cached"]:
+            return MagicMock(returncode=1, stdout="", stderr="")
+        if cmd[0:2] == ["git", "commit"]:
+            return MagicMock(returncode=1, stdout="", stderr="commit failed")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = side_effect
+
+    with pytest.raises(RuntimeError, match="git commit failed"):
+        _commit(tmp_path, "task")
 
 
 @patch("mcloop.main.subprocess.run", side_effect=OSError("git not found"))

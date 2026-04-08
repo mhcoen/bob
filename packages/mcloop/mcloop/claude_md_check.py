@@ -65,7 +65,7 @@ def _is_source_file(path: str) -> bool:
     if suffix in _SOURCE_EXTENSIONS:
         return True
     for prefix in _SOURCE_DIRS:
-        if path.startswith(prefix):
+        if path.startswith(prefix) and suffix in _SOURCE_EXTENSIONS:
             return True
     return False
 

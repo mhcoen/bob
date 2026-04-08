@@ -61,13 +61,22 @@ class TestIsSourceFile:
         assert _is_source_file("scripts/deploy.sh") is True
 
     def test_src_dir(self):
-        assert _is_source_file("src/config.toml") is True
+        assert _is_source_file("src/main.py") is True
+
+    def test_src_dir_non_code(self):
+        assert _is_source_file("src/config.toml") is False
 
     def test_lib_dir(self):
-        assert _is_source_file("lib/utils.txt") is True
+        assert _is_source_file("lib/app.js") is True
+
+    def test_lib_dir_non_code(self):
+        assert _is_source_file("lib/utils.txt") is False
 
     def test_package_dir(self):
-        assert _is_source_file("package/index.html") is True
+        assert _is_source_file("package/main.ts") is True
+
+    def test_package_dir_non_code(self):
+        assert _is_source_file("package/index.html") is False
 
     def test_markdown(self):
         assert _is_source_file("README.md") is False
@@ -137,13 +146,22 @@ class TestCheckClaudeMdFreshness:
         )
 
     def test_src_dir_triggers(self):
-        assert check_claude_md_freshness(["src/config.yaml"], self.project) is False
+        assert check_claude_md_freshness(["src/main.py"], self.project) is False
+
+    def test_src_dir_non_code_ignored(self):
+        assert check_claude_md_freshness(["src/config.yaml"], self.project) is True
 
     def test_lib_dir_triggers(self):
-        assert check_claude_md_freshness(["lib/helper.txt"], self.project) is False
+        assert check_claude_md_freshness(["lib/helper.rb"], self.project) is False
+
+    def test_lib_dir_non_code_ignored(self):
+        assert check_claude_md_freshness(["lib/helper.txt"], self.project) is True
 
     def test_package_dir_triggers(self):
-        assert check_claude_md_freshness(["package/data.json"], self.project) is False
+        assert check_claude_md_freshness(["package/index.ts"], self.project) is False
+
+    def test_package_dir_non_code_ignored(self):
+        assert check_claude_md_freshness(["package/data.json"], self.project) is True
 
     def test_nested_claude_md(self):
         # Only top-level CLAUDE.md name matters (Path.name)

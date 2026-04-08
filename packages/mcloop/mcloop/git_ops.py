@@ -204,12 +204,40 @@ def _commit(project_dir: Path, task_text: str) -> None:
             flush=True,
         )
         return
-    _git(["git", "add", "-A"], cwd=project_dir, label="commit add")
-    _git(
+    # Stage untracked files individually, skipping sensitive patterns
+    _git(["git", "add", "-u"], cwd=project_dir, label="commit add -u")
+    untracked = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="commit ls untracked",
+    )
+    _sensitive = {".env", ".key", ".pem", "credentials.json", "secrets"}
+    for f in untracked.stdout.strip().splitlines():
+        f = f.strip()
+        if not f:
+            continue
+        if any(s in f for s in _sensitive):
+            continue
+        _git(["git", "add", "--", f], cwd=project_dir, label=f"commit add {f}")
+    add_result = _git(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=project_dir,
+        label="commit check staged",
+        silent=True,
+    )
+    if add_result.returncode == 0:
+        # Nothing staged — treat as failure so caller knows commit didn't happen
+        raise RuntimeError("git commit failed: nothing to commit after staging")
+    commit_result = _git(
         ["git", "commit", "-m", f"Complete: {_sanitize_commit_msg(task_text)}"],
         cwd=project_dir,
         label="commit",
     )
+    if commit_result.returncode != 0:
+        raise RuntimeError(
+            f"git commit failed (exit {commit_result.returncode}). "
+            "Check git status and re-run mcloop."
+        )
     result = _git(
         ["git", "remote"],
         cwd=project_dir,

@@ -41,8 +41,10 @@ def _check_errors_json(
 
     Reads the error file, prints a summary, and asks the user whether
     to run diagnostic sessions and insert fix tasks into a ``## Bugs``
-    section of PLAN.md. Returns True if tasks were added (or no errors
-    found), False if the user declined or all errors are unresolvable.
+    section of PLAN.md. Returns True if tasks were added, no errors
+    were found, or the user declined (so the run continues without
+    fixing bugs). Returns False if all errors are unresolvable or
+    input was interrupted (EOFError/KeyboardInterrupt).
 
     Tracks fix_attempts per error via a hash of the error signature.
     If any error has been diagnosed ``_MAX_FIX_ATTEMPTS`` or more times,

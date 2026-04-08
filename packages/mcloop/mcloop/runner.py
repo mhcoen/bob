@@ -617,19 +617,11 @@ _SUPPRESS_ALL_TOOLS = True
 _last_tool_name: str = ""
 
 
-def _extract_status(text: str) -> str | None:
-    """Extract a conceptual status line from streaming text.
-
-    Returns None always. Narration lines add noise without value.
-    """
-    return None
-
-
 def _print_stream_event(line: str) -> None:
     """Parse a stream-json line and print relevant activity.
 
-    Prints non-suppressed tool calls (e.g. Bash) and status lines
-    extracted from streaming text. Suppresses quiet tools and code.
+    Prints non-suppressed tool calls (e.g. Bash). Suppresses quiet
+    tools and code.
     """
     import json as _json
 
@@ -650,14 +642,6 @@ def _print_stream_event(line: str) -> None:
                     detail = inp.get("command", "") if name == "Bash" else ""
                     label = f"{name}: {detail}" if detail else name
                     print(f"  {label}", flush=True)
-        return
-
-    if data.get("type") == "stream_event":
-        delta = data.get("event", {}).get("delta", {})
-        if delta.get("type") == "text_delta":
-            status = _extract_status(delta.get("text", ""))
-            if status:
-                print(f"  {status}", flush=True)
 
 
 def run_sync(

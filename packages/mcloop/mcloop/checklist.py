@@ -228,6 +228,58 @@ def stage_status(tasks: list[Task]) -> str:
     return "all_complete"
 
 
+def _search_tasks(
+    task_list: list[Task],
+    *,
+    is_subtask: bool = False,
+    required_stage: str | None = None,
+    skip_stages: set[str] | None = None,
+) -> Task | None:
+    """Depth-first search for the next unchecked leaf task.
+
+    Shared logic used by both ``find_next`` and ``_search_in_stage``.
+    *required_stage* restricts matches to tasks in that stage.
+    *skip_stages* skips tasks in those stages.
+    """
+    for task in task_list:
+        # A failed subtask blocks all later siblings under the
+        # same parent (implicit sequential dependency).
+        # Root-level tasks are treated as independent.
+        if task.failed:
+            if is_subtask:
+                return None
+            continue
+
+        if task.checked:
+            continue
+
+        if skip_stages and task.stage in skip_stages:
+            continue
+
+        if required_stage is not None and task.stage != required_stage:
+            continue
+
+        if task.children:
+            child = _search_tasks(
+                task.children,
+                is_subtask=True,
+                required_stage=required_stage,
+                skip_stages=skip_stages,
+            )
+            if child:
+                return child
+            # Don't return the parent if any child failed;
+            # the parent can never complete in that state.
+            if any(c.failed for c in task.children):
+                if is_subtask:
+                    return None
+                continue
+            return task
+
+        return task
+    return None
+
+
 def has_unchecked_bugs(tasks: list[Task]) -> bool:
     """Return True if there are unchecked tasks in the ``## Bugs`` section."""
     return _search_in_stage(tasks, "Bugs") is not None
@@ -252,69 +304,21 @@ def find_next(tasks: list[Task]) -> Task | None:
     active_stage = current_stage(tasks)
     has_stages = len(get_stages(tasks)) > 0
 
-    def _search(task_list: list[Task], is_subtask: bool = False) -> Task | None:
-        for task in task_list:
-            # A failed subtask blocks all later siblings under the
-            # same parent (implicit sequential dependency).
-            # Root-level tasks are treated as independent.
-            if task.failed:
-                if is_subtask:
-                    return None
-                continue
+    # Skip bug tasks (already handled above) and non-active stages
+    skip_stages = {"Bugs"}
 
-            if task.checked:
-                continue
-
-            # Skip bug tasks (already handled above)
-            if task.stage == "Bugs":
-                continue
-
-            # Skip tasks not in the active stage
-            if has_stages and task.stage != active_stage:
-                continue
-
-            if task.children:
-                child = _search(task.children, is_subtask=True)
-                if child:
-                    return child
-                # Don't return the parent if any child failed;
-                # the parent can never complete in that state.
-                if any(c.failed for c in task.children):
-                    if is_subtask:
-                        return None
-                    continue
-                return task
-
-            return task
-        return None
-
-    return _search(tasks)
+    return _search_tasks(
+        tasks,
+        required_stage=active_stage if has_stages else None,
+        skip_stages=skip_stages,
+    )
 
 
 def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
     """Search for the next unchecked leaf in a specific stage."""
 
     def _search(task_list: list[Task], is_subtask: bool = False) -> Task | None:
-        for task in task_list:
-            # A failed subtask blocks all later siblings.
-            if task.failed:
-                if is_subtask:
-                    return None
-                continue
-            if task.checked:
-                continue
-            if task.stage != stage:
-                continue
-            if task.children:
-                child = _search(task.children, is_subtask=True)
-                if child:
-                    return child
-                if any(c.failed for c in task.children):
-                    if is_subtask:
-                        return None
-                    continue
-            return task
-        return None
+        return _search_tasks(task_list, is_subtask=is_subtask, required_stage=stage)
 
     return _search(tasks)
 

@@ -13,7 +13,7 @@ RATE_LIMIT_PATTERNS = [
     "too many requests",
     "usage limit",
     "quota exceeded",
-    "capacity",
+    "over capacity",
     "5-hour message limit",
 ]
 

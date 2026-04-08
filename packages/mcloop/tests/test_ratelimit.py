@@ -28,7 +28,7 @@ def test_is_rate_limited_detects_all_patterns():
     assert is_rate_limited("rate_limit_error", 1)
     assert is_rate_limited("too many requests", 1)
     assert is_rate_limited("quota exceeded", 1)
-    assert is_rate_limited("capacity reached", 1)
+    assert is_rate_limited("over capacity", 1)
 
 
 def test_is_rate_limited_ignores_success():

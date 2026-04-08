@@ -27,7 +27,6 @@ from mcloop.runner import (
     _SUPPRESS_ALL_TOOLS,
     INVESTIGATION_TOOLS,
     _build_command,
-    _extract_status,
     _last_output_lines,
     _print_stream_event,
     _slugify,
@@ -628,55 +627,6 @@ def test_run_session_no_pty_imports():
 def test_suppress_all_tools_enabled():
     """All tool output is suppressed."""
     assert _SUPPRESS_ALL_TOOLS is True
-
-
-# --- _extract_status ---
-
-
-def test_extract_status_action_sentence():
-    assert _extract_status("Let me read the configuration file.") is None
-
-
-def test_extract_status_running_prefix():
-    assert _extract_status("Running the test suite now.") is None
-
-
-def test_extract_status_truncates_long():
-    long = "Let me " + "x" * 200
-    result = _extract_status(long)
-    assert result is None
-
-
-def test_extract_status_ignores_short_text():
-    assert _extract_status("ok") is None
-
-
-def test_extract_status_ignores_code():
-    assert _extract_status("import os") is None
-    assert _extract_status("def foo():") is None
-    assert _extract_status("class Bar:") is None
-
-
-def test_extract_status_ignores_json():
-    assert _extract_status('{"type": "result"}') is None
-
-
-def test_extract_status_ignores_paths():
-    assert _extract_status("/usr/local/bin/python") is None
-
-
-def test_extract_status_ignores_non_action():
-    assert _extract_status("The variable x is set to 5.") is None
-
-
-def test_extract_status_takes_first_sentence():
-    text = "Let me fix the bug. Then I will run the tests."
-    assert _extract_status(text) is None
-
-
-def test_extract_status_empty():
-    assert _extract_status("") is None
-    assert _extract_status("   ") is None
 
 
 # --- _print_stream_event ---
