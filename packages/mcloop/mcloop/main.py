@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json as _json
 import select
 import shlex
@@ -23,7 +22,6 @@ from mcloop.checklist import (
     find_parent,
     get_batch_children,
     get_eliminated,
-    get_stages,
     has_unchecked_bugs,
     is_auto_task,
     is_batch_task,
@@ -36,8 +34,14 @@ from mcloop.checklist import (
     stage_status,
     user_task_instructions,
 )
+from mcloop.checklist import (
+    task_label as _task_label,
+)
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
-from mcloop.claude_md_check import check_claude_md_freshness
+from mcloop.claude_md_check import (
+    auto_update_claude_md,
+    check_claude_md_freshness,
+)
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.errors import (
     _check_errors_json,
@@ -76,6 +80,13 @@ from mcloop.lifecycle import (
     register_signal_handlers,
 )
 from mcloop.notify import notify
+from mcloop.output import (
+    _dry_run,
+    _print_error_tail,
+    _print_summary,
+    _snapshot_notes,
+    _tail,
+)
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
     RateLimitState,
@@ -437,11 +448,14 @@ def _run_batch(
     )
     if check_result.passed:
         if not check_claude_md_freshness(changed_files, project_dir):
-            print(
-                formatting.error_msg("Batch: CLAUDE.md not updated alongside source changes"),
-                flush=True,
-            )
-            return "failed"
+            if auto_update_claude_md(project_dir):
+                changed_files = _changed_files(project_dir)
+            else:
+                print(
+                    formatting.error_msg("Batch: CLAUDE.md not updated alongside source changes"),
+                    flush=True,
+                )
+                return "failed"
         try:
             _commit(
                 project_dir,
@@ -927,14 +941,17 @@ def run_loop(
                 )
                 if check_result.passed:
                     if not check_claude_md_freshness(changed_files, project_dir):
-                        last_error = "CLAUDE.md was not updated alongside source file changes"
-                        print(
-                            formatting.error_msg(
-                                f"CLAUDE.md not updated (attempt {attempt}/{max_retries})"
-                            ),
-                            flush=True,
-                        )
-                        continue
+                        if auto_update_claude_md(project_dir):
+                            changed_files = _changed_files(project_dir)
+                        else:
+                            last_error = "CLAUDE.md was not updated alongside source file changes"
+                            print(
+                                formatting.error_msg(
+                                    f"CLAUDE.md not updated (attempt {attempt}/{max_retries})"
+                                ),
+                                flush=True,
+                            )
+                            continue
                     try:
                         _commit(project_dir, task.text)
                     except RuntimeError as exc:
@@ -1255,34 +1272,6 @@ def _cmd_audit(checklist_path: Path, model: str | None = None) -> None:
         print("audit: BUGS.md was not written", file=sys.stderr)
 
 
-def _dry_run(tasks) -> None:
-    """Print the task tree without executing anything."""
-    stages = get_stages(tasks)
-    last_stage = ""
-
-    def _print(task_list, depth=0):
-        nonlocal last_stage
-        for t in task_list:
-            if stages and t.stage != last_stage:
-                last_stage = t.stage
-                print(f"\n  [{t.stage}]")
-            marker = "[x]" if t.checked else "[ ]"
-            print(f"{'  ' * depth}- {marker} {t.text}")
-            if t.children:
-                _print(t.children, depth + 1)
-
-    _print(tasks)
-    active = current_stage(tasks)
-    next_task = find_next(tasks)
-    if next_task:
-        label = f" (in {active})" if active else ""
-        print(f"\nNext task{label}: {next_task.text}")
-    elif active is None and stages:
-        print("\nAll stages complete.")
-    else:
-        print("\nNo unchecked tasks remaining.")
-
-
 def _check_user_input() -> str:
     """Non-blocking check for user input typed between tasks.
 
@@ -1301,272 +1290,6 @@ def _check_user_input() -> str:
     except (OSError, ValueError):
         return ""
     return "\n".join(lines).strip()
-
-
-def _tail(text: str, max_lines: int = 50) -> str:
-    """Return the last N lines of text."""
-    lines = text.strip().splitlines()
-    if len(lines) > max_lines:
-        lines = lines[-max_lines:]
-    return "\n".join(lines)
-
-
-def _print_summary(
-    completed: list[str],
-    failed_task: str | None,
-    failed_reason: str,
-    remaining_tasks: list[Task],
-    total_seconds: float = 0,
-    project_dir: Path | None = None,
-    notes_snapshot: tuple[str, int] | None = None,
-    completed_stage: str = "",
-) -> None:
-    """Print a summary of what McLoop did."""
-    print(formatting.summary_header(), flush=True)
-    if total_seconds > 0:
-        print(
-            f"Total time: {_format_elapsed(total_seconds)}",
-            flush=True,
-        )
-
-    if completed:
-        print(
-            f"Completed: {len(completed)} task(s)",
-            flush=True,
-        )
-        for item in completed:
-            print(f"  {item}", flush=True)
-
-    if failed_task:
-        print(f"\nFailed: {failed_task}", flush=True)
-        if failed_reason:
-            for line in failed_reason.splitlines()[:10]:
-                print(f"  {line}", flush=True)
-
-    # Count remaining unchecked tasks
-    def _count_unchecked(tasks: list[Task]) -> int:
-        n = 0
-        for t in tasks:
-            if not t.checked and not t.failed:
-                n += 1
-            n += _count_unchecked(t.children)
-        return n
-
-    remaining = _count_unchecked(remaining_tasks)
-    if remaining:
-        print(
-            f"\nRemaining: {remaining} task(s)",
-            flush=True,
-        )
-
-    if completed_stage:
-        print(
-            formatting.system_msg(
-                f"{completed_stage} complete. Run mcloop again for the next stage."
-            ),
-            flush=True,
-        )
-    elif not completed and not failed_task:
-        print(
-            "All tasks were already complete.",
-            flush=True,
-        )
-
-    suggestions = _whitelist_suggestions()
-    if suggestions:
-        print(
-            "\nWhitelist suggestions (approved this session):",
-            flush=True,
-        )
-        print(
-            "  Add to permissions.allow in",
-            flush=True,
-        )
-        print(
-            "    ~/.claude/settings.json (global)",
-            flush=True,
-        )
-        print(
-            "    .claude/settings.json (project)",
-            flush=True,
-        )
-        for s in suggestions:
-            print(f'  "{s}",', flush=True)
-
-    if project_dir:
-        run_cmd = detect_run(project_dir)
-        if run_cmd:
-            print(
-                f"\nTo run: {run_cmd}",
-                flush=True,
-            )
-    if project_dir:
-        _print_notes_update(
-            project_dir,
-            notes_snapshot,
-        )
-
-    print(formatting.summary_footer(), flush=True)
-
-
-SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
-SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
-
-
-def _whitelist_suggestions() -> list[str]:
-    """Read session-approved patterns and suggest allowlist entries."""
-    try:
-        data = _json.loads(SESSION_FILE.read_text())
-        patterns = data.get("patterns", [])
-    except (OSError, _json.JSONDecodeError):
-        return []
-    if not patterns:
-        return []
-
-    # Load current allowlist
-    try:
-        settings = _json.loads(SETTINGS_FILE.read_text())
-        allow = settings.get("permissions", {}).get("allow", [])
-    except (OSError, _json.JSONDecodeError):
-        allow = []
-
-    # Never suggest whitelisting dangerous commands
-    dangerous = {
-        "rm",
-        "rmdir",
-        "kill",
-        "killall",
-        "pkill",
-        "chmod",
-        "chown",
-        "sudo",
-        "su",
-        "dd",
-        "mkfs",
-        "mv",
-        "shutdown",
-        "reboot",
-    }
-
-    allow_set = set(allow)
-    suggestions = []
-    for pattern in sorted(patterns):
-        # Convert "Bash:ruff check ." to "Bash(ruff check:*)"
-        if ":" in pattern:
-            tool, arg = pattern.split(":", 1)
-            first_word = arg.split()[0] if arg.split() else arg
-            if first_word in dangerous:
-                continue
-            rule = f"{tool}({first_word}:*)"
-        else:
-            rule = pattern
-        if rule not in allow_set:
-            suggestions.append(rule)
-            allow_set.add(rule)  # dedup
-    return suggestions
-
-
-def _print_error_tail(output: str, max_lines: int = 30) -> None:
-    """Print the last N lines of output to help diagnose failures."""
-    lines = output.strip().splitlines()
-    tail = lines[-max_lines:] if len(lines) > max_lines else lines
-    if tail:
-        print("    --- last output ---", flush=True)
-        for line in tail:
-            print(f"    {line}", flush=True)
-        print("    ---", flush=True)
-
-
-def _task_label(tasks: list[Task], target: Task) -> str:
-    """Return a label like '6.3' or '6.3.2' for a task's position.
-
-    The first number is the stage number (extracted from the
-    ``## Stage N:`` header).  Tasks without a stage header use
-    a global positional index.  Subtask numbers are relative to
-    their parent.
-    """
-    # Extract stage number from the stage string (e.g. "Stage 6: ..." -> "6")
-    stage_num = ""
-    if target.stage and target.stage.startswith("Stage "):
-        rest = target.stage[len("Stage ") :]
-        num_part = rest.split(":")[0].split()[0]
-        if num_part.isdigit():
-            stage_num = num_part
-
-    # Filter root tasks to only those in the same stage
-    if stage_num:
-        stage_tasks = [t for t in tasks if t.stage == target.stage]
-    else:
-        stage_tasks = tasks
-
-    def _search(task_list: list[Task], prefix: str) -> str | None:
-        for i, task in enumerate(task_list, 1):
-            label = f"{prefix}{i}" if prefix else str(i)
-            if task is target:
-                return label
-            if task.children:
-                found = _search(task.children, f"{label}.")
-                if found:
-                    return found
-        return None
-
-    result = _search(stage_tasks, f"{stage_num}." if stage_num else "")
-    return result or "?"
-
-
-def _snapshot_notes(
-    project_dir: Path,
-) -> tuple[str, int]:
-    """Capture hash and line count of NOTES.md."""
-    notes_path = project_dir / "NOTES.md"
-    if not notes_path.exists():
-        return ("", 0)
-    content = notes_path.read_text()
-    h = hashlib.md5(content.encode()).hexdigest()
-    return (h, len(content.splitlines()))
-
-
-def _print_notes_update(
-    project_dir: Path,
-    snapshot: tuple[str, int] | None,
-) -> None:
-    """Show NOTES.md changes since snapshot."""
-    notes_path = project_dir / "NOTES.md"
-    if not notes_path.exists():
-        return
-    content = notes_path.read_text()
-    current_hash = hashlib.md5(content.encode()).hexdigest()
-    lines = content.splitlines()
-
-    old_hash, old_count = snapshot or ("", 0)
-
-    if old_hash == "" and old_count == 0:
-        # NOTES.md is new this run
-        print(
-            f"\nNOTES.md created ({len(lines)} lines). Review for observations.",
-            flush=True,
-        )
-    elif current_hash != old_hash:
-        new_count = len(lines) - old_count
-        if new_count > 0:
-            print(
-                f"\nNOTES.md updated ({new_count} new lines).",
-                flush=True,
-            )
-        else:
-            print(
-                "\nNOTES.md was modified.",
-                flush=True,
-            )
-        # Show the last entry header
-        for line in reversed(lines):
-            if line.startswith("## "):
-                print(
-                    f"  Last entry: {line}",
-                    flush=True,
-                )
-                break
-    # If hash unchanged, say nothing
 
 
 def _run_build(project_dir: Path) -> None:

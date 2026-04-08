@@ -8,8 +8,10 @@ from pathlib import Path
 
 from mcloop import formatting
 from mcloop.checks import run_checks
+from mcloop.formatting import format_elapsed as _format_elapsed
 from mcloop.git_ops import _commit, _get_diff, _get_git_hash, _git, _has_meaningful_changes
 from mcloop.notify import notify
+from mcloop.output import _print_error_tail, _tail
 from mcloop.prompts import (
     bugs_md_has_bugs,
     parse_bugs_md,
@@ -17,34 +19,6 @@ from mcloop.prompts import (
     review_found_problems,
 )
 from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
-
-
-def _format_elapsed(seconds: float) -> str:
-    """Format elapsed seconds as human-readable string."""
-    m, s = divmod(int(seconds), 60)
-    if m > 0:
-        return f"{m}m {s}s"
-    return f"{s}s"
-
-
-def _tail(text: str, max_lines: int = 50) -> str:
-    """Return the last N lines of text."""
-    lines = text.strip().splitlines()
-    if len(lines) > max_lines:
-        lines = lines[-max_lines:]
-    return "\n".join(lines)
-
-
-def _print_error_tail(output: str, max_lines: int = 30) -> None:
-    """Print the last N lines of output to help diagnose failures."""
-    lines = output.strip().splitlines()
-    tail = lines[-max_lines:] if len(lines) > max_lines else lines
-    if tail:
-        print("    --- last output ---", flush=True)
-        for line in tail:
-            print(f"    {line}", flush=True)
-        print("    ---", flush=True)
-
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"
 

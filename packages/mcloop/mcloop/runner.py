@@ -236,8 +236,8 @@ def run_task(
         " check commands listed in the CHECK COMMANDS section"
         " below. Running any other verification command is a"
         " violation that wastes time and money. Make your code"
-        " changes, update CLAUDE.md, run the listed check"
-        " commands, and stop. Nothing else."
+        " changes, run the listed check commands, and stop."
+        " Nothing else."
     )
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
@@ -370,23 +370,6 @@ def run_task(
             " approach, stop and try a fundamentally"
             " different strategy.\n" + elim_text
         )
-    parts.append(
-        "FINAL STEP BEFORE FINISHING (this is checked and enforced):\n"
-        "Update CLAUDE.md. This file describes every source file"
-        " in the project. The orchestrator compares changed source"
-        " files against CLAUDE.md after every task. If any .py, .swift,"
-        " .rs, .go, .js, .ts, .java, .c, .cpp, .rb, or .sh file was"
-        " modified and CLAUDE.md was not, THE TASK FAILS AUTOMATICALLY."
-        " This is not optional. This is not a suggestion. This is a"
-        " hard gate that will reject your work.\n"
-        "What to update in CLAUDE.md:\n"
-        "- New file created: add an entry describing it\n"
-        "- File renamed or moved: update the old entry\n"
-        "- Functions moved between files: update both entries\n"
-        "- File purpose changed significantly: update description\n"
-        "Do this BEFORE running check commands. Read CLAUDE.md now"
-        " if you have not already."
-    )
     prompt = "\n\n".join(parts)
     build_kwargs: dict = {"model": model}
     if allowed_tools:

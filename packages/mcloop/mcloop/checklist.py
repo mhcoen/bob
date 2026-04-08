@@ -532,3 +532,40 @@ def _auto_check_parents(path: Path) -> None:
     visit(tasks)
     if changed:
         path.write_text("\n".join(lines) + "\n")
+
+
+def task_label(tasks: list[Task], target: Task) -> str:
+    """Return a label like '6.3' or '6.3.2' for a task's position.
+
+    The first number is the stage number (extracted from the
+    ``## Stage N:`` header).  Tasks without a stage header use
+    a global positional index.  Subtask numbers are relative to
+    their parent.
+    """
+    # Extract stage number from the stage string (e.g. "Stage 6: ..." -> "6")
+    stage_num = ""
+    if target.stage and target.stage.startswith("Stage "):
+        rest = target.stage[len("Stage ") :]
+        num_part = rest.split(":")[0].split()[0]
+        if num_part.isdigit():
+            stage_num = num_part
+
+    # Filter root tasks to only those in the same stage
+    if stage_num:
+        stage_tasks = [t for t in tasks if t.stage == target.stage]
+    else:
+        stage_tasks = tasks
+
+    def _search(task_list: list[Task], prefix: str) -> str | None:
+        for i, task in enumerate(task_list, 1):
+            lbl = f"{prefix}{i}" if prefix else str(i)
+            if task is target:
+                return lbl
+            if task.children:
+                found = _search(task.children, f"{lbl}.")
+                if found:
+                    return found
+        return None
+
+    result = _search(stage_tasks, f"{stage_num}." if stage_num else "")
+    return result or "?"

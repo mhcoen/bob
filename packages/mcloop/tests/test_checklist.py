@@ -14,6 +14,7 @@ from mcloop.checklist import (
     parse,
     parse_auto_task,
     parse_description,
+    task_label,
     user_task_instructions,
 )
 
@@ -793,3 +794,32 @@ def test_find_parent_returns_none_for_root(tmp_path):
     tasks = parse(f)
     assert find_parent(tasks, tasks[0]) is None
     assert find_parent(tasks, tasks[1]) is None
+
+
+def test_task_label_flat(tmp_path):
+    md = "- [ ] First\n- [ ] Second\n- [ ] Third\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert task_label(tasks, tasks[0]) == "1"
+    assert task_label(tasks, tasks[1]) == "2"
+    assert task_label(tasks, tasks[2]) == "3"
+
+
+def test_task_label_with_subtasks(tmp_path):
+    md = "- [ ] Parent\n  - [ ] Child one\n  - [ ] Child two\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert task_label(tasks, tasks[0]) == "1"
+    assert task_label(tasks, tasks[0].children[0]) == "1.1"
+    assert task_label(tasks, tasks[0].children[1]) == "1.2"
+
+
+def test_task_label_with_stages(tmp_path):
+    md = "## Stage 2: Setup\n- [ ] First task\n- [ ] Second task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert task_label(tasks, tasks[0]) == "2.1"
+    assert task_label(tasks, tasks[1]) == "2.2"
