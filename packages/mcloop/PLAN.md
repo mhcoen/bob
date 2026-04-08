@@ -381,9 +381,9 @@ The debugging playbook this enforces:
    - [x] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
    - [x] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
    - [x] [USER] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
-- [ ] Extract run summary and display helpers from main.py into mcloop/display.py
+- [x] Extract run summary and display helpers from main.py into mcloop/display.py
    - [x] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
-   - [ ] These are pure formatting functions with no orchestration side effects
+   - [x] These are pure formatting functions with no orchestration side effects
 - [ ] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
    - [ ] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
    - [ ] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
