@@ -382,7 +382,7 @@ The debugging playbook this enforces:
    - [x] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
    - [x] [USER] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
 - [ ] Extract run summary and display helpers from main.py into mcloop/display.py
-   - [!] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
+   - [ ] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
    - [ ] These are pure formatting functions with no orchestration side effects
 - [ ] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
    - [ ] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
