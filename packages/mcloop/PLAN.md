@@ -384,9 +384,9 @@ The debugging playbook this enforces:
 - [x] Extract run summary and display helpers from main.py into mcloop/display.py
    - [x] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
    - [x] These are pure formatting functions with no orchestration side effects
-- [ ] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
+- [x] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
    - [x] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
-   - [ ] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
+   - [x] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
 - [ ] Remove pytest-of-mhcoen/ from version control
    - [ ] Add pytest-of-*/ to .gitignore
    - [ ] git rm -r --cached pytest-of-mhcoen/
