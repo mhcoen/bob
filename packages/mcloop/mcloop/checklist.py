@@ -445,9 +445,7 @@ def get_batch_children(task: Task) -> list[Task]:
     """
     batch: list[Task] = []
     for child in task.children:
-        if child.failed:
-            break
-        if child.checked:
+        if child.checked or child.failed:
             continue
         if is_user_task(child) or is_auto_task(child):
             break

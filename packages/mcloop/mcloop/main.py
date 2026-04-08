@@ -991,7 +991,7 @@ def run_loop(
 
         # Handle [AUTO] tasks: automated observation
         if is_auto_task(task):
-            has_subtasks = "." in label
+            has_subtasks = find_parent(tasks, task) is not None
             ctx.update_group(label, has_subtasks)
             action, args = parse_auto_task(task)
             response = _handle_auto_task(label, action, args)
@@ -1007,7 +1007,7 @@ def run_loop(
             _current_task_label = label
             _current_task_text = task.text
             _phase_start_time = time.monotonic()
-            has_subtasks = "." in label
+            has_subtasks = find_parent(tasks, task) is not None
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
             response = _handle_user_task(label, instructions)
@@ -1071,7 +1071,7 @@ def run_loop(
         if active_cli is None:
             active_cli = wait_for_reset(rate_state, notify, enabled_clis=(cli,))
 
-        has_subtasks = "." in label
+        has_subtasks = find_parent(tasks, task) is not None
         ctx.update_group(label, has_subtasks)
 
         # Pick up any text the user typed while the last task ran
@@ -1812,7 +1812,26 @@ def _print_error_tail(output: str, max_lines: int = 30) -> None:
 
 
 def _task_label(tasks: list[Task], target: Task) -> str:
-    """Return a label like '3' or '3.2' for a task's position in the tree."""
+    """Return a label like '6.3' or '6.3.2' for a task's position.
+
+    The first number is the stage number (extracted from the
+    ``## Stage N:`` header).  Tasks without a stage header use
+    a global positional index.  Subtask numbers are relative to
+    their parent.
+    """
+    # Extract stage number from the stage string (e.g. "Stage 6: ..." -> "6")
+    stage_num = ""
+    if target.stage and target.stage.startswith("Stage "):
+        rest = target.stage[len("Stage "):]
+        num_part = rest.split(":")[0].split()[0]
+        if num_part.isdigit():
+            stage_num = num_part
+
+    # Filter root tasks to only those in the same stage
+    if stage_num:
+        stage_tasks = [t for t in tasks if t.stage == target.stage]
+    else:
+        stage_tasks = tasks
 
     def _search(task_list: list[Task], prefix: str) -> str | None:
         for i, task in enumerate(task_list, 1):
@@ -1825,7 +1844,8 @@ def _task_label(tasks: list[Task], target: Task) -> str:
                     return found
         return None
 
-    return _search(tasks, "") or "?"
+    result = _search(stage_tasks, f"{stage_num}." if stage_num else "")
+    return result or "?"
 
 
 def _snapshot_notes(

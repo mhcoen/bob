@@ -33,11 +33,17 @@ _CHECKS_PASS = CheckResult(passed=True, output="ok", command="true")
 
 
 def _notify_calls(mock_notify):
-    """Extract (message, level) pairs from notify mock calls."""
+    """Extract (message, level) pairs from notify mock calls.
+
+    Filters out the startup "Starting: ..." notification so tests
+    only assert on meaningful operational notifications.
+    """
     result = []
     for c in mock_notify.call_args_list:
         msg = c.args[0]
         level = c.kwargs.get("level", c.args[1] if len(c.args) > 1 else "info")
+        if msg.startswith("Starting:"):
+            continue
         result.append((msg, level))
     return result
 
