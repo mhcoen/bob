@@ -167,8 +167,7 @@ def auto_update_claude_md(project_dir: Path) -> bool:
     current_content = claude_md.read_text()
 
     user_msg = (
-        f"## Current CLAUDE.md\n\n{current_content}\n\n"
-        f"## Git diff\n\n```diff\n{diff_text}\n```"
+        f"## Current CLAUDE.md\n\n{current_content}\n\n## Git diff\n\n```diff\n{diff_text}\n```"
     )
 
     payload = {
