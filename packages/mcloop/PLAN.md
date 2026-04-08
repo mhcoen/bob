@@ -28,7 +28,7 @@ over-abstraction.
 - [ ] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
    - [x] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
    - [x] Fall back to text matching only when line_number is unavailable or stale (e.g. file was edited externally), with validation that indent_level and stage also match
-   - [ ] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
+   - [x] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
    - [ ] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
 
 - [ ] Batch collection does not stop at failed siblings (checklist.py:443-457)
