@@ -162,3 +162,26 @@ class TestSummary:
         with _force_color():
             result = formatting.summary_footer()
             assert formatting.BOLD in result
+
+
+class TestFormatElapsed:
+    def test_seconds_only(self):
+        assert formatting.format_elapsed(45) == "45s"
+
+    def test_zero_seconds(self):
+        assert formatting.format_elapsed(0) == "0s"
+
+    def test_fractional_seconds(self):
+        assert formatting.format_elapsed(3.7) == "4s"
+
+    def test_minutes_and_seconds(self):
+        assert formatting.format_elapsed(192) == "3m 12s"
+
+    def test_exactly_one_minute(self):
+        assert formatting.format_elapsed(60) == "1m 0s"
+
+    def test_hours_minutes_seconds(self):
+        assert formatting.format_elapsed(3930) == "1h 5m 30s"
+
+    def test_exactly_one_hour(self):
+        assert formatting.format_elapsed(3600) == "1h 0m 0s"

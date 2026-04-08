@@ -1,5 +1,7 @@
 """Tests for mcloop.output."""
 
+import json
+
 from mcloop.output import (
     _dry_run,
     _print_error_tail,
@@ -7,6 +9,7 @@ from mcloop.output import (
     _print_summary,
     _snapshot_notes,
     _tail,
+    _whitelist_suggestions,
 )
 
 
@@ -145,3 +148,73 @@ def test_print_summary_with_failure(capsys, monkeypatch):
     captured = capsys.readouterr().out
     assert "Failed: Task B" in captured
     assert "Something went wrong" in captured
+
+
+class TestWhitelistSuggestions:
+    def test_no_session_file(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", tmp_path / "missing.json")
+        assert _whitelist_suggestions() == []
+
+    def test_empty_patterns(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(json.dumps({"patterns": []}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        assert _whitelist_suggestions() == []
+
+    def test_suggests_new_patterns(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(json.dumps({"patterns": ["Bash:ruff check ."]}))
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"permissions": {"allow": []}}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        monkeypatch.setattr("mcloop.output.SETTINGS_FILE", settings)
+        result = _whitelist_suggestions()
+        assert result == ["Bash(ruff:*)"]
+
+    def test_skips_already_allowed(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(json.dumps({"patterns": ["Bash:ruff check ."]}))
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"permissions": {"allow": ["Bash(ruff:*)"]}}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        monkeypatch.setattr("mcloop.output.SETTINGS_FILE", settings)
+        assert _whitelist_suggestions() == []
+
+    def test_skips_dangerous_commands(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(json.dumps({"patterns": ["Bash:rm -rf /", "Bash:kill 1234"]}))
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        monkeypatch.setattr("mcloop.output.SETTINGS_FILE", settings)
+        assert _whitelist_suggestions() == []
+
+    def test_deduplicates(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(
+            json.dumps(
+                {
+                    "patterns": [
+                        "Bash:pytest tests/",
+                        "Bash:pytest tests/test_foo.py",
+                    ]
+                }
+            )
+        )
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        monkeypatch.setattr("mcloop.output.SETTINGS_FILE", settings)
+        result = _whitelist_suggestions()
+        # Both map to Bash(pytest:*), should only appear once
+        assert result == ["Bash(pytest:*)"]
+
+    def test_pattern_without_colon(self, monkeypatch, tmp_path):
+        session = tmp_path / "session.json"
+        session.write_text(json.dumps({"patterns": ["Read"]}))
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({}))
+        monkeypatch.setattr("mcloop.output.SESSION_FILE", session)
+        monkeypatch.setattr("mcloop.output.SETTINGS_FILE", settings)
+        result = _whitelist_suggestions()
+        assert result == ["Read"]
