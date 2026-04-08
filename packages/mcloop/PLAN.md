@@ -377,10 +377,10 @@ The debugging playbook this enforces:
    - [x] Move _cmd_install, _cmd_uninstall, _setup_telegram, _setup_sandbox, _setup_env_security, _install_hooks, _install_recommended_permissions, _merge_settings, _unmerge_settings, _remove_telegram_env, _remove_hooks_dir, _remove_config_json, _remove_recommended_perms, _check_rtk, _check_reviewer, _load_mcloop_config, _print_install_summary, _print_uninstall_summary, and _print_file_diff
    - [x] Update main.py imports to delegate to install_cmd
    - [x] Verify mcloop install and mcloop uninstall still work (including --dry-run)
-- [ ] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
+- [x] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
    - [x] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
    - [x] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
-   - [ ] [USER] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
+   - [x] [USER] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
 - [ ] Extract run summary and display helpers from main.py into mcloop/display.py
    - [ ] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
    - [ ] These are pure formatting functions with no orchestration side effects
