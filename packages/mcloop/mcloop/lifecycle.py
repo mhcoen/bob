@@ -239,16 +239,22 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
     When mcloop is killed with kill -9, the claude subprocess
     survives because it runs in its own session. The PID is
     recorded in .mcloop/active-pid so the next run can kill it.
+
+    Before killing, verifies the stored command line matches the
+    live process via ``ps -p <pid> -o command=`` to avoid killing
+    an unrelated process that reused the same PID.
     """
     pid_file = project_dir / ".mcloop" / "active-pid"
     if not pid_file.exists():
         return
+    stored_cmd: str | None = None
     try:
         content = pid_file.read_text().strip()
         try:
             data = _json.loads(content)
             pid = int(data["pid"])
             pgid = int(data.get("pgid", pid))
+            stored_cmd = data.get("cmd")
         except (_json.JSONDecodeError, KeyError, TypeError):
             # Fallback: legacy "pid pgid" format
             parts = content.split()
@@ -266,6 +272,22 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
         return
     except PermissionError:
         pass  # alive but we can't signal it
+    # Verify the live process matches the stored command before killing
+    if stored_cmd is not None:
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            live_cmd = result.stdout.strip()
+            if live_cmd and stored_cmd not in live_cmd and live_cmd not in stored_cmd:
+                # PID was reused by a different process — do not kill
+                pid_file.unlink(missing_ok=True)
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # can't verify — proceed with kill
     # Kill the entire process group
     print(
         formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),

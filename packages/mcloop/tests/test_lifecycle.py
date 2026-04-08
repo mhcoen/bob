@@ -203,6 +203,181 @@ def test_kill_orphan_invalid_json_falls_back(tmp_path):
     assert not pid_file.exists()
 
 
+def test_kill_orphan_verifies_cmd_match(tmp_path):
+    """Kills process when stored cmd matches the live process."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="claude -p --model opus\n")
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_skips_when_cmd_mismatch(tmp_path):
+    """Does not kill when live process command differs from stored cmd."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="/usr/bin/vim myfile.py\n")
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_not_called()
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_proceeds_when_ps_fails(tmp_path):
+    """Proceeds with kill when ps command fails (can't verify)."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", side_effect=OSError("ps not found")),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_proceeds_when_ps_times_out(tmp_path):
+    """Proceeds with kill when ps command times out."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch(
+            "mcloop.lifecycle.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("ps", 5),
+        ),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_no_verification_for_legacy_format(tmp_path):
+    """Legacy format (no cmd) skips verification and kills directly."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text("12345 12345")
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run") as mock_ps,
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_ps.assert_not_called()
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_partial_cmd_match(tmp_path):
+    """Kills when stored cmd is a substring of the live command (e.g. wrapper)."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    # Live process might have a longer path prefix
+    ps_result = MagicMock(stdout="/usr/local/bin/claude -p --model opus\n")
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
+def test_kill_orphan_ps_empty_output_proceeds(tmp_path):
+    """Proceeds with kill when ps returns empty output (process exiting)."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "pgid": 12345,
+                "cmd": "claude -p --model opus",
+                "started": "2026-04-08T10:30:00",
+            }
+        )
+    )
+    ps_result = MagicMock(stdout="\n")
+    with (
+        patch("mcloop.lifecycle.os.kill"),
+        patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
+    ):
+        _kill_orphan_sessions(tmp_path)
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    assert not pid_file.exists()
+
+
 # ── _kill_active_process ──
 
 
