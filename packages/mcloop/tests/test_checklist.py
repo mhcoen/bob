@@ -1006,3 +1006,60 @@ def test_fallback_raises_when_no_match_with_validation(tmp_path):
 
         lines = f.read_text().splitlines()
         _find_task_line(lines, fake)
+
+
+def test_auto_check_parents_duplicate_text_different_stages(tmp_path):
+    """_auto_check_parents only checks off the parent whose children are all done."""
+    md = """\
+## Stage 1: First
+- [ ] Setup
+  - [x] Child A
+  - [ ] Child B
+
+## Stage 2: Second
+- [ ] Setup
+  - [ ] Child C
+  - [ ] Child D
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Check off Child B in Stage 1 — should auto-check Stage 1 parent only
+    child_b = tasks[0].children[1]
+    assert child_b.text == "Child B"
+    check_off(f, child_b)
+
+    tasks2 = parse(f)
+    assert tasks2[0].checked, "Stage 1 parent should be auto-checked"
+    assert not tasks2[1].checked, "Stage 2 parent should NOT be auto-checked"
+
+
+def test_auto_check_parents_duplicate_text_different_indent(tmp_path):
+    """_auto_check_parents handles parents with identical text at different indent levels."""
+    md = """\
+- [ ] Outer
+  - [ ] Setup
+    - [x] Deep A
+    - [ ] Deep B
+  - [x] Other child
+- [ ] Setup
+  - [x] Top A
+  - [ ] Top B
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Check off Deep B (nested under Outer > Setup)
+    deep_b = tasks[0].children[0].children[1]
+    assert deep_b.text == "Deep B"
+    check_off(f, deep_b)
+
+    tasks2 = parse(f)
+    # Inner "Setup" should be auto-checked (both Deep A and Deep B done)
+    assert tasks2[0].children[0].checked, "Inner Setup should be auto-checked"
+    # Outer "Outer" should also be auto-checked (Setup + Other child both done)
+    assert tasks2[0].checked, "Outer should be auto-checked"
+    # Top-level "Setup" should NOT be auto-checked (Top B still unchecked)
+    assert not tasks2[1].checked, "Top-level Setup should NOT be auto-checked"
