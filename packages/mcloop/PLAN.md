@@ -14,27 +14,6 @@ over-abstraction.
 ## Bugs
 
 
-## Stage 6: Structural cleanup
-
-- [ ] Extract install/uninstall from main.py into mcloop/install_cmd.py
-   - [!] Move _cmd_install, _cmd_uninstall, _setup_telegram, _setup_sandbox, _setup_env_security, _install_hooks, _install_recommended_permissions, _merge_settings, _unmerge_settings, _remove_telegram_env, _remove_hooks_dir, _remove_config_json, _remove_recommended_perms, _check_rtk, _check_reviewer, _load_mcloop_config, _print_install_summary, _print_uninstall_summary, and _print_file_diff
-   - [ ] Update main.py imports to delegate to install_cmd
-   - [ ] Verify mcloop install and mcloop uninstall still work (including --dry-run)
-- [ ] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
-   - [ ] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
-   - [ ] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
-   - [ ] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
-- [ ] Extract run summary and display helpers from main.py into mcloop/display.py
-   - [ ] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
-   - [ ] These are pure formatting functions with no orchestration side effects
-- [ ] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
-   - [ ] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
-   - [ ] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
-- [ ] Remove pytest-of-mhcoen/ from version control
-   - [ ] Add pytest-of-*/ to .gitignore
-   - [ ] git rm -r --cached pytest-of-mhcoen/
-   - [ ] Commit the removal and .gitignore update
-
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)
@@ -391,3 +370,24 @@ The debugging playbook this enforces:
    - [x] Test: trivial Codex task (same) completes and commits
    - [x] Test: task with intentional check failure ("create hello.txt" but check command is "test -f goodbye.txt") retries and eventually fails
    - [x] Skip all tests when MCLOOP_INTEGRATION is not set
+
+## Stage 6: Structural cleanup
+
+- [ ] Extract install/uninstall from main.py into mcloop/install_cmd.py
+   - [x] Move _cmd_install, _cmd_uninstall, _setup_telegram, _setup_sandbox, _setup_env_security, _install_hooks, _install_recommended_permissions, _merge_settings, _unmerge_settings, _remove_telegram_env, _remove_hooks_dir, _remove_config_json, _remove_recommended_perms, _check_rtk, _check_reviewer, _load_mcloop_config, _print_install_summary, _print_uninstall_summary, and _print_file_diff
+   - [x] Update main.py imports to delegate to install_cmd
+   - [ ] Verify mcloop install and mcloop uninstall still work (including --dry-run)
+- [ ] Extract signal handling and interrupt state from main.py into mcloop/interrupt.py
+   - [ ] Move _save_interrupt_state, _check_interrupted, _kill_orphan_sessions, _kill_active_process, _graceful_kill_active_process, and the module-level state they depend on (_active_process, _current_phase, _interrupted_task, etc.)
+   - [ ] Expose a register_signal_handlers(process_ref) entry point that run_loop calls at startup
+   - [ ] Verify Ctrl-C, Ctrl-Z, and kill still work correctly on a live run
+- [ ] Extract run summary and display helpers from main.py into mcloop/display.py
+   - [ ] Move _print_summary, _print_error_tail, _print_notes_update, _task_label, _format_elapsed, _tail, _snapshot_notes, _dry_run
+   - [ ] These are pure formatting functions with no orchestration side effects
+- [ ] Extract reviewer lifecycle from main.py into mcloop/reviewer_lifecycle.py
+   - [ ] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
+   - [ ] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
+- [ ] Remove pytest-of-mhcoen/ from version control
+   - [ ] Add pytest-of-*/ to .gitignore
+   - [ ] git rm -r --cached pytest-of-mhcoen/
+   - [ ] Commit the removal and .gitignore update

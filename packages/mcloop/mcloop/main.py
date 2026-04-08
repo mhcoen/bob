@@ -907,6 +907,15 @@ def run_loop(
     # Bug-only mode: when ## Bugs has unchecked items, work only those
     # tasks. Do not fall through to feature tasks, do not start the
     # next stage, do not run the audit cycle.
+    def _has_any_failed(task_list: list[Task]) -> Task | None:
+        for t in task_list:
+            if t.failed:
+                return t
+            found = _has_any_failed(t.children)
+            if found:
+                return found
+        return None
+
     initial_tasks = parse(checklist_path)
     bug_only = has_unchecked_bugs(initial_tasks)
     if bug_only:
@@ -917,11 +926,48 @@ def run_loop(
 
     active_stage_at_start = current_stage(parse(checklist_path))
 
+    # Count remaining tasks for the startup notification
+    def _count_unchecked(task_list: list[Task]) -> int:
+        n = 0
+        for t in task_list:
+            if not t.checked and not t.failed:
+                n += 1
+            n += _count_unchecked(t.children)
+        return n
+
+    remaining_count = _count_unchecked(initial_tasks)
+    start_msg = f"Starting: {remaining_count} task(s) remaining"
+    if active_stage_at_start:
+        start_msg += f" in {active_stage_at_start}"
+    if bug_only:
+        start_msg = f"Starting: fixing bugs ({remaining_count} remaining)"
+    notify(start_msg)
+
     while True:
         # Check for completed reviews from background reviewer processes
         _collect_review_findings(project_dir, checklist_path, ctx)
 
         tasks = parse(checklist_path)
+
+        # If any task has failed, stop the entire run.
+        # A failed task is fatal: do not attempt other tasks.
+        failed = _has_any_failed(tasks)
+        if failed:
+            notify(
+                f"Fatal: previously failed task: {failed.text}",
+                level="error",
+            )
+            total = time.monotonic() - run_start
+            _print_summary(
+                completed,
+                f"{failed.text}",
+                "Task failed in a prior attempt",
+                tasks,
+                total,
+                project_dir,
+                notes_snapshot,
+            )
+            return []
 
         if active_stage_at_start is not None:
             now_stage = current_stage(tasks)
@@ -1334,6 +1380,10 @@ def run_loop(
             for t in parse(checklist_path)
             if t.stage == "Bugs" and not t.checked and not t.failed
         ]
+        if stuck:
+            notify(f"Bug-only mode: {len(stuck)} bug(s) could not be fixed", level="error")
+        else:
+            notify("Bug-only mode: all bugs fixed")
         return stuck
 
     # Check if we stopped at a stage boundary

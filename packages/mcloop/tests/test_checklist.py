@@ -302,6 +302,40 @@ def test_multiple_roots_mixed(tmp_path):
     assert nxt.text == "Child B"
 
 
+def test_find_next_blocks_siblings_after_failed_subtask(tmp_path):
+    """A failed subtask blocks later siblings under the same parent."""
+    md = """\
+- [ ] Parent
+   - [!] Failed child
+   - [ ] Next child
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    nxt = find_next(tasks)
+    # Parent can't complete with a failed child, and the sibling
+    # after the failed child is blocked. Nothing is actionable.
+    assert nxt is None
+
+
+def test_find_next_skips_root_with_failed_child(tmp_path):
+    """A root task with a failed child is skipped; later roots still run."""
+    md = """\
+- [ ] Parent A
+   - [!] Broken
+   - [ ] Blocked
+- [ ] Parent B
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    nxt = find_next(tasks)
+    assert nxt is not None
+    assert nxt.text == "Parent B"
+
+
 def test_mark_failed_checked_task(tmp_path):
     """mark_failed handles tasks that Claude Code already checked off."""
     md = "- [x] Already checked\n- [ ] Other\n"

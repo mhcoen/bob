@@ -252,9 +252,17 @@ def find_next(tasks: list[Task]) -> Task | None:
     active_stage = current_stage(tasks)
     has_stages = len(get_stages(tasks)) > 0
 
-    def _search(task_list: list[Task]) -> Task | None:
+    def _search(task_list: list[Task], is_subtask: bool = False) -> Task | None:
         for task in task_list:
-            if task.checked or task.failed:
+            # A failed subtask blocks all later siblings under the
+            # same parent (implicit sequential dependency).
+            # Root-level tasks are treated as independent.
+            if task.failed:
+                if is_subtask:
+                    return None
+                continue
+
+            if task.checked:
                 continue
 
             # Skip bug tasks (already handled above)
@@ -266,9 +274,15 @@ def find_next(tasks: list[Task]) -> Task | None:
                 continue
 
             if task.children:
-                child = _search(task.children)
+                child = _search(task.children, is_subtask=True)
                 if child:
                     return child
+                # Don't return the parent if any child failed;
+                # the parent can never complete in that state.
+                if any(c.failed for c in task.children):
+                    if is_subtask:
+                        return None
+                    continue
                 return task
 
             return task
@@ -280,16 +294,25 @@ def find_next(tasks: list[Task]) -> Task | None:
 def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
     """Search for the next unchecked leaf in a specific stage."""
 
-    def _search(task_list: list[Task]) -> Task | None:
+    def _search(task_list: list[Task], is_subtask: bool = False) -> Task | None:
         for task in task_list:
-            if task.checked or task.failed:
+            # A failed subtask blocks all later siblings.
+            if task.failed:
+                if is_subtask:
+                    return None
+                continue
+            if task.checked:
                 continue
             if task.stage != stage:
                 continue
             if task.children:
-                child = _search(task.children)
+                child = _search(task.children, is_subtask=True)
                 if child:
                     return child
+                if any(c.failed for c in task.children):
+                    if is_subtask:
+                        return None
+                    continue
             return task
         return None
 
@@ -422,7 +445,9 @@ def get_batch_children(task: Task) -> list[Task]:
     """
     batch: list[Task] = []
     for child in task.children:
-        if child.checked or child.failed:
+        if child.failed:
+            break
+        if child.checked:
             continue
         if is_user_task(child) or is_auto_task(child):
             break
