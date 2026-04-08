@@ -55,20 +55,22 @@ from mcloop.main import (
     _all_tasks,
     _check_interrupted,
     _check_user_input,
-    _cleanup_stale_reviews,
-    _collect_review_findings,
-    _get_commit_hash,
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
-    _reviewer_procs,
     _run_batch,
     _save_interrupt_state,
-    _spawn_reviewer,
-    _terminate_reviewers,
     _write_eliminated_json,
     _write_ruledout_to_plan,
     run_loop,
+)
+from mcloop.review_integration import (
+    _cleanup_stale_reviews,
+    _collect_review_findings,
+    _get_commit_hash,
+    _reviewer_procs,
+    _spawn_reviewer,
+    _terminate_reviewers,
 )
 from mcloop.session_context import SessionContext
 
@@ -6497,8 +6499,8 @@ def test_spawn_reviewer(tmp_path):
     """_spawn_reviewer spawns a subprocess and appends to _reviewer_procs."""
     proc = MagicMock()
     with (
-        patch("mcloop.main._get_commit_hash", return_value="abc123"),
-        patch("mcloop.main.subprocess.Popen", return_value=proc) as mock_popen,
+        patch("mcloop.review_integration._get_commit_hash", return_value="abc123"),
+        patch("mcloop.review_integration.subprocess.Popen", return_value=proc) as mock_popen,
     ):
         saved = list(_reviewer_procs)
         _reviewer_procs.clear()
@@ -6521,8 +6523,8 @@ def test_spawn_reviewer(tmp_path):
 def test_spawn_reviewer_no_hash(tmp_path):
     """_spawn_reviewer does nothing if commit hash is empty."""
     with (
-        patch("mcloop.main._get_commit_hash", return_value=""),
-        patch("mcloop.main.subprocess.Popen") as mock_popen,
+        patch("mcloop.review_integration._get_commit_hash", return_value=""),
+        patch("mcloop.review_integration.subprocess.Popen") as mock_popen,
     ):
         _spawn_reviewer(tmp_path)
     mock_popen.assert_not_called()
