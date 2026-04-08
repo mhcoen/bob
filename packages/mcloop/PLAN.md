@@ -13,6 +13,56 @@ over-abstraction.
 
 ## Bugs
 
+- [ ] Stale PID reuse can kill unrelated processes (lifecycle.py:243-275)
+   - [ ] Extend .mcloop/active-pid format to include command line and start time alongside pid and pgid
+   - [ ] In _kill_orphan_sessions, read the stored metadata and verify it matches the live process via ps -p {pid} -o command= before issuing SIGKILL (do not use /proc, which does not exist on macOS)
+   - [ ] If verification fails, delete the stale pid file and print a warning instead of killing
+   - [ ] Update _record_active_pid (or wherever the pid file is written) to write the new format
+   - [ ] Add tests: stale pid file with reused PID is not killed, valid pid file with matching process is killed, missing pid file is a no-op
+
+- [ ] Full-suite failure at stage boundary still reports success (main.py:965-1062)
+   - [ ] After full-suite check failure at a stage boundary or end-of-run, skip _run_build(), skip audit, skip stage-complete and all-done notifications
+   - [ ] Send an explicit failure notification instead (distinct from per-task failure) so the user knows the run ended with a red repo
+   - [ ] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
+
+- [ ] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
+   - [ ] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
+   - [ ] Fall back to text matching only when line_number is unavailable or stale (e.g. file was edited externally), with validation that indent_level and stage also match
+   - [ ] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
+   - [ ] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
+
+- [ ] Batch collection does not stop at failed siblings (checklist.py:443-457)
+   - [ ] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
+   - [ ] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
+   - [ ] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
+
+- [ ] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
+   - [ ] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
+   - [ ] On rollback, restore only the snapshotted files via git checkout -- {files} and rm for the new untracked files, instead of git checkout . && git clean -fd
+   - [ ] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
+
+- [ ] CLAUDE.md freshness gate accepts non-root paths (claude_md_check.py:89-97)
+   - [ ] Change the path check to require the repo-relative path to be exactly CLAUDE.md (not docs/CLAUDE.md or subdir/CLAUDE.md)
+   - [ ] Fix the test at tests/test_claude_md_check.py:166-170 that blesses the current (wrong) behavior
+   - [ ] Add a test: docs/CLAUDE.md does not satisfy the freshness gate, repo-root CLAUDE.md does
+
+- [ ] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
+   - [ ] Add TypeError to the except clause alongside KeyError and IndexError
+   - [ ] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
+   - [ ] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
+
+- [ ] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
+   - [ ] Split the prompt template into a normal-task variant and a bug-investigation variant, selected based on whether prior_errors is populated
+   - [ ] In the normal-task variant, remove the "run the app and reproduce" instruction
+   - [ ] In the bug-investigation variant, remove the "only run exact check commands" instruction
+   - [ ] Normalize pytest invocation at command-generation time (always emit pytest, never python -m pytest) so the prompt does not need a conflicting natural-language override
+   - [ ] Add tests: normal task prompt does not contain reproduction language, bug-investigation prompt does not contain "only run exact check commands"
+
+- [ ] CLAUDE.md manifest is stale and contains a duplicated architecture block (CLAUDE.md:69-209, 653-690)
+   - [ ] Regenerate the architecture section from the current module tree (include gather.py, sync_cmd.py, prompts.py, worktree.py, and any other modules added since the last update)
+   - [ ] Remove the duplicated architecture block at lines 653-690
+   - [ ] Remove references to runner internals that no longer exist
+
 
 ## Stage 1: Core
 

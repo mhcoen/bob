@@ -48,6 +48,11 @@ It's a persistent task queue backed by a text file, not a one-shot build
 script. All state lives in the repository: PLAN.md, source code,
 documentation, configuration, and git history. If McLoop is interrupted,
 killed, or hits a rate limit, just run `mcloop` again. It finds the next
+
+**Do not edit PLAN.md while mcloop is running.** McLoop reads, modifies,
+and commits PLAN.md during execution (checking off tasks, auto-checking
+parents, safety checkpoints). Edits made while mcloop is running will be
+silently overwritten. Kill mcloop first, make your edits, then restart.
 unchecked task and picks up exactly where it left off. No session files, no
 databases, nothing to reset.
 

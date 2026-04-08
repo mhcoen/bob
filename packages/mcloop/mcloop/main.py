@@ -505,6 +505,13 @@ def run_loop(
     if bug_only:
         start_msg = f"Starting: fixing bugs ({remaining_count} remaining)"
     notify(start_msg)
+    print(
+        formatting.system_msg(
+            "Do not edit PLAN.md while mcloop is running."
+            " Kill mcloop first, make edits, then restart."
+        ),
+        flush=True,
+    )
 
     while True:
         # Check for completed reviews from background reviewer processes
