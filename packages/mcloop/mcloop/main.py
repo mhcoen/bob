@@ -978,6 +978,17 @@ def run_loop(
                 flush=True,
             )
             _print_error_tail(full_check.output)
+            total = time.monotonic() - run_start
+            _print_summary(
+                completed,
+                None,
+                "",
+                final_tasks,
+                total,
+                project_dir,
+                notes_snapshot,
+            )
+            return []
         else:
             print(
                 formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
@@ -1014,8 +1025,19 @@ def run_loop(
             flush=True,
         )
         _print_error_tail(full_check.output)
-    else:
-        print(formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"), flush=True)
+        total = time.monotonic() - run_start
+        _print_summary(
+            completed,
+            None,
+            "",
+            [],
+            total,
+            project_dir,
+            notes_snapshot,
+        )
+        return []
+
+    print(formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"), flush=True)
 
     # Only audit if every task in every stage is complete
     final_for_audit = parse(checklist_path)
