@@ -388,6 +388,6 @@ The debugging playbook this enforces:
    - [x] Move _get_commit_hash, _spawn_reviewer, _cleanup_stale_reviews, _collect_review_findings, _terminate_reviewers
    - [x] reviewer.py already owns the review logic itself; this module owns spawning and collecting results within run_loop
 - [ ] Remove pytest-of-mhcoen/ from version control
-   - [ ] Add pytest-of-*/ to .gitignore
+   - [x] Add pytest-of-*/ to .gitignore
    - [ ] git rm -r --cached pytest-of-mhcoen/
    - [ ] Commit the removal and .gitignore update
