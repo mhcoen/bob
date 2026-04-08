@@ -373,7 +373,7 @@ The debugging playbook this enforces:
 
 ## Stage 6: Structural cleanup
 
-- [ ] Extract install/uninstall from main.py into mcloop/install_cmd.py
+- [x] Extract install/uninstall from main.py into mcloop/install_cmd.py
    - [x] Move _cmd_install, _cmd_uninstall, _setup_telegram, _setup_sandbox, _setup_env_security, _install_hooks, _install_recommended_permissions, _merge_settings, _unmerge_settings, _remove_telegram_env, _remove_hooks_dir, _remove_config_json, _remove_recommended_perms, _check_rtk, _check_reviewer, _load_mcloop_config, _print_install_summary, _print_uninstall_summary, and _print_file_diff
    - [x] Update main.py imports to delegate to install_cmd
    - [x] Verify mcloop install and mcloop uninstall still work (including --dry-run)
