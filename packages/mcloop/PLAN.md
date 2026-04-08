@@ -17,7 +17,7 @@ over-abstraction.
    - [x] Extend .mcloop/active-pid format to include command line and start time alongside pid and pgid
    - [x] In _kill_orphan_sessions, read the stored metadata and verify it matches the live process via ps -p {pid} -o command= before issuing SIGKILL (do not use /proc, which does not exist on macOS)
    - [x] If verification fails, delete the stale pid file and print a warning instead of killing
-   - [ ] Update _record_active_pid (or wherever the pid file is written) to write the new format
+   - [x] Update _record_active_pid (or wherever the pid file is written) to write the new format
    - [ ] Add tests: stale pid file with reused PID is not killed, valid pid file with matching process is killed, missing pid file is a no-op
 
 - [ ] Full-suite failure at stage boundary still reports success (main.py:965-1062)
