@@ -51,11 +51,33 @@ RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
 # --- Session memory ---
 
 
+def _bash_prefix(cmd):
+    """Extract the command prefix (executable + subcommand) from a Bash command.
+
+    Returns the first two tokens unless the second token starts with '-',
+    in which case only the executable is returned.
+    Examples: 'git add a.py' -> 'git add', 'ls -la' -> 'ls',
+              'ruff check .' -> 'ruff check'.
+    """
+    parts = cmd.split(None, 2)
+    if not parts:
+        return ""
+    if len(parts) >= 2 and not parts[1].startswith("-"):
+        return f"{parts[0]} {parts[1]}"
+    return parts[0]
+
+
 def _tool_pattern(tool_name, tool_input):
-    """Create a pattern key for session memory. Uses the full command."""
+    """Create a pattern key for session memory.
+
+    For Bash tools, stores the command prefix (executable + subcommand)
+    so that a single approval covers all invocations with different arguments.
+    For other tools, uses exact-string matching on the relevant identifier.
+    """
     if tool_name == "Bash":
         cmd = tool_input.get("command", "").strip()
-        return f"Bash:{cmd}"
+        prefix = _bash_prefix(cmd)
+        return f"Bash:{prefix}"
     if tool_name in ("Edit", "Read", "Write"):
         path = tool_input.get("file_path", "")
         return f"{tool_name}:{path}"

@@ -52,3 +52,71 @@ def test_proceeds_when_task_label_set():
             {"tool_name": "Bash", "tool_input": {"command": "ls"}},
         )
     assert result == {}
+
+
+# --- _bash_prefix tests ---
+
+
+class TestBashPrefix:
+    """Tests for _bash_prefix: extracts executable + subcommand."""
+
+    def test_git_subcommand(self):
+        assert _hook._bash_prefix("git add a.py") == "git add"
+
+    def test_git_status(self):
+        assert _hook._bash_prefix("git status") == "git status"
+
+    def test_flag_only(self):
+        """Second token starting with '-' is a flag, not a subcommand."""
+        assert _hook._bash_prefix("ls -la") == "ls"
+
+    def test_ruff_check(self):
+        assert _hook._bash_prefix("ruff check .") == "ruff check"
+
+    def test_single_command(self):
+        assert _hook._bash_prefix("ls") == "ls"
+
+    def test_empty(self):
+        assert _hook._bash_prefix("") == ""
+
+    def test_rtk_proxy(self):
+        assert _hook._bash_prefix("rtk proxy swift build") == "rtk proxy"
+
+    def test_python_flag(self):
+        """python -m is a flag, so only 'python' is the prefix."""
+        assert _hook._bash_prefix("python -m mcloop") == "python"
+
+
+# --- _tool_pattern tests ---
+
+
+class TestToolPattern:
+    """Tests for _tool_pattern: session memory keys."""
+
+    def test_bash_uses_prefix(self):
+        """Bash patterns use command prefix, not full command."""
+        pattern = _hook._tool_pattern("Bash", {"command": "git add a.py"})
+        assert pattern == "Bash:git add"
+
+    def test_bash_different_args_same_pattern(self):
+        """Different arguments to same command produce the same pattern."""
+        p1 = _hook._tool_pattern("Bash", {"command": "git add a.py"})
+        p2 = _hook._tool_pattern("Bash", {"command": "git add b.py c.py"})
+        assert p1 == p2
+
+    def test_edit_uses_exact_path(self):
+        """Non-Bash tools preserve exact-string matching."""
+        pattern = _hook._tool_pattern("Edit", {"file_path": "/foo/bar.py"})
+        assert pattern == "Edit:/foo/bar.py"
+
+    def test_read_uses_exact_path(self):
+        pattern = _hook._tool_pattern("Read", {"file_path": "/foo/bar.py"})
+        assert pattern == "Read:/foo/bar.py"
+
+    def test_write_uses_exact_path(self):
+        pattern = _hook._tool_pattern("Write", {"file_path": "/foo/bar.py"})
+        assert pattern == "Write:/foo/bar.py"
+
+    def test_other_tool_uses_name_only(self):
+        pattern = _hook._tool_pattern("Grep", {"pattern": "foo"})
+        assert pattern == "Grep"
