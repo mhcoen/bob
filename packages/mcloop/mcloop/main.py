@@ -363,7 +363,8 @@ def _run_batch(
         changed_files=changed_files,
     )
     if check_result.passed:
-        if _worktree_status(project_dir) != pre_check_status:
+        post = set(_worktree_status(project_dir).splitlines())
+        if post != set(pre_check_status.splitlines()):
             print(
                 formatting.error_msg("Batch: checker introduced uncommitted changes"),
                 flush=True,
@@ -893,7 +894,8 @@ def run_loop(
                     changed_files=changed_files,
                 )
                 if check_result.passed:
-                    if _worktree_status(project_dir) != pre_check_status:
+                    post = set(_worktree_status(project_dir).splitlines())
+                    if post != set(pre_check_status.splitlines()):
                         last_error = "Checker introduced uncommitted changes"
                         print(
                             formatting.error_msg(

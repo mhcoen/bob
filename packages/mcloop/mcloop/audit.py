@@ -242,7 +242,8 @@ def _run_single_audit_round(
         pre_check_status = _worktree_status(project_dir)
         check_result = run_checks(project_dir)
         if check_result.passed:
-            if _worktree_status(project_dir) != pre_check_status:
+            post = set(_worktree_status(project_dir).splitlines())
+            if post != set(pre_check_status.splitlines()):
                 print(
                     formatting.error_msg(
                         f"Bug-fix: checker introduced uncommitted changes"

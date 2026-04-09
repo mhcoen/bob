@@ -6596,6 +6596,67 @@ def test_worktree_status_handles_git_failure(tmp_path):
     assert status == ""
 
 
+def test_worktree_status_reordered_lines_not_treated_as_change(tmp_path):
+    """Same files in different order should NOT be detected as a change.
+
+    git status --porcelain output order can vary; the comparison uses sets
+    of lines so reordering alone does not trigger a false positive.
+    """
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    # Pre-check and post-check return same files but in different order
+    worktree_calls = iter(
+        [
+            " M src/main.py\n M src/utils.py",  # pre-check
+            " M src/utils.py\n M src/main.py",  # post-check (reordered)
+        ]
+    )
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["src/main.py"]),
+        patch("mcloop.main._worktree_status", side_effect=worktree_calls),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    # Commit SHOULD be called since the status is the same (just reordered)
+    mock_commit.assert_called_once()
+
+
 def test_checker_introduced_changes_to_filtered_file_detected(tmp_path):
     """When a checker modifies a filtered file (e.g. PLAN.md), the change is detected.
 
