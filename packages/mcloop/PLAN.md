@@ -28,9 +28,9 @@ over-abstraction.
    - [x] In the stage-complete and all-done paths, check the build result and treat failure as a terminal run error
    - [x] Send a failure notification instead of stage-complete/all-done when the build fails
 
-- [ ] [BATCH] Stale reviewer findings injected when reviewer is disabled (main.py:477, 548)
-   - [ ] Gate review-file cleanup and collection on reviewer_config being present
-   - [ ] At startup, if reviewer is disabled, delete any existing .mcloop/reviews/*.json files to prevent stale findings from previous runs
+- [x] [BATCH] Stale reviewer findings injected when reviewer is disabled (main.py:477, 548)
+   - [x] Gate review-file cleanup and collection on reviewer_config being present
+   - [x] At startup, if reviewer is disabled, delete any existing .mcloop/reviews/*.json files to prevent stale findings from previous runs
 
 - [ ] [BATCH] Session memory for Bash stores exact command strings, not prefixes (telegram-permission-hook.py:54, 409)
    - [ ] Normalize Bash session approvals to store the command prefix (the executable and subcommand) rather than the full command with arguments
