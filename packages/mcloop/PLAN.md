@@ -31,10 +31,10 @@ over-abstraction.
    - [x] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
    - [x] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
 
-- [ ] Batch collection does not stop at failed siblings (checklist.py:443-457)
+- [x] Batch collection does not stop at failed siblings (checklist.py:443-457)
    - [x] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
    - [x] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
-   - [ ] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
+   - [x] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
 
 - [ ] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
    - [ ] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
