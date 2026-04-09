@@ -16,7 +16,7 @@ from mcloop.errors import (
     _error_signature_hash,
     _insert_bugs_section,
 )
-from mcloop.git_ops import _snapshot_worktree
+from mcloop.git_ops import _snapshot_worktree, _worktree_status
 from mcloop.install_cmd import (
     _HOOK_SCRIPTS,
     _check_reviewer,
@@ -3601,6 +3601,7 @@ def test_run_loop_user_task_skips_claude(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
         mock_result = MagicMock()
@@ -3730,6 +3731,7 @@ def test_run_loop_picks_up_user_input(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
         mock_result = MagicMock()
@@ -3945,6 +3947,7 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
         mock_result = MagicMock()
@@ -4035,6 +4038,7 @@ def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch("mcloop.main.get_available_cli", return_value="claude"),
         patch("mcloop.main.wait_for_reset", return_value="claude"),
@@ -4091,6 +4095,7 @@ def test_run_loop_no_fallback_without_flag(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch("mcloop.main.get_available_cli", return_value="claude"),
         patch("mcloop.main.wait_for_reset", return_value="claude"),
@@ -4151,6 +4156,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
             "mcloop.main.get_available_cli",
@@ -4209,6 +4215,7 @@ def test_fallback_model_prints_message(tmp_path, capsys):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
             "mcloop.main.get_available_cli",
@@ -4449,6 +4456,7 @@ def test_fallback_gets_fresh_retries(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
             "mcloop.main.get_available_cli",
@@ -4515,6 +4523,7 @@ def test_fallback_resets_per_task(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
             "mcloop.main.get_available_cli",
@@ -4658,6 +4667,7 @@ def test_run_loop_calls_auto_wrap_after_commit(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -4852,6 +4862,7 @@ def test_run_loop_calls_reinject_after_commit(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -5571,6 +5582,7 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -5644,6 +5656,7 @@ def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -5684,6 +5697,7 @@ def test_run_loop_bug_only_clears_errors_json(tmp_path):
         patch("mcloop.main._check_errors_json"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -5725,6 +5739,7 @@ def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
         patch("mcloop.main._check_errors_json"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
@@ -6211,6 +6226,7 @@ def test_run_batch_combines_text(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._commit"),
         patch("mcloop.main._maybe_auto_wrap"),
@@ -6240,6 +6256,7 @@ def test_run_batch_success_checks_off_children(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._commit"),
         patch("mcloop.main._maybe_auto_wrap"),
@@ -6293,6 +6310,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off") as mock_check_off,
@@ -6521,6 +6539,115 @@ def test_snapshot_worktree_handles_git_failure(tmp_path):
     assert untracked == []
 
 
+# ── _worktree_status tests ──
+
+
+def test_worktree_status_returns_raw_porcelain(tmp_path):
+    """_worktree_status returns unfiltered git status --porcelain output."""
+    raw = " M PLAN.md\n M logs/run.log\n M src/main.py\n"
+    mock_result = MagicMock(returncode=0, stdout=raw)
+    with patch("mcloop.git_ops._git", return_value=mock_result):
+        status = _worktree_status(tmp_path)
+    assert "PLAN.md" in status
+    assert "logs/run.log" in status
+    assert "src/main.py" in status
+
+
+def test_worktree_status_includes_filtered_files(tmp_path):
+    """_worktree_status includes files that _changed_files would filter out."""
+    raw = " M PLAN.md\n M .mcloop/state.json\n M logs/debug.log\n"
+    mock_result = MagicMock(returncode=0, stdout=raw)
+    with patch("mcloop.git_ops._git", return_value=mock_result):
+        status = _worktree_status(tmp_path)
+    # All files appear — no filtering applied
+    assert "PLAN.md" in status
+    assert ".mcloop/state.json" in status
+    assert "logs/debug.log" in status
+
+
+def test_worktree_status_empty_on_clean_tree(tmp_path):
+    """Clean working tree returns empty string."""
+    mock_result = MagicMock(returncode=0, stdout="")
+    with patch("mcloop.git_ops._git", return_value=mock_result):
+        status = _worktree_status(tmp_path)
+    assert status == ""
+
+
+def test_worktree_status_handles_git_failure(tmp_path):
+    """Git failure returns empty string."""
+    mock_result = MagicMock(returncode=128, stdout="")
+    with patch("mcloop.git_ops._git", return_value=mock_result):
+        status = _worktree_status(tmp_path)
+    assert status == ""
+
+
+def test_checker_introduced_changes_to_filtered_file_detected(tmp_path):
+    """When a checker modifies a filtered file (e.g. PLAN.md), the change is detected.
+
+    This is the core bug fix: previously _changed_files was used for detection,
+    which would miss changes to PLAN.md, logs/, and .mcloop/ files.
+    """
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    # Simulate checker modifying PLAN.md: _worktree_status returns different
+    # values before and after run_checks.  The retry loop runs up to 3
+    # attempts, each calling _worktree_status twice (pre + post).
+    worktree_calls = iter(
+        [
+            " M src/main.py",  # attempt 1 pre-check
+            " M src/main.py\n M PLAN.md",  # attempt 1 post-check (changed!)
+            " M src/main.py",  # attempt 2 pre-check
+            " M src/main.py\n M PLAN.md",  # attempt 2 post-check (changed!)
+            " M src/main.py",  # attempt 3 pre-check
+            " M src/main.py\n M PLAN.md",  # attempt 3 post-check (changed!)
+        ]
+    )
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["src/main.py"]),
+        patch("mcloop.main._worktree_status", side_effect=worktree_calls),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        run_loop(plan, no_audit=True)
+
+    # Commit should NOT have been called because checker introduced changes
+    mock_commit.assert_not_called()
+
+
 # ── Batch rollback with pre-batch dirty state ──
 
 
@@ -6552,6 +6679,7 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
@@ -6591,6 +6719,7 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
@@ -6625,6 +6754,7 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
@@ -6672,6 +6802,7 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
@@ -6726,6 +6857,7 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
@@ -6771,6 +6903,7 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
@@ -6826,6 +6959,7 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
@@ -7168,6 +7302,7 @@ def test_run_loop_spawns_reviewer_after_commit(tmp_path):
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main.run_checks", return_value=check_result),
         patch("mcloop.main._commit"),
@@ -7224,6 +7359,7 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["a.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main.run_checks", return_value=check_result),
         patch("mcloop.main._commit"),
@@ -7268,6 +7404,7 @@ def test_run_loop_claude_md_freshness_blocks_commit(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=False),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7314,6 +7451,7 @@ def test_run_loop_claude_md_freshness_passes(tmp_path):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7351,6 +7489,7 @@ def test_run_loop_claude_md_freshness_feeds_prior_errors(tmp_path, capsys):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=False),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result) as mock_run,
@@ -7417,6 +7556,7 @@ def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, c
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7473,6 +7613,7 @@ def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, cap
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["bar.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7533,6 +7674,7 @@ def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7596,6 +7738,7 @@ def test_full_suite_pass_at_end_of_run_proceeds_normally(tmp_path, capsys):
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["bar.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7665,6 +7808,7 @@ def test_build_failure_at_stage_boundary_returns_failure(tmp_path, capsys):
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -7718,6 +7862,7 @@ def test_build_failure_at_end_of_run_returns_failure(tmp_path, capsys):
         patch("mcloop.main._check_errors_json", return_value=True),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["bar.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),

@@ -56,6 +56,7 @@ from mcloop.git_ops import (
     _has_meaningful_changes,
     _push_or_die,
     _snapshot_worktree,
+    _worktree_status,
 )
 from mcloop.install_cmd import (
     _cmd_install,
@@ -349,14 +350,13 @@ def _run_batch(
     _lifecycle._current_phase = "checks"
     run_autofix(project_dir)
     changed_files = _changed_files(project_dir)
-    pre_check_files = set(changed_files)
+    pre_check_status = _worktree_status(project_dir)
     check_result = run_checks(
         project_dir,
         changed_files=changed_files,
     )
     if check_result.passed:
-        post_check_files = set(_changed_files(project_dir))
-        if post_check_files != pre_check_files:
+        if _worktree_status(project_dir) != pre_check_status:
             print(
                 formatting.error_msg("Batch: checker introduced uncommitted changes"),
                 flush=True,
@@ -870,14 +870,13 @@ def run_loop(
                 _lifecycle._current_phase = "checks"
                 run_autofix(project_dir)
                 changed_files = _changed_files(project_dir)
-                pre_check_files = set(changed_files)
+                pre_check_status = _worktree_status(project_dir)
                 check_result = run_checks(
                     project_dir,
                     changed_files=changed_files,
                 )
                 if check_result.passed:
-                    post_check_files = set(_changed_files(project_dir))
-                    if post_check_files != pre_check_files:
+                    if _worktree_status(project_dir) != pre_check_status:
                         last_error = "Checker introduced uncommitted changes"
                         print(
                             formatting.error_msg(

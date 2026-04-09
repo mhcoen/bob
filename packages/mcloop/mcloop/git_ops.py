@@ -333,6 +333,22 @@ def _get_diff(project_dir: Path) -> str:
     return result.stdout.strip()
 
 
+def _worktree_status(project_dir: Path) -> str:
+    """Return raw ``git status --porcelain`` output (unfiltered).
+
+    Unlike :func:`_changed_files`, this includes *all* uncommitted changes —
+    logs/, .mcloop/, PLAN.md, etc.  Used for before/after comparisons to
+    detect whether a checker or autofix step introduced new changes.
+    """
+    result = _git(
+        ["git", "status", "--porcelain"],
+        cwd=project_dir,
+        label="worktree status",
+        silent=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def _changed_files(project_dir: Path) -> list[str]:
     """Return list of files with uncommitted changes, excluding logs and metadata."""
     result = _git(
