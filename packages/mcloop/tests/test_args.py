@@ -1,5 +1,6 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -7742,3 +7743,70 @@ def test_run_loop_success_returns_success_status(tmp_path):
 
     assert result.status == "success"
     assert result.ok
+
+
+def test_main_exits_nonzero_on_interrupted(tmp_path):
+    """_main() calls sys.exit(1) when run_loop returns interrupted status."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+
+    interrupted = RunStatus("interrupted", detail="User interrupted")
+    with (
+        patch("mcloop.main._parse_args") as mock_args,
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.run_loop", return_value=interrupted),
+    ):
+        mock_args.return_value = MagicMock(
+            file=str(plan),
+            command=None,
+            dry_run=False,
+            max_retries=3,
+            cli=None,
+            model=None,
+            fallback_model=None,
+            no_audit=False,
+            reviewer=False,
+            allow_web_tools=False,
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _main()
+    assert exc_info.value.code == 1
+
+
+def test_main_exits_nonzero_on_failure_with_stuck_tasks(tmp_path):
+    """_main() exits nonzero when run_loop returns failure with stuck tasks."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task A\n- [ ] Task B\n")
+
+    failure = RunStatus(
+        "failure",
+        stuck=["Task A", "Task B"],
+        detail="2 tasks stuck",
+    )
+    with (
+        patch("mcloop.main._parse_args") as mock_args,
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.run_loop", return_value=failure),
+    ):
+        mock_args.return_value = MagicMock(
+            file=str(plan),
+            command=None,
+            dry_run=False,
+            max_retries=3,
+            cli=None,
+            model=None,
+            fallback_model=None,
+            no_audit=False,
+            reviewer=False,
+            allow_web_tools=False,
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _main()
+    assert exc_info.value.code == 1
+
+
+def test_run_status_frozen():
+    """RunStatus is immutable (frozen dataclass)."""
+    status = RunStatus("success")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        status.status = "failure"
