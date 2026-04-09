@@ -46,10 +46,10 @@ over-abstraction.
    - [x] Fix the test at tests/test_claude_md_check.py:166-170 that blesses the current (wrong) behavior
    - [x] Add a test: docs/CLAUDE.md does not satisfy the freshness gate, repo-root CLAUDE.md does
 
-- [ ] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
+- [x] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
    - [x] Add TypeError to the except clause alongside KeyError and IndexError
    - [x] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
-   - [ ] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
+   - [x] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
 
 - [ ] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
    - [ ] Split the prompt template into a normal-task variant and a bug-investigation variant, selected based on whether prior_errors is populated
