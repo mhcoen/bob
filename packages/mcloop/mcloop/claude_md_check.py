@@ -87,7 +87,7 @@ def check_claude_md_freshness(
     has_claude_md = False
 
     for path in changed_files:
-        if Path(path).name == "CLAUDE.md":
+        if path == "CLAUDE.md":
             has_claude_md = True
         if _is_source_file(path):
             has_source = True

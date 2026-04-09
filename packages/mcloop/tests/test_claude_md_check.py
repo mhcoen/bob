@@ -163,10 +163,16 @@ class TestCheckClaudeMdFreshness:
     def test_package_dir_non_code_ignored(self):
         assert check_claude_md_freshness(["package/data.json"], self.project) is True
 
-    def test_nested_claude_md(self):
-        # Only top-level CLAUDE.md name matters (Path.name)
+    def test_nested_claude_md_not_accepted(self):
+        # Only root CLAUDE.md counts, not docs/CLAUDE.md or subdir/CLAUDE.md
         assert (
-            check_claude_md_freshness(["mcloop/main.py", "docs/CLAUDE.md"], self.project) is True
+            check_claude_md_freshness(["mcloop/main.py", "docs/CLAUDE.md"], self.project) is False
+        )
+
+    def test_subdir_claude_md_not_accepted(self):
+        assert (
+            check_claude_md_freshness(["mcloop/main.py", "subdir/CLAUDE.md"], self.project)
+            is False
         )
 
     def test_non_source_mixed(self):
