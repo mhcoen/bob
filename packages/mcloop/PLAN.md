@@ -18,10 +18,10 @@ over-abstraction.
    - [x] After run_checks() returns success, verify no uncommitted changes exist (git diff --quiet). If changes were introduced by the checker, route them back through commit or treat as failure
    - [x] Ensure the no-op detection path, full-suite path, and stage-boundary path all use the side-effect-free version of run_checks()
 
-- [ ] [BATCH] Targeted testing skips changed test files entirely (targeted.py:27, checks.py:70)
-   - [ ] In map_to_tests(), include changed test files (tests/test_*.py) directly in the targeted set, not just source-to-test mappings
-   - [ ] When only test files changed and no source files changed, run those test files instead of skipping pytest
-   - [ ] Fix tests at tests/test_targeted.py:47 and tests/test_targeted.py:128 that encode the current (wrong) behavior
+- [x] [BATCH] Targeted testing skips changed test files entirely (targeted.py:27, checks.py:70)
+   - [x] In map_to_tests(), include changed test files (tests/test_*.py) directly in the targeted set, not just source-to-test mappings
+   - [x] When only test files changed and no source files changed, run those test files instead of skipping pytest
+   - [x] Fix tests at tests/test_targeted.py:47 and tests/test_targeted.py:128 that encode the current (wrong) behavior
 
 - [ ] [BATCH] _run_build() outcome is ignored (main.py:1043, 1125, 1246)
    - [ ] Make _run_build() return a structured result indicating success or failure
@@ -39,6 +39,9 @@ over-abstraction.
 
 
 
+- [ ] Fix review finding from commit ebe60c8e: The bug-fix loop incorrectly uses `_changed_files` to detect uncommitted changes after `run_autofix`. `_changed_files` returns only files with meaningful changes (excluding logs/, .mcloop/, PLAN.md). This means changes to those filtered files (e.g., formatting changes to PLAN.md) would not be detected, allowing the loop to proceed when it should fail. Use `_has_uncommitted_changes` (newly added) instead, which checks the entire working tree.
+- [ ] Fix review finding from commit ebe60c8e: In `_run_batch`, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. `_changed_files` filters out metadata files (logs/, .mcloop/, PLAN.md). If `run_autofix` modifies PLAN.md (e.g., formatting), the change will be ignored, causing the batch to incorrectly succeed. Replace with `_has_uncommitted_changes` to catch all modifications.
+- [ ] Fix review finding from commit ebe60c8e: In the individual task loop, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. This will miss changes to filtered files (logs/, .mcloop/, PLAN.md). If auto‑formatting changes PLAN.md, the check will pass incorrectly. Use `_has_uncommitted_changes` instead.
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)
