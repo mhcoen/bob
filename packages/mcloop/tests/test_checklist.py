@@ -806,6 +806,27 @@ def test_get_batch_children_empty_when_all_done(tmp_path):
     assert batch == []
 
 
+def test_get_batch_children_empty_when_all_failed(tmp_path):
+    """All children failed and none were collected — returns empty."""
+    md = "- [ ] [BATCH] Parent\n  - [!] Failed A\n  - [!] Failed B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert batch == []
+
+
+def test_get_batch_children_failed_immediately_after_first(tmp_path):
+    """Failed child right after first collected child yields single-item batch."""
+    md = "- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [!] Failed child\n  - [ ] Child B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 1
+    assert batch[0].text == "Child A"
+
+
 def test_find_parent_returns_parent(tmp_path):
     md = "- [ ] Parent\n  - [ ] Child\n"
     f = tmp_path / "tasks.md"
