@@ -59,7 +59,7 @@ over-abstraction.
    - [x] Add tests: normal task prompt does not contain reproduction language, bug-investigation prompt does not contain "only run exact check commands"
 
 - [ ] CLAUDE.md manifest is stale and contains a duplicated architecture block (CLAUDE.md:69-209, 653-690)
-   - [ ] Regenerate the architecture section from the current module tree (include gather.py, sync_cmd.py, prompts.py, worktree.py, and any other modules added since the last update)
+   - [x] Regenerate the architecture section from the current module tree (include gather.py, sync_cmd.py, prompts.py, worktree.py, and any other modules added since the last update)
    - [ ] Remove the duplicated architecture block at lines 653-690
    - [ ] Remove references to runner internals that no longer exist
 
