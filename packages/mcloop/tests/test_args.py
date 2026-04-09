@@ -6692,6 +6692,189 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
         assert checkout_file_calls[0][0][0][3] == "new_file.py"
 
 
+def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
+    """Rollback handles both pre-batch modified AND untracked files simultaneously."""
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    # Batch created a new untracked file
+    batch_new = project_dir / "batch_new.py"
+    batch_new.write_text("batch created")
+    # Pre-batch untracked file that must survive
+    pre_untracked = project_dir / "user_notes.txt"
+    pre_untracked.write_text("user notes")
+
+    def git_side_effect(cmd, cwd, **kwargs):
+        if cmd[1:3] == ["diff", "--name-only"]:
+            # Both pre-dirty and batch-touched files show as modified
+            return MagicMock(returncode=0, stdout="pre_dirty.py\nbatch_touched.py\n")
+        if cmd[1:3] == ["ls-files", "--others"]:
+            return MagicMock(returncode=0, stdout="user_notes.txt\nbatch_new.py\n")
+        return MagicMock(returncode=0, stdout="")
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch(
+            "mcloop.main._snapshot_worktree",
+            return_value=(["pre_dirty.py"], ["user_notes.txt"]),
+        ),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        git_calls = mock_git.call_args_list
+        # Only batch_touched.py should be checked out, not pre_dirty.py
+        checkout_calls = [
+            c for c in git_calls if len(c[0][0]) >= 4 and c[0][0][:3] == ["git", "checkout", "--"]
+        ]
+        reverted = [c[0][0][3] for c in checkout_calls]
+        assert "batch_touched.py" in reverted
+        assert "pre_dirty.py" not in reverted
+        # batch_new.py removed, user_notes.txt preserved
+        assert not batch_new.exists()
+        assert pre_untracked.exists()
+
+
+def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
+    """Rollback handles empty git diff output (no modified files)."""
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    # Batch created only an untracked file, no modifications
+    batch_file = project_dir / "new_output.py"
+    batch_file.write_text("new content")
+
+    def git_side_effect(cmd, cwd, **kwargs):
+        if cmd[1:3] == ["diff", "--name-only"]:
+            return MagicMock(returncode=0, stdout="")
+        if cmd[1:3] == ["ls-files", "--others"]:
+            return MagicMock(returncode=0, stdout="new_output.py\n")
+        return MagicMock(returncode=0, stdout="")
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=([], [])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        # No checkout calls since no modified files
+        git_calls = mock_git.call_args_list
+        checkout_calls = [
+            c for c in git_calls if len(c[0][0]) >= 4 and c[0][0][:3] == ["git", "checkout", "--"]
+        ]
+        assert len(checkout_calls) == 0
+        # But untracked file should still be removed
+        assert not batch_file.exists()
+
+
+def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
+    """Multiple new untracked files are removed while multiple pre-existing survive."""
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    # Pre-existing untracked files
+    pre1 = project_dir / "scratch.txt"
+    pre1.write_text("scratch")
+    pre2 = project_dir / "local_config.ini"
+    pre2.write_text("config")
+    # Batch-created untracked files
+    batch1 = project_dir / "generated_a.py"
+    batch1.write_text("gen a")
+    batch2 = project_dir / "generated_b.py"
+    batch2.write_text("gen b")
+
+    def git_side_effect(cmd, cwd, **kwargs):
+        if cmd[1:3] == ["diff", "--name-only"]:
+            return MagicMock(returncode=0, stdout="")
+        if cmd[1:3] == ["ls-files", "--others"]:
+            return MagicMock(
+                returncode=0,
+                stdout="scratch.txt\nlocal_config.ini\ngenerated_a.py\ngenerated_b.py\n",
+            )
+        return MagicMock(returncode=0, stdout="")
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch(
+            "mcloop.main._snapshot_worktree",
+            return_value=([], ["scratch.txt", "local_config.ini"]),
+        ),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        # Pre-existing files survive
+        assert pre1.exists()
+        assert pre2.exists()
+        # Batch-created files removed
+        assert not batch1.exists()
+        assert not batch2.exists()
+
+
+def test_run_batch_rollback_task_failure_no_rollback(tmp_path):
+    """When the task itself fails (not checks), no rollback is needed."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=(["dirty.py"], ["scratch.txt"])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes") as mock_changes,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git") as mock_git,
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=False, output="error")
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        # No rollback git calls (diff, checkout, ls-files) should happen
+        # because the task failed before checks
+        mock_changes.assert_not_called()
+        mock_checks.assert_not_called()
+        # _git is called for checkpoint/snapshot, but not for rollback
+        rollback_calls = [
+            c
+            for c in mock_git.call_args_list
+            if any(
+                kw.get("label", "").startswith("batch rollback")
+                for kw in [c[1]]
+                if isinstance(c[1], dict)
+            )
+        ]
+        assert len(rollback_calls) == 0
+
+
 # --- Reviewer integration ---
 
 
