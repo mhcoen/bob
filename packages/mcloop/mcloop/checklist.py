@@ -351,8 +351,11 @@ def _find_task_line(lines: list[str], task: Task) -> int:
     # Track the current stage as we scan so we can disambiguate
     # duplicate task texts that appear in different stages or at
     # different indentation levels.
+    # Collect all candidates and pick the one nearest to the original
+    # line_number, preferring unchecked tasks.
     current_stage = ""
-    fallback = None
+    unchecked: list[int] = []
+    checked: list[int] = []
     for i, line in enumerate(lines):
         if STAGE_RE.match(line):
             current_stage = line.lstrip("#").strip()
@@ -369,11 +372,13 @@ def _find_task_line(lines: list[str], task: Task) -> int:
         if current_stage != task.stage:
             continue
         if m.group(2) == " ":
-            return i
-        if fallback is None:
-            fallback = i
-    if fallback is not None:
-        return fallback
+            unchecked.append(i)
+        else:
+            checked.append(i)
+    # Prefer unchecked matches; fall back to checked ones.
+    candidates = unchecked or checked
+    if candidates:
+        return min(candidates, key=lambda idx: abs(idx - task.line_number))
 
     raise IndexError(
         f"Task not found: line {task.line_number} stale and no text match for '{task.text}'"

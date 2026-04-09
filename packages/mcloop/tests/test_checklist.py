@@ -1074,6 +1074,77 @@ def test_fallback_raises_when_no_match_with_validation(tmp_path):
         _find_task_line(lines, fake)
 
 
+def test_fallback_nearest_match_check_off(tmp_path):
+    """Fallback picks the match nearest to the original line_number, not the first."""
+    from mcloop.checklist import Task as CTask
+    from mcloop.checklist import _find_task_line
+
+    # 5 identical Deploys after 10 header lines (candidates at lines 10-14)
+    content = "# H\n" * 10 + "- [ ] Deploy\n" * 5
+    f = tmp_path / "tasks.md"
+    f.write_text(content)
+    lines = f.read_text().splitlines()
+
+    # Stale line_number=13: nearest candidate should be line 13, not line 10 (first)
+    task = CTask(
+        text="Deploy",
+        checked=False,
+        failed=False,
+        line_number=13,
+        indent_level=0,
+        stage="",
+    )
+    result = _find_task_line(lines, task)
+    assert result == 13
+
+
+def test_fallback_nearest_match_not_first(tmp_path):
+    """When the nearest match is not the first candidate, it is still chosen."""
+    from mcloop.checklist import Task as CTask
+    from mcloop.checklist import _find_task_line
+
+    # 3 identical tasks with headers shifting them
+    content = "- [x] Done\n- [ ] Work\n- [x] Done\n- [ ] Work\n- [x] Done\n- [ ] Work\n"
+    f = tmp_path / "plan.md"
+    f.write_text(content)
+    lines = content.splitlines()
+
+    # Target the last "Work" (originally at line 5), stale line_number=50
+    fake = CTask(
+        text="Work",
+        checked=False,
+        failed=False,
+        line_number=50,  # stale, far past end
+        indent_level=0,
+        stage="",
+    )
+    result = _find_task_line(lines, fake)
+    # Unchecked "Work" at lines 1, 3, 5. Nearest to 50 is 5.
+    assert result == 5
+
+
+def test_fallback_nearest_checked_when_no_unchecked(tmp_path):
+    """When all matches are checked, nearest checked match is returned."""
+    from mcloop.checklist import Task as CTask
+    from mcloop.checklist import _find_task_line
+
+    content = "- [x] Task\n- [x] Task\n- [x] Task\n"
+    f = tmp_path / "plan.md"
+    f.write_text(content)
+    lines = content.splitlines()
+
+    fake = CTask(
+        text="Task",
+        checked=False,
+        failed=False,
+        line_number=2,  # stale
+        indent_level=0,
+        stage="",
+    )
+    result = _find_task_line(lines, fake)
+    assert result == 2  # nearest checked match
+
+
 def test_auto_check_parents_duplicate_text_different_stages(tmp_path):
     """_auto_check_parents only checks off the parent whose children are all done."""
     md = """\
