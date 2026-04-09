@@ -1543,6 +1543,131 @@ def test_run_task_no_eliminated_no_block(tmp_path):
         assert "RULED OUT APPROACHES" not in prompt
 
 
+# --- prompt variant selection ---
+
+
+def test_run_task_uses_normal_prompt_without_prior_errors(tmp_path):
+    """Without prior_errors, run_task uses the normal prompt variant."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Add a feature",
+            "claude",
+            project_dir,
+            log_dir,
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "Task: Add a feature" in prompt
+        assert "Write unit tests where they make sense" in prompt
+        # Normal prompt should NOT have bug investigation framing
+        assert "BUG INVESTIGATION" not in prompt
+        assert "ERRORS FROM PREVIOUS ATTEMPT" not in prompt
+
+
+def test_run_task_uses_bug_prompt_with_prior_errors(tmp_path):
+    """With prior_errors, run_task uses the bug-investigation prompt variant."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the parser",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="TypeError: 'NoneType' is not subscriptable",
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        # Bug prompt leads with investigation framing
+        assert "BUG INVESTIGATION" in prompt
+        assert "ERRORS FROM PREVIOUS ATTEMPT" in prompt
+        assert "TypeError: 'NoneType' is not subscriptable" in prompt
+        # Bug prompt includes debugging instruction
+        assert "find and read the actual error output first" in prompt
+        # Bug prompt includes minimal-change instruction
+        assert "minimal, targeted change" in prompt
+        # Normal-only instruction should not be present
+        assert "Write unit tests where they make sense" not in prompt
+
+
+def test_bug_prompt_errors_before_task(tmp_path):
+    """In the bug prompt, errors appear before the task statement."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the parser",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="ruff check failed",
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        errors_pos = prompt.index("ERRORS FROM PREVIOUS ATTEMPT")
+        task_pos = prompt.index("Task: Fix the parser")
+        assert errors_pos < task_pos
+
+
+def test_bug_prompt_includes_shared_instructions(tmp_path):
+    """Bug prompt includes shared safety instructions (check commands, etc.)."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="test failure",
+            check_commands=["ruff check .", "pytest"],
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        # Shared instructions are present
+        assert "ABSOLUTELY FORBIDDEN" in prompt
+        assert "CHECK COMMANDS" in prompt
+        assert "mcloop:wrap" in prompt
+        assert "accessibility" in prompt.lower()
+        assert "NOTES.md" in prompt
+
+
+def test_bug_prompt_with_eliminated(tmp_path):
+    """Bug prompt includes RULED OUT APPROACHES when eliminated is provided."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="test failure",
+            eliminated=["[RULEDOUT] tried restart"],
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "RULED OUT APPROACHES" in prompt
+        assert "[RULEDOUT] tried restart" in prompt
+
+
 # --- _build_session_env ---
 
 

@@ -201,32 +201,13 @@ def _build_rtk_instruction() -> str | None:
     )
 
 
-def run_task(
+def _build_shared_parts(
     task_text: str,
-    cli: str,
-    project_dir: str | Path,
-    log_dir: str | Path,
-    description: str = "",
-    task_label: str = "",
-    model: str | None = None,
-    prior_errors: str = "",
-    session_context: str = "",
-    check_commands: list[str] | None = None,
-    allowed_tools: str | None = None,
-    eliminated: list[str] | None = None,
-) -> RunResult:
-    """Launch a CLI session to perform a task. Returns RunResult."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
+    task_label: str,
+    check_commands: list[str] | None,
+) -> list[str]:
+    """Return prompt parts shared by both normal and bug-investigation variants."""
     parts = []
-    if description:
-        parts.append(f"Project context:\n{description}")
-    if session_context:
-        parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
-    parts.append("Write unit tests where they make sense.")
     parts.append(
         "ABSOLUTELY FORBIDDEN: Do not run ANY test, lint,"
         " import check, or verification command yourself."
@@ -295,21 +276,6 @@ def run_task(
         if rtk_instruction:
             parts.append(rtk_instruction)
     parts.append(
-        "When debugging crashes or unexpected"
-        " behavior, always find and read the actual"
-        " error output first. Check crash reports"
-        " (~/Library/Logs/DiagnosticReports/ on"
-        " macOS), stderr, log files, tracebacks, core"
-        " dumps, or browser console errors. Read them"
-        " before looking at source code. Do not guess"
-        " at the cause from code inspection alone."
-        " After applying a fix, find a way to"
-        " reproduce the original failure and verify"
-        " the fix actually works. Run the app, trigger"
-        " the same condition, and confirm it no longer"
-        " crashes. Compiling is not enough."
-    )
-    parts.append(
         "Do not remove or modify code between"
         " mcloop:wrap markers (e.g. `// mcloop:wrap:begin`"
         " ... `// mcloop:wrap:end` or the Python `#`"
@@ -318,7 +284,7 @@ def run_task(
         " changes to the entry point file, work around"
         " the marked block."
     )
-    notes_instruction = (
+    parts.append(
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"
         " worth revisiting later, append a note to"
@@ -336,7 +302,6 @@ def run_task(
         " them out). Place each note under the"
         " appropriate section."
     )
-    parts.append(notes_instruction)
     parts.append(
         "When building UI (SwiftUI, HTML, React, Qt,"
         " or any other UI framework), add accessibility"
@@ -356,10 +321,26 @@ def run_task(
         " search for alternative ways to obtain it."
         " The user will install it and re-run."
     )
-    if prior_errors:
-        parts.append(
-            "IMPORTANT: A previous attempt at this task failed. Fix these errors:\n" + prior_errors
-        )
+    return parts
+
+
+def _build_normal_prompt(
+    task_text: str,
+    description: str,
+    task_label: str,
+    session_context: str,
+    check_commands: list[str] | None,
+    eliminated: list[str] | None = None,
+) -> str:
+    """Build prompt for a normal (first-attempt) task."""
+    parts = []
+    if description:
+        parts.append(f"Project context:\n{description}")
+    if session_context:
+        parts.append(f"Recent session history:\n{session_context}")
+    parts.append(f"Task: {task_text}")
+    parts.append("Write unit tests where they make sense.")
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
     if eliminated:
         elim_text = "\n".join(eliminated)
         parts.append(
@@ -370,7 +351,107 @@ def run_task(
             " approach, stop and try a fundamentally"
             " different strategy.\n" + elim_text
         )
-    prompt = "\n\n".join(parts)
+    return "\n\n".join(parts)
+
+
+def _build_bug_prompt(
+    task_text: str,
+    description: str,
+    task_label: str,
+    session_context: str,
+    check_commands: list[str] | None,
+    prior_errors: str,
+    eliminated: list[str] | None,
+) -> str:
+    """Build prompt for a bug-investigation task (prior_errors populated)."""
+    parts = []
+    if description:
+        parts.append(f"Project context:\n{description}")
+    # Lead with the failure context so the session focuses on it
+    parts.append(
+        "BUG INVESTIGATION: A previous attempt at this task"
+        " failed. Your primary goal is to diagnose and fix"
+        " the errors below. Read the error output carefully"
+        " before reading source code. Understand the root"
+        " cause before changing anything."
+    )
+    parts.append(f"ERRORS FROM PREVIOUS ATTEMPT:\n{prior_errors}")
+    if session_context:
+        parts.append(f"Recent session history:\n{session_context}")
+    parts.append(f"Task: {task_text}")
+    parts.append(
+        "When debugging crashes or unexpected"
+        " behavior, always find and read the actual"
+        " error output first. Check crash reports"
+        " (~/Library/Logs/DiagnosticReports/ on"
+        " macOS), stderr, log files, tracebacks, core"
+        " dumps, or browser console errors. Read them"
+        " before looking at source code. Do not guess"
+        " at the cause from code inspection alone."
+        " After applying a fix, find a way to"
+        " reproduce the original failure and verify"
+        " the fix actually works. Run the app, trigger"
+        " the same condition, and confirm it no longer"
+        " crashes. Compiling is not enough."
+    )
+    parts.append(
+        "Fix the bug with a minimal, targeted change."
+        " Do not refactor surrounding code. Write or"
+        " update tests to cover the failure case so"
+        " it cannot regress."
+    )
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    if eliminated:
+        elim_text = "\n".join(eliminated)
+        parts.append(
+            "RULED OUT APPROACHES: The following approaches"
+            " have already been tried for this task and"
+            " failed. Do not repeat any of them. If you"
+            " find yourself heading toward a ruled out"
+            " approach, stop and try a fundamentally"
+            " different strategy.\n" + elim_text
+        )
+    return "\n\n".join(parts)
+
+
+def run_task(
+    task_text: str,
+    cli: str,
+    project_dir: str | Path,
+    log_dir: str | Path,
+    description: str = "",
+    task_label: str = "",
+    model: str | None = None,
+    prior_errors: str = "",
+    session_context: str = "",
+    check_commands: list[str] | None = None,
+    allowed_tools: str | None = None,
+    eliminated: list[str] | None = None,
+) -> RunResult:
+    """Launch a CLI session to perform a task. Returns RunResult."""
+    project_dir = Path(project_dir)
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    if prior_errors:
+        prompt = _build_bug_prompt(
+            task_text,
+            description,
+            task_label,
+            session_context,
+            check_commands,
+            prior_errors,
+            eliminated,
+        )
+    else:
+        prompt = _build_normal_prompt(
+            task_text,
+            description,
+            task_label,
+            session_context,
+            check_commands,
+            eliminated,
+        )
     build_kwargs: dict = {"model": model}
     if allowed_tools:
         build_kwargs["allowed_tools"] = allowed_tools
