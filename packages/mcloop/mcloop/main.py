@@ -367,55 +367,38 @@ def _run_batch(
     )
     # Discard uncommitted changes from the failed batch,
     # preserving files that were dirty before the batch started.
-    if pre_batch_modified:
-        # Some tracked files were modified before the batch (e.g.
-        # checkpoint commit failed). Only revert batch-produced changes.
-        current_modified = _git(
-            ["git", "diff", "--name-only"],
-            cwd=project_dir,
-            label="batch rollback diff",
-        )
-        pre_set = set(pre_batch_modified)
-        for f in current_modified.stdout.strip().splitlines():
-            f = f.strip()
-            if f and f not in pre_set:
-                _git(
-                    ["git", "checkout", "--", f],
-                    cwd=project_dir,
-                    label=f"batch rollback {f}",
-                )
-    else:
-        _git(
-            ["git", "checkout", "."],
-            cwd=project_dir,
-            label="batch rollback",
-        )
-    clean_cmd = [
-        "git",
-        "clean",
-        "-fd",
-        "-e",
-        "*.env",
-        "-e",
-        "*.env.*",
-        "-e",
-        "*.key",
-        "-e",
-        "*.pem",
-        "-e",
-        "credentials.json",
-        "-e",
-        "secrets",
-        "-e",
-        "secrets/",
-    ]
-    for f in pre_batch_untracked:
-        clean_cmd.extend(["-e", f])
-    _git(
-        clean_cmd,
+    # Selective rollback: only revert files the batch actually touched.
+    current_modified = _git(
+        ["git", "diff", "--name-only"],
         cwd=project_dir,
-        label="batch clean",
+        label="batch rollback diff",
     )
+    pre_mod_set = set(pre_batch_modified)
+    for f in current_modified.stdout.strip().splitlines():
+        f = f.strip()
+        if f and f not in pre_mod_set:
+            _git(
+                ["git", "checkout", "--", f],
+                cwd=project_dir,
+                label=f"batch rollback {f}",
+            )
+    # Remove only new untracked files created by the batch.
+    current_untracked = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="batch rollback untracked",
+    )
+    pre_untracked_set = set(pre_batch_untracked)
+    for f in current_untracked.stdout.strip().splitlines():
+        f = f.strip()
+        if f and f not in pre_untracked_set:
+            fpath = project_dir / f
+            if fpath.is_file():
+                fpath.unlink()
+            elif fpath.is_dir():
+                import shutil
+
+                shutil.rmtree(fpath)
     return "failed"
 
 
