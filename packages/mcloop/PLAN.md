@@ -39,7 +39,7 @@ over-abstraction.
 
 
 
-- [ ] Fix review finding from commit ebe60c8e: The bug-fix loop incorrectly uses `_changed_files` to detect uncommitted changes after `run_autofix`. `_changed_files` returns only files with meaningful changes (excluding logs/, .mcloop/, PLAN.md). This means changes to those filtered files (e.g., formatting changes to PLAN.md) would not be detected, allowing the loop to proceed when it should fail. Use `_has_uncommitted_changes` (newly added) instead, which checks the entire working tree.
+- [x] Fix review finding from commit ebe60c8e: The bug-fix loop incorrectly uses `_changed_files` to detect uncommitted changes after `run_autofix`. `_changed_files` returns only files with meaningful changes (excluding logs/, .mcloop/, PLAN.md). This means changes to those filtered files (e.g., formatting changes to PLAN.md) would not be detected, allowing the loop to proceed when it should fail. Use `_has_uncommitted_changes` (newly added) instead, which checks the entire working tree.
 - [ ] Fix review finding from commit ebe60c8e: In `_run_batch`, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. `_changed_files` filters out metadata files (logs/, .mcloop/, PLAN.md). If `run_autofix` modifies PLAN.md (e.g., formatting), the change will be ignored, causing the batch to incorrectly succeed. Replace with `_has_uncommitted_changes` to catch all modifications.
 - [ ] Fix review finding from commit ebe60c8e: In the individual task loop, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. This will miss changes to filtered files (logs/, .mcloop/, PLAN.md). If auto‑formatting changes PLAN.md, the check will pass incorrectly. Use `_has_uncommitted_changes` instead.
 ## Stage 1: Core
