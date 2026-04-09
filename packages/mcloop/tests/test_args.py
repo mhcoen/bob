@@ -3601,6 +3601,7 @@ def test_run_loop_user_task_skips_claude(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
@@ -3731,6 +3732,7 @@ def test_run_loop_picks_up_user_input(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
@@ -3947,6 +3949,7 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
     ):
@@ -4038,6 +4041,7 @@ def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch("mcloop.main.get_available_cli", return_value="claude"),
@@ -4095,6 +4099,7 @@ def test_run_loop_no_fallback_without_flag(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch("mcloop.main.get_available_cli", return_value="claude"),
@@ -4156,6 +4161,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
@@ -4215,6 +4221,7 @@ def test_fallback_model_prints_message(tmp_path, capsys):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
@@ -4456,6 +4463,7 @@ def test_fallback_gets_fresh_retries(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
@@ -4523,6 +4531,7 @@ def test_fallback_resets_per_task(tmp_path):
             return_value=True,
         ),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._commit"),
         patch(
@@ -5656,6 +5665,7 @@ def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -5697,6 +5707,7 @@ def test_run_loop_bug_only_clears_errors_json(tmp_path):
         patch("mcloop.main._check_errors_json"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -5739,6 +5750,7 @@ def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
         patch("mcloop.main._check_errors_json"),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
@@ -6226,6 +6238,7 @@ def test_run_batch_combines_text(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._commit"),
@@ -6256,6 +6269,7 @@ def test_run_batch_success_checks_off_children(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._commit"),
@@ -6310,6 +6324,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
@@ -6648,6 +6663,116 @@ def test_checker_introduced_changes_to_filtered_file_detected(tmp_path):
     mock_commit.assert_not_called()
 
 
+# ── Autofix metadata-only changes detection ──
+
+
+def test_run_batch_autofix_metadata_only_fails(tmp_path):
+    """_run_batch fails when autofix modifies only metadata files (e.g. PLAN.md).
+
+    _changed_files filters out metadata files, so if autofix modifies PLAN.md
+    the change would be invisible. _has_uncommitted_changes catches this.
+    """
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=([], [])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=True),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._git", return_value=MagicMock(returncode=0, stdout="")),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        result = _run_batch(**args)
+
+        assert result == "failed"
+        mock_commit.assert_not_called()
+        # Checks should not have been run since we bail early
+        mock_checks.assert_not_called()
+
+
+def test_run_batch_autofix_no_uncommitted_succeeds(tmp_path):
+    """_run_batch proceeds normally when _changed_files is empty and no uncommitted changes."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=([], [])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main.run_checks") as mock_checks,
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        result = _run_batch(**args)
+
+        # No meaningful changes path: auto-success if checks pass
+        assert result == "success"
+
+
+def test_individual_task_autofix_metadata_only_retries(tmp_path):
+    """Individual task loop retries when autofix modifies only metadata files.
+
+    Same bug as _run_batch: _changed_files filters metadata, so autofix
+    changes to PLAN.md would be invisible without _has_uncommitted_changes.
+    """
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    call_count = 0
+
+    def fake_find_next(tasks):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return tasks[0] if tasks else None
+        return None
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=True),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.find_next", side_effect=fake_find_next),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        mock_checks.return_value = MagicMock(passed=True)
+
+        run_loop(plan, no_audit=True)
+
+    # Commit should NOT have been called because autofix modified metadata-only
+    mock_commit.assert_not_called()
+
+
 # ── Batch rollback with pre-batch dirty state ──
 
 
@@ -6679,6 +6804,7 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
@@ -6719,6 +6845,7 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
@@ -6754,6 +6881,7 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
@@ -6802,6 +6930,7 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
@@ -6857,6 +6986,7 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
@@ -6903,6 +7033,7 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
@@ -6959,6 +7090,7 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
         patch("mcloop.main.run_task") as mock_run,
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),

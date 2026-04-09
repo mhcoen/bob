@@ -54,6 +54,7 @@ from mcloop.git_ops import (
     _ensure_git,
     _git,
     _has_meaningful_changes,
+    _has_uncommitted_changes,
     _push_or_die,
     _snapshot_worktree,
     _worktree_status,
@@ -350,6 +351,12 @@ def _run_batch(
     _lifecycle._current_phase = "checks"
     run_autofix(project_dir)
     changed_files = _changed_files(project_dir)
+    if not changed_files and _has_uncommitted_changes(project_dir):
+        print(
+            formatting.error_msg("Batch: autofix modified metadata-only files"),
+            flush=True,
+        )
+        return "failed"
     pre_check_status = _worktree_status(project_dir)
     check_result = run_checks(
         project_dir,
@@ -870,6 +877,16 @@ def run_loop(
                 _lifecycle._current_phase = "checks"
                 run_autofix(project_dir)
                 changed_files = _changed_files(project_dir)
+                if not changed_files and _has_uncommitted_changes(project_dir):
+                    last_error = "Autofix modified metadata-only files"
+                    print(
+                        formatting.error_msg(
+                            f"Autofix modified metadata-only files"
+                            f" (attempt {attempt}/{max_retries})"
+                        ),
+                        flush=True,
+                    )
+                    continue
                 pre_check_status = _worktree_status(project_dir)
                 check_result = run_checks(
                     project_dir,
