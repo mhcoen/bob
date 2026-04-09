@@ -109,9 +109,9 @@ def test_stub_creates_file_and_checks_off_task(tmp_path):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert (tmp_path / "hello.txt").exists()
     assert (tmp_path / "hello.txt").read_text() == "hello from stub\n"
 
@@ -155,9 +155,9 @@ def test_stub_failing_task_retried_and_marked_failed(tmp_path):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+            result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [!] Impossible task" in content
 
@@ -217,9 +217,9 @@ def test_stub_check_failure_retries_with_prior_errors(tmp_path):
 
     with patch("mcloop.runner._build_command", tracking_build):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=3, no_audit=True)
+            result = run_loop(plan_md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [x] Create widget" in content
 
@@ -274,9 +274,9 @@ def test_stub_rate_limit_triggers_pause_and_retry(tmp_path):
                     "mcloop.main.wait_for_reset",
                     return_value="claude",
                 ):
-                    stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+                    result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [x] Create output file" in content
     # Rate limit attempt should not count, so we should have seen at least 2 calls
@@ -326,9 +326,9 @@ def test_stub_session_limit_triggers_polling(tmp_path):
                 side_effect=fake_is_session_limited,
             ):
                 with patch("mcloop.main.SESSION_LIMIT_POLL", 0):
-                    stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+                    result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [x] Create result file" in content
     assert call_count >= 2
@@ -373,9 +373,9 @@ def test_stub_batch_runs_one_session_checks_off_all(tmp_path):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert (tmp_path / "part_a.txt").read_text() == "a\n"
     assert (tmp_path / "part_b.txt").read_text() == "b\n"
     assert (tmp_path / "part_c.txt").read_text() == "c\n"
@@ -449,9 +449,9 @@ def test_stub_batch_failure_falls_back_to_individual(tmp_path):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert (tmp_path / "alpha.txt").read_text() == "a\n"
     assert (tmp_path / "beta.txt").read_text() == "b\n"
 
@@ -488,9 +488,9 @@ def test_stub_no_file_changes_checks_pass_auto_checked(tmp_path):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [x] Verify everything works" in content
 
@@ -543,13 +543,13 @@ def test_stub_reviewer_spawned_after_commit(tmp_path):
                         "mcloop.main._spawn_reviewer",
                         side_effect=fake_spawn_reviewer,
                     ):
-                        stuck = run_loop(
+                        result = run_loop(
                             plan_md,
                             max_retries=1,
                             no_audit=True,
                         )
 
-    assert stuck == []
+    assert result.ok
     content = plan_md.read_text()
     assert "- [x] Add feature" in content
 
@@ -593,9 +593,9 @@ def test_stub_stage_boundary_full_suite(tmp_path, capsys):
         _make_stub_build_command(scenario_path),
     ):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
 
     content = plan_md.read_text()
     # Stage 1 task checked off
@@ -650,10 +650,10 @@ def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
 
     with patch("mcloop.runner._build_command", tracking_build):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+            result = run_loop(plan_md, max_retries=2, no_audit=True)
 
     # Task failed (exhausted retries)
-    assert stuck == []
+    assert result.ok
 
     # hello.txt was created (task succeeds) but goodbye.txt never exists
     assert (tmp_path / "hello.txt").exists()

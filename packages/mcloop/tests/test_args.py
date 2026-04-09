@@ -53,9 +53,11 @@ from mcloop.investigate_cmd import (
 )
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
+    RunStatus,
     _all_tasks,
     _check_interrupted,
     _check_user_input,
+    _main,
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
@@ -4152,7 +4154,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=2,
             model="opus",
@@ -4160,7 +4162,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == []
+    assert result.ok
     # First 2 attempts used primary, third used fallback
     assert models_used[0] == "opus"
     assert models_used[1] == "opus"
@@ -4252,7 +4254,7 @@ def test_fallback_model_also_exhausted(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=2,
             model="opus",
@@ -4260,7 +4262,7 @@ def test_fallback_model_also_exhausted(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == []
+    assert not result.ok
     # 2 primary + 2 fallback = 4 total attempts
     assert len(models_used) == 4
     assert models_used[:2] == ["opus", "opus"]
@@ -4337,14 +4339,14 @@ def test_no_fallback_retry_without_flag(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=2,
             model="opus",
             no_audit=True,
         )
 
-    assert stuck == []
+    assert not result.ok
     # Only 2 attempts, no fallback
     assert len(models_used) == 2
     assert models_used == ["opus", "opus"]
@@ -4380,7 +4382,7 @@ def test_fallback_same_as_primary_skips_fallback(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=2,
             model="opus",
@@ -4388,7 +4390,7 @@ def test_fallback_same_as_primary_skips_fallback(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == []
+    assert not result.ok
     # Same model as fallback: only 2 attempts, not 4
     assert len(models_used) == 2
     assert models_used == ["opus", "opus"]
@@ -4450,7 +4452,7 @@ def test_fallback_gets_fresh_retries(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=3,
             model="opus",
@@ -4458,7 +4460,7 @@ def test_fallback_gets_fresh_retries(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == []
+    assert result.ok
     # 3 primary + 3 fallback = 6 total, fallback succeeded on 3rd try
     assert len(models_used) == 6
     assert models_used[:3] == ["opus", "opus", "opus"]
@@ -4516,7 +4518,7 @@ def test_fallback_resets_per_task(tmp_path):
             return_value="claude",
         ),
     ):
-        stuck = run_loop(
+        result = run_loop(
             plan,
             max_retries=2,
             model="opus",
@@ -4524,7 +4526,7 @@ def test_fallback_resets_per_task(tmp_path):
             no_audit=True,
         )
 
-    assert stuck == []
+    assert result.ok
     # Task 1: opus, opus (fail), sonnet (succeed)
     # Task 2: should start with opus again
     assert models_used[0] == "opus"
@@ -5577,7 +5579,7 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
         patch("mcloop.main._launch_app_verification", return_value=None),
     ):
-        stuck = run_loop(plan)
+        result = run_loop(plan)
 
     mock_audit.assert_not_called()
     # The feature task should NOT have been worked on
@@ -5586,19 +5588,19 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
     tasks = cl_parse(plan)
     feature = [t for t in tasks if t.stage != "Bugs"][0]
     assert not feature.checked
-    assert stuck == []
+    assert result.ok
 
 
 def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
-    """Bug-only mode: returns stuck bugs when fix fails."""
+    """Bug-only mode: returns failure when fix fails."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
 
-    result = MagicMock()
-    result.success = False
-    result.output = "error"
-    result.exit_code = 1
+    mock_result = MagicMock()
+    mock_result.success = False
+    mock_result.output = "error"
+    mock_result.exit_code = 1
 
     with (
         patch("mcloop.main._checkpoint"),
@@ -5606,15 +5608,15 @@ def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main._check_user_input", return_value=None),
-        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_task", return_value=mock_result),
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
         patch("mcloop.main._launch_app_verification") as mock_verify,
     ):
-        stuck = run_loop(plan)
+        result = run_loop(plan)
 
-    # Task fails all retries → returns empty (failed is not stuck)
-    assert stuck == []
+    # Task fails all retries → failure status
+    assert not result.ok
     mock_verify.assert_not_called()
 
 
@@ -7614,3 +7616,129 @@ def test_full_suite_pass_at_end_of_run_proceeds_normally(tmp_path, capsys):
     mock_summary.assert_called_once()
     captured = capsys.readouterr()
     assert "Full test suite passed" in captured.out
+
+
+# --- RunStatus and _main() exit code ---
+
+
+def test_run_status_ok_property():
+    """RunStatus.ok is True only for success status."""
+    assert RunStatus("success").ok is True
+    assert RunStatus("failure").ok is False
+    assert RunStatus("interrupted").ok is False
+
+
+def test_run_status_with_stuck_and_detail():
+    """RunStatus stores stuck tasks and detail."""
+    s = RunStatus("failure", stuck=["task A"], detail="something broke")
+    assert s.stuck == ["task A"]
+    assert s.detail == "something broke"
+    assert not s.ok
+
+
+def test_main_exits_nonzero_on_failure(tmp_path):
+    """_main() calls sys.exit(1) when run_loop returns failure."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+
+    failure = RunStatus("failure", detail="Task failed")
+    with (
+        patch("mcloop.main._parse_args") as mock_args,
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.run_loop", return_value=failure),
+    ):
+        mock_args.return_value = MagicMock(
+            file=str(plan),
+            command=None,
+            dry_run=False,
+            max_retries=3,
+            cli=None,
+            model=None,
+            fallback_model=None,
+            no_audit=False,
+            reviewer=False,
+            allow_web_tools=False,
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _main()
+    assert exc_info.value.code == 1
+
+
+def test_main_exits_zero_on_success(tmp_path):
+    """_main() does not call sys.exit when run_loop returns success."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+
+    success = RunStatus("success")
+    with (
+        patch("mcloop.main._parse_args") as mock_args,
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.run_loop", return_value=success),
+    ):
+        mock_args.return_value = MagicMock(
+            file=str(plan),
+            command=None,
+            dry_run=False,
+            max_retries=3,
+            cli=None,
+            model=None,
+            fallback_model=None,
+            no_audit=False,
+            reviewer=False,
+            allow_web_tools=False,
+        )
+        # Should not raise SystemExit
+        _main()
+
+
+def test_run_loop_failure_returns_failure_status(tmp_path):
+    """run_loop returns failure status when a task exhausts retries."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Do something\n")
+    (tmp_path / ".git").mkdir()
+
+    mock_result = MagicMock()
+    mock_result.success = False
+    mock_result.output = "error output"
+    mock_result.exit_code = 1
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=mock_result),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, max_retries=1, no_audit=True)
+
+    assert result.status == "failure"
+    assert not result.ok
+    assert "Do something" in result.detail
+
+
+def test_run_loop_success_returns_success_status(tmp_path):
+    """run_loop returns success status when all tasks complete."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\nNo tasks.\n")
+    (tmp_path / ".git").mkdir()
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, no_audit=True)
+
+    assert result.status == "success"
+    assert result.ok

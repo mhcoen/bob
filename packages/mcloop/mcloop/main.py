@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import select
 import shlex
 import subprocess
@@ -110,6 +111,26 @@ from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
 
 
+@dataclasses.dataclass(frozen=True)
+class RunStatus:
+    """Structured result from run_loop().
+
+    status: "success" when all tasks completed and checks passed,
+            "failure" when a task failed or checks failed,
+            "interrupted" when the user interrupted the run.
+    stuck:  list of task texts that could not be completed.
+    detail: optional description of why the run ended.
+    """
+
+    status: str  # "success", "failure", or "interrupted"
+    stuck: list[str] = dataclasses.field(default_factory=list)
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "success"
+
+
 def main() -> None:
     import atexit
 
@@ -164,7 +185,7 @@ def _main() -> None:
     # Resolve CLI: command line overrides config, default is claude
     cli = args.cli or _load_mcloop_config().get("cli", "claude")
 
-    run_loop(
+    result = run_loop(
         checklist_path,
         max_retries=args.max_retries,
         cli=cli,
@@ -174,6 +195,8 @@ def _main() -> None:
         allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
         enable_reviewer=args.reviewer,
     )
+    if not result.ok:
+        sys.exit(1)
 
 
 def _run_batch(
@@ -411,8 +434,8 @@ def run_loop(
     no_audit: bool = False,
     allowed_tools: str | None = None,
     enable_reviewer: bool = False,
-) -> list[str]:
-    """Run the main loop. Returns list of stuck task texts."""
+) -> RunStatus:
+    """Run the main loop. Returns a RunStatus indicating outcome."""
     import mcloop.runner as _runner
 
     register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
@@ -425,7 +448,7 @@ def run_loop(
     # Check for interrupted state from a previous Ctrl-C
     interrupt_action = _check_interrupted(project_dir, checklist_path)
     if interrupt_action == "quit":
-        return []
+        return RunStatus("interrupted", detail="User quit at interrupt prompt")
 
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
@@ -439,7 +462,7 @@ def run_loop(
 
     # Check for crash errors from previous runs
     if not _check_errors_json(project_dir, model=model):
-        return []
+        return RunStatus("failure", detail="Unresolved errors from previous run")
 
     # Reviewer integration: enabled by "enabled": true in config
     # OR by --reviewer flag on the command line
@@ -544,7 +567,7 @@ def run_loop(
                 project_dir,
                 notes_snapshot,
             )
-            return []
+            return RunStatus("failure", detail=f"Previously failed task: {failed.text}")
 
         if active_stage_at_start is not None:
             now_stage = current_stage(tasks)
@@ -732,7 +755,11 @@ def run_loop(
                             notes_snapshot,
                         )
                         print("\nExiting.", flush=True)
-                        return [task.text]
+                        return RunStatus(
+                            "interrupted",
+                            stuck=[task.text],
+                            detail="User interrupted during session limit wait",
+                        )
                     # Don't count as a real attempt
                     attempt -= 1
                     continue
@@ -852,7 +879,10 @@ def run_loop(
                             project_dir,
                             notes_snapshot,
                         )
-                        sys.exit(1)
+                        return RunStatus(
+                            "failure",
+                            detail=f"Commit failed: {exc}",
+                        )
                     if reviewer_config:
                         _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
@@ -911,7 +941,7 @@ def run_loop(
                 project_dir,
                 notes_snapshot,
             )
-            return []
+            return RunStatus("failure", detail=f"Task failed: {task.text}")
 
     # Bug-only mode: verify the fix by launching the app, then exit.
     # Skip stage transitions, audit cycle, and build.
@@ -961,9 +991,10 @@ def run_loop(
         ]
         if stuck:
             notify(f"Bug-only mode: {len(stuck)} bug(s) could not be fixed", level="error")
+            return RunStatus("failure", stuck=stuck, detail="Bug-only mode: unfixed bugs remain")
         else:
             notify("Bug-only mode: all bugs fixed")
-        return stuck
+            return RunStatus("success")
 
     # Check if we stopped at a stage boundary
     final_tasks = parse(checklist_path)
@@ -1000,7 +1031,10 @@ def run_loop(
                 f" at stage boundary ({full_check.command})",
                 level="error",
             )
-            return []
+            return RunStatus(
+                "failure",
+                detail=f"Full suite failed at stage boundary: {full_check.command}",
+            )
         else:
             print(
                 formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
@@ -1022,7 +1056,7 @@ def run_loop(
         if next_stg:
             msg += f" Run mcloop again to start {next_stg}."
         notify(msg)
-        return []
+        return RunStatus("success")
 
     # Full test suite at end of run
     print(formatting.system_msg("Running full test suite (end of run)..."), flush=True)
@@ -1051,7 +1085,10 @@ def run_loop(
             f"Run ended with red repo: full suite failed at end of run ({full_check.command})",
             level="error",
         )
-        return []
+        return RunStatus(
+            "failure",
+            detail=f"Full suite failed at end of run: {full_check.command}",
+        )
 
     print(formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"), flush=True)
 
@@ -1098,7 +1135,7 @@ def run_loop(
         notes_snapshot,
     )
     notify("All tasks completed!")
-    return []
+    return RunStatus("success")
 
 
 def _parse_args() -> argparse.Namespace:

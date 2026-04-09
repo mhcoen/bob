@@ -71,9 +71,9 @@ def test_children_execute_before_parent(tmp_path):
 
     with patch("mcloop.main.run_task", fake_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == [], f"Expected no stuck tasks, got: {stuck}"
+    assert result.ok, f"Expected success, got: {result}"
 
     # Children must run; parent must NOT be passed to run_task (it's auto-checked)
     assert execution_order == ["Child A", "Child B"], (
@@ -97,9 +97,9 @@ def test_parent_auto_checked_after_all_children_complete(tmp_path):
 
     with patch("mcloop.main.run_task", fake_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert "Feature" not in execution_order, "Parent should not be passed to run_task"
     assert execution_order == ["Step 1", "Step 2", "Step 3"]
 
@@ -118,9 +118,9 @@ def test_deep_nesting_runs_depth_first(tmp_path):
 
     with patch("mcloop.main.run_task", fake_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert execution_order == ["Grandchild"], (
         f"Only the leaf should be executed; got: {execution_order}"
     )
@@ -142,9 +142,9 @@ def test_mixed_parent_and_leaf_tasks_ordered_correctly(tmp_path):
 
     with patch("mcloop.main.run_task", fake_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert execution_order == ["Standalone task", "Sub A", "Sub B"], (
         f"Expected standalone then children, got: {execution_order}"
     )

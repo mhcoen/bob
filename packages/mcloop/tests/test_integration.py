@@ -61,9 +61,9 @@ def test_full_cycle_two_tasks(
     md = _make_project(tmp_path, "- [ ] Task one\n- [ ] Task two\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, no_audit=True)
+    result = run_loop(md, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
     assert mock_commit.call_count == 2
 
@@ -93,9 +93,9 @@ def test_nested_subtasks(
     )
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, no_audit=True)
+    result = run_loop(md, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
     content = md.read_text()
     assert "- [ ]" not in content
@@ -119,9 +119,9 @@ def test_retry_then_succeed(
     md = _make_project(tmp_path, "- [ ] Flaky task\n")
     mock_run.side_effect = [_fail_run_result(), _ok_run_result()]
 
-    stuck = run_loop(md, max_retries=3, no_audit=True)
+    result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
     content = md.read_text()
     assert "- [x] Flaky task" in content
@@ -150,9 +150,9 @@ def test_checks_fail_then_pass(
         CheckResult(passed=True, output="ok", command="ruff check ."),  # end-of-run full suite
     ]
 
-    stuck = run_loop(md, max_retries=3, no_audit=True)
+    result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
     assert mock_checks.call_count == 3
 
@@ -174,9 +174,9 @@ def test_max_retries_exhausted_stops_loop(
     md = _make_project(tmp_path, "- [ ] Hopeless task\n- [ ] Next task\n")
     mock_run.return_value = _fail_run_result()
 
-    stuck = run_loop(md, max_retries=3)
+    result = run_loop(md, max_retries=3)
 
-    assert stuck == []
+    assert not result.ok
     assert mock_run.call_count == 3
     content = md.read_text()
     assert "- [!] Hopeless task" in content
@@ -205,9 +205,9 @@ def test_rate_limit_notifies(
     ]
 
     with patch("mcloop.main.wait_for_reset", return_value="claude"):
-        stuck = run_loop(md, max_retries=3, no_audit=True)
+        result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
 
     # Rate-limit warning + all done (no per-task completion notification)
@@ -242,9 +242,9 @@ def test_session_limit_polls_then_retries(
         _ok_run_result(),
     ]
 
-    stuck = run_loop(md, max_retries=3, no_audit=True)
+    result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 2
     mock_sleep.assert_called_once_with(600)
 
@@ -268,9 +268,9 @@ def test_skips_already_checked_no_extra_notifications(
     md = _make_project(tmp_path, "- [x] Done already\n- [ ] Still todo\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, no_audit=True)
+    result = run_loop(md, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 1
 
     # Only "All tasks completed" — no per-task notifications
@@ -295,9 +295,9 @@ def test_noop_task_checks_fail_treated_as_failure(
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, max_retries=3)
+    result = run_loop(md, max_retries=3)
 
-    assert stuck == []
+    assert not result.ok
     # No-op + checks fail is a terminal failure (no retry)
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
@@ -324,9 +324,9 @@ def test_noop_task_checks_pass_auto_checks(
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, max_retries=3, no_audit=True)
+    result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     # run_checks called once for no-changes path + once for end-of-run full suite
@@ -355,9 +355,9 @@ def test_noop_then_checks_fail_is_terminal(
         patch("mcloop.main._has_meaningful_changes", return_value=False),
         patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL),
     ):
-        stuck = run_loop(md, max_retries=3, no_audit=True)
+        result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = md.read_text()
@@ -381,9 +381,9 @@ def test_noop_with_max_retries_one(
     md = _make_project(tmp_path, "- [ ] One-shot task\n")
     mock_run.return_value = _ok_run_result()
 
-    stuck = run_loop(md, max_retries=1)
+    result = run_loop(md, max_retries=1)
 
-    assert stuck == []
+    assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = md.read_text()
@@ -531,9 +531,9 @@ def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock
     """All items already checked, loop exits immediately."""
     md = _make_project(tmp_path, "- [x] Done\n- [x] Also done\n")
 
-    stuck = run_loop(md, no_audit=True)
+    result = run_loop(md, no_audit=True)
 
-    assert stuck == []
+    assert result.ok
     assert mock_run.call_count == 0
 
     # Only the final "all done" notification

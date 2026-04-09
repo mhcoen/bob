@@ -99,9 +99,9 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
     # Second run: should complete tasks 2 and 3 only
     with patch("mcloop.main.run_task", tracking_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == [], f"Expected no stuck tasks on restart, got: {stuck}"
+    assert result.ok, f"Expected success on restart, got: {result}"
     assert second_run_tasks == ["Create beta.txt", "Create gamma.txt"], (
         f"Restart should only run unchecked tasks, got: {second_run_tasks}"
     )

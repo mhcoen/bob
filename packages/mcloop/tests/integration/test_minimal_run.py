@@ -60,9 +60,9 @@ def test_minimal_run_file_created_task_checked_off_commit_made(tmp_path):
 
     with patch("mcloop.main.run_task", fake_run_task):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert stuck == [], f"Expected no stuck tasks, got: {stuck}"
+    assert result.ok, f"Expected success, got: {result}"
     assert output_file.exists(), "hello.txt should have been created by the task"
     assert output_file.read_text() == "hello from task\n"
 

@@ -63,9 +63,9 @@ def test_task_marked_failed_after_max_retries(tmp_path):
 
     with patch("mcloop.main.run_task", always_fail):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=3, no_audit=True)
+            result = run_loop(plan_md, max_retries=3, no_audit=True)
 
-    assert stuck == []
+    assert not result.ok
     assert attempt_count[0] == 3, f"Expected 3 attempts, got {attempt_count[0]}"
 
     content = plan_md.read_text()
@@ -101,9 +101,9 @@ def test_loop_stops_after_failed_task_leaving_subsequent_tasks_unchecked(tmp_pat
 
     with patch("mcloop.main.run_task", selective_fail):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+            result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == []
+    assert not result.ok
     assert "Should not run" not in tasks_attempted, (
         f"Loop should stop after first failed task; tasks run: {tasks_attempted}"
     )
@@ -148,9 +148,9 @@ def test_task_succeeds_on_final_retry(tmp_path):
 
     with patch("mcloop.main.run_task", fail_twice_then_succeed):
         with patch("mcloop.main.notify"):
-            stuck = run_loop(plan_md, max_retries=3, no_audit=True)
+            result = run_loop(plan_md, max_retries=3, no_audit=True)
 
-    assert stuck == [], f"Expected task to succeed on third attempt, got stuck: {stuck}"
+    assert result.ok, f"Expected success on third attempt, got: {result}"
     assert attempt_count[0] == 3
 
     content = plan_md.read_text()

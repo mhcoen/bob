@@ -61,9 +61,9 @@ def test_real_claude_creates_file_and_commits(tmp_path):
     )
 
     with patch("mcloop.main.notify"):
-        stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+        result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert stuck == [], f"Task got stuck: {stuck}"
+    assert result.ok, f"Expected success, got: {result}"
 
     # File was created with expected content
     hello = tmp_path / "hello.txt"
@@ -96,9 +96,9 @@ def test_real_codex_creates_file_and_commits(tmp_path):
     )
 
     with patch("mcloop.main.notify"):
-        stuck = run_loop(plan_md, max_retries=2, no_audit=True, cli="codex")
+        result = run_loop(plan_md, max_retries=2, no_audit=True, cli="codex")
 
-    assert stuck == [], f"Task got stuck: {stuck}"
+    assert result.ok, f"Expected success, got: {result}"
 
     # File was created with expected content
     hello = tmp_path / "hello.txt"
@@ -132,10 +132,10 @@ def test_real_claude_check_failure_retries_and_fails(tmp_path):
     )
 
     with patch("mcloop.main.notify"):
-        stuck = run_loop(plan_md, max_retries=2, no_audit=True)
+        result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    # Task failed (exhausted retries), not returned as stuck
-    assert stuck == [], f"Expected empty (failed task is not stuck), got: {stuck}"
+    # Task failed (exhausted retries) → failure status
+    assert not result.ok, f"Expected failure, got: {result}"
 
     # hello.txt was created by Claude (task itself succeeds)
     hello = tmp_path / "hello.txt"
