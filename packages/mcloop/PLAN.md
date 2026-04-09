@@ -42,7 +42,7 @@ over-abstraction.
    - [x] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
 
 - [ ] CLAUDE.md freshness gate accepts non-root paths (claude_md_check.py:89-97)
-   - [ ] Change the path check to require the repo-relative path to be exactly CLAUDE.md (not docs/CLAUDE.md or subdir/CLAUDE.md)
+   - [x] Change the path check to require the repo-relative path to be exactly CLAUDE.md (not docs/CLAUDE.md or subdir/CLAUDE.md)
    - [ ] Fix the test at tests/test_claude_md_check.py:166-170 that blesses the current (wrong) behavior
    - [ ] Add a test: docs/CLAUDE.md does not satisfy the freshness gate, repo-root CLAUDE.md does
 
