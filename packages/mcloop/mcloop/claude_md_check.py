@@ -201,7 +201,7 @@ def auto_update_claude_md(project_dir: Path) -> bool:
 
     try:
         content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, TypeError):
         print("  CLAUDE.md auto-update: no content in response", flush=True)
         return False
 

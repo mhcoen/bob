@@ -168,7 +168,7 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
                 lines = lines[:-1]
             content = "\n".join(lines)
         raw = json.loads(content)
-    except (KeyError, IndexError, json.JSONDecodeError):
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
         return []
 
     if not isinstance(raw, list):

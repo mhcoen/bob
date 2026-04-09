@@ -177,7 +177,7 @@ def main() -> None:
     # Show raw response content
     try:
         content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, TypeError):
         print(f"Unexpected response structure: {json.dumps(body)[:500]}")
         return
 
@@ -192,7 +192,7 @@ def main() -> None:
         reasoning = body["choices"][0]["message"].get("reasoning_details")
         if reasoning:
             print(f"Reasoning details present ({len(str(reasoning))} chars)")
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, TypeError):
         pass
 
     # Parse the response we already have (no second API call)

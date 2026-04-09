@@ -218,6 +218,26 @@ def test_run_review_non_list_response():
         assert run_review(request, config) == []
 
 
+def test_run_review_none_message_typeerror():
+    """TypeError is caught when response contains None in the chain."""
+    api_response = json.dumps({"choices": [{"message": None}]}).encode()
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = api_response
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    request = ReviewRequest("abc", "diff", "desc", "1", "task")
+    config = {
+        "api_key": "sk-test",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    }
+
+    with patch("mcloop.reviewer.urllib.request.urlopen", return_value=mock_resp):
+        assert run_review(request, config) == []
+
+
 def test_run_review_custom_base_url_and_model():
     api_response = json.dumps({"choices": [{"message": {"content": "[]"}}]}).encode()
 
