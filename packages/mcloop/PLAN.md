@@ -13,55 +13,19 @@ over-abstraction.
 
 ## Bugs
 
-- [x] Stale PID reuse can kill unrelated processes (lifecycle.py:243-275)
-   - [x] Extend .mcloop/active-pid format to include command line and start time alongside pid and pgid
-   - [x] In _kill_orphan_sessions, read the stored metadata and verify it matches the live process via ps -p {pid} -o command= before issuing SIGKILL (do not use /proc, which does not exist on macOS)
-   - [x] If verification fails, delete the stale pid file and print a warning instead of killing
-   - [x] Update _record_active_pid (or wherever the pid file is written) to write the new format
-   - [x] Add tests: stale pid file with reused PID is not killed, valid pid file with matching process is killed, missing pid file is a no-op
+- [ ] _main() exits 0 on red repo (main.py:167-176)
+   - [ ] Make run_loop() return a structured status indicating success, failure, or terminal error
+   - [ ] In _main(), check the return value and sys.exit(1) when run_loop() reports terminal failure (full-suite failure, stuck task, etc.)
+   - [ ] Add tests: run_loop returning failure status causes _main() to exit nonzero, run_loop returning success causes exit 0
 
-- [x] Full-suite failure at stage boundary still reports success (main.py:965-1062)
-   - [x] After full-suite check failure at a stage boundary or end-of-run, skip _run_build(), skip audit, skip stage-complete and all-done notifications
-   - [x] Send an explicit failure notification instead (distinct from per-task failure) so the user knows the run ended with a red repo
-   - [x] Add tests: full-suite failure at stage boundary skips build/audit/notifications and sends failure notification, full-suite pass proceeds normally
+- [ ] Orphan kill falls back to killing blindly when ps verification fails (lifecycle.py:275-297)
+   - [ ] When verification metadata exists but ps fails or times out, remove the stale pid file and print a warning instead of killing
+   - [ ] Only kill when verification positively confirms the process matches the stored metadata
+   - [ ] Add tests: ps failure with existing metadata results in warning and pid file removal (not kill), ps success with matching metadata results in kill
 
-- [x] Task identity uses first text match, can mutate wrong checkbox (checklist.py:326-407)
-   - [x] Change check_off() and mark_failed() to identify tasks by line_number as the primary key, not by first text match
-   - [x] Fall back to text matching only when line_number is unavailable or stale (e.g. file was edited externally), with validation that indent_level and stage also match
-   - [x] Fix _auto_check_parents() at checklist.py:520-538 to use the same line_number-based identity
-   - [x] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
-
-- [x] Batch collection does not stop at failed siblings (checklist.py:443-457)
-   - [x] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
-   - [x] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
-   - [x] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
-
-- [x] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
-   - [x] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
-   - [x] On rollback, restore only the snapshotted files via git checkout -- {files} and rm for the new untracked files, instead of git checkout . && git clean -fd
-   - [x] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
-
-- [x] CLAUDE.md freshness gate accepts non-root paths (claude_md_check.py:89-97)
-   - [x] Change the path check to require the repo-relative path to be exactly CLAUDE.md (not docs/CLAUDE.md or subdir/CLAUDE.md)
-   - [x] Fix the test at tests/test_claude_md_check.py:166-170 that blesses the current (wrong) behavior
-   - [x] Add a test: docs/CLAUDE.md does not satisfy the freshness gate, repo-root CLAUDE.md does
-
-- [x] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
-   - [x] Add TypeError to the except clause alongside KeyError and IndexError
-   - [x] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
-   - [x] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
-
-- [x] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
-   - [x] Split the prompt template into a normal-task variant and a bug-investigation variant, selected based on whether prior_errors is populated
-   - [x] In the normal-task variant, remove the "run the app and reproduce" instruction
-   - [x] In the bug-investigation variant, remove the "only run exact check commands" instruction
-   - [x] Normalize pytest invocation at command-generation time (always emit pytest, never python -m pytest) so the prompt does not need a conflicting natural-language override
-   - [x] Add tests: normal task prompt does not contain reproduction language, bug-investigation prompt does not contain "only run exact check commands"
-
-- [ ] CLAUDE.md manifest is stale and contains a duplicated architecture block (CLAUDE.md:69-209, 653-690)
-   - [x] Regenerate the architecture section from the current module tree (include gather.py, sync_cmd.py, prompts.py, worktree.py, and any other modules added since the last update)
-   - [x] Remove the duplicated architecture block at lines 653-690
-   - [ ] Remove references to runner internals that no longer exist
+- [ ] Stale-line fallback in check_off/mark_failed is still ambiguous with duplicate text at same indent and stage (checklist.py:350-376)
+   - [ ] On fallback (line_number stale), choose the nearest valid match to the original line_number rather than the first match
+   - [ ] Add tests: PLAN.md with two identical tasks at same indent/stage, file shifted by inserted lines, check_off targets the one closest to the original line_number
 
 
 ## Stage 1: Core
