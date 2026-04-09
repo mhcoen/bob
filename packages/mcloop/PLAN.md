@@ -24,7 +24,7 @@ over-abstraction.
    - [x] Add tests: ps failure with existing metadata results in warning and pid file removal (not kill), ps success with matching metadata results in kill
 
 - [ ] Stale-line fallback in check_off/mark_failed is still ambiguous with duplicate text at same indent and stage (checklist.py:350-376)
-   - [ ] On fallback (line_number stale), choose the nearest valid match to the original line_number rather than the first match
+   - [x] On fallback (line_number stale), choose the nearest valid match to the original line_number rather than the first match
    - [ ] Add tests: PLAN.md with two identical tasks at same indent/stage, file shifted by inserted lines, check_off targets the one closest to the original line_number
 
 
