@@ -18,10 +18,10 @@ over-abstraction.
    - [x] In _main(), check the return value and sys.exit(1) when run_loop() reports terminal failure (full-suite failure, stuck task, etc.)
    - [x] Add tests: run_loop returning failure status causes _main() to exit nonzero, run_loop returning success causes exit 0
 
-- [ ] Orphan kill falls back to killing blindly when ps verification fails (lifecycle.py:275-297)
+- [x] Orphan kill falls back to killing blindly when ps verification fails (lifecycle.py:275-297)
    - [x] When verification metadata exists but ps fails or times out, remove the stale pid file and print a warning instead of killing
    - [x] Only kill when verification positively confirms the process matches the stored metadata
-   - [ ] Add tests: ps failure with existing metadata results in warning and pid file removal (not kill), ps success with matching metadata results in kill
+   - [x] Add tests: ps failure with existing metadata results in warning and pid file removal (not kill), ps success with matching metadata results in kill
 
 - [ ] Stale-line fallback in check_off/mark_failed is still ambiguous with duplicate text at same indent and stage (checklist.py:350-376)
    - [ ] On fallback (line_number stale), choose the nearest valid match to the original line_number rather than the first match
