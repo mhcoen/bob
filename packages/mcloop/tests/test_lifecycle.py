@@ -151,9 +151,11 @@ def test_kill_orphan_json_format(tmp_path):
             }
         )
     )
+    ps_result = MagicMock(stdout="claude -p --model opus\n")
     with (
         patch("mcloop.lifecycle.os.kill"),
         patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
     ):
         _kill_orphan_sessions(tmp_path)
     mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
@@ -183,9 +185,11 @@ def test_kill_orphan_json_missing_pgid(tmp_path):
     pid_file.write_text(
         json.dumps({"pid": 54321, "cmd": "claude", "started": "2026-04-08T10:00:00"})
     )
+    ps_result = MagicMock(stdout="claude\n")
     with (
         patch("mcloop.lifecycle.os.kill"),
         patch("mcloop.lifecycle.os.killpg") as mock_killpg,
+        patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
     ):
         _kill_orphan_sessions(tmp_path)
     mock_killpg.assert_called_once_with(54321, signal.SIGKILL)
@@ -260,8 +264,8 @@ def test_kill_orphan_skips_when_cmd_mismatch(tmp_path, capsys):
     assert "claude -p --model opus" in captured.out
 
 
-def test_kill_orphan_proceeds_when_ps_fails(tmp_path):
-    """Proceeds with kill when ps command fails (can't verify)."""
+def test_kill_orphan_removes_stale_pid_when_ps_fails(tmp_path, capsys):
+    """Removes stale pid file and warns when ps command fails."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     pid_file = mcloop_dir / "active-pid"
@@ -281,12 +285,15 @@ def test_kill_orphan_proceeds_when_ps_fails(tmp_path):
         patch("mcloop.lifecycle.subprocess.run", side_effect=OSError("ps not found")),
     ):
         _kill_orphan_sessions(tmp_path)
-    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "could not verify" in captured.out
 
 
-def test_kill_orphan_proceeds_when_ps_times_out(tmp_path):
-    """Proceeds with kill when ps command times out."""
+def test_kill_orphan_removes_stale_pid_when_ps_times_out(tmp_path, capsys):
+    """Removes stale pid file and warns when ps command times out."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     pid_file = mcloop_dir / "active-pid"
@@ -309,8 +316,11 @@ def test_kill_orphan_proceeds_when_ps_times_out(tmp_path):
         ),
     ):
         _kill_orphan_sessions(tmp_path)
-    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "could not verify" in captured.out
 
 
 def test_kill_orphan_no_verification_for_legacy_format(tmp_path):

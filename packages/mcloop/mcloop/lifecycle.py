@@ -294,7 +294,16 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
                 pid_file.unlink(missing_ok=True)
                 return
         except (OSError, subprocess.TimeoutExpired):
-            pass  # can't verify — proceed with kill
+            # Can't verify — remove stale pid file rather than risk killing
+            # an unrelated process.
+            print(
+                formatting.system_msg(
+                    f"Stale PID file removed (pid={pid}, could not verify with ps)"
+                ),
+                flush=True,
+            )
+            pid_file.unlink(missing_ok=True)
+            return
     # Kill the entire process group
     print(
         formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),
