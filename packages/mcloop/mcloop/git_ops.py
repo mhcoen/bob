@@ -329,6 +329,38 @@ def _changed_files(project_dir: Path) -> list[str]:
     return files
 
 
+def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
+    """Snapshot modified and untracked files in the working tree.
+
+    Returns (modified, untracked) where each is a list of file paths
+    relative to the project root. Used at batch start so rollback can
+    preserve pre-existing dirty state.
+    """
+    modified: list[str] = []
+    untracked: list[str] = []
+    diff_result = _git(
+        ["git", "diff", "--name-only"],
+        cwd=project_dir,
+        label="snapshot modified",
+    )
+    if diff_result.returncode == 0:
+        for line in diff_result.stdout.strip().splitlines():
+            line = line.strip()
+            if line:
+                modified.append(line)
+    untracked_result = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="snapshot untracked",
+    )
+    if untracked_result.returncode == 0:
+        for line in untracked_result.stdout.strip().splitlines():
+            line = line.strip()
+            if line:
+                untracked.append(line)
+    return modified, untracked
+
+
 def _get_git_hash(project_dir: Path) -> str:
     """Return current HEAD commit hash."""
     if not (project_dir / ".git").exists():

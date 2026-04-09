@@ -54,6 +54,7 @@ from mcloop.git_ops import (
     _git,
     _has_meaningful_changes,
     _push_or_die,
+    _snapshot_worktree,
 )
 from mcloop.install_cmd import (
     _cmd_install,
@@ -233,6 +234,7 @@ def _run_batch(
         project_dir,
         next_task=f"{label_range}) [BATCH] {n} subtasks",
     )
+    pre_batch_modified, pre_batch_untracked = _snapshot_worktree(project_dir)
     print(
         formatting.task_header(
             label_range,
@@ -363,32 +365,54 @@ def _run_batch(
         formatting.error_msg(f"Batch checks failed: {check_result.command}"),
         flush=True,
     )
-    # Discard uncommitted changes from the failed batch
+    # Discard uncommitted changes from the failed batch,
+    # preserving files that were dirty before the batch started.
+    if pre_batch_modified:
+        # Some tracked files were modified before the batch (e.g.
+        # checkpoint commit failed). Only revert batch-produced changes.
+        current_modified = _git(
+            ["git", "diff", "--name-only"],
+            cwd=project_dir,
+            label="batch rollback diff",
+        )
+        pre_set = set(pre_batch_modified)
+        for f in current_modified.stdout.strip().splitlines():
+            f = f.strip()
+            if f and f not in pre_set:
+                _git(
+                    ["git", "checkout", "--", f],
+                    cwd=project_dir,
+                    label=f"batch rollback {f}",
+                )
+    else:
+        _git(
+            ["git", "checkout", "."],
+            cwd=project_dir,
+            label="batch rollback",
+        )
+    clean_cmd = [
+        "git",
+        "clean",
+        "-fd",
+        "-e",
+        "*.env",
+        "-e",
+        "*.env.*",
+        "-e",
+        "*.key",
+        "-e",
+        "*.pem",
+        "-e",
+        "credentials.json",
+        "-e",
+        "secrets",
+        "-e",
+        "secrets/",
+    ]
+    for f in pre_batch_untracked:
+        clean_cmd.extend(["-e", f])
     _git(
-        ["git", "checkout", "."],
-        cwd=project_dir,
-        label="batch rollback",
-    )
-    _git(
-        [
-            "git",
-            "clean",
-            "-fd",
-            "-e",
-            "*.env",
-            "-e",
-            "*.env.*",
-            "-e",
-            "*.key",
-            "-e",
-            "*.pem",
-            "-e",
-            "credentials.json",
-            "-e",
-            "secrets",
-            "-e",
-            "secrets/",
-        ],
+        clean_cmd,
         cwd=project_dir,
         label="batch clean",
     )
