@@ -209,7 +209,6 @@ def _build_shared_parts(
     """Return prompt parts shared by both normal and bug-investigation variants."""
     parts = []
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
-    parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     parts.append(
         "Never set, unset, or override environment variables"
         " in Bash commands. Do not use VAR=value command,"

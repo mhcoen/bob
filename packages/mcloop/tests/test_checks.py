@@ -8,6 +8,7 @@ from mcloop.checks import (
     _classify_run_command,
     _detect_commands,
     _load_config,
+    _normalize_pytest,
     detect_app_type,
     get_check_commands,
     run_checks,
@@ -105,6 +106,43 @@ def test_get_check_commands_checks_not_list(tmp_path):
     (tmp_path / "mcloop.json").write_text(json.dumps({"checks": "not a list"}))
     # Falls back to detect since checks is not a list
     assert get_check_commands(tmp_path) == []
+
+
+# --- _normalize_pytest tests ---
+
+
+def test_normalize_pytest_python_m_pytest():
+    assert _normalize_pytest("python -m pytest") == "pytest"
+
+
+def test_normalize_pytest_python3_m_pytest():
+    assert _normalize_pytest("python3 -m pytest") == "pytest"
+
+
+def test_normalize_pytest_python_m_pytest_with_args():
+    assert _normalize_pytest("python -m pytest tests/ -x -q") == "pytest tests/ -x -q"
+
+
+def test_normalize_pytest_venv_bin():
+    assert _normalize_pytest(".venv/bin/pytest") == "pytest"
+
+
+def test_normalize_pytest_venv_bin_with_args():
+    assert _normalize_pytest(".venv/bin/pytest tests/ -v") == "pytest tests/ -v"
+
+
+def test_normalize_pytest_already_normalized():
+    assert _normalize_pytest("pytest") == "pytest"
+
+
+def test_normalize_pytest_non_pytest():
+    assert _normalize_pytest("ruff check .") == "ruff check ."
+
+
+def test_get_check_commands_normalizes_python_m_pytest(tmp_path):
+    data = {"checks": ["ruff check .", "python -m pytest"]}
+    (tmp_path / "mcloop.json").write_text(json.dumps(data))
+    assert get_check_commands(tmp_path) == ["ruff check .", "pytest"]
 
 
 @patch("mcloop.checks.subprocess.run")

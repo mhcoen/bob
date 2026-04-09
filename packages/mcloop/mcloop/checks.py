@@ -28,13 +28,30 @@ def _load_config(project_dir: Path) -> dict:
         return {}
 
 
+def _normalize_pytest(cmd: str) -> str:
+    """Rewrite ``python -m pytest …`` and ``.venv/bin/pytest …`` to ``pytest …``."""
+    parts = cmd.split()
+    if (
+        len(parts) >= 3
+        and parts[0] in ("python", "python3")
+        and parts[1] == "-m"
+        and parts[2] == "pytest"
+    ):
+        rest = parts[3:]
+        return "pytest" + (" " + " ".join(rest) if rest else "")
+    if parts and parts[0].endswith("/pytest"):
+        rest = parts[1:]
+        return "pytest" + (" " + " ".join(rest) if rest else "")
+    return cmd
+
+
 def get_check_commands(project_dir: str | Path) -> list[str]:
     """Return the check commands for this project without running them."""
     project_dir = Path(project_dir)
     config = _load_config(project_dir)
     checks = config.get("checks")
     if isinstance(checks, list) and checks:
-        return [str(c) for c in checks]
+        return [_normalize_pytest(str(c)) for c in checks]
     return _detect_commands(project_dir, config)
 
 
