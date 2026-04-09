@@ -15,7 +15,7 @@ over-abstraction.
 
 - [ ] _main() exits 0 on red repo (main.py:167-176)
    - [x] Make run_loop() return a structured status indicating success, failure, or terminal error
-   - [ ] In _main(), check the return value and sys.exit(1) when run_loop() reports terminal failure (full-suite failure, stuck task, etc.)
+   - [x] In _main(), check the return value and sys.exit(1) when run_loop() reports terminal failure (full-suite failure, stuck task, etc.)
    - [ ] Add tests: run_loop returning failure status causes _main() to exit nonzero, run_loop returning success causes exit 0
 
 - [ ] Orphan kill falls back to killing blindly when ps verification fails (lifecycle.py:275-297)
