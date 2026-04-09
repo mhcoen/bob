@@ -13,10 +13,10 @@ over-abstraction.
 
 ## Bugs
 
-- [ ] [BATCH] ruff autofix inside run_checks() makes verification non-read-only (checks.py:104)
-   - [ ] Move ruff check --fix and ruff format out of run_checks() into a separate autofix step that runs before verification, or run them only in the task session prompt
-   - [ ] After run_checks() returns success, verify no uncommitted changes exist (git diff --quiet). If changes were introduced by the checker, route them back through commit or treat as failure
-   - [ ] Ensure the no-op detection path, full-suite path, and stage-boundary path all use the side-effect-free version of run_checks()
+- [x] [BATCH] ruff autofix inside run_checks() makes verification non-read-only (checks.py:104)
+   - [x] Move ruff check --fix and ruff format out of run_checks() into a separate autofix step that runs before verification, or run them only in the task session prompt
+   - [x] After run_checks() returns success, verify no uncommitted changes exist (git diff --quiet). If changes were introduced by the checker, route them back through commit or treat as failure
+   - [x] Ensure the no-op detection path, full-suite path, and stage-boundary path all use the side-effect-free version of run_checks()
 
 - [ ] [BATCH] Targeted testing skips changed test files entirely (targeted.py:27, checks.py:70)
    - [ ] In map_to_tests(), include changed test files (tests/test_*.py) directly in the targeted set, not just source-to-test mappings
