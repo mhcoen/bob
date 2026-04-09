@@ -112,6 +112,16 @@ from mcloop.sync_cmd import _cmd_sync
 
 
 @dataclasses.dataclass(frozen=True)
+class BuildResult:
+    """Structured result from _run_build()."""
+
+    ran: bool  # True if a build command was found and executed
+    passed: bool  # True if build succeeded or no build command exists
+    command: str = ""
+    output: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class RunStatus:
     """Structured result from run_loop().
 
@@ -1062,7 +1072,26 @@ def run_loop(
                 formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
                 flush=True,
             )
-        _run_build(project_dir)
+        build_result = _run_build(project_dir)
+        if not build_result.passed:
+            total = time.monotonic() - run_start
+            _print_summary(
+                completed,
+                None,
+                "",
+                final_tasks,
+                total,
+                project_dir,
+                notes_snapshot,
+            )
+            notify(
+                f"Build failed at stage boundary ({build_result.command})",
+                level="error",
+            )
+            return RunStatus(
+                "failure",
+                detail=f"Build failed at stage boundary: {build_result.command}",
+            )
         total = time.monotonic() - run_start
         _print_summary(
             completed,
@@ -1144,7 +1173,26 @@ def run_loop(
         _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
         print(formatting.system_msg(f"Audit completed [{_audit_elapsed}]"), flush=True)
 
-    _run_build(project_dir)
+    build_result = _run_build(project_dir)
+    if not build_result.passed:
+        total = time.monotonic() - run_start
+        _print_summary(
+            completed,
+            None,
+            "",
+            [],
+            total,
+            project_dir,
+            notes_snapshot,
+        )
+        notify(
+            f"Build failed at end of run ({build_result.command})",
+            level="error",
+        )
+        return RunStatus(
+            "failure",
+            detail=f"Build failed at end of run: {build_result.command}",
+        )
 
     total = time.monotonic() - run_start
     _print_summary(
@@ -1265,11 +1313,11 @@ def _check_user_input() -> str:
     return "\n".join(lines).strip()
 
 
-def _run_build(project_dir: Path) -> None:
+def _run_build(project_dir: Path) -> BuildResult:
     """Run the auto-detected or configured build command."""
     build_cmd = detect_build(project_dir)
     if not build_cmd:
-        return
+        return BuildResult(ran=False, passed=True)
     print(
         formatting.system_msg(f"Building: {build_cmd}"),
         flush=True,
@@ -1278,7 +1326,7 @@ def _run_build(project_dir: Path) -> None:
         parts = shlex.split(build_cmd)
     except ValueError:
         print(formatting.error_msg(f"Malformed build command: {build_cmd}"), flush=True)
-        return
+        return BuildResult(ran=True, passed=False, command=build_cmd)
     try:
         result = subprocess.run(
             parts,
@@ -1287,16 +1335,20 @@ def _run_build(project_dir: Path) -> None:
             text=True,
             timeout=600,
         )
+        combined_output = result.stdout + result.stderr
         if result.returncode == 0:
             print(formatting.system_msg("Build succeeded"), flush=True)
+            return BuildResult(ran=True, passed=True, command=build_cmd)
         else:
             print(
                 formatting.error_msg(f"Build failed (exit {result.returncode})"),
                 flush=True,
             )
-            _print_error_tail(result.stdout + result.stderr)
+            _print_error_tail(combined_output)
+            return BuildResult(ran=True, passed=False, command=build_cmd, output=combined_output)
     except Exception as e:
         print(formatting.error_msg(f"Build error: {e}"), flush=True)
+        return BuildResult(ran=True, passed=False, command=build_cmd, output=str(e))
 
 
 def _maybe_auto_wrap(project_dir: Path) -> None:
