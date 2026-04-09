@@ -37,7 +37,7 @@ over-abstraction.
    - [x] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
 
 - [ ] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
-   - [ ] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
+   - [x] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
    - [ ] On rollback, restore only the snapshotted files via git checkout -- {files} and rm for the new untracked files, instead of git checkout . && git clean -fd
    - [ ] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
 
