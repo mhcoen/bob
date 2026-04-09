@@ -24,8 +24,15 @@ def map_to_tests(
         if p.suffix != ".py":
             continue
 
-        # Skip test files themselves, config, and metadata
-        if p.name.startswith("test_") or p.name.startswith("__"):
+        # Skip config and metadata
+        if p.name.startswith("__"):
+            continue
+
+        # Include changed test files directly
+        if p.name.startswith("test_"):
+            candidate = project_dir / p
+            if candidate.exists():
+                test_files.add(str(p))
             continue
 
         candidate = tests_dir / f"test_{p.name}"

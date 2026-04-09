@@ -44,10 +44,17 @@ def test_map_skips_non_python(tmp_path):
     assert result == []
 
 
-def test_map_skips_test_files(tmp_path):
-    """Test files themselves are not re-mapped."""
+def test_map_includes_changed_test_files(tmp_path):
+    """Changed test files are included directly in the targeted set."""
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_test_foo.py").write_text("")
+    (tmp_path / "tests" / "test_foo.py").write_text("")
+    result = map_to_tests(["tests/test_foo.py"], tmp_path)
+    assert result == ["tests/test_foo.py"]
+
+
+def test_map_skips_nonexistent_test_files(tmp_path):
+    """Changed test files that don't exist are not included."""
+    (tmp_path / "tests").mkdir()
     result = map_to_tests(["tests/test_foo.py"], tmp_path)
     assert result == []
 
@@ -123,8 +130,36 @@ def test_run_checks_with_targeted(tmp_path):
         assert calls[1] == ["pytest", "tests/test_checks.py"]
 
 
+def test_run_checks_targeted_only_test_files_changed(tmp_path):
+    """When only test files changed, pytest runs those test files."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_foo.py").write_text("")
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["tests/test_foo.py"],
+        )
+        # Test file included directly — ruff check + targeted pytest
+        assert mock_run.call_count == 2
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert calls[0] == ["ruff", "check", "."]
+        assert calls[1] == ["pytest", "tests/test_foo.py"]
+
+
 def test_run_checks_targeted_no_matching_tests(tmp_path):
-    """When no test files match, test command is skipped."""
+    """When no test files match source changes, test command is skipped."""
     from mcloop.checks import run_checks
 
     (tmp_path / "pyproject.toml").write_text(
@@ -143,7 +178,7 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
             tmp_path,
             changed_files=["mcloop/main.py"],
         )
-        # Side-effect-free: only ruff check (pytest skipped — no matching tests)
+        # No test_main.py exists — only ruff check runs, pytest skipped
         assert mock_run.call_count == 1
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
