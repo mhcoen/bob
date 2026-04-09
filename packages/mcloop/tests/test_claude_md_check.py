@@ -175,6 +175,21 @@ class TestCheckClaudeMdFreshness:
             is False
         )
 
+    def test_docs_claude_md_fails_but_root_claude_md_passes(self):
+        # docs/CLAUDE.md does NOT satisfy the freshness gate
+        assert (
+            check_claude_md_freshness(["mcloop/main.py", "docs/CLAUDE.md"], self.project) is False
+        )
+        # repo-root CLAUDE.md DOES satisfy the freshness gate
+        assert check_claude_md_freshness(["mcloop/main.py", "CLAUDE.md"], self.project) is True
+        # Both present: root CLAUDE.md is sufficient
+        assert (
+            check_claude_md_freshness(
+                ["mcloop/main.py", "docs/CLAUDE.md", "CLAUDE.md"], self.project
+            )
+            is True
+        )
+
     def test_non_source_mixed(self):
         assert (
             check_claude_md_freshness(
