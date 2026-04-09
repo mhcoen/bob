@@ -7207,6 +7207,46 @@ def test_run_batch_rollback_task_failure_no_rollback(tmp_path):
         assert len(rollback_calls) == 0
 
 
+def test_run_batch_worktree_status_reordered_lines_not_treated_as_change(tmp_path):
+    """_run_batch: same worktree status in different order should NOT be detected as a change.
+
+    git status --porcelain output order can vary; the comparison uses sets
+    of lines so reordering alone does not trigger a false positive.
+    """
+    args = _make_batch_args(tmp_path)
+
+    worktree_calls = iter(
+        [
+            " M src/main.py\n M src/utils.py",  # pre-check
+            " M src/utils.py\n M src/main.py",  # post-check (reordered)
+        ]
+    )
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["src/main.py"]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", side_effect=worktree_calls),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.check_off"),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main.run_autofix"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        result = _run_batch(**args)
+
+        assert result == "success"
+        mock_commit.assert_called_once()
+
+
 # --- Reviewer integration ---
 
 
