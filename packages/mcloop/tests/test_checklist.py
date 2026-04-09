@@ -730,6 +730,18 @@ def test_is_batch_task_false(tmp_path):
 
 
 def test_get_batch_children_returns_unchecked(tmp_path):
+    md = "- [ ] [BATCH] Parent\n  - [x] Done child\n  - [ ] Child A\n  - [ ] Child B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 2
+    assert batch[0].text == "Child A"
+    assert batch[1].text == "Child B"
+
+
+def test_get_batch_children_stops_at_failed_after_collected(tmp_path):
+    """A failed child stops collection once non-failed children exist."""
     md = (
         "- [ ] [BATCH] Parent\n"
         "  - [x] Done child\n"
@@ -742,10 +754,27 @@ def test_get_batch_children_returns_unchecked(tmp_path):
     f.write_text(md)
     tasks = parse(f)
     batch = get_batch_children(tasks[0])
-    assert len(batch) == 3
+    assert len(batch) == 2
     assert batch[0].text == "Child A"
     assert batch[1].text == "Child B"
-    assert batch[2].text == "Child C"
+
+
+def test_get_batch_children_skips_leading_failed(tmp_path):
+    """Failed children before any collected child are skipped."""
+    md = (
+        "- [ ] [BATCH] Parent\n"
+        "  - [!] Failed first\n"
+        "  - [!] Failed second\n"
+        "  - [ ] Child A\n"
+        "  - [ ] Child B\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert len(batch) == 2
+    assert batch[0].text == "Child A"
+    assert batch[1].text == "Child B"
 
 
 def test_get_batch_children_stops_at_user_task(tmp_path):
