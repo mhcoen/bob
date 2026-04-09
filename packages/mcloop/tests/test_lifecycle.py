@@ -121,8 +121,8 @@ def test_kill_orphan_dead_process(tmp_path):
     assert not pid_file.exists()
 
 
-def test_kill_orphan_alive_process(tmp_path):
-    """Kills alive orphan process group."""
+def test_kill_orphan_alive_process_legacy_no_kill(tmp_path, capsys):
+    """Legacy format (no cmd metadata) removes stale PID instead of killing."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     pid_file = mcloop_dir / "active-pid"
@@ -132,8 +132,11 @@ def test_kill_orphan_alive_process(tmp_path):
         patch("mcloop.lifecycle.os.killpg") as mock_killpg,
     ):
         _kill_orphan_sessions(tmp_path)
-    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "no verification metadata" in captured.out
 
 
 def test_kill_orphan_json_format(tmp_path):
@@ -323,8 +326,8 @@ def test_kill_orphan_removes_stale_pid_when_ps_times_out(tmp_path, capsys):
     assert "could not verify" in captured.out
 
 
-def test_kill_orphan_no_verification_for_legacy_format(tmp_path):
-    """Legacy format (no cmd) skips verification and kills directly."""
+def test_kill_orphan_no_verification_for_legacy_format(tmp_path, capsys):
+    """Legacy format (no cmd) removes stale PID file instead of killing."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     pid_file = mcloop_dir / "active-pid"
@@ -336,8 +339,11 @@ def test_kill_orphan_no_verification_for_legacy_format(tmp_path):
     ):
         _kill_orphan_sessions(tmp_path)
     mock_ps.assert_not_called()
-    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "no verification metadata" in captured.out
 
 
 def test_kill_orphan_partial_cmd_match(tmp_path):
@@ -367,8 +373,8 @@ def test_kill_orphan_partial_cmd_match(tmp_path):
     assert not pid_file.exists()
 
 
-def test_kill_orphan_ps_empty_output_proceeds(tmp_path):
-    """Proceeds with kill when ps returns empty output (process exiting)."""
+def test_kill_orphan_ps_empty_output_removes_stale(tmp_path, capsys):
+    """Removes stale PID file when ps returns empty output (cannot confirm)."""
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
     pid_file = mcloop_dir / "active-pid"
@@ -389,8 +395,11 @@ def test_kill_orphan_ps_empty_output_proceeds(tmp_path):
         patch("mcloop.lifecycle.subprocess.run", return_value=ps_result),
     ):
         _kill_orphan_sessions(tmp_path)
-    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+    mock_killpg.assert_not_called()
     assert not pid_file.exists()
+    captured = capsys.readouterr()
+    assert "Stale PID file removed" in captured.out
+    assert "ps returned no output" in captured.out
 
 
 def test_kill_orphan_no_mcloop_dir(tmp_path):

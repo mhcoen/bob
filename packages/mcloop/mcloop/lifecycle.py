@@ -272,39 +272,53 @@ def _kill_orphan_sessions(project_dir: Path) -> None:
         return
     except PermissionError:
         pass  # alive but we can't signal it
-    # Verify the live process matches the stored command before killing
-    if stored_cmd is not None:
-        try:
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "command="],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            live_cmd = result.stdout.strip()
-            if live_cmd and stored_cmd not in live_cmd and live_cmd not in stored_cmd:
-                # PID was reused by a different process — do not kill
-                print(
-                    formatting.system_msg(
-                        f"Stale PID file removed (pid={pid} is now '{live_cmd}', "
-                        f"was '{stored_cmd}')"
-                    ),
-                    flush=True,
-                )
-                pid_file.unlink(missing_ok=True)
-                return
-        except (OSError, subprocess.TimeoutExpired):
-            # Can't verify — remove stale pid file rather than risk killing
-            # an unrelated process.
+    # Only kill when verification positively confirms the process matches.
+    # Without stored metadata we cannot verify, so treat as stale.
+    if stored_cmd is None:
+        print(
+            formatting.system_msg(f"Stale PID file removed (pid={pid}, no verification metadata)"),
+            flush=True,
+        )
+        pid_file.unlink(missing_ok=True)
+        return
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        live_cmd = result.stdout.strip()
+        if not live_cmd:
+            # ps returned nothing — cannot positively confirm, treat as stale
             print(
                 formatting.system_msg(
-                    f"Stale PID file removed (pid={pid}, could not verify with ps)"
+                    f"Stale PID file removed (pid={pid}, ps returned no output)"
                 ),
                 flush=True,
             )
             pid_file.unlink(missing_ok=True)
             return
-    # Kill the entire process group
+        if stored_cmd not in live_cmd and live_cmd not in stored_cmd:
+            # PID was reused by a different process — do not kill
+            print(
+                formatting.system_msg(
+                    f"Stale PID file removed (pid={pid} is now '{live_cmd}', was '{stored_cmd}')"
+                ),
+                flush=True,
+            )
+            pid_file.unlink(missing_ok=True)
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        # Can't verify — remove stale pid file rather than risk killing
+        # an unrelated process.
+        print(
+            formatting.system_msg(f"Stale PID file removed (pid={pid}, could not verify with ps)"),
+            flush=True,
+        )
+        pid_file.unlink(missing_ok=True)
+        return
+    # Verification positively confirmed — kill the entire process group
     print(
         formatting.error_msg(f"Killing orphan claude process (pid={pid}) from previous run"),
         flush=True,
