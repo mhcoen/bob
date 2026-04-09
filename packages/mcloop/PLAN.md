@@ -33,7 +33,7 @@ over-abstraction.
 
 - [ ] Batch collection does not stop at failed siblings (checklist.py:443-457)
    - [x] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
-   - [ ] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
+   - [x] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
    - [ ] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
 
 - [ ] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
