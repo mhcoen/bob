@@ -65,6 +65,23 @@ def _cleanup_stale_reviews(project_dir: Path) -> None:
                 pass
 
 
+def _purge_all_reviews(project_dir: Path) -> None:
+    """Remove all .mcloop/reviews/*.json files.
+
+    Called at startup when the reviewer is disabled to prevent stale
+    findings from previous runs from being collected.
+    """
+    reviews_dir = project_dir / ".mcloop" / "reviews"
+    if not reviews_dir.exists():
+        return
+    for f in reviews_dir.iterdir():
+        if f.suffix == ".json":
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+
 def _collect_review_findings(
     project_dir: Path,
     checklist_path: Path,

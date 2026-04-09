@@ -11,6 +11,7 @@ from mcloop.review_integration import (
     _cleanup_stale_reviews,
     _collect_review_findings,
     _get_commit_hash,
+    _purge_all_reviews,
     _reviewer_procs,
     _spawn_reviewer,
     _terminate_reviewers,
@@ -248,3 +249,22 @@ def test_collect_review_findings_clean_review(tmp_path, capsys):
     _collect_review_findings(tmp_path, plan, ctx)
     out = capsys.readouterr().out
     assert "clean" in out
+
+
+def test_purge_all_reviews(tmp_path):
+    """_purge_all_reviews removes all .json files regardless of age."""
+    reviews_dir = tmp_path / ".mcloop" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    (reviews_dir / "old.json").write_text("{}")
+    (reviews_dir / "new.json").write_text("{}")
+    txt = reviews_dir / "notes.txt"
+    txt.write_text("keep")
+    _purge_all_reviews(tmp_path)
+    assert not (reviews_dir / "old.json").exists()
+    assert not (reviews_dir / "new.json").exists()
+    assert txt.exists()
+
+
+def test_purge_all_reviews_no_dir(tmp_path):
+    """_purge_all_reviews does nothing if directory doesn't exist."""
+    _purge_all_reviews(tmp_path)  # Should not raise

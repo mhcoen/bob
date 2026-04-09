@@ -98,6 +98,7 @@ from mcloop.ratelimit import (
 from mcloop.review_integration import (
     _cleanup_stale_reviews,
     _collect_review_findings,
+    _purge_all_reviews,
     _spawn_reviewer,
     _terminate_reviewers,
 )
@@ -493,8 +494,11 @@ def run_loop(
             flush=True,
         )
 
-    # Clean up stale review files from previous runs
-    _cleanup_stale_reviews(project_dir)
+    # Clean up review files from previous runs
+    if reviewer_config:
+        _cleanup_stale_reviews(project_dir)
+    else:
+        _purge_all_reviews(project_dir)
 
     # Clean up stale pending files from previous runs
     pending_dir = project_dir / ".mcloop" / "pending"
@@ -564,7 +568,8 @@ def run_loop(
 
     while True:
         # Check for completed reviews from background reviewer processes
-        _collect_review_findings(project_dir, checklist_path, ctx)
+        if reviewer_config:
+            _collect_review_findings(project_dir, checklist_path, ctx)
 
         tasks = parse(checklist_path)
 
