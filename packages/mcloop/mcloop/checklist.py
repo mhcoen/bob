@@ -478,16 +478,19 @@ def get_batch_children(task: Task) -> list[Task]:
     Starts from the first unchecked child and collects until
     hitting a [USER] or [AUTO] task, or running out of children.
     Already checked children are skipped.  Failed children are
-    skipped when they appear before any collected child, but once
-    at least one non-failed child has been collected a failed child
-    stops collection (the failure is a dependency barrier).
+    skipped when they appear before any non-failed child, but once
+    at least one non-failed child has been seen (checked or collected)
+    a failed child stops collection (the failure is a dependency
+    barrier).
     """
     batch: list[Task] = []
+    seen_non_failed = False
     for child in task.children:
         if child.checked:
+            seen_non_failed = True
             continue
         if child.failed:
-            if batch:
+            if batch or seen_non_failed:
                 break
             continue
         if is_user_task(child) or is_auto_task(child):

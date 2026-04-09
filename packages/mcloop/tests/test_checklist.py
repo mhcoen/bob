@@ -827,6 +827,22 @@ def test_get_batch_children_failed_immediately_after_first(tmp_path):
     assert batch[0].text == "Child A"
 
 
+def test_get_batch_children_zero_when_failed_after_done(tmp_path):
+    """Parent [done, failed, pending, pending] collects zero — failed blocks pending siblings."""
+    md = (
+        "- [ ] [BATCH] Parent\n"
+        "  - [x] Done child\n"
+        "  - [!] Failed child\n"
+        "  - [ ] Pending A\n"
+        "  - [ ] Pending B\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    batch = get_batch_children(tasks[0])
+    assert batch == []
+
+
 def test_find_parent_returns_parent(tmp_path):
     md = "- [ ] Parent\n  - [ ] Child\n"
     f = tmp_path / "tasks.md"
