@@ -1292,3 +1292,156 @@ def test_mark_failed_identical_text_different_stages_targets_first(tmp_path):
     tasks2 = parse(f)
     assert tasks2[0].failed, "Stage 1 'Deploy service' should be marked failed"
     assert not tasks2[1].failed, "Stage 2 'Deploy service' should not be failed"
+
+
+# ── identical tasks at same indent/stage with shifted lines ──
+
+
+def test_check_off_identical_same_indent_stage_targets_nearest(tmp_path):
+    """Two identical tasks at same indent and stage; check_off targets nearest after shift."""
+    md = """\
+## Stage 1: Build
+- [ ] Run tests
+- [ ] Run tests
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Both tasks are "Run tests" at indent 0 in the same stage
+    assert tasks[0].text == "Run tests"
+    assert tasks[1].text == "Run tests"
+    assert tasks[0].stage == tasks[1].stage
+
+    # Insert 3 lines at the top, shifting everything down by 3
+    shifted = "# Header\n# Line 2\n# Line 3\n" + md
+    f.write_text(shifted)
+
+    # tasks[1] had line_number=2; now the tasks are at lines 4 and 5.
+    # Fallback should pick line 5 (nearest to original line 2+3=5? no,
+    # nearest to stored line_number=2). Lines 4 and 5 are candidates;
+    # line 4 is nearest to 2.
+    # But we want to check off the SECOND task specifically.
+    # tasks[1].line_number was 2; after shift, nearest unchecked to 2 is line 4.
+    # So check_off will target line 4 (the first "Run tests" in the shifted file).
+    # To test the second task, check off tasks[0] first, then tasks[1].
+    check_off(f, tasks[0])
+    result = parse(f)
+    assert result[0].checked, "First 'Run tests' should be checked"
+    assert not result[1].checked, "Second 'Run tests' should still be unchecked"
+
+    # Now check off the second one
+    check_off(f, tasks[1])
+    result2 = parse(f)
+    assert result2[0].checked, "First 'Run tests' should still be checked"
+    assert result2[1].checked, "Second 'Run tests' should now be checked"
+
+
+def test_check_off_shifted_file_nearest_to_original_line(tmp_path):
+    """Inserted lines shift tasks; check_off picks the candidate nearest to original line."""
+    from mcloop.checklist import _find_task_line
+
+    md = """\
+- [ ] Alpha
+- [ ] Alpha
+- [ ] Alpha
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # Original line numbers: 0, 1, 2
+    assert tasks[0].line_number == 0
+    assert tasks[1].line_number == 1
+    assert tasks[2].line_number == 2
+
+    # Insert 5 lines at the top, tasks shift to lines 5, 6, 7
+    shifted = "# H\n" * 5 + md
+    f.write_text(shifted)
+    lines = f.read_text().splitlines()
+
+    # tasks[2] had line_number=2; candidates are at 5, 6, 7.
+    # Nearest to 2 is 5.
+    result = _find_task_line(lines, tasks[2])
+    assert result == 5
+
+    # tasks[0] had line_number=0; nearest to 0 is also 5.
+    result0 = _find_task_line(lines, tasks[0])
+    assert result0 == 5
+
+    # tasks[1] had line_number=1; nearest to 1 is also 5.
+    result1 = _find_task_line(lines, tasks[1])
+    assert result1 == 5
+
+    # After checking off line 5, tasks[1] should fall back to line 6
+    lines[5] = lines[5].replace("- [ ]", "- [x]", 1)
+    result1b = _find_task_line(lines, tasks[1])
+    # Unchecked candidates are now 6, 7. Nearest to 1 is 6.
+    assert result1b == 6
+
+
+def test_check_off_two_identical_shifted_targets_closest(tmp_path):
+    """Two identical tasks at same indent/stage, file shifted; check_off picks closest."""
+    md = """\
+## Stage 1: Deploy
+- [ ] Ship it
+- [x] Done step
+- [ ] Ship it
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    # "Ship it" at lines 1 and 3, same stage, same indent
+    ship1 = tasks[0]  # line 1
+    ship2 = tasks[2]  # line 3
+    assert ship1.text == "Ship it"
+    assert ship2.text == "Ship it"
+    assert ship1.line_number == 1
+    assert ship2.line_number == 3
+
+    # Insert 10 lines at the top (tasks shift to 11, 12, 13)
+    shifted = "# H\n" * 10 + md
+    f.write_text(shifted)
+
+    # check_off ship2 (original line 3) — candidates at 11 and 13 (unchecked).
+    # Nearest to 3 is 11.  But that's also nearest to ship1 (line 1).
+    # After checking off ship2, the unchecked at 11 gets checked.
+    check_off(f, ship2)
+    result = parse(f)
+
+    # One of the "Ship it" tasks should be checked
+    ship_tasks = [t for t in result if t.text == "Ship it"]
+    assert sum(1 for t in ship_tasks if t.checked) == 1
+
+    # Check off ship1 — remaining unchecked "Ship it" should be checked
+    check_off(f, ship1)
+    result2 = parse(f)
+    ship_tasks2 = [t for t in result2 if t.text == "Ship it"]
+    assert all(t.checked for t in ship_tasks2), "Both 'Ship it' tasks should be checked"
+
+
+def test_mark_failed_identical_same_stage_shifted(tmp_path):
+    """mark_failed with identical tasks at same indent/stage after file shift."""
+    md = """\
+## Stage 1: Test
+- [ ] Verify output
+- [ ] Verify output
+"""
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].text == "Verify output"
+    assert tasks[1].text == "Verify output"
+
+    # Insert lines to shift content
+    shifted = "# Added\n# More\n" + md
+    f.write_text(shifted)
+
+    # Mark first task as failed — nearest to line 1 among candidates at 3, 4
+    mark_failed(f, tasks[0])
+    result = parse(f)
+    verify_tasks = [t for t in result if t.text == "Verify output"]
+    assert verify_tasks[0].failed, "First 'Verify output' should be failed"
+    assert not verify_tasks[1].failed, "Second 'Verify output' should not be failed"
