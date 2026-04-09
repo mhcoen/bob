@@ -32,7 +32,7 @@ over-abstraction.
    - [x] Add tests: two tasks with identical text at different indent levels, check_off targets the correct one; two tasks with identical text in different stages, mark_failed targets the correct one
 
 - [ ] Batch collection does not stop at failed siblings (checklist.py:443-457)
-   - [ ] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
+   - [x] When collecting children for a batch, stop collecting once a failed child is encountered after at least one non-failed child has been collected
    - [ ] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
    - [ ] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
 
