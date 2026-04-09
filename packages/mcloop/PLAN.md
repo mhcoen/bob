@@ -47,7 +47,7 @@ over-abstraction.
    - [x] Add a test: docs/CLAUDE.md does not satisfy the freshness gate, repo-root CLAUDE.md does
 
 - [ ] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
-   - [ ] Add TypeError to the except clause alongside KeyError and IndexError
+   - [x] Add TypeError to the except clause alongside KeyError and IndexError
    - [ ] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
    - [ ] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
 
