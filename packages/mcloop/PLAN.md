@@ -48,7 +48,7 @@ over-abstraction.
 
 - [ ] LLM response parsing in claude_md_check.py misses TypeError (claude_md_check.py:202-206)
    - [x] Add TypeError to the except clause alongside KeyError and IndexError
-   - [ ] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
+   - [x] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
    - [ ] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
 
 - [ ] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
