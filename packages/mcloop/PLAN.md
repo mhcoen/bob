@@ -23,10 +23,10 @@ over-abstraction.
    - [x] When only test files changed and no source files changed, run those test files instead of skipping pytest
    - [x] Fix tests at tests/test_targeted.py:47 and tests/test_targeted.py:128 that encode the current (wrong) behavior
 
-- [ ] [BATCH] _run_build() outcome is ignored (main.py:1043, 1125, 1246)
-   - [ ] Make _run_build() return a structured result indicating success or failure
-   - [ ] In the stage-complete and all-done paths, check the build result and treat failure as a terminal run error
-   - [ ] Send a failure notification instead of stage-complete/all-done when the build fails
+- [x] [BATCH] _run_build() outcome is ignored (main.py:1043, 1125, 1246)
+   - [x] Make _run_build() return a structured result indicating success or failure
+   - [x] In the stage-complete and all-done paths, check the build result and treat failure as a terminal run error
+   - [x] Send a failure notification instead of stage-complete/all-done when the build fails
 
 - [ ] [BATCH] Stale reviewer findings injected when reviewer is disabled (main.py:477, 548)
    - [ ] Gate review-file cleanup and collection on reviewer_config being present
