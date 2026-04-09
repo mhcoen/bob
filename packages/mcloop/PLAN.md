@@ -36,10 +36,10 @@ over-abstraction.
    - [x] Fix the test at tests/test_checklist.py:732-748 that encodes the current (wrong) behavior to expect the corrected behavior
    - [x] Add a test: parent with children [done, failed, pending, pending] collects zero tasks (failed blocks pending siblings)
 
-- [ ] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
+- [x] Git rollback with checkout/clean discards unrelated changes (main.py:366-395)
    - [x] At batch start, snapshot the set of modified files (git diff --name-only) and untracked files (git ls-files --others --exclude-standard)
    - [x] On rollback, restore only the snapshotted files via git checkout -- {files} and rm for the new untracked files, instead of git checkout . && git clean -fd
-   - [ ] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
+   - [x] Add tests: rollback after batch failure restores only batch-touched files, pre-existing untracked files survive rollback
 
 - [ ] CLAUDE.md freshness gate accepts non-root paths (claude_md_check.py:89-97)
    - [ ] Change the path check to require the repo-relative path to be exactly CLAUDE.md (not docs/CLAUDE.md or subdir/CLAUDE.md)
