@@ -51,12 +51,12 @@ over-abstraction.
    - [x] Validate response shape defensively before indexing (check that choices is a list, message is a dict, etc.)
    - [x] Add tests: choices=null, message=42, and other malformed-but-valid-JSON payloads are handled gracefully
 
-- [ ] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
+- [x] Runner prompt gives contradictory instructions for checks vs. bug investigation (runner.py:229-310)
    - [x] Split the prompt template into a normal-task variant and a bug-investigation variant, selected based on whether prior_errors is populated
    - [x] In the normal-task variant, remove the "run the app and reproduce" instruction
    - [x] In the bug-investigation variant, remove the "only run exact check commands" instruction
    - [x] Normalize pytest invocation at command-generation time (always emit pytest, never python -m pytest) so the prompt does not need a conflicting natural-language override
-   - [ ] Add tests: normal task prompt does not contain reproduction language, bug-investigation prompt does not contain "only run exact check commands"
+   - [x] Add tests: normal task prompt does not contain reproduction language, bug-investigation prompt does not contain "only run exact check commands"
 
 - [ ] CLAUDE.md manifest is stale and contains a duplicated architecture block (CLAUDE.md:69-209, 653-690)
    - [ ] Regenerate the architecture section from the current module tree (include gather.py, sync_cmd.py, prompts.py, worktree.py, and any other modules added since the last update)
