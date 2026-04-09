@@ -13,19 +13,30 @@ over-abstraction.
 
 ## Bugs
 
-- [x] _main() exits 0 on red repo (main.py:167-176)
-   - [x] Make run_loop() return a structured status indicating success, failure, or terminal error
-   - [x] In _main(), check the return value and sys.exit(1) when run_loop() reports terminal failure (full-suite failure, stuck task, etc.)
-   - [x] Add tests: run_loop returning failure status causes _main() to exit nonzero, run_loop returning success causes exit 0
+- [ ] [BATCH] ruff autofix inside run_checks() makes verification non-read-only (checks.py:104)
+   - [ ] Move ruff check --fix and ruff format out of run_checks() into a separate autofix step that runs before verification, or run them only in the task session prompt
+   - [ ] After run_checks() returns success, verify no uncommitted changes exist (git diff --quiet). If changes were introduced by the checker, route them back through commit or treat as failure
+   - [ ] Ensure the no-op detection path, full-suite path, and stage-boundary path all use the side-effect-free version of run_checks()
 
-- [x] Orphan kill falls back to killing blindly when ps verification fails (lifecycle.py:275-297)
-   - [x] When verification metadata exists but ps fails or times out, remove the stale pid file and print a warning instead of killing
-   - [x] Only kill when verification positively confirms the process matches the stored metadata
-   - [x] Add tests: ps failure with existing metadata results in warning and pid file removal (not kill), ps success with matching metadata results in kill
+- [ ] [BATCH] Targeted testing skips changed test files entirely (targeted.py:27, checks.py:70)
+   - [ ] In map_to_tests(), include changed test files (tests/test_*.py) directly in the targeted set, not just source-to-test mappings
+   - [ ] When only test files changed and no source files changed, run those test files instead of skipping pytest
+   - [ ] Fix tests at tests/test_targeted.py:47 and tests/test_targeted.py:128 that encode the current (wrong) behavior
 
-- [ ] Stale-line fallback in check_off/mark_failed is still ambiguous with duplicate text at same indent and stage (checklist.py:350-376)
-   - [x] On fallback (line_number stale), choose the nearest valid match to the original line_number rather than the first match
-   - [ ] Add tests: PLAN.md with two identical tasks at same indent/stage, file shifted by inserted lines, check_off targets the one closest to the original line_number
+- [ ] [BATCH] _run_build() outcome is ignored (main.py:1043, 1125, 1246)
+   - [ ] Make _run_build() return a structured result indicating success or failure
+   - [ ] In the stage-complete and all-done paths, check the build result and treat failure as a terminal run error
+   - [ ] Send a failure notification instead of stage-complete/all-done when the build fails
+
+- [ ] [BATCH] Stale reviewer findings injected when reviewer is disabled (main.py:477, 548)
+   - [ ] Gate review-file cleanup and collection on reviewer_config being present
+   - [ ] At startup, if reviewer is disabled, delete any existing .mcloop/reviews/*.json files to prevent stale findings from previous runs
+
+- [ ] [BATCH] Session memory for Bash stores exact command strings, not prefixes (telegram-permission-hook.py:54, 409)
+   - [ ] Normalize Bash session approvals to store the command prefix (the executable and subcommand) rather than the full command with arguments
+   - [ ] For example, store "Bash:git add" instead of "Bash:git add a.py", so all git add invocations are covered by a single session approval
+   - [ ] Preserve exact-string matching for non-Bash tools where the current behavior is correct
+
 
 
 ## Stage 1: Core
