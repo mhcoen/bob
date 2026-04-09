@@ -32,10 +32,10 @@ over-abstraction.
    - [x] Gate review-file cleanup and collection on reviewer_config being present
    - [x] At startup, if reviewer is disabled, delete any existing .mcloop/reviews/*.json files to prevent stale findings from previous runs
 
-- [ ] [BATCH] Session memory for Bash stores exact command strings, not prefixes (telegram-permission-hook.py:54, 409)
-   - [ ] Normalize Bash session approvals to store the command prefix (the executable and subcommand) rather than the full command with arguments
-   - [ ] For example, store "Bash:git add" instead of "Bash:git add a.py", so all git add invocations are covered by a single session approval
-   - [ ] Preserve exact-string matching for non-Bash tools where the current behavior is correct
+- [x] [BATCH] Session memory for Bash stores exact command strings, not prefixes (telegram-permission-hook.py:54, 409)
+   - [x] Normalize Bash session approvals to store the command prefix (the executable and subcommand) rather than the full command with arguments
+   - [x] For example, store "Bash:git add" instead of "Bash:git add a.py", so all git add invocations are covered by a single session approval
+   - [x] Preserve exact-string matching for non-Bash tools where the current behavior is correct
 
 
 
