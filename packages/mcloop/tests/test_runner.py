@@ -1567,6 +1567,9 @@ def test_run_task_uses_normal_prompt_without_prior_errors(tmp_path):
         # Normal prompt should NOT have bug investigation framing
         assert "BUG INVESTIGATION" not in prompt
         assert "ERRORS FROM PREVIOUS ATTEMPT" not in prompt
+        # Normal prompt should NOT have the debugging/reproduce instruction
+        assert "reproduce the original failure" not in prompt
+        assert "Run the app, trigger the same condition" not in prompt
 
 
 def test_run_task_uses_bug_prompt_with_prior_errors(tmp_path):
