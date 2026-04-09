@@ -117,12 +117,10 @@ def test_run_checks_with_targeted(tmp_path):
             tmp_path,
             changed_files=["mcloop/checks.py"],
         )
-        # Should have run auto-fix, ruff check, and targeted pytest
+        # run_checks is side-effect-free: no autofix, just ruff check + targeted pytest
         calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "--fix", "."]
-        assert calls[1] == ["ruff", "format", "."]
-        assert calls[2] == ["ruff", "check", "."]
-        assert calls[3] == ["pytest", "tests/test_checks.py"]
+        assert calls[0] == ["ruff", "check", "."]
+        assert calls[1] == ["pytest", "tests/test_checks.py"]
 
 
 def test_run_checks_targeted_no_matching_tests(tmp_path):
@@ -145,12 +143,10 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
             tmp_path,
             changed_files=["mcloop/main.py"],
         )
-        # Should run auto-fix + ruff check (pytest skipped — no matching tests)
-        assert mock_run.call_count == 3
+        # Side-effect-free: only ruff check (pytest skipped — no matching tests)
+        assert mock_run.call_count == 1
         calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "--fix", "."]
-        assert calls[1] == ["ruff", "format", "."]
-        assert calls[2] == ["ruff", "check", "."]
+        assert calls[0] == ["ruff", "check", "."]
 
 
 def test_run_checks_no_changed_files_runs_full(tmp_path):
@@ -169,9 +165,7 @@ def test_run_checks_no_changed_files_runs_full(tmp_path):
             stderr="",
         )
         run_checks(tmp_path)
-        # Should run auto-fix, ruff check, and pytest (full)
+        # Side-effect-free: ruff check + pytest (full), no autofix
         calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "--fix", "."]
-        assert calls[1] == ["ruff", "format", "."]
-        assert calls[2] == ["ruff", "check", "."]
-        assert calls[3] == ["pytest"]
+        assert calls[0] == ["ruff", "check", "."]
+        assert calls[1] == ["pytest"]

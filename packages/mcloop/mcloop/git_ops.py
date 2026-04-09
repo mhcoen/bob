@@ -291,6 +291,30 @@ def _has_meaningful_changes(project_dir: Path) -> bool:
     return len(meaningful) > 0
 
 
+def _has_uncommitted_changes(project_dir: Path) -> bool:
+    """Return True if git diff --quiet detects any uncommitted changes.
+
+    Unlike _has_meaningful_changes this does not filter out metadata files —
+    it checks whether the working tree is completely clean.
+    """
+    result = _git(
+        ["git", "diff", "--quiet"],
+        cwd=project_dir,
+        label="uncommitted check",
+        silent=True,
+    )
+    if result.returncode != 0:
+        return True
+    # Also check staged changes
+    result = _git(
+        ["git", "diff", "--quiet", "--cached"],
+        cwd=project_dir,
+        label="uncommitted check (staged)",
+        silent=True,
+    )
+    return result.returncode != 0
+
+
 def _get_diff(project_dir: Path) -> str:
     """Return the combined diff of staged and unstaged changes."""
     result = _git(

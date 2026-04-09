@@ -11,6 +11,7 @@ from mcloop.checks import (
     _normalize_pytest,
     detect_app_type,
     get_check_commands,
+    run_autofix,
     run_checks,
 )
 
@@ -154,9 +155,9 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     )
     result = run_checks(tmp_path)
     assert result.passed
-    # 2 auto-fix calls (ruff check --fix, ruff format) + 1 gate call
-    assert mock_run.call_count == 3
-    called_cmd = mock_run.call_args_list[-1][0][0]
+    # run_checks is now side-effect-free: only the gate call, no autofix
+    assert mock_run.call_count == 1
+    called_cmd = mock_run.call_args_list[0][0][0]
     assert called_cmd == ["ruff", "check", "."]
 
 
@@ -213,10 +214,7 @@ def test_run_checks_first_fails(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_timeout(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
-    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
     mock_run.side_effect = [
-        ok,  # ruff check --fix .
-        ok,  # ruff format .
         subprocess.TimeoutExpired(cmd="ruff check .", timeout=300),
     ]
     result = run_checks(tmp_path)
@@ -227,16 +225,43 @@ def test_run_checks_timeout(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_second_command_fails(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
-    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
     mock_run.side_effect = [
-        ok,  # ruff check --fix .
-        ok,  # ruff format .
         subprocess.CompletedProcess(args="ruff check .", returncode=0, stdout="ok\n", stderr=""),
         subprocess.CompletedProcess(args="pytest", returncode=1, stdout="FAILED\n", stderr=""),
     ]
     result = run_checks(tmp_path)
     assert not result.passed
     assert result.command == "pytest"
+
+
+# --- _classify_run_command tests ---
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
+    """run_autofix runs ruff check --fix and ruff format."""
+    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
+    mock_run.return_value = ok
+    run_autofix(tmp_path)
+    assert mock_run.call_count == 2
+    cmds = [call[0][0] for call in mock_run.call_args_list]
+    assert cmds[0] == ["ruff", "check", "--fix", "."]
+    assert cmds[1] == ["ruff", "format", "."]
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_checks_no_autofix_side_effects(mock_run, tmp_path):
+    """run_checks does not invoke ruff --fix or ruff format."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="", returncode=0, stdout="ok\n", stderr=""
+    )
+    run_checks(tmp_path)
+    # Only the gate commands, no autofix
+    cmds = [call[0][0] for call in mock_run.call_args_list]
+    for cmd in cmds:
+        assert cmd != ["ruff", "check", "--fix", "."]
+        assert cmd != ["ruff", "format", "."]
 
 
 # --- _classify_run_command tests ---

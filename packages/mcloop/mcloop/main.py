@@ -37,7 +37,7 @@ from mcloop.checklist import (
 from mcloop.checklist import (
     task_label as _task_label,
 )
-from mcloop.checks import detect_build, detect_run, get_check_commands, run_checks
+from mcloop.checks import detect_build, detect_run, get_check_commands, run_autofix, run_checks
 from mcloop.claude_md_check import (
     auto_update_claude_md,
     check_claude_md_freshness,
@@ -336,12 +336,21 @@ def _run_batch(
         return "failed"
 
     _lifecycle._current_phase = "checks"
+    run_autofix(project_dir)
     changed_files = _changed_files(project_dir)
+    pre_check_files = set(changed_files)
     check_result = run_checks(
         project_dir,
         changed_files=changed_files,
     )
     if check_result.passed:
+        post_check_files = set(_changed_files(project_dir))
+        if post_check_files != pre_check_files:
+            print(
+                formatting.error_msg("Batch: checker introduced uncommitted changes"),
+                flush=True,
+            )
+            return "failed"
         if not check_claude_md_freshness(changed_files, project_dir):
             if auto_update_claude_md(project_dir):
                 changed_files = _changed_files(project_dir)
@@ -844,12 +853,25 @@ def run_loop(
                     break
 
                 _lifecycle._current_phase = "checks"
+                run_autofix(project_dir)
                 changed_files = _changed_files(project_dir)
+                pre_check_files = set(changed_files)
                 check_result = run_checks(
                     project_dir,
                     changed_files=changed_files,
                 )
                 if check_result.passed:
+                    post_check_files = set(_changed_files(project_dir))
+                    if post_check_files != pre_check_files:
+                        last_error = "Checker introduced uncommitted changes"
+                        print(
+                            formatting.error_msg(
+                                f"Checker introduced uncommitted changes"
+                                f" (attempt {attempt}/{max_retries})"
+                            ),
+                            flush=True,
+                        )
+                        continue
                     if not check_claude_md_freshness(changed_files, project_dir):
                         if auto_update_claude_md(project_dir):
                             changed_files = _changed_files(project_dir)

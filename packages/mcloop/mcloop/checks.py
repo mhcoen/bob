@@ -55,11 +55,32 @@ def get_check_commands(project_dir: str | Path) -> list[str]:
     return _detect_commands(project_dir, config)
 
 
+def run_autofix(project_dir: str | Path) -> None:
+    """Run ruff check --fix and ruff format to auto-fix lint issues.
+
+    This is a separate step from verification so that callers can choose
+    whether to allow side effects.  Read-only paths (no-op detection,
+    full-suite, stage-boundary) should skip this.
+    """
+    project_dir = Path(project_dir)
+    for fix_cmd in ["ruff check --fix .", "ruff format ."]:
+        subprocess.run(
+            shlex.split(fix_cmd),
+            cwd=project_dir,
+            capture_output=True,
+            timeout=120,
+        )
+
+
 def run_checks(
     project_dir: str | Path,
     changed_files: list[str] | None = None,
 ) -> CheckResult:
     """Run the project's checks. Returns a CheckResult.
+
+    This function is side-effect-free: it only reads and reports.
+    Call *run_autofix()* first if you want auto-formatting applied
+    before verification.
 
     When *changed_files* is provided, test commands (e.g. pytest) are
     scoped to only the test files that correspond to the changed source
@@ -101,15 +122,6 @@ def run_checks(
                 output="\n".join(all_output),
                 command=cmd,
             )
-        # Auto-fix ruff violations before the read-only gate
-        if cmd.startswith("ruff check"):
-            for fix_cmd in ["ruff check --fix .", "ruff format ."]:
-                subprocess.run(
-                    shlex.split(fix_cmd),
-                    cwd=project_dir,
-                    capture_output=True,
-                    timeout=120,
-                )
         try:
             result = subprocess.run(
                 parts,

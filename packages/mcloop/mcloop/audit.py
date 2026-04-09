@@ -7,9 +7,16 @@ import time
 from pathlib import Path
 
 from mcloop import formatting
-from mcloop.checks import run_checks
+from mcloop.checks import run_autofix, run_checks
 from mcloop.formatting import format_elapsed as _format_elapsed
-from mcloop.git_ops import _commit, _get_diff, _get_git_hash, _git, _has_meaningful_changes
+from mcloop.git_ops import (
+    _changed_files,
+    _commit,
+    _get_diff,
+    _get_git_hash,
+    _git,
+    _has_meaningful_changes,
+)
 from mcloop.notify import notify
 from mcloop.output import _print_error_tail, _tail
 from mcloop.prompts import (
@@ -231,8 +238,20 @@ def _run_single_audit_round(
             )
             break
 
+        run_autofix(project_dir)
+        pre_check_files = set(_changed_files(project_dir))
         check_result = run_checks(project_dir)
         if check_result.passed:
+            post_check_files = set(_changed_files(project_dir))
+            if post_check_files != pre_check_files:
+                print(
+                    formatting.error_msg(
+                        f"Bug-fix: checker introduced uncommitted changes"
+                        f" (attempt {attempt}/{max_fix_attempts})"
+                    ),
+                    flush=True,
+                )
+                continue
             # Post-fix review: verify changes don't introduce new bugs
             diff = _get_diff(project_dir)
             if diff:
