@@ -199,9 +199,17 @@ def auto_update_claude_md(project_dir: Path) -> bool:
         print(f"  CLAUDE.md auto-update failed: {exc}", flush=True)
         return False
 
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if not isinstance(choices, list) or len(choices) == 0:
+        print("  CLAUDE.md auto-update: no content in response", flush=True)
+        return False
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        print("  CLAUDE.md auto-update: no content in response", flush=True)
+        return False
+    content = message.get("content")
+    if not isinstance(content, str):
         print("  CLAUDE.md auto-update: no content in response", flush=True)
         return False
 

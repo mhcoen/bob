@@ -175,9 +175,20 @@ def main() -> None:
     print()
 
     # Show raw response content
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if not isinstance(choices, list) or len(choices) == 0:
+        print(f"Unexpected response structure: {json.dumps(body)[:500]}")
+        return
+    first = choices[0]
+    if not isinstance(first, dict):
+        print(f"Unexpected response structure: {json.dumps(body)[:500]}")
+        return
+    message = first.get("message")
+    if not isinstance(message, dict):
+        print(f"Unexpected response structure: {json.dumps(body)[:500]}")
+        return
+    content = message.get("content")
+    if not isinstance(content, str):
         print(f"Unexpected response structure: {json.dumps(body)[:500]}")
         return
 
@@ -188,12 +199,9 @@ def main() -> None:
     print()
 
     # Also check for reasoning_details
-    try:
-        reasoning = body["choices"][0]["message"].get("reasoning_details")
-        if reasoning:
-            print(f"Reasoning details present ({len(str(reasoning))} chars)")
-    except (KeyError, IndexError, TypeError):
-        pass
+    reasoning = message.get("reasoning_details")
+    if reasoning:
+        print(f"Reasoning details present ({len(str(reasoning))} chars)")
 
     # Parse the response we already have (no second API call)
     from mcloop.reviewer import _parse_findings

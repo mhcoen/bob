@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mcloop.claude_md_check import (
     _is_source_file,
     _is_test_file,
@@ -230,3 +232,53 @@ class TestAutoUpdateClaudeMdTypeError:
             ),
         ):
             assert auto_update_claude_md(tmp_path) is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"choices": []},
+        {"choices": "not a list"},
+        {"choices": [None]},
+        {"choices": [{"message": {"content": 42}}]},
+        {"choices": [[]]},
+        {"no_choices": True},
+        "not a dict",
+        {"choices": [{"message": 123}]},
+    ],
+    ids=[
+        "empty_choices",
+        "choices_not_list",
+        "first_choice_none",
+        "content_not_string",
+        "first_choice_not_dict",
+        "missing_choices_key",
+        "body_not_dict",
+        "message_not_dict",
+    ],
+)
+def test_auto_update_malformed_response_shape(tmp_path, body):
+    """Malformed response shapes return False."""
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# Project\n")
+
+    config = {
+        "base_url": "https://api.example.com/v1",
+        "model": "test-model",
+        "api_key": "sk-test",
+    }
+    api_response = json.dumps(body).encode()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = api_response
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with (
+        patch("mcloop.claude_md_check._load_update_config", return_value=config),
+        patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
+        patch(
+            "mcloop.claude_md_check.urllib.request.urlopen",
+            return_value=mock_resp,
+        ),
+    ):
+        assert auto_update_claude_md(tmp_path) is False

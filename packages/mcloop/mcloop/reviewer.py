@@ -156,19 +156,31 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return []
 
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if not isinstance(choices, list) or len(choices) == 0:
+        return []
+    first = choices[0]
+    if not isinstance(first, dict):
+        return []
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if not isinstance(content, str):
+        return []
+
+    # Strip markdown code fences if present
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        # Remove first and last lines (fences)
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
     try:
-        content = body["choices"][0]["message"]["content"]
-        # Strip markdown code fences if present
-        content = content.strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            # Remove first and last lines (fences)
-            lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            content = "\n".join(lines)
         raw = json.loads(content)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+    except json.JSONDecodeError:
         return []
 
     if not isinstance(raw, list):
