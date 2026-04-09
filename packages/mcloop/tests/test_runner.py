@@ -1597,8 +1597,63 @@ def test_run_task_uses_bug_prompt_with_prior_errors(tmp_path):
         assert "find and read the actual error output first" in prompt
         # Bug prompt includes minimal-change instruction
         assert "minimal, targeted change" in prompt
-        # Normal-only instruction should not be present
+        # Normal-only instructions should not be present
         assert "Write unit tests where they make sense" not in prompt
+        assert "ABSOLUTELY FORBIDDEN" not in prompt
+
+
+def test_normal_prompt_includes_only_run_check_commands(tmp_path):
+    """Normal prompt includes the 'only run exact check commands' instruction."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Add a feature",
+            "claude",
+            project_dir,
+            log_dir,
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "ABSOLUTELY FORBIDDEN" in prompt
+
+
+def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
+    """Bug prompt excludes 'only run exact check commands' instruction."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="test failure",
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "ABSOLUTELY FORBIDDEN" not in prompt
+        # But check commands section is still present when provided
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the bug",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="test failure",
+            check_commands=["pytest"],
+        )
+        cmd = mock_session.call_args[0][0]
+        prompt = cmd[2]
+        assert "ABSOLUTELY FORBIDDEN" not in prompt
+        assert "CHECK COMMANDS" in prompt
 
 
 def test_bug_prompt_errors_before_task(tmp_path):
@@ -1642,7 +1697,6 @@ def test_bug_prompt_includes_shared_instructions(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         # Shared instructions are present
-        assert "ABSOLUTELY FORBIDDEN" in prompt
         assert "CHECK COMMANDS" in prompt
         assert "mcloop:wrap" in prompt
         assert "accessibility" in prompt.lower()

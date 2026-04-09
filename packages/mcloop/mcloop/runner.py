@@ -208,18 +208,6 @@ def _build_shared_parts(
 ) -> list[str]:
     """Return prompt parts shared by both normal and bug-investigation variants."""
     parts = []
-    parts.append(
-        "ABSOLUTELY FORBIDDEN: Do not run ANY test, lint,"
-        " import check, or verification command yourself."
-        " This includes pytest, python -c 'import ...', ruff,"
-        " mypy, and any other command that checks whether code"
-        " works. The ONLY commands you may run are the exact"
-        " check commands listed in the CHECK COMMANDS section"
-        " below. Running any other verification command is a"
-        " violation that wastes time and money. Make your code"
-        " changes, run the listed check commands, and stop."
-        " Nothing else."
-    )
     parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append("Run pytest directly, never via python -m pytest or .venv/bin/pytest.")
     parts.append(
@@ -340,6 +328,18 @@ def _build_normal_prompt(
         parts.append(f"Recent session history:\n{session_context}")
     parts.append(f"Task: {task_text}")
     parts.append("Write unit tests where they make sense.")
+    parts.append(
+        "ABSOLUTELY FORBIDDEN: Do not run ANY test, lint,"
+        " import check, or verification command yourself."
+        " This includes pytest, python -c 'import ...', ruff,"
+        " mypy, and any other command that checks whether code"
+        " works. The ONLY commands you may run are the exact"
+        " check commands listed in the CHECK COMMANDS section"
+        " below. Running any other verification command is a"
+        " violation that wastes time and money. Make your code"
+        " changes, run the listed check commands, and stop."
+        " Nothing else."
+    )
     parts.extend(_build_shared_parts(task_text, task_label, check_commands))
     if eliminated:
         elim_text = "\n".join(eliminated)
