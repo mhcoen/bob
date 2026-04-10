@@ -537,8 +537,15 @@ def _dispatch_auto_action(action: str, args: str) -> str:
         safe_name = re.sub(r"[^a-zA-Z0-9_\-.]", "_", app_name)
         tmp_dir = tempfile.mkdtemp(prefix="mcloop_")
         path = str(Path(tmp_dir) / f"auto_screenshot_{safe_name}.png")
-        app_interact.screenshot_window(app_name, path)
-        return f"screenshot saved to {path}"
+        try:
+            app_interact.screenshot_window(app_name, path)
+            import atexit
+
+            atexit.register(shutil.rmtree, tmp_dir, True)
+            return f"screenshot saved to {path}"
+        except BaseException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
     if action == "list_elements":
         elements = app_interact.list_elements(args.strip())

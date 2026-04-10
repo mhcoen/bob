@@ -420,10 +420,10 @@ The debugging playbook this enforces:
    - [x] Run `mcloop maintain` against mcloop itself to verify the invariant is detected and either reported as satisfied or fixed
    - [x] Iterate on the prompt template until the satisfied/fixed/failed outcomes are reliably distinguishable
 
-- [ ] [BATCH] DeepSeek model currency invariant
-   - [ ] Add a maintain invariant that ensures mcloop.json uses the most capable current DeepSeek model available on OpenRouter
-   - [ ] The maintenance session must be allowed to use WebFetch to query the OpenRouter model catalog
-   - [ ] The prompt must define "most capable" concretely enough to be checkable: prefer the highest version number in the deepseek-v family, breaking ties by recency of release
-   - [ ] When the choice is ambiguous (multiple new models with tradeoffs), use the Telegram ask-then-fall-back-to-autonomous flow from the maintain mechanism
-   - [ ] Update mcloop.json and run the project checks before committing. If checks fail with the new model, roll back and report failed
+- [x] [BATCH] DeepSeek model currency invariant
+   - [x] Add a maintain invariant that ensures mcloop.json uses the most capable current DeepSeek model available on OpenRouter
+   - [x] The maintenance session must be allowed to use WebFetch to query the OpenRouter model catalog
+   - [x] The prompt must define "most capable" concretely enough to be checkable: prefer the highest version number in the deepseek-v family, breaking ties by recency of release
+   - [x] When the choice is ambiguous (multiple new models with tradeoffs), use the Telegram ask-then-fall-back-to-autonomous flow from the maintain mechanism
+   - [x] Update mcloop.json and run the project checks before committing. If checks fail with the new model, roll back and report failed
 

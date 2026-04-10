@@ -719,6 +719,7 @@ def _add_swift_init_call(content: str) -> str:
     result = []
     in_main_struct = False
     found_init = False
+    pending_init: bool = False
 
     for i, line in enumerate(lines):
         result.append(line)
@@ -729,6 +730,12 @@ def _add_swift_init_call(content: str) -> str:
             continue
 
         if in_main_struct and not found_init:
+            if pending_init and stripped.startswith("{"):
+                found_init = True
+                indent = len(line) - len(line.lstrip()) + 4
+                result.append(" " * indent + call + "\n")
+                continue
+            pending_init = False
             if re.match(r"^\s*init\s*\(", stripped):
                 if "{" in stripped:
                     found_init = True
@@ -736,12 +743,7 @@ def _add_swift_init_call(content: str) -> str:
                     result.append(" " * indent + call + "\n")
                     continue
                 # Brace may be on the next line; mark for insertion
-                in_main_struct = "pending_init"
-                continue
-            if in_main_struct == "pending_init" and stripped.startswith("{"):
-                found_init = True
-                indent = len(line) - len(line.lstrip()) + 4
-                result.append(" " * indent + call + "\n")
+                pending_init = True
                 continue
 
     return "".join(result)

@@ -1059,7 +1059,7 @@ def run_loop(
     # notification on failure. The success path is gated on terminal_failure
     # being None, so adding a new check cannot accidentally skip the gate.
     summary_remaining_tasks: list[Task] = []
-    completed_stage: str | None = None
+    completed_stage: str = ""
     success_msg: str | None = None
 
     if terminal_failure is None:
@@ -1218,7 +1218,7 @@ def run_loop(
         total,
         project_dir,
         notes_snapshot,
-        completed_stage=completed_stage,
+        completed_stage=completed_stage or "",
     )
     if terminal_failure:
         return RunStatus("failure", detail=terminal_failure)
