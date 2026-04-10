@@ -211,6 +211,17 @@ def test_uninstall_subcommand_with_file():
     assert args.file == "custom.md"
 
 
+def test_idea_subcommand():
+    args = _parse("idea", "cool feature")
+    assert args.command == "idea"
+    assert args.text == "cool feature"
+
+
+def test_idea_subcommand_missing_text_exits():
+    with pytest.raises(SystemExit):
+        _parse("idea")
+
+
 def test_invalid_subcommand_exits():
     with pytest.raises(SystemExit):
         _parse("bogus")

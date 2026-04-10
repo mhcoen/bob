@@ -59,6 +59,7 @@ from mcloop.git_ops import (
     _snapshot_worktree,
     _worktree_status,
 )
+from mcloop.idea_cmd import _cmd_idea
 from mcloop.install_cmd import (
     _cmd_install,
     _cmd_uninstall,
@@ -173,6 +174,10 @@ def _main() -> None:
 
     if args.command == "uninstall":
         _cmd_uninstall(checklist_path.parent, dry_run=args.dry_run)
+        return
+
+    if args.command == "idea":
+        _cmd_idea(checklist_path.parent, args.text)
         return
 
     if not checklist_path.exists():
@@ -1267,6 +1272,8 @@ def _parse_args() -> argparse.Namespace:
         "description", nargs="?", default=None, help="Short description of the bug"
     )
     inv_parser.add_argument("--log", default=None, help="Path to a log file with error output")
+    idea_parser = subparsers.add_parser("idea", help="Append an idea to IDEAS.md")
+    idea_parser.add_argument("text", help="The idea text to record")
     return parser.parse_args()
 
 

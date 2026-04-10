@@ -38,6 +38,12 @@ between sessions:
   review.
 - **BUGS.md**: Written by the audit cycle, lists confirmed defects for
   the fix session to act on. Deleted after bugs are fixed.
+- **IDEAS.md**: A flat scratchpad for ideas not yet ready to become
+  PLAN.md tasks. Unlike the files above, McLoop never reads or modifies
+  IDEAS.md during runs — it is purely human-owned state. Use
+  `mcloop idea "some text"` to append a timestamped entry from the
+  command line, or edit the file directly. When an idea matures, move
+  it into PLAN.md as a task.
 
 These files live in the repo alongside your code and are the mechanism
 by which one session's knowledge reaches the next.
