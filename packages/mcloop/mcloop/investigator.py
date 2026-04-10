@@ -30,16 +30,6 @@ WEB_SEARCH_INSTRUCTION = (
     " Prefer proven solutions over ad-hoc patches."
 )
 
-PROGRAMMATIC_STEPS_INSTRUCTION = (
-    "Every plan step that involves launching, observing, or verifying"
-    " the app MUST use the programmatic tools instead of manual"
-    " actions. For example, 'Launch the app and verify the menu bar"
-    " icon appears' becomes 'Launch the app with"
-    " process_monitor.run_gui() and verify the window exists with"
-    " app_interact.window_exists()'. Never write steps that assume a"
-    " human will click, look, or type — use process_monitor,"
-    " app_interact, or web_interact to do it programmatically."
-)
 
 TESTING_INSTRUCTION = (
     "When writing tests during an investigation, exercise real code"
@@ -67,20 +57,6 @@ DEBUGGING_INSTRUCTION = (
     " means the strategy is wrong, not the execution."
 )
 
-REPRO_STEPS_INSTRUCTION = (
-    "When you successfully reproduce the bug, save the reproduction"
-    " steps to .mcloop/repro-steps.json as a JSON array. Each entry"
-    " must have 'action' and 'args' keys matching the AUTO action"
-    " format. Supported actions: run_cli, run_gui (args:"
-    " 'command | process_name'), window_exists, screenshot,"
-    " list_elements, click_button (args: 'app | label'), navigate,"
-    " page_text. Example:\n"
-    ' [{"action": "window_exists", "args": "MyApp"},'
-    ' {"action": "click_button", "args": "MyApp | Start"}]\n'
-    "This file is replayed automatically after the fix to verify"
-    " the bug no longer occurs."
-)
-
 
 @dataclass
 class BugContext:
@@ -91,91 +67,6 @@ class BugContext:
     failure_history: str = ""
     source_summary: str = ""
     app_type: str = ""  # "gui", "cli", "web", or ""
-
-
-def build_plan_generation_prompt(ctx: BugContext) -> str:
-    """Build the prompt sent to a Claude Code session to generate an investigation plan.
-
-    The prompt includes the debugging playbook, standalone-probe instruction,
-    web-search instruction, and the "What has been tried" section populated
-    from ctx.failure_history.
-    """
-    parts: list[str] = []
-
-    parts.append(
-        "You are generating an investigation plan for a bug."
-        " Follow this debugging playbook strictly:\n\n" + DEBUGGING_PLAYBOOK
-    )
-    parts.append(PROBES_INSTRUCTION)
-    parts.append(WEB_SEARCH_INSTRUCTION)
-    parts.append(DEBUGGING_INSTRUCTION)
-
-    if ctx.app_type:
-        parts.append(PROGRAMMATIC_STEPS_INSTRUCTION)
-        parts.append(REPRO_STEPS_INSTRUCTION)
-
-    if ctx.user_description:
-        parts.append(f"Bug description: {ctx.user_description}")
-    if ctx.crash_report:
-        parts.append(f"Crash report:\n```\n{ctx.crash_report}\n```")
-    if ctx.source_summary:
-        parts.append(f"Source summary: {ctx.source_summary}")
-
-    parts.append("## What has been tried\n")
-    if ctx.failure_history:
-        parts.append(ctx.failure_history)
-    else:
-        parts.append("Nothing yet.")
-
-    app_guidance = ""
-    if ctx.app_type == "gui":
-        app_guidance = (
-            "This is a GUI app. Available programmatic tools:\n"
-            "- process_monitor.run_gui(): launch and monitor for crash/hang\n"
-            "- process_monitor.is_alive(pid): check process is running\n"
-            "- process_monitor.sample(pid): capture call graph\n"
-            "- process_monitor.read_crash_report(name): find crash logs\n"
-            "- app_interact.window_exists(app): verify window appeared\n"
-            "- app_interact.list_elements(app): inspect UI element tree\n"
-            "- app_interact.click_button(app, label): click by label\n"
-            "- app_interact.select_menu_item(app, path): navigate menus\n"
-            "- app_interact.type_text(text): type into focused field\n"
-            "- app_interact.read_value(app, type, label): read element value\n"
-            "- app_interact.screenshot_window(app, path): capture screenshot"
-        )
-    elif ctx.app_type == "web":
-        app_guidance = (
-            "This is a web app. Available programmatic tools:\n"
-            "- process_monitor.launch(cmd): start the server\n"
-            "- process_monitor.is_alive(pid): check server is running\n"
-            "- process_monitor.read_output(proc): read server logs\n"
-            "- web_interact.launch_browser(): open headless browser\n"
-            "- browser.navigate(url): go to a page\n"
-            "- browser.click(selector): click an element\n"
-            "- browser.text(): read visible page text\n"
-            "- browser.content(): read page HTML\n"
-            "- browser.screenshot(path): capture screenshot"
-        )
-    elif ctx.app_type == "cli":
-        app_guidance = (
-            "This is a CLI app. Available programmatic tools:\n"
-            "- process_monitor.run_cli(cmd): run and capture output/exit code\n"
-            "- process_monitor.launch(cmd): start long-running process\n"
-            "- process_monitor.read_output(proc): read stdout\n"
-            "- process_monitor.send_input(proc, text): write to stdin\n"
-            "- process_monitor.is_hung(proc): detect stuck process\n"
-            "- process_monitor.sample(pid): capture call graph"
-        )
-    if app_guidance:
-        parts.append(app_guidance)
-
-    parts.append(
-        "Generate a PLAN.md with markdown checklist items (- [ ])"
-        " following the playbook order: research, reproduce,"
-        " instrument, isolate, inspect, fix, verify, clean up."
-    )
-
-    return "\n\n".join(parts)
 
 
 def generate_plan(ctx: BugContext) -> str:
@@ -347,7 +238,11 @@ def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
     now = time.time()
     candidates: list[Path] = []
     for entry in reports_dir.iterdir():
-        if entry.suffix == ".ips" and (now - entry.stat().st_mtime) < max_age_seconds:
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        if entry.suffix == ".ips" and (now - mtime) < max_age_seconds:
             candidates.append(entry)
     if not candidates:
         return ""

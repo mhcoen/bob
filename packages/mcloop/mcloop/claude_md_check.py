@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -94,21 +93,9 @@ def check_claude_md_freshness(
 
 def _get_diff_text(project_dir: Path) -> str:
     """Return the combined diff of staged and unstaged changes."""
-    result = subprocess.run(
-        ["git", "diff", "HEAD"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    result = subprocess.run(
-        ["git", "diff"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
+    from mcloop.git_ops import _get_diff
+
+    return _get_diff(project_dir)
 
 
 def _load_update_config() -> dict | None:

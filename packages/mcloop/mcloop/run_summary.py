@@ -55,13 +55,6 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _monotonic_to_iso(mono: float, run_start_mono: float, run_start_wall: float) -> str:
-    """Convert a monotonic timestamp to ISO 8601 using wall-clock anchor."""
-    offset = mono - run_start_mono
-    wall = run_start_wall + offset
-    return datetime.fromtimestamp(wall, tz=timezone.utc).isoformat()
-
-
 def write_run_summary(project_dir: Path, summary: RunSummary) -> Path:
     """Write the run summary to .mcloop/runs/ and update latest.json.
 

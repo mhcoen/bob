@@ -705,9 +705,6 @@ def _run_session(
 # label (">>> Task N)") and progress dots are shown.
 _SUPPRESS_ALL_TOOLS = True
 
-# Track the last tool name so we can suppress results from quiet tools
-_last_tool_name: str = ""
-
 
 def _print_stream_event(line: str) -> None:
     """Parse a stream-json line and print relevant activity.
@@ -722,13 +719,10 @@ def _print_stream_event(line: str) -> None:
     except (ValueError, TypeError):
         return
 
-    global _last_tool_name
-
     if data.get("type") == "assistant":
         for block in data.get("message", {}).get("content", []):
             if block.get("type") == "tool_use":
                 name = block.get("name", "")
-                _last_tool_name = name
                 if not _SUPPRESS_ALL_TOOLS:
                     inp = block.get("input", {})
                     detail = inp.get("command", "") if name == "Bash" else ""

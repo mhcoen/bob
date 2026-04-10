@@ -9,6 +9,7 @@ from pathlib import Path
 from mcloop import formatting
 from mcloop.checklist import (
     Task,
+    count_unchecked,
     current_stage,
     find_next,
     get_stages,
@@ -143,15 +144,7 @@ def _print_summary(
                 print(f"  {line}", flush=True)
 
     # Count remaining unchecked tasks
-    def _count_unchecked(tasks: list[Task]) -> int:
-        n = 0
-        for t in tasks:
-            if not t.checked and not t.failed:
-                n += 1
-            n += _count_unchecked(t.children)
-        return n
-
-    remaining = _count_unchecked(remaining_tasks)
+    remaining = count_unchecked(remaining_tasks)
     if remaining:
         print(
             f"\nRemaining: {remaining} task(s)",

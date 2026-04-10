@@ -17,6 +17,7 @@ from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
     Task,
     check_off,
+    count_unchecked,
     current_stage,
     find_next,
     find_parent,
@@ -654,15 +655,7 @@ def run_loop(
     active_stage_at_start = current_stage(parse(checklist_path))
 
     # Count remaining tasks for the startup notification
-    def _count_unchecked(task_list: list[Task]) -> int:
-        n = 0
-        for t in task_list:
-            if not t.checked and not t.failed:
-                n += 1
-            n += _count_unchecked(t.children)
-        return n
-
-    remaining_count = _count_unchecked(initial_tasks)
+    remaining_count = count_unchecked(initial_tasks)
     start_msg = f"Starting: {remaining_count} task(s) remaining"
     if active_stage_at_start:
         start_msg += f" in {active_stage_at_start}"

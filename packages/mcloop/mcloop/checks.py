@@ -64,12 +64,15 @@ def run_autofix(project_dir: str | Path) -> None:
     """
     project_dir = Path(project_dir)
     for fix_cmd in ["ruff check --fix .", "ruff format ."]:
-        subprocess.run(
-            shlex.split(fix_cmd),
-            cwd=project_dir,
-            capture_output=True,
-            timeout=120,
-        )
+        try:
+            subprocess.run(
+                shlex.split(fix_cmd),
+                cwd=project_dir,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def run_checks(

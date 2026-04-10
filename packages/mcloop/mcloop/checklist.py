@@ -26,6 +26,16 @@ class Task:
     eliminated: list[str] = field(default_factory=list)
 
 
+def count_unchecked(tasks: list[Task]) -> int:
+    """Recursively count unchecked, non-failed tasks."""
+    n = 0
+    for t in tasks:
+        if not t.checked and not t.failed:
+            n += 1
+        n += count_unchecked(t.children)
+    return n
+
+
 def parse_description(path: str | Path) -> str:
     """Extract prose before the first checkbox as a project description."""
     lines = Path(path).read_text().splitlines()
