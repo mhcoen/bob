@@ -150,6 +150,36 @@ def test_print_summary_with_failure(capsys, monkeypatch):
     assert "Something went wrong" in captured
 
 
+def test_print_summary_stop_reason(capsys, monkeypatch):
+    monkeypatch.setattr("mcloop.output._whitelist_suggestions", lambda: [])
+    _print_summary(
+        completed=["Task A"],
+        failed_task=None,
+        failed_reason="",
+        remaining_tasks=[],
+        stop_reason="Stopped after one task as requested",
+    )
+    captured = capsys.readouterr().out
+    assert "Stopped after one task as requested" in captured
+
+
+def test_print_summary_stop_reason_overrides_stage(capsys, monkeypatch):
+    """stop_reason takes precedence over completed_stage."""
+    monkeypatch.setattr("mcloop.output._whitelist_suggestions", lambda: [])
+    _print_summary(
+        completed=["Task A"],
+        failed_task=None,
+        failed_reason="",
+        remaining_tasks=[],
+        completed_stage="Core",
+        stop_reason="Stopped after stage as requested (Core complete).",
+    )
+    captured = capsys.readouterr().out
+    assert "Stopped after stage as requested (Core complete)." in captured
+    # The generic message should NOT appear
+    assert "Core complete. Run mcloop again for the next stage." not in captured
+
+
 class TestWhitelistSuggestions:
     def test_no_session_file(self, monkeypatch, tmp_path):
         monkeypatch.setattr("mcloop.output.SESSION_FILE", tmp_path / "missing.json")

@@ -1168,6 +1168,7 @@ def run_loop(
                 total,
                 project_dir,
                 notes_snapshot,
+                stop_reason=_stop_msg,
             )
             _build_and_write_summary(
                 project_dir,
@@ -1286,6 +1287,7 @@ def run_loop(
             total,
             project_dir,
             notes_snapshot,
+            stop_reason=_stop_msg,
         )
         _build_and_write_summary(
             project_dir,
@@ -1484,6 +1486,7 @@ def run_loop(
 
     # --- Single exit point for all non-bug-only paths ---
     total = time.monotonic() - run_start
+    _stop_reason = success_msg if stopped_early == "stage" and success_msg else ""
     _print_summary(
         completed,
         failed_task,
@@ -1493,6 +1496,7 @@ def run_loop(
         project_dir,
         notes_snapshot,
         completed_stage=completed_stage or "",
+        stop_reason=_stop_reason,
     )
     _terminal_status = "failure" if terminal_failure else "success"
     _stuck = [t.text for t in summary_remaining_tasks if not t.checked and not t.failed]

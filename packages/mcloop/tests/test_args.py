@@ -9466,3 +9466,157 @@ def test_main_passes_stop_flags_to_run_loop(tmp_path):
     _, kwargs = mock_loop.call_args
     assert kwargs["stop_after_stage"] is True
     assert kwargs["stop_after_one"] is True
+
+
+def test_stop_after_one_prints_stop_reason(tmp_path, capsys):
+    """--stop-after-one prints stop reason in terminal summary (not patched)."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    captured = capsys.readouterr()
+    assert "Stopped after one task as requested" in captured.out
+
+
+def test_stop_after_one_bug_only_prints_stop_reason(tmp_path, capsys):
+    """--stop-after-one in bug-only mode prints stop reason in terminal summary."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    captured = capsys.readouterr()
+    assert "Stopped after one task as requested" in captured.out
+
+
+def test_stop_after_stage_prints_stop_reason(tmp_path, capsys):
+    """--stop-after-stage prints distinct stop reason in terminal summary."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_stage=True, no_audit=True)
+
+    assert result.ok
+    captured = capsys.readouterr()
+    assert "Stopped after stage as requested" in captured.out
+    assert "Core" in captured.out
+
+
+def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
+    """Normal stage completion (no --stop-after-stage) uses generic message."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, no_audit=True)
+
+    assert result.ok
+    captured = capsys.readouterr()
+    # Should NOT say "Stopped after stage as requested"
+    assert "Stopped after stage as requested" not in captured.out
+    # Should have the generic stage complete message
+    assert "Core complete. Run mcloop again for the next stage." in captured.out

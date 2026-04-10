@@ -120,6 +120,7 @@ def _print_summary(
     project_dir: Path | None = None,
     notes_snapshot: tuple[str, int] | None = None,
     completed_stage: str = "",
+    stop_reason: str = "",
 ) -> None:
     """Print a summary of what McLoop did."""
     print(formatting.summary_header(), flush=True)
@@ -151,7 +152,12 @@ def _print_summary(
             flush=True,
         )
 
-    if completed_stage:
+    if stop_reason:
+        print(
+            formatting.system_msg(stop_reason),
+            flush=True,
+        )
+    elif completed_stage:
         print(
             formatting.system_msg(
                 f"{completed_stage} complete. Run mcloop again for the next stage."
