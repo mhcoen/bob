@@ -1187,15 +1187,41 @@ def run_loop(
             flush=True,
         )
     elif not no_audit:
+        from mcloop.audit import AuditResult
+
         _lifecycle._current_phase = "audit"
         _lifecycle._phase_start_time = time.monotonic()
         _audit_start = time.monotonic()
-        _run_audit_fix_cycle(
+        audit_result = _run_audit_fix_cycle(
             project_dir,
             log_dir,
             model=model,
         )
         _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
+        if audit_result == AuditResult.failed:
+            print(
+                formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
+                flush=True,
+            )
+            total = time.monotonic() - run_start
+            _print_summary(
+                completed,
+                None,
+                "",
+                [],
+                total,
+                project_dir,
+                notes_snapshot,
+            )
+            notify(
+                "Run ended: audit session failed (crashed, timed out,"
+                " or BUGS.md not produced). Build and completion skipped.",
+                level="error",
+            )
+            return RunStatus(
+                "failure",
+                detail="Audit failed: session crashed or BUGS.md not produced",
+            )
         print(formatting.system_msg(f"Audit completed [{_audit_elapsed}]"), flush=True)
 
     build_result = _run_build(project_dir)

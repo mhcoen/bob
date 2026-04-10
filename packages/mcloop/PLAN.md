@@ -13,13 +13,13 @@ over-abstraction.
 
 ## Bugs
 
-- [ ] [BATCH] _run_audit_fix_cycle() collapses audit failure and no-bugs-found into the same path (audit.py:84, 89, 99, 135)
-   - [ ] Define a structured audit result type with at least three states: no_bugs (audit ran, found nothing), fixed (audit ran, bugs found and fixed), failed (audit session crashed, timed out, or BUGS.md was not produced)
-   - [ ] Update _run_audit_fix_cycle() to return this structured result instead of a bare bool
-   - [ ] Only write .mcloop-last-audit when the result is no_bugs or fixed. Never on failed, so the next run retries the audit
-   - [ ] Send the "Audit complete: no bugs found" notification only on the no_bugs result. Send a distinct failure notification on failed
-   - [ ] Update all callers in main.py to handle the new return type
-   - [ ] Update existing audit tests to assert the correct state for each path (success, failure, no-bugs, bugs-fixed)
+- [ ] [BATCH] run_loop() success path is not gated on a single terminal-failure flag (main.py)
+   - [ ] Introduce a single helper or sentinel in run_loop() that captures terminal failure from any source: full-suite failure, build failure, audit failure, commit failure, and any future check that produces a fatal result
+   - [ ] Refactor the end-of-run path so that the success notification, the all-done notification, and the success RunStatus return are all gated on this single flag rather than scattered across multiple if branches
+   - [ ] The goal is to prevent the recurring class of bug where a new failure mode is added but its caller forgets to skip the success path. Three instances of this bug have been fixed individually so far
+   - [ ] Preserve existing distinct failure notifications per failure mode (the user should still see why the run failed), but consolidate the skip-success logic
+   - [ ] Update tests to verify that each failure mode still produces the correct distinct notification AND skips build/success/all-done
+
 
 
 ## Stage 1: Core
