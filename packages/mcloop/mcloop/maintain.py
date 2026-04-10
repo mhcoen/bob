@@ -78,48 +78,40 @@ def parse_invariants(path: str | Path) -> list[str]:
 
 def _build_maintain_prompt(
     invariant_text: str,
-    check_commands: list[str] | None,
 ) -> str:
-    """Build the prompt for a maintain session checking one invariant."""
+    """Build the prompt for a maintain session checking one invariant.
+
+    Safety instructions and check commands are added by run_task's
+    _build_normal_prompt / _build_shared_parts, so this prompt only
+    contains the maintain-specific instructions.
+    """
     parts = []
     parts.append(
         "You are checking whether an invariant holds in this codebase."
         " An invariant is a statement of desired state, not a task."
         " Your job is to verify it, fix it if broken, and report"
-        " the outcome."
+        " the outcome.\n\n"
+        f"INVARIANT: {invariant_text}"
     )
-    parts.append(f"INVARIANT: {invariant_text}")
     parts.append(
         "Follow these steps:\n"
-        "1. Check whether the invariant currently holds in the codebase.\n"
-        "2. If it holds, report SATISFIED.\n"
-        "3. If it does not hold, fix it with minimal changes.\n"
-        "4. Run the project's check commands to verify your fix.\n"
-        "5. If the fix passes all checks, report FIXED.\n"
-        "6. If you cannot fix it or checks fail, report FAILED."
+        "1. Check whether the invariant currently holds.\n"
+        "2. If it holds, skip the CHECK COMMANDS and report SATISFIED.\n"
+        "3. If it does not hold, fix it with minimal changes,"
+        " then run the CHECK COMMANDS listed below.\n"
+        "4. If your fix passes all checks, report FIXED.\n"
+        "5. If you cannot fix it or checks fail, report FAILED."
     )
-    if check_commands:
-        cmds = ", ".join(check_commands)
-        parts.append(
-            "CHECK COMMANDS (mandatory):\n"
-            f"Commands: {cmds}\n"
-            "Run each check command EXACTLY ONCE before reporting"
-            " FIXED. If a check fails, attempt to fix and re-run"
-            " (maximum 3 total runs per command)."
-        )
     parts.append(
-        "Report your outcome in this exact format at the end"
-        " of your response:\n"
+        "CRITICAL: You MUST end your response with this exact block"
+        " (pick exactly one of SATISFIED, FIXED, or FAILED):\n\n"
         "--- MAINTAIN RESULT ---\n"
-        "OUTCOME: SATISFIED|FIXED|FAILED\n"
-        "DETAIL: <brief explanation>\n"
-        "--- END MAINTAIN ---"
-    )
-    parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
-    parts.append(
-        "Never delete any file. Do not use rm, git rm,"
-        " os.remove, unlink, shutil.rmtree, or any other"
-        " file deletion mechanism."
+        "OUTCOME: SATISFIED\n"
+        "DETAIL: one-line explanation\n"
+        "--- END MAINTAIN ---\n\n"
+        "Replace SATISFIED with FIXED or FAILED as appropriate."
+        " The OUTCOME line must contain a single word after the colon."
+        " Without this block the run is treated as a failure."
     )
     return "\n\n".join(parts)
 
@@ -260,7 +252,7 @@ def run_maintain(
             flush=True,
         )
 
-        task_text = _build_maintain_prompt(invariant_text, project_checks)
+        task_text = _build_maintain_prompt(invariant_text)
         task_start = time.monotonic()
 
         result = run_task(
@@ -272,7 +264,7 @@ def run_maintain(
             task_label=f"maintain-{i}",
             model=model,
             session_context="",
-            check_commands=None,  # Already included in the maintain prompt
+            check_commands=project_checks,
         )
 
         elapsed = formatting.format_elapsed(time.monotonic() - task_start)

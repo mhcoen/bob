@@ -66,7 +66,7 @@ def test_parse_invariants_ignores_non_checkbox_lines(tmp_path):
 
 
 def test_build_maintain_prompt_contains_invariant():
-    prompt = _build_maintain_prompt("All tests pass", ["pytest", "ruff check ."])
+    prompt = _build_maintain_prompt("All tests pass")
     assert "All tests pass" in prompt
     assert "INVARIANT:" in prompt
     assert "SATISFIED" in prompt
@@ -74,15 +74,12 @@ def test_build_maintain_prompt_contains_invariant():
     assert "FAILED" in prompt
 
 
-def test_build_maintain_prompt_includes_check_commands():
-    prompt = _build_maintain_prompt("Invariant X", ["pytest", "ruff check ."])
-    assert "pytest" in prompt
-    assert "ruff check ." in prompt
-
-
-def test_build_maintain_prompt_no_check_commands():
-    prompt = _build_maintain_prompt("Invariant X", None)
-    assert "CHECK COMMANDS" not in prompt
+def test_build_maintain_prompt_no_embedded_check_commands():
+    """Check commands are now passed to run_task, not embedded in the prompt."""
+    prompt = _build_maintain_prompt("Invariant X")
+    # The prompt should reference CHECK COMMANDS conceptually but not embed them
+    assert "INVARIANT:" in prompt
+    assert "MAINTAIN RESULT" in prompt
 
 
 # --- parse_maintain_output ---
@@ -271,6 +268,9 @@ def test_run_maintain_satisfied(
     assert summary.satisfied == 1
     assert summary.fixed == 0
     assert summary.failed == 0
+    # Verify check_commands are passed through to run_task
+    call_kwargs = mock_run_task.call_args
+    assert call_kwargs.kwargs.get("check_commands") == ["pytest"]
 
 
 @patch("mcloop.maintain._push_or_die")
