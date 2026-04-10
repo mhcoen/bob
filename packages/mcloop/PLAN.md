@@ -415,10 +415,10 @@ The debugging playbook this enforces:
    - [x] Maintain mode is a distinct lifecycle from the PLAN.md run_loop. Implement it as a separate code path in main.py, not by overloading run_loop
    - [x] Document MAINTAIN.md in the README, contrasting it with PLAN.md (PLAN.md is a feature backlog, MAINTAIN.md is a list of invariants)
 
-- [ ] [BATCH] First proof-of-concept maintain invariant
-   - [ ] Add a single concrete, checkable invariant to mcloop's own MAINTAIN.md to validate the mechanism. Suggested: "All top-level modules in mcloop/ are listed in CLAUDE.md" or "pyproject.toml requires Python 3.11 or newer"
-   - [ ] Run `mcloop maintain` against mcloop itself to verify the invariant is detected and either reported as satisfied or fixed
-   - [ ] Iterate on the prompt template until the satisfied/fixed/failed outcomes are reliably distinguishable
+- [x] [BATCH] First proof-of-concept maintain invariant
+   - [x] Add a single concrete, checkable invariant to mcloop's own MAINTAIN.md to validate the mechanism. Suggested: "All top-level modules in mcloop/ are listed in CLAUDE.md" or "pyproject.toml requires Python 3.11 or newer"
+   - [x] Run `mcloop maintain` against mcloop itself to verify the invariant is detected and either reported as satisfied or fixed
+   - [x] Iterate on the prompt template until the satisfied/fixed/failed outcomes are reliably distinguishable
 
 - [ ] [BATCH] DeepSeek model currency invariant
    - [ ] Add a maintain invariant that ensures mcloop.json uses the most capable current DeepSeek model available on OpenRouter
