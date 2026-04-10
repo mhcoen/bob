@@ -82,6 +82,7 @@ from mcloop.lifecycle import (
     _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
     register_signal_handlers,
 )
+from mcloop.maintain import run_maintain
 from mcloop.notify import notify
 from mcloop.output import (
     _dry_run,
@@ -178,6 +179,10 @@ def _main() -> None:
 
     if args.command == "idea":
         _cmd_idea(checklist_path.parent, args.text)
+        return
+
+    if args.command == "maintain":
+        _cmd_maintain(checklist_path.parent, cli=args.cli, model=args.model)
         return
 
     if not checklist_path.exists():
@@ -1274,6 +1279,7 @@ def _parse_args() -> argparse.Namespace:
     inv_parser.add_argument("--log", default=None, help="Path to a log file with error output")
     idea_parser = subparsers.add_parser("idea", help="Append an idea to IDEAS.md")
     idea_parser.add_argument("text", help="The idea text to record")
+    subparsers.add_parser("maintain", help="Check and enforce invariants from MAINTAIN.md")
     return parser.parse_args()
 
 
@@ -1307,6 +1313,24 @@ def _cmd_audit(checklist_path: Path, model: str | None = None) -> None:
         print(bugs_path.read_text())
     else:
         print("audit: BUGS.md was not written", file=sys.stderr)
+
+
+def _cmd_maintain(
+    project_dir: Path,
+    cli: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Run maintain mode: check and enforce MAINTAIN.md invariants."""
+    from mcloop.install_cmd import _load_mcloop_config
+
+    maintain_path = project_dir / "MAINTAIN.md"
+    if not maintain_path.exists():
+        print("MAINTAIN.md not found", file=sys.stderr)
+        sys.exit(1)
+    resolved_cli = cli or _load_mcloop_config().get("cli", "claude")
+    summary = run_maintain(maintain_path, cli=resolved_cli, model=model)
+    if summary.failed > 0:
+        sys.exit(1)
 
 
 def _check_user_input() -> str:

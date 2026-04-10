@@ -44,6 +44,14 @@ between sessions:
   `mcloop idea "some text"` to append a timestamped entry from the
   command line, or edit the file directly. When an idea matures, move
   it into PLAN.md as a task.
+- **MAINTAIN.md**: A list of invariants — statements of desired state
+  that should always hold (e.g. "All public functions have docstrings",
+  "No TODO comments in production code"). Unlike PLAN.md, which is a
+  feature backlog of tasks to execute once, MAINTAIN.md is a set of
+  ongoing constraints to enforce repeatedly. Run `mcloop maintain` to
+  check each invariant in its own session: if it holds, nothing happens;
+  if it's broken, the session fixes it and commits. Failures don't stop
+  the run. Results are logged to `.mcloop/maintain-log.json`.
 
 These files live in the repo alongside your code and are the mechanism
 by which one session's knowledge reaches the next.
