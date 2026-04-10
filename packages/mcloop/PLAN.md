@@ -396,11 +396,11 @@ The debugging playbook this enforces:
 
 ## Stage 7: Maintain mode and ideas scratchpad
 
-- [ ] [BATCH] IDEAS.md scratchpad mechanism
-   - [ ] Create a top-level IDEAS.md file in the repo root with a brief header explaining its purpose: a flat scratchpad for ideas not yet ready to become PLAN.md tasks
-   - [ ] mcloop must not parse, execute, or modify IDEAS.md during normal runs (it is human-only state)
-   - [ ] Add an `mcloop idea "some text"` subcommand that appends a timestamped line to IDEAS.md in the project root, creating the file if it does not exist
-   - [ ] Document IDEAS.md in the README, contrasting it with PLAN.md (PLAN.md is executable, IDEAS.md is a scratchpad)
+- [x] [BATCH] IDEAS.md scratchpad mechanism
+   - [x] Create a top-level IDEAS.md file in the repo root with a brief header explaining its purpose: a flat scratchpad for ideas not yet ready to become PLAN.md tasks
+   - [x] mcloop must not parse, execute, or modify IDEAS.md during normal runs (it is human-only state)
+   - [x] Add an `mcloop idea "some text"` subcommand that appends a timestamped line to IDEAS.md in the project root, creating the file if it does not exist
+   - [x] Document IDEAS.md in the README, contrasting it with PLAN.md (PLAN.md is executable, IDEAS.md is a scratchpad)
 
 - [ ] [BATCH] MAINTAIN.md parser and maintain mode
    - [ ] Create a MAINTAIN.md parser that reuses the existing checklist parser. Each entry is an invariant (a statement of desired state), not a task
