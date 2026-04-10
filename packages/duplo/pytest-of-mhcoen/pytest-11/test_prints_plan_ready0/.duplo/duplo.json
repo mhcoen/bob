@@ -1,1 +1,0 @@
-{"source_url": "https://example.com", "features": [{"name": "Search", "description": "Full-text search.", "category": "core"}], "preferences": {"platform": "web", "language": "Python", "constraints": [], "preferences": []}, "roadmap": [{"phase": 0, "title": "Core", "goal": "Search", "features": ["Search"], "test": "ok"}], "current_phase": 0}
