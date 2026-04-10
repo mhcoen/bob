@@ -494,6 +494,7 @@ def _build_and_write_summary(
     commit_hashes: list[str],
     terminal_status: str,
     failure_detail: str = "",
+    stop_reason: str = "",
     stuck: list[str] | None = None,
     full_suite_passed: bool | None = None,
     build_passed: bool | None = None,
@@ -512,6 +513,7 @@ def _build_and_write_summary(
         audit_result=audit_result,
         terminal_status=terminal_status,
         failure_detail=failure_detail,
+        stop_reason=stop_reason,
         stuck=stuck or [],
         commit_hashes=list(commit_hashes),
     )
@@ -1178,8 +1180,8 @@ def run_loop(
                 task_entries=task_entries,
                 check_entries=check_entries,
                 commit_hashes=commit_hashes,
-                terminal_status="success",
-                failure_detail=_stop_msg,
+                terminal_status="stopped",
+                stop_reason="stop_after_one",
             )
             return RunStatus("success", detail=_stop_msg)
         if terminal_failure is None:
@@ -1297,8 +1299,8 @@ def run_loop(
             task_entries=task_entries,
             check_entries=check_entries,
             commit_hashes=commit_hashes,
-            terminal_status="success",
-            failure_detail=_stop_msg,
+            terminal_status="stopped",
+            stop_reason="stop_after_one",
         )
         return RunStatus("success", detail=_stop_msg)
 
@@ -1498,7 +1500,15 @@ def run_loop(
         completed_stage=completed_stage or "",
         stop_reason=_stop_reason,
     )
-    _terminal_status = "failure" if terminal_failure else "success"
+    if terminal_failure:
+        _terminal_status = "failure"
+    elif stopped_early == "stage":
+        _terminal_status = "stopped"
+    else:
+        _terminal_status = "success"
+    _summary_stop_reason = (
+        "stop_after_stage" if stopped_early == "stage" and not terminal_failure else ""
+    )
     _stuck = [t.text for t in summary_remaining_tasks if not t.checked and not t.failed]
     _build_and_write_summary(
         project_dir,
@@ -1510,6 +1520,7 @@ def run_loop(
         commit_hashes=commit_hashes,
         terminal_status=_terminal_status,
         failure_detail=terminal_failure or "",
+        stop_reason=_summary_stop_reason,
         stuck=_stuck if terminal_failure else [],
         full_suite_passed=_summary_full_suite,
         build_passed=_summary_build,

@@ -8940,6 +8940,7 @@ def test_run_summary_schema_fields():
     )
     assert s.terminal_status == ""
     assert s.failure_detail == ""
+    assert s.stop_reason == ""
     assert s.tasks == []
     assert s.checks == []
     assert s.commit_hashes == []
@@ -9027,6 +9028,7 @@ def test_run_summary_all_fields_populated(tmp_path):
     assert data["build_passed"] is True
     assert data["audit_result"] == "no_bugs"
     assert data["commit_hashes"] == ["abc123", "def456"]
+    assert data["stop_reason"] == ""
 
 
 def test_run_summary_successful_run(tmp_path):
@@ -9620,3 +9622,207 @@ def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
     assert "Stopped after stage as requested" not in captured.out
     # Should have the generic stage complete message
     assert "Core complete. Run mcloop again for the next stage." in captured.out
+
+
+def test_run_summary_stop_after_one_terminal_status(tmp_path):
+    """--stop-after-one sets terminal_status='stopped' and stop_reason='stop_after_one'."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] First task\n- [ ] Second task\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    assert captured.get("terminal_status") == "stopped"
+    assert captured.get("stop_reason") == "stop_after_one"
+    assert captured.get("failure_detail", "") == ""
+
+
+def test_run_summary_stop_after_one_bug_only_terminal_status(tmp_path):
+    """--stop-after-one in bug-only mode sets stopped status."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    assert captured.get("terminal_status") == "stopped"
+    assert captured.get("stop_reason") == "stop_after_one"
+    assert captured.get("failure_detail", "") == ""
+
+
+def test_run_summary_stop_after_stage_terminal_status(tmp_path):
+    """--stop-after-stage sets terminal_status='stopped' and stop_reason='stop_after_stage'."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_stage=True, no_audit=True)
+
+    assert result.ok
+    assert captured.get("terminal_status") == "stopped"
+    assert captured.get("stop_reason") == "stop_after_stage"
+    assert captured.get("failure_detail", "") == ""
+
+
+def test_run_summary_stop_reason_field_in_schema():
+    """RunSummary includes stop_reason field that serializes correctly."""
+    from mcloop.run_summary import RunSummary
+
+    s = RunSummary(
+        run_start="2026-04-10T12:00:00+00:00",
+        run_end="2026-04-10T12:05:00+00:00",
+        elapsed_seconds=300.0,
+        mode="plan",
+        terminal_status="stopped",
+        stop_reason="stop_after_one",
+    )
+    assert s.terminal_status == "stopped"
+    assert s.stop_reason == "stop_after_one"
+    assert s.failure_detail == ""
+
+
+def test_run_summary_stop_reason_writes_to_json(tmp_path):
+    """stop_reason is persisted in the JSON output."""
+    from mcloop.run_summary import RunSummary, write_run_summary
+
+    s = RunSummary(
+        run_start="2026-04-10T12:00:00+00:00",
+        run_end="2026-04-10T12:05:00+00:00",
+        elapsed_seconds=300.0,
+        mode="plan",
+        terminal_status="stopped",
+        stop_reason="stop_after_stage",
+    )
+    path = write_run_summary(tmp_path, s)
+    data = json.loads(path.read_text())
+    assert data["terminal_status"] == "stopped"
+    assert data["stop_reason"] == "stop_after_stage"
+    assert data["failure_detail"] == ""
+
+
+def test_run_summary_normal_success_no_stop_reason(tmp_path):
+    """Normal successful run has empty stop_reason and terminal_status='success'."""
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] Only task\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    status, _ = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main._build_and_write_summary": capture_summary,
+        },
+        no_audit=True,
+    )
+
+    assert status.status == "success"
+    assert captured.get("terminal_status") == "success"
+    assert captured.get("stop_reason", "") == ""

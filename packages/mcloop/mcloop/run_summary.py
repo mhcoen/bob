@@ -44,8 +44,9 @@ class RunSummary:
     full_suite_passed: bool | None = None
     build_passed: bool | None = None
     audit_result: str | None = None  # "no_bugs", "fixed", "failed", "skipped", or None
-    terminal_status: str = ""  # "success", "failure", "interrupted"
+    terminal_status: str = ""  # "success", "failure", "interrupted", "stopped"
     failure_detail: str = ""
+    stop_reason: str = ""  # set when terminal_status == "stopped"
     stuck: list[str] = field(default_factory=list)
     commit_hashes: list[str] = field(default_factory=list)
 
