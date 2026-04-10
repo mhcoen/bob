@@ -429,11 +429,11 @@ The debugging playbook this enforces:
 
 ## Stage 8: Structured run artifacts
 
-- [ ] [BATCH] Per-run structured summary written to disk
-   - [ ] Define a run-summary schema covering: run start/end timestamps, total elapsed seconds, mode (plan, bug-only, maintain), per-task entries (label, text, outcome, elapsed, model, attempts, commit hash if any), per-check entries (command, passed, elapsed), full-suite check result, build result, audit result (if run), terminal status (success, failure, interrupted), failure detail string, and any stuck task list
-   - [ ] At the end of every run_loop() invocation, write a dated file to .mcloop/runs/YYYYMMDD_HHMMSS_run-summary.json containing the schema above. The file must be written on all exit paths: success, failure, interrupted, terminal failures from any source
-   - [ ] Also maintain .mcloop/runs/latest.json as a copy of the most recent summary, so automation has a stable filename to read
-   - [ ] Capture commit hashes for every commit produced during the run (per-task commits, batch commits, audit fix commits, maintain commits) by extending the existing _commit() flow to return the new HEAD hash
-   - [ ] Document the run summary schema and the .mcloop/runs/ directory in the README, including the latest.json convention
-   - [ ] Add tests covering: a successful run produces a complete summary, a failed run still produces a summary with the failure detail, an interrupted run produces a summary, all expected fields are populated
+- [x] [BATCH] Per-run structured summary written to disk
+   - [x] Define a run-summary schema covering: run start/end timestamps, total elapsed seconds, mode (plan, bug-only, maintain), per-task entries (label, text, outcome, elapsed, model, attempts, commit hash if any), per-check entries (command, passed, elapsed), full-suite check result, build result, audit result (if run), terminal status (success, failure, interrupted), failure detail string, and any stuck task list
+   - [x] At the end of every run_loop() invocation, write a dated file to .mcloop/runs/YYYYMMDD_HHMMSS_run-summary.json containing the schema above. The file must be written on all exit paths: success, failure, interrupted, terminal failures from any source
+   - [x] Also maintain .mcloop/runs/latest.json as a copy of the most recent summary, so automation has a stable filename to read
+   - [x] Capture commit hashes for every commit produced during the run (per-task commits, batch commits, audit fix commits, maintain commits) by extending the existing _commit() flow to return the new HEAD hash
+   - [x] Document the run summary schema and the .mcloop/runs/ directory in the README, including the latest.json convention
+   - [x] Add tests covering: a successful run produces a complete summary, a failed run still produces a summary with the failure detail, an interrupted run produces a summary, all expected fields are populated
 
