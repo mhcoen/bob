@@ -466,3 +466,145 @@ def test_run_maintain_passes_allowed_tools(
     run_maintain(md, cli="claude")
     call_kwargs = mock_run_task.call_args
     assert call_kwargs.kwargs.get("allowed_tools") == MAINTAIN_TOOLS
+
+
+# --- stop_after_one ---
+
+
+@patch("mcloop.maintain._push_or_die")
+@patch("mcloop.maintain._ensure_git")
+@patch("mcloop.maintain._kill_orphan_sessions")
+@patch("mcloop.maintain._checkpoint")
+@patch("mcloop.maintain.register_signal_handlers")
+@patch("mcloop.maintain.notify")
+@patch("mcloop.maintain.get_check_commands", return_value=["pytest"])
+@patch("mcloop.maintain._has_meaningful_changes", return_value=False)
+@patch("mcloop.maintain.run_task")
+def test_run_maintain_stop_after_one_satisfied(
+    mock_run_task,
+    mock_changes,
+    mock_checks,
+    mock_notify,
+    mock_signals,
+    mock_checkpoint,
+    mock_orphans,
+    mock_git,
+    mock_push,
+    tmp_path,
+):
+    """stop_after_one exits after the first satisfied invariant, skipping the rest."""
+    md = tmp_path / "MAINTAIN.md"
+    md.write_text("- [ ] First invariant\n- [ ] Second invariant\n")
+    (tmp_path / ".git").mkdir()
+
+    mock_run_task.return_value = _mock_run_task(
+        "--- MAINTAIN RESULT ---\nOUTCOME: SATISFIED\nDETAIL: OK\n--- END MAINTAIN ---\n"
+    )
+
+    summary = run_maintain(md, cli="claude", stop_after_one=True)
+
+    # Only the first invariant was processed
+    assert len(summary.results) == 1
+    assert summary.satisfied == 1
+    assert mock_run_task.call_count == 1
+
+    # Sends the same stop notification as plan mode
+    notify_calls = [c.args[0] for c in mock_notify.call_args_list]
+    assert any("Stopped after one task" in msg for msg in notify_calls)
+
+    # Log was still written
+    log_path = tmp_path / ".mcloop" / "maintain-log.json"
+    assert log_path.exists()
+
+
+@patch("mcloop.maintain._push_or_die")
+@patch("mcloop.maintain._ensure_git")
+@patch("mcloop.maintain._kill_orphan_sessions")
+@patch("mcloop.maintain._checkpoint")
+@patch("mcloop.maintain.register_signal_handlers")
+@patch("mcloop.maintain.notify")
+@patch("mcloop.maintain.get_check_commands", return_value=["pytest"])
+@patch("mcloop.maintain._has_meaningful_changes", return_value=True)
+@patch("mcloop.maintain._commit")
+@patch("mcloop.maintain.run_task")
+def test_run_maintain_stop_after_one_fixed(
+    mock_run_task,
+    mock_commit,
+    mock_changes,
+    mock_checks,
+    mock_notify,
+    mock_signals,
+    mock_checkpoint,
+    mock_orphans,
+    mock_git,
+    mock_push,
+    tmp_path,
+):
+    """stop_after_one exits after the first fixed invariant (post-commit boundary)."""
+    md = tmp_path / "MAINTAIN.md"
+    md.write_text("- [ ] First invariant\n- [ ] Second invariant\n")
+    (tmp_path / ".git").mkdir()
+
+    mock_run_task.return_value = _mock_run_task(
+        "--- MAINTAIN RESULT ---\nOUTCOME: FIXED\nDETAIL: Fixed it\n--- END MAINTAIN ---\n"
+    )
+
+    summary = run_maintain(md, cli="claude", stop_after_one=True)
+
+    # Only the first invariant was processed; commit happened then exit
+    assert len(summary.results) == 1
+    assert summary.fixed == 1
+    mock_commit.assert_called_once()
+    assert mock_run_task.call_count == 1
+
+    # Distinct stop notification
+    notify_calls = [c.args[0] for c in mock_notify.call_args_list]
+    assert any("Stopped after one task" in msg for msg in notify_calls)
+
+
+@patch("mcloop.maintain._push_or_die")
+@patch("mcloop.maintain._ensure_git")
+@patch("mcloop.maintain._kill_orphan_sessions")
+@patch("mcloop.maintain._checkpoint")
+@patch("mcloop.maintain.register_signal_handlers")
+@patch("mcloop.maintain.notify")
+@patch("mcloop.maintain.get_check_commands", return_value=["pytest"])
+@patch("mcloop.maintain._has_meaningful_changes", return_value=False)
+@patch("mcloop.maintain.run_task")
+def test_run_maintain_stop_after_one_skips_failed(
+    mock_run_task,
+    mock_changes,
+    mock_checks,
+    mock_notify,
+    mock_signals,
+    mock_checkpoint,
+    mock_orphans,
+    mock_git,
+    mock_push,
+    tmp_path,
+):
+    """stop_after_one does NOT exit on a failed invariant; continues to the next."""
+    md = tmp_path / "MAINTAIN.md"
+    md.write_text("- [ ] First invariant\n- [ ] Second invariant\n")
+    (tmp_path / ".git").mkdir()
+
+    mock_run_task.side_effect = [
+        # First invariant fails
+        _mock_run_task("", success=False, exit_code=1),
+        # Second invariant succeeds — this triggers the stop
+        _mock_run_task(
+            "--- MAINTAIN RESULT ---\nOUTCOME: SATISFIED\nDETAIL: OK\n--- END MAINTAIN ---\n"
+        ),
+    ]
+
+    summary = run_maintain(md, cli="claude", stop_after_one=True)
+
+    # Both invariants were processed (first failed, second satisfied)
+    assert len(summary.results) == 2
+    assert summary.failed == 1
+    assert summary.satisfied == 1
+    assert mock_run_task.call_count == 2
+
+    # Stop notification sent after second (successful) invariant
+    notify_calls = [c.args[0] for c in mock_notify.call_args_list]
+    assert any("Stopped after one task" in msg for msg in notify_calls)

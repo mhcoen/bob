@@ -234,6 +234,7 @@ def run_maintain(
     maintain_path: Path,
     cli: str = "claude",
     model: str | None = None,
+    stop_after_one: bool = False,
 ) -> MaintainSummary:
     """Run the maintain loop over all invariants in MAINTAIN.md.
 
@@ -343,6 +344,13 @@ def run_maintain(
         )
         if detail:
             print(f"    {detail}", flush=True)
+
+        # --stop-after-one: exit after first successful invariant
+        if stop_after_one and outcome in ("satisfied", "fixed"):
+            _write_maintain_log(project_dir, summary.results)
+            _print_maintain_summary(summary)
+            notify("Stopped after one task as requested")
+            return summary
 
     # Write log and print summary
     _write_maintain_log(project_dir, summary.results)

@@ -192,7 +192,12 @@ def _main() -> None:
         return
 
     if args.command == "maintain":
-        _cmd_maintain(checklist_path.parent, cli=args.cli, model=args.model)
+        _cmd_maintain(
+            checklist_path.parent,
+            cli=args.cli,
+            model=args.model,
+            stop_after_one=args.stop_after_one,
+        )
         return
 
     if not checklist_path.exists():
@@ -1615,6 +1620,7 @@ def _cmd_maintain(
     project_dir: Path,
     cli: str | None = None,
     model: str | None = None,
+    stop_after_one: bool = False,
 ) -> None:
     """Run maintain mode: check and enforce MAINTAIN.md invariants."""
     from mcloop.install_cmd import _load_mcloop_config
@@ -1624,7 +1630,9 @@ def _cmd_maintain(
         print("MAINTAIN.md not found", file=sys.stderr)
         sys.exit(1)
     resolved_cli = cli or _load_mcloop_config().get("cli", "claude")
-    summary = run_maintain(maintain_path, cli=resolved_cli, model=model)
+    summary = run_maintain(
+        maintain_path, cli=resolved_cli, model=model, stop_after_one=stop_after_one
+    )
     if summary.failed > 0:
         sys.exit(1)
 
