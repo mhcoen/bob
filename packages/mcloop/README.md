@@ -20,6 +20,8 @@ McLoop lets you run AI coding agents for hours at a time without babysitting the
 - **Visual verification** with deterministic app screenshots
 - **Guided setup** with `mcloop install` and `mcloop uninstall`
 - **Token auditing** with `bin/mcloop-audit` for per-task cost breakdowns
+- **Maintain mode** (`mcloop maintain`) enforces invariants from `MAINTAIN.md` independently of the main task loop
+- **Ideas scratchpad** (`mcloop idea "..."`) appends timestamped notes to `IDEAS.md` for capturing future work without polluting `PLAN.md`
 
 Because McLoop runs CLI sessions continuously, it will use
 your plan allowance faster than if you used the agent interactively. See
