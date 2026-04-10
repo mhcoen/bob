@@ -13,12 +13,6 @@ over-abstraction.
 
 ## Bugs
 
-- [ ] [BATCH] run_loop() success path is not gated on a single terminal-failure flag (main.py)
-   - [ ] Introduce a single helper or sentinel in run_loop() that captures terminal failure from any source: full-suite failure, build failure, audit failure, commit failure, and any future check that produces a fatal result
-   - [ ] Refactor the end-of-run path so that the success notification, the all-done notification, and the success RunStatus return are all gated on this single flag rather than scattered across multiple if branches
-   - [ ] The goal is to prevent the recurring class of bug where a new failure mode is added but its caller forgets to skip the success path. Three instances of this bug have been fixed individually so far
-   - [ ] Preserve existing distinct failure notifications per failure mode (the user should still see why the run failed), but consolidate the skip-success logic
-   - [ ] Update tests to verify that each failure mode still produces the correct distinct notification AND skips build/success/all-done
 
 
 
@@ -399,3 +393,37 @@ The debugging playbook this enforces:
    - [x] Add pytest-of-*/ to .gitignore
    - [x] git rm -r --cached pytest-of-mhcoen/
    - [x] Commit the removal and .gitignore update
+
+## Stage 7: Maintain mode and ideas scratchpad
+
+- [ ] [BATCH] IDEAS.md scratchpad mechanism
+   - [ ] Create a top-level IDEAS.md file in the repo root with a brief header explaining its purpose: a flat scratchpad for ideas not yet ready to become PLAN.md tasks
+   - [ ] mcloop must not parse, execute, or modify IDEAS.md during normal runs (it is human-only state)
+   - [ ] Add an `mcloop idea "some text"` subcommand that appends a timestamped line to IDEAS.md in the project root, creating the file if it does not exist
+   - [ ] Document IDEAS.md in the README, contrasting it with PLAN.md (PLAN.md is executable, IDEAS.md is a scratchpad)
+
+- [ ] [BATCH] MAINTAIN.md parser and maintain mode
+   - [ ] Create a MAINTAIN.md parser that reuses the existing checklist parser. Each entry is an invariant (a statement of desired state), not a task
+   - [ ] Add an `mcloop maintain` subcommand that loops over MAINTAIN.md entries independently. Each invariant gets its own Claude Code session
+   - [ ] The maintenance prompt must instruct the session to: check whether the invariant holds, fix it if not, run project checks, and report one of three outcomes: satisfied, fixed, or failed
+   - [ ] Failure of one invariant must not stop the run. Each invariant is independent. Continue to the next on failure
+   - [ ] On `fixed`, commit with a message like `maintain: <invariant text>`. On `satisfied`, do nothing. On `failed`, surface the failure in the run summary
+   - [ ] When the session needs human judgment, send a Telegram message with the question via the same PreToolUse hook flow used elsewhere. The 10-minute hook ceiling applies, same as everywhere else in mcloop
+   - [ ] If no Telegram reply within 10 minutes, the session proceeds with its best independent judgment and notes the autonomous decision in the commit message
+   - [ ] Write all maintain decisions (satisfied, fixed, failed, autonomous) to .mcloop/maintain-log.json for post-hoc audit
+   - [ ] Print a maintain run summary at the end: X satisfied, Y fixed, Z failed, and a list of any autonomous decisions made without user confirmation
+   - [ ] Maintain mode is a distinct lifecycle from the PLAN.md run_loop. Implement it as a separate code path in main.py, not by overloading run_loop
+   - [ ] Document MAINTAIN.md in the README, contrasting it with PLAN.md (PLAN.md is a feature backlog, MAINTAIN.md is a list of invariants)
+
+- [ ] [BATCH] First proof-of-concept maintain invariant
+   - [ ] Add a single concrete, checkable invariant to mcloop's own MAINTAIN.md to validate the mechanism. Suggested: "All top-level modules in mcloop/ are listed in CLAUDE.md" or "pyproject.toml requires Python 3.11 or newer"
+   - [ ] Run `mcloop maintain` against mcloop itself to verify the invariant is detected and either reported as satisfied or fixed
+   - [ ] Iterate on the prompt template until the satisfied/fixed/failed outcomes are reliably distinguishable
+
+- [ ] [BATCH] DeepSeek model currency invariant
+   - [ ] Add a maintain invariant that ensures mcloop.json uses the most capable current DeepSeek model available on OpenRouter
+   - [ ] The maintenance session must be allowed to use WebFetch to query the OpenRouter model catalog
+   - [ ] The prompt must define "most capable" concretely enough to be checkable: prefer the highest version number in the deepseek-v family, breaking ties by recency of release
+   - [ ] When the choice is ambiguous (multiple new models with tradeoffs), use the Telegram ask-then-fall-back-to-autonomous flow from the maintain mechanism
+   - [ ] Update mcloop.json and run the project checks before committing. If checks fail with the new model, roll back and report failed
+
