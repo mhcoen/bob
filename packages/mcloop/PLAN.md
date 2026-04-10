@@ -439,11 +439,11 @@ The debugging playbook this enforces:
 
 ## Stage 9: Checkpoint flags for unattended runs
 
-- [ ] [BATCH] First-class stop-after controls
-   - [ ] Add `--stop-after-stage` CLI flag. When set, mcloop runs through the current stage normally (full-suite check, build, stage-complete notification), then exits cleanly with success status instead of advancing into the next stage. The summary and notification must clearly indicate the run stopped because of the flag, not because tasks ran out
-   - [ ] Add `--stop-after-one` CLI flag. When set, mcloop runs exactly one checkable leaf task and then exits. If the next task is part of a `[BATCH]` parent, the batching logic must be bypassed for that single task: run only the one task in its own session, commit it normally, then exit. Do not run the rest of the batch
-   - [ ] Both flags must produce a distinct exit notification (e.g. "Stopped after stage as requested" or "Stopped after one task as requested") so the user can distinguish a checkpoint exit from a normal run completion or a failure
-   - [ ] `--stop-after-stage` is meaningless in bug-only mode (no stages). When both bug-only mode and `--stop-after-stage` apply, print a warning and ignore the flag. `--stop-after-one` works in all modes including bug-only and maintain
-   - [ ] The stop check must happen at a clean boundary: after a successful commit and check-off, before pulling the next task. Never stop mid-task or mid-batch
-   - [ ] Document both flags in the README with concrete use cases (overnight runs with tighter human checkpoints, inspecting one change at a time, validating a single stage before continuing)
+- [x] [BATCH] First-class stop-after controls
+   - [x] Add `--stop-after-stage` CLI flag. When set, mcloop runs through the current stage normally (full-suite check, build, stage-complete notification), then exits cleanly with success status instead of advancing into the next stage. The summary and notification must clearly indicate the run stopped because of the flag, not because tasks ran out
+   - [x] Add `--stop-after-one` CLI flag. When set, mcloop runs exactly one checkable leaf task and then exits. If the next task is part of a `[BATCH]` parent, the batching logic must be bypassed for that single task: run only the one task in its own session, commit it normally, then exit. Do not run the rest of the batch
+   - [x] Both flags must produce a distinct exit notification (e.g. "Stopped after stage as requested" or "Stopped after one task as requested") so the user can distinguish a checkpoint exit from a normal run completion or a failure
+   - [x] `--stop-after-stage` is meaningless in bug-only mode (no stages). When both bug-only mode and `--stop-after-stage` apply, print a warning and ignore the flag. `--stop-after-one` works in all modes including bug-only and maintain
+   - [x] The stop check must happen at a clean boundary: after a successful commit and check-off, before pulling the next task. Never stop mid-task or mid-batch
+   - [x] Document both flags in the README with concrete use cases (overnight runs with tighter human checkpoints, inspecting one change at a time, validating a single stage before continuing)
 

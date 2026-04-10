@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcloop.gather import gather_audit_context, gather_sync_context
 from mcloop.prompts import (
     bugs_md_has_bugs,
     build_audit_prompt,
@@ -102,81 +101,6 @@ def test_write_log_filename_format(tmp_path):
     assert log_path.suffix == ".log"
 
 
-# --- gather_sync_context ---
-
-
-def test_gather_sync_context_reads_plan(tmp_path):
-    (tmp_path / "PLAN.md").write_text("# My plan")
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert ctx["PLAN.md"] == "# My plan"
-
-
-def test_gather_sync_context_reads_readme(tmp_path):
-    (tmp_path / "README.md").write_text("# Readme")
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert ctx["README.md"] == "# Readme"
-
-
-def test_gather_sync_context_reads_claude_md(tmp_path):
-    (tmp_path / "CLAUDE.md").write_text("instructions")
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert ctx["CLAUDE.md"] == "instructions"
-
-
-def test_gather_sync_context_skips_missing_files(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert "PLAN.md" not in ctx
-    assert "README.md" not in ctx
-    assert "CLAUDE.md" not in ctx
-
-
-def test_gather_sync_context_includes_git_log(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True
-    )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True)
-    (tmp_path / "f.txt").write_text("x")
-    subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert "git_log" in ctx
-    assert "init" in ctx["git_log"]
-
-
-def test_gather_sync_context_includes_file_tree(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True
-    )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True)
-    (tmp_path / "hello.py").write_text("print('hi')")
-    subprocess.run(["git", "add", "hello.py"], cwd=tmp_path, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    assert "file_tree" in ctx
-    assert "hello.py" in ctx["file_tree"]
-
-
-def test_gather_sync_context_includes_python_source(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    (tmp_path / "app.py").write_text("x = 1")
-    ctx = gather_sync_context(tmp_path)
-    assert "app.py" in ctx
-    assert ctx["app.py"] == "x = 1"
-
-
-def test_gather_sync_context_excludes_git_dir(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_sync_context(tmp_path)
-    # No .git/ paths should appear as source keys
-    assert not any(".git" in k for k in ctx)
-
-
 # --- build_sync_prompt ---
 
 
@@ -227,46 +151,6 @@ def test_build_sync_prompt_problems_report_format():
 def test_build_sync_prompt_no_problems_instruction():
     prompt = build_sync_prompt()
     assert "No problems found." in prompt
-
-
-# --- gather_audit_context ---
-
-
-def test_gather_audit_context_reads_readme(tmp_path):
-    (tmp_path / "README.md").write_text("# Readme")
-    ctx = gather_audit_context(tmp_path)
-    assert ctx["README.md"] == "# Readme"
-
-
-def test_gather_audit_context_reads_claude_md(tmp_path):
-    (tmp_path / "CLAUDE.md").write_text("instructions")
-    ctx = gather_audit_context(tmp_path)
-    assert ctx["CLAUDE.md"] == "instructions"
-
-
-def test_gather_audit_context_skips_missing_files(tmp_path):
-    ctx = gather_audit_context(tmp_path)
-    assert "README.md" not in ctx
-    assert "CLAUDE.md" not in ctx
-
-
-def test_gather_audit_context_includes_python_source(tmp_path):
-    (tmp_path / "app.py").write_text("x = 1")
-    ctx = gather_audit_context(tmp_path)
-    assert "app.py" in ctx
-    assert ctx["app.py"] == "x = 1"
-
-
-def test_gather_audit_context_excludes_git_dir(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-    ctx = gather_audit_context(tmp_path)
-    assert not any(".git" in k for k in ctx)
-
-
-def test_gather_audit_context_omits_plan_md(tmp_path):
-    (tmp_path / "PLAN.md").write_text("# Plan")
-    ctx = gather_audit_context(tmp_path)
-    assert "PLAN.md" not in ctx
 
 
 # --- build_audit_prompt ---

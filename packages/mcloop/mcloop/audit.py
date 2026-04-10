@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import sys
 import time
 from pathlib import Path
 
@@ -323,7 +322,7 @@ def _run_single_audit_round(
                     formatting.error_msg(str(exc)),
                     flush=True,
                 )
-                sys.exit(1)
+                return None
             bugs_path.unlink(missing_ok=True)
             return True
 

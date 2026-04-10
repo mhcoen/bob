@@ -516,7 +516,6 @@ def _build_command(
         raise ValueError(f"Unknown CLI: {cli}")
 
 
-SILENCE_TIMEOUT = 5  # seconds before checking pending
 PROGRESS_DOT_INTERVAL = 3  # seconds between progress dots
 _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None

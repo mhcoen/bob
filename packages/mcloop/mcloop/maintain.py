@@ -317,7 +317,7 @@ def run_maintain(
             if _has_meaningful_changes(project_dir):
                 commit_msg = f"maintain: {_sanitize_commit_msg(invariant_text)}"
                 try:
-                    _commit(project_dir, commit_msg)
+                    _commit(project_dir, commit_msg, raw_message=True)
                 except RuntimeError as exc:
                     print(
                         formatting.error_msg(f"Invariant {i} commit failed: {exc}"),
