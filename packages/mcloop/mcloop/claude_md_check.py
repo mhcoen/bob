@@ -25,8 +25,6 @@ _SOURCE_EXTENSIONS = frozenset(
     )
 )
 
-_SOURCE_DIRS = ("src/", "lib/", "package/")
-
 _UPDATE_SYSTEM_PROMPT = """\
 You maintain a project manifest file called CLAUDE.md. You will receive
 the current CLAUDE.md and a git diff showing what changed. Update ONLY
@@ -64,9 +62,6 @@ def _is_source_file(path: str) -> bool:
     suffix = Path(path).suffix
     if suffix in _SOURCE_EXTENSIONS:
         return True
-    for prefix in _SOURCE_DIRS:
-        if path.startswith(prefix) and suffix in _SOURCE_EXTENSIONS:
-            return True
     return False
 
 

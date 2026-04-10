@@ -57,6 +57,7 @@ from mcloop.git_ops import (
     _has_uncommitted_changes,
     _push_or_die,
     _snapshot_worktree,
+    _stage_safe,
     _worktree_status,
 )
 from mcloop.idea_cmd import _cmd_idea
@@ -1118,6 +1119,7 @@ def run_loop(
 
         else:
             # Normal end of run (not a stage boundary)
+            summary_remaining_tasks = parse(checklist_path)
             print(
                 formatting.system_msg("Running full test suite (end of run)..."),
                 flush=True,
@@ -1416,7 +1418,7 @@ def _maybe_auto_wrap(project_dir: Path) -> None:
 
     print("Injected crash handlers.", flush=True)
 
-    _git(["git", "add", "-A"], cwd=project_dir, label="auto-wrap add")
+    _stage_safe(project_dir, label="auto-wrap")
     _git(
         ["git", "commit", "-m", "Inject mcloop crash handlers"],
         cwd=project_dir,
@@ -1486,7 +1488,7 @@ def _reinject_wrappers(project_dir: Path) -> None:
     )
     restored = inject(content, language, str(project_dir))
     entry.write_text(restored)
-    _git(["git", "add", "-A"], cwd=project_dir, label="reinject add")
+    _stage_safe(project_dir, label="reinject")
     _git(
         ["git", "commit", "-m", "Re-inject mcloop crash handlers"],
         cwd=project_dir,

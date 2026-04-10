@@ -9,6 +9,8 @@ from pathlib import Path
 from mcloop import formatting
 from mcloop.notify import notify
 
+_SENSITIVE_PATTERNS = {".env", ".key", ".pem", "credentials.json", "secrets"}
+
 
 def _git(
     args: list[str],
@@ -157,12 +159,11 @@ def _checkpoint(
         cwd=project_dir,
         label="checkpoint ls untracked",
     )
-    _sensitive = {".env", ".key", ".pem", "credentials.json", "secrets"}
     for f in untracked.stdout.strip().splitlines():
         f = f.strip()
         if not f:
             continue
-        if any(s in f for s in _sensitive):
+        if any(s in f for s in _SENSITIVE_PATTERNS):
             continue
         _git(["git", "add", "--", f], cwd=project_dir, label=f"checkpoint add {f}")
     result = _git(
@@ -209,6 +210,23 @@ def _push_or_die(project_dir: Path) -> None:
         sys.exit(1)
 
 
+def _stage_safe(project_dir: Path, *, label: str = "") -> None:
+    """Stage all changes while skipping sensitive files."""
+    _git(["git", "add", "-u"], cwd=project_dir, label=f"{label} add -u")
+    untracked = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label=f"{label} ls untracked",
+    )
+    for f in untracked.stdout.strip().splitlines():
+        f = f.strip()
+        if not f:
+            continue
+        if any(s in f for s in _SENSITIVE_PATTERNS):
+            continue
+        _git(["git", "add", "--", f], cwd=project_dir, label=f"{label} add {f}")
+
+
 def _commit(project_dir: Path, task_text: str) -> None:
     """Stage all changes, commit, and push."""
     if not (project_dir / ".git").exists():
@@ -224,12 +242,11 @@ def _commit(project_dir: Path, task_text: str) -> None:
         cwd=project_dir,
         label="commit ls untracked",
     )
-    _sensitive = {".env", ".key", ".pem", "credentials.json", "secrets"}
     for f in untracked.stdout.strip().splitlines():
         f = f.strip()
         if not f:
             continue
-        if any(s in f for s in _sensitive):
+        if any(s in f for s in _SENSITIVE_PATTERNS):
             continue
         _git(["git", "add", "--", f], cwd=project_dir, label=f"commit add {f}")
     add_result = _git(

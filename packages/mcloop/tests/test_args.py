@@ -4679,6 +4679,7 @@ def test_auto_wrap_injects_and_commits(tmp_path, capsys):
 
     with (
         patch("mcloop.main.detect_run", return_value="python main.py"),
+        patch("mcloop.main._stage_safe") as mock_stage,
         patch("mcloop.main._git", return_value=git_result) as mock_git,
     ):
         _maybe_auto_wrap(tmp_path)
@@ -4686,9 +4687,11 @@ def test_auto_wrap_injects_and_commits(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Injected crash handlers." in captured.out
 
-    # Should have committed: add, commit, remote check, push
-    assert mock_git.call_count == 4
-    commit_call = mock_git.call_args_list[1]
+    # _stage_safe called once for safe staging
+    mock_stage.assert_called_once()
+    # Should have committed: commit, remote check, push
+    assert mock_git.call_count == 3
+    commit_call = mock_git.call_args_list[0]
     assert "Inject mcloop crash handlers" in commit_call[0][0]
 
     # Entry point should have markers
@@ -4833,12 +4836,17 @@ def test_reinject_markers_stripped_swift(tmp_path):
 
     git_result = MagicMock()
     git_result.returncode = 0
-    with patch("mcloop.main._git", return_value=git_result) as mock_git:
+    with (
+        patch("mcloop.main._stage_safe") as mock_stage,
+        patch("mcloop.main._git", return_value=git_result) as mock_git,
+    ):
         _reinject_wrappers(tmp_path)
 
-    # Should have committed the re-injection
-    assert mock_git.call_count == 4  # add, commit, remote check, push
-    commit_call = mock_git.call_args_list[1]
+    # _stage_safe called once for safe staging
+    mock_stage.assert_called_once()
+    # Should have committed the re-injection: commit, remote check, push
+    assert mock_git.call_count == 3
+    commit_call = mock_git.call_args_list[0]
     assert "Re-inject mcloop crash handlers" in commit_call[0][0]
 
     # Entry point should now have markers
@@ -4878,10 +4886,13 @@ def test_reinject_markers_stripped_python(tmp_path):
 
     git_result = MagicMock()
     git_result.returncode = 0
-    with patch("mcloop.main._git", return_value=git_result) as mock_git:
+    with (
+        patch("mcloop.main._stage_safe"),
+        patch("mcloop.main._git", return_value=git_result) as mock_git,
+    ):
         _reinject_wrappers(tmp_path)
 
-    assert mock_git.call_count == 4
+    assert mock_git.call_count == 3
     content = entry.read_text()
     assert "# mcloop:wrap:begin" in content
     assert "# mcloop:wrap:end" in content
@@ -4921,7 +4932,10 @@ def test_reinject_push_failure_prints_error(tmp_path, capsys):
             result.returncode = 0
         return result
 
-    with patch("mcloop.main._git", side_effect=fake_git):
+    with (
+        patch("mcloop.main._stage_safe"),
+        patch("mcloop.main._git", side_effect=fake_git),
+    ):
         _reinject_wrappers(tmp_path)
 
     captured = capsys.readouterr()

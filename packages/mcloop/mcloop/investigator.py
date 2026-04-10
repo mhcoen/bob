@@ -139,7 +139,7 @@ def build_plan_generation_prompt(ctx: BugContext) -> str:
             "- app_interact.list_elements(app): inspect UI element tree\n"
             "- app_interact.click_button(app, label): click by label\n"
             "- app_interact.select_menu_item(app, path): navigate menus\n"
-            "- app_interact.type_text(app, text): type into focused field\n"
+            "- app_interact.type_text(text): type into focused field\n"
             "- app_interact.read_value(app, type, label): read element value\n"
             "- app_interact.screenshot_window(app, path): capture screenshot"
         )
