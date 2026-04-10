@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mcloop.maintain import (
+    MAINTAIN_TOOLS,
     InvariantResult,
     MaintainSummary,
     _build_maintain_prompt,
@@ -414,3 +415,54 @@ def test_print_summary_output(capsys):
     assert "1 failed" in out
     assert "Autonomous" in out
     assert "no reply" in out
+
+
+# --- MAINTAIN_TOOLS ---
+
+
+def test_maintain_tools_includes_webfetch():
+    """MAINTAIN_TOOLS must include WebFetch for external state verification."""
+    tools = MAINTAIN_TOOLS.split(",")
+    assert "WebFetch" in tools
+
+
+def test_maintain_tools_includes_defaults():
+    """MAINTAIN_TOOLS must include all default tools."""
+    tools = set(MAINTAIN_TOOLS.split(","))
+    defaults = {"Edit", "Write", "Bash", "Read", "Glob", "Grep"}
+    assert defaults.issubset(tools)
+
+
+@patch("mcloop.maintain._push_or_die")
+@patch("mcloop.maintain._ensure_git")
+@patch("mcloop.maintain._kill_orphan_sessions")
+@patch("mcloop.maintain._checkpoint")
+@patch("mcloop.maintain.register_signal_handlers")
+@patch("mcloop.maintain.notify")
+@patch("mcloop.maintain.get_check_commands", return_value=["pytest"])
+@patch("mcloop.maintain._has_meaningful_changes", return_value=False)
+@patch("mcloop.maintain.run_task")
+def test_run_maintain_passes_allowed_tools(
+    mock_run_task,
+    mock_changes,
+    mock_checks,
+    mock_notify,
+    mock_signals,
+    mock_checkpoint,
+    mock_orphans,
+    mock_git,
+    mock_push,
+    tmp_path,
+):
+    """run_maintain passes MAINTAIN_TOOLS as allowed_tools to run_task."""
+    md = tmp_path / "MAINTAIN.md"
+    md.write_text("- [ ] Some invariant\n")
+    (tmp_path / ".git").mkdir()
+
+    mock_run_task.return_value = _mock_run_task(
+        "--- MAINTAIN RESULT ---\nOUTCOME: SATISFIED\nDETAIL: OK\n--- END MAINTAIN ---\n"
+    )
+
+    run_maintain(md, cli="claude")
+    call_kwargs = mock_run_task.call_args
+    assert call_kwargs.kwargs.get("allowed_tools") == MAINTAIN_TOOLS

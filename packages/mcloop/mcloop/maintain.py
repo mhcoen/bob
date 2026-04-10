@@ -23,6 +23,11 @@ from mcloop.lifecycle import _kill_orphan_sessions, register_signal_handlers
 from mcloop.notify import notify
 from mcloop.runner import run_task, warn_unknown_model
 
+# Maintain sessions may need web access to verify external state
+# (e.g. checking model catalogs, API docs). Include WebFetch
+# beyond the default Edit,Write,Bash,Read,Glob,Grep set.
+MAINTAIN_TOOLS = "Edit,Write,Bash,Read,Glob,Grep,WebFetch"
+
 
 @dataclass
 class InvariantResult:
@@ -265,6 +270,7 @@ def run_maintain(
             model=model,
             session_context="",
             check_commands=project_checks,
+            allowed_tools=MAINTAIN_TOOLS,
         )
 
         elapsed = formatting.format_elapsed(time.monotonic() - task_start)
