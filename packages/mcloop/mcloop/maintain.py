@@ -124,15 +124,37 @@ def _build_maintain_prompt(
 def parse_maintain_output(output: str) -> tuple[str, str]:
     """Parse maintain session output for outcome.
 
+    The session output is a stream of JSON events from claude -p. The
+    final clean assistant text lives in the terminal ``result`` event's
+    ``result`` field. Searching the raw stream for the marker is
+    unreliable because the marker can be split across multiple
+    text_delta events and embedded inside JSON-escaped strings.
+
     Returns (outcome, detail) where outcome is one of
     'satisfied', 'fixed', 'failed', or 'unknown'.
     """
+    final_text = ""
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("type") == "result" and isinstance(obj.get("result"), str):
+            final_text = obj["result"]
+
+    # Fall back to the raw output if no result event was found
+    # (e.g. session was killed or output was truncated).
+    haystack = final_text or output
+
     marker = "--- MAINTAIN RESULT ---"
     end_marker = "--- END MAINTAIN ---"
-    idx = output.find(marker)
+    idx = haystack.find(marker)
     if idx == -1:
         return "failed", "No result marker found in session output"
-    after = output[idx + len(marker) :]
+    after = haystack[idx + len(marker) :]
     end_idx = after.find(end_marker)
     if end_idx != -1:
         after = after[:end_idx]
