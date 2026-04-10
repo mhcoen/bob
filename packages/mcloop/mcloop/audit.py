@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,15 @@ from mcloop.prompts import (
 from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"
+
+
+class AuditResult(enum.Enum):
+    """Structured result from an audit/fix cycle."""
+
+    no_bugs = "no_bugs"  # Audit ran, found nothing
+    fixed = "fixed"  # Audit ran, bugs found and fixed
+    failed = "failed"  # Audit session crashed, timed out, or BUGS.md not produced
+    skipped = "skipped"  # Audit skipped (no changes since last audit)
 
 
 def _should_skip_audit(project_dir: Path) -> bool:
@@ -66,45 +76,61 @@ def _run_audit_fix_cycle(
     project_dir: Path,
     log_dir: Path,
     model: str | None = None,
-) -> None:
+) -> AuditResult:
     """Run two rounds of audit/verify/fix to catch bugs introduced by fixes."""
     if _should_skip_audit(project_dir):
         print(
             formatting.system_msg("Audit skipped (no changes since last audit)"),
             flush=True,
         )
-        return
+        return AuditResult.skipped
 
+    any_fixed = False
     max_rounds = 2
     for round_num in range(1, max_rounds + 1):
         print(
             formatting.system_msg(f"Audit round {round_num}/{max_rounds}"),
             flush=True,
         )
-        fixed = _run_single_audit_round(
+        round_result = _run_single_audit_round(
             project_dir,
             log_dir,
             model=model,
         )
-        if not fixed:
+        if round_result is None:
+            # Session crashed or BUGS.md not produced
+            notify("Audit failed: session crashed or timed out.")
+            return AuditResult.failed
+        if not round_result:
             # No bugs found or fixed — no need for another round
-            if round_num == 1:
+            if round_num == 1 and not any_fixed:
                 notify("Audit complete: no bugs found.")
+                result = AuditResult.no_bugs
             else:
                 notify("Audit complete: fixes verified, no new bugs.")
-            break
+                result = AuditResult.fixed
+            _save_audit_hash(project_dir)
+            return result
+        any_fixed = True
         if round_num == max_rounds:
             notify("Audit complete: bugs fixed.")
+            _save_audit_hash(project_dir)
+            return AuditResult.fixed
 
-    _save_audit_hash(project_dir)
+    # Should not reach here, but guard against it
+    return AuditResult.failed
 
 
 def _run_single_audit_round(
     project_dir: Path,
     log_dir: Path,
     model: str | None = None,
-) -> bool:
-    """Run one audit/verify/fix cycle. Returns True if bugs were fixed."""
+) -> bool | None:
+    """Run one audit/verify/fix cycle.
+
+    Returns True if bugs were fixed, False if no bugs found, or None if the
+    audit session failed (crashed, timed out, or BUGS.md not produced).
+    """
     bugs_path = project_dir / "BUGS.md"
 
     # Resume from existing BUGS.md if present
@@ -137,14 +163,14 @@ def _run_single_audit_round(
                 f"audit: session exited with code {audit_result.exit_code}, skipping fix",
                 flush=True,
             )
-            return False
+            return None
 
         if not bugs_path.exists():
             print(
                 f"audit: BUGS.md not written, skipping fix [{_audit_el}]",
                 flush=True,
             )
-            return False
+            return None
 
         bugs_content = bugs_path.read_text()
         if not bugs_md_has_bugs(bugs_content):

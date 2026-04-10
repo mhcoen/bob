@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 import mcloop.lifecycle as lifecycle_mod
-from mcloop.audit import _run_audit_fix_cycle, _run_single_audit_round
+from mcloop.audit import AuditResult, _run_audit_fix_cycle, _run_single_audit_round
 from mcloop.errors import (
     _MAX_FIX_ATTEMPTS,
     _check_errors_json,
@@ -1942,8 +1942,9 @@ def test_run_audit_fix_cycle_no_bugs(tmp_path):
         patch("mcloop.audit.run_audit", side_effect=fake_audit) as mock_audit,
         patch("mcloop.audit.run_bug_fix") as mock_fix,
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
+    assert result == AuditResult.no_bugs
     mock_audit.assert_called_once()
     mock_fix.assert_not_called()
     assert not bugs_path.exists()
@@ -1964,30 +1965,34 @@ def test_run_audit_fix_cycle_with_bugs(tmp_path):
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()) as mock_fix,
         patch("mcloop.audit._has_meaningful_changes", return_value=False),
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_called_once()
+    # Fix had no meaningful changes so round returns False → no_bugs
+    assert result == AuditResult.no_bugs
 
 
 def test_run_audit_fix_cycle_audit_failure(tmp_path):
-    """When audit session fails, fix session is not run."""
+    """When audit session fails, result is failed."""
     with (
         patch("mcloop.audit.run_audit", return_value=_make_result(success=False, exit_code=1)),
         patch("mcloop.audit.run_bug_fix") as mock_fix,
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
+    assert result == AuditResult.failed
     mock_fix.assert_not_called()
 
 
 def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
-    """When audit succeeds but BUGS.md not written, fix session is not run."""
+    """When audit succeeds but BUGS.md not written, result is failed."""
     with (
         patch("mcloop.audit.run_audit", return_value=_make_result()),
         patch("mcloop.audit.run_bug_fix") as mock_fix,
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
+    assert result == AuditResult.failed
     mock_fix.assert_not_called()
 
 
@@ -2067,9 +2072,10 @@ def test_audit_cycle_runs_two_rounds_when_first_fixes(tmp_path):
         ),
         patch("mcloop.audit._save_audit_hash"),
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     assert call_count == 2
+    assert result == AuditResult.fixed
 
 
 def test_audit_cycle_stops_after_one_round_when_no_fixes(tmp_path):
@@ -2082,9 +2088,10 @@ def test_audit_cycle_stops_after_one_round_when_no_fixes(tmp_path):
         ) as mock_round,
         patch("mcloop.audit._save_audit_hash"),
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_round.assert_called_once()
+    assert result == AuditResult.no_bugs
 
 
 def test_audit_cycle_caps_at_two_rounds(tmp_path):
@@ -2097,13 +2104,14 @@ def test_audit_cycle_caps_at_two_rounds(tmp_path):
         ) as mock_round,
         patch("mcloop.audit._save_audit_hash"),
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     assert mock_round.call_count == 2
+    assert result == AuditResult.fixed
 
 
 def test_audit_cycle_saves_hash_after_completion(tmp_path):
-    """Audit hash is saved after both rounds complete."""
+    """Audit hash is saved when result is no_bugs."""
     with (
         patch("mcloop.audit._should_skip_audit", return_value=False),
         patch(
@@ -2112,8 +2120,9 @@ def test_audit_cycle_saves_hash_after_completion(tmp_path):
         ),
         patch("mcloop.audit._save_audit_hash") as mock_save,
     ):
-        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
+    assert result == AuditResult.no_bugs
     mock_save.assert_called_once_with(tmp_path)
 
 
@@ -2152,6 +2161,73 @@ def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
         result = _run_single_audit_round(tmp_path, tmp_path / "logs")
 
     assert result is False
+
+
+def test_single_audit_round_returns_none_on_session_failure(tmp_path):
+    """_run_single_audit_round returns None when audit session crashes."""
+    with patch("mcloop.audit.run_audit", return_value=_make_result(success=False, exit_code=1)):
+        result = _run_single_audit_round(tmp_path, tmp_path / "logs")
+
+    assert result is None
+
+
+def test_single_audit_round_returns_none_when_no_bugs_md(tmp_path):
+    """_run_single_audit_round returns None when BUGS.md not produced."""
+    with patch("mcloop.audit.run_audit", return_value=_make_result()):
+        result = _run_single_audit_round(tmp_path, tmp_path / "logs")
+
+    assert result is None
+
+
+def test_audit_cycle_failed_does_not_save_hash(tmp_path):
+    """Audit hash is NOT saved when result is failed."""
+    with (
+        patch("mcloop.audit._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.audit._run_single_audit_round",
+            return_value=None,
+        ),
+        patch("mcloop.audit._save_audit_hash") as mock_save,
+    ):
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    assert result == AuditResult.failed
+    mock_save.assert_not_called()
+
+
+def test_audit_cycle_failed_sends_failure_notification(tmp_path):
+    """Failed audit sends a distinct failure notification."""
+    with (
+        patch("mcloop.audit._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.audit._run_single_audit_round",
+            return_value=None,
+        ),
+        patch("mcloop.audit.notify") as mock_notify,
+    ):
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    assert result == AuditResult.failed
+    mock_notify.assert_called_once()
+    assert "failed" in mock_notify.call_args[0][0].lower()
+
+
+def test_audit_cycle_no_bugs_sends_no_bugs_notification(tmp_path):
+    """no_bugs result sends 'no bugs found' notification."""
+    with (
+        patch("mcloop.audit._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.audit._run_single_audit_round",
+            return_value=False,
+        ),
+        patch("mcloop.audit._save_audit_hash"),
+        patch("mcloop.audit.notify") as mock_notify,
+    ):
+        result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    assert result == AuditResult.no_bugs
+    mock_notify.assert_called_once()
+    assert "no bugs found" in mock_notify.call_args[0][0].lower()
 
 
 # --- _find_recent_crash_report ---

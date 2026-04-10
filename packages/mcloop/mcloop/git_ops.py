@@ -92,10 +92,7 @@ def _ensure_git(project_dir: Path) -> None:
         )
         if commit_result.returncode != 0:
             stderr = commit_result.stderr.strip()
-            msg = (
-                "CRITICAL: initial git commit failed: "
-                f"{stderr or 'unknown error'}"
-            )
+            msg = f"CRITICAL: initial git commit failed: {stderr or 'unknown error'}"
             if "user.email" in stderr or "user.name" in stderr:
                 msg += (
                     "\nConfigure git first:\n"

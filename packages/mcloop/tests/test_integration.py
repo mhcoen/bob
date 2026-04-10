@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from mcloop.audit import _run_audit_fix_cycle
+from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
 from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
@@ -642,15 +642,17 @@ def test_checkpoint_called_before_loop(
 @patch("mcloop.audit._should_skip_audit", return_value=False)
 @patch("mcloop.audit.run_audit")
 def test_audit_notifies_no_bugs(mock_audit, mock_skip, mock_save, mock_notify, tmp_path):
-    """Audit cycle notifies when no bugs are found."""
+    """Audit cycle sends failure notification when BUGS.md not produced."""
     mock_audit.return_value = _ok_run_result()
-    # No BUGS.md written by audit session
+    # No BUGS.md written by audit session → treated as failed
 
-    _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+    result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
+    assert result == AuditResult.failed
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Audit complete: no bugs found.", "info")
+    assert "failed" in calls[0][0].lower()
+    mock_save.assert_not_called()
 
 
 @patch("mcloop.audit.notify")
