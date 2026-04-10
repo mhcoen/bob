@@ -52,6 +52,7 @@ from mcloop.git_ops import (
     _checkpoint,
     _commit,
     _ensure_git,
+    _get_git_hash,
     _git,
     _has_meaningful_changes,
     _has_uncommitted_changes,
@@ -106,6 +107,13 @@ from mcloop.review_integration import (
     _purge_all_reviews,
     _spawn_reviewer,
     _terminate_reviewers,
+)
+from mcloop.run_summary import (
+    CheckEntry,
+    RunSummary,
+    TaskEntry,
+    _iso_now,
+    write_run_summary,
 )
 from mcloop.runner import (
     INVESTIGATION_TOOLS,
@@ -243,6 +251,7 @@ def _run_batch(
     completed: list[str],
     notes_snapshot: tuple[str, int] | None,
     reviewer_config: dict | None = None,
+    commit_hashes: list[str] | None = None,
 ) -> str:
     """Run multiple subtasks in a single session.
 
@@ -392,7 +401,7 @@ def _run_batch(
                 )
                 return "failed"
         try:
-            _commit(
+            batch_hash = _commit(
                 project_dir,
                 f"[BATCH] {label_range}: {n} subtasks",
             )
@@ -402,6 +411,8 @@ def _run_batch(
                 flush=True,
             )
             return "failed"
+        if batch_hash and commit_hashes is not None:
+            commit_hashes.append(batch_hash)
         if reviewer_config:
             _spawn_reviewer(project_dir)
         _maybe_auto_wrap(project_dir)
@@ -465,6 +476,43 @@ def _run_batch(
     return "failed"
 
 
+def _build_and_write_summary(
+    project_dir: Path,
+    run_start_iso: str,
+    elapsed_seconds: float,
+    mode: str,
+    task_entries: list[TaskEntry],
+    check_entries: list[CheckEntry],
+    commit_hashes: list[str],
+    terminal_status: str,
+    failure_detail: str = "",
+    stuck: list[str] | None = None,
+    full_suite_passed: bool | None = None,
+    build_passed: bool | None = None,
+    audit_result: str | None = None,
+) -> Path | None:
+    """Build a RunSummary and write it. Returns the file path, or None on error."""
+    summary = RunSummary(
+        run_start=run_start_iso,
+        run_end=_iso_now(),
+        elapsed_seconds=round(elapsed_seconds, 2),
+        mode=mode,
+        tasks=list(task_entries),
+        checks=list(check_entries),
+        full_suite_passed=full_suite_passed,
+        build_passed=build_passed,
+        audit_result=audit_result,
+        terminal_status=terminal_status,
+        failure_detail=failure_detail,
+        stuck=stuck or [],
+        commit_hashes=list(commit_hashes),
+    )
+    try:
+        return write_run_summary(project_dir, summary)
+    except Exception:
+        return None
+
+
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
@@ -480,6 +528,9 @@ def run_loop(
 
     register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
 
+    run_start_iso = _iso_now()
+    run_start_mono = time.monotonic()
+
     project_dir = checklist_path.parent
     _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
@@ -488,6 +539,17 @@ def run_loop(
     # Check for interrupted state from a previous Ctrl-C
     interrupt_action = _check_interrupted(project_dir, checklist_path)
     if interrupt_action == "quit":
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=time.monotonic() - run_start_mono,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="interrupted",
+            failure_detail="User quit at interrupt prompt",
+        )
         return RunStatus("interrupted", detail="User quit at interrupt prompt")
 
     # Codex fallover disabled until remote approval is sorted out
@@ -502,6 +564,17 @@ def run_loop(
 
     # Check for crash errors from previous runs
     if not _check_errors_json(project_dir, model=model):
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=time.monotonic() - run_start_mono,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="failure",
+            failure_detail="Unresolved errors from previous run",
+        )
         return RunStatus("failure", detail="Unresolved errors from previous run")
 
     # Reviewer integration: enabled by "enabled": true in config
@@ -529,8 +602,11 @@ def run_loop(
 
     notes_snapshot = _snapshot_notes(project_dir)
     ctx = SessionContext()
-    run_start = time.monotonic()
+    run_start = run_start_mono
     completed: list[str] = []
+    task_entries: list[TaskEntry] = []
+    check_entries: list[CheckEntry] = []
+    commit_hashes: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
     terminal_failure: str | None = None  # Set by any fatal failure; gates success path
@@ -555,6 +631,7 @@ def run_loop(
 
     initial_tasks = parse(checklist_path)
     bug_only = has_unchecked_bugs(initial_tasks)
+    _run_mode = "bug-only" if bug_only else "plan"
     if bug_only:
         print(
             formatting.system_msg("Bug-only mode: fixing bugs before continuing"),
@@ -612,7 +689,19 @@ def run_loop(
                 project_dir,
                 notes_snapshot,
             )
-            return RunStatus("failure", detail=f"Previously failed task: {failed.text}")
+            _detail = f"Previously failed task: {failed.text}"
+            _build_and_write_summary(
+                project_dir,
+                run_start_iso,
+                elapsed_seconds=total,
+                mode=_run_mode,
+                task_entries=task_entries,
+                check_entries=check_entries,
+                commit_hashes=commit_hashes,
+                terminal_status="failure",
+                failure_detail=_detail,
+            )
+            return RunStatus("failure", detail=_detail)
 
         if active_stage_at_start is not None:
             now_stage = current_stage(tasks)
@@ -697,6 +786,7 @@ def run_loop(
                     completed,
                     notes_snapshot,
                     reviewer_config=reviewer_config,
+                    commit_hashes=commit_hashes,
                 )
                 if batch_handled == "success":
                     continue
@@ -800,6 +890,18 @@ def run_loop(
                             notes_snapshot,
                         )
                         print("\nExiting.", flush=True)
+                        _build_and_write_summary(
+                            project_dir,
+                            run_start_iso,
+                            elapsed_seconds=total,
+                            mode=_run_mode,
+                            task_entries=task_entries,
+                            check_entries=check_entries,
+                            commit_hashes=commit_hashes,
+                            terminal_status="interrupted",
+                            failure_detail="User interrupted during session limit wait",
+                            stuck=[task.text],
+                        )
                         return RunStatus(
                             "interrupted",
                             stuck=[task.text],
@@ -932,16 +1034,28 @@ def run_loop(
                             )
                             continue
                     try:
-                        _commit(project_dir, task.text)
+                        task_hash = _commit(project_dir, task.text)
                     except RuntimeError as exc:
                         print(
                             formatting.error_msg(str(exc)),
                             flush=True,
                         )
+                        task_entries.append(
+                            TaskEntry(
+                                label=label,
+                                text=task.text,
+                                outcome="failed",
+                                elapsed=round(time.monotonic() - task_start, 2),
+                                model=task_model or "",
+                                attempts=attempt,
+                            )
+                        )
                         failed_task = f"{label}) {task.text}"
                         failed_reason = str(exc)
                         terminal_failure = f"Commit failed: {exc}"
                         break
+                    if task_hash:
+                        commit_hashes.append(task_hash)
                     if reviewer_config:
                         _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
@@ -949,6 +1063,17 @@ def run_loop(
                     check_off(checklist_path, task)
                     elapsed = _format_elapsed(
                         time.monotonic() - task_start,
+                    )
+                    task_entries.append(
+                        TaskEntry(
+                            label=label,
+                            text=task.text,
+                            outcome="success",
+                            elapsed=round(time.monotonic() - task_start, 2),
+                            model=task_model or "",
+                            attempts=attempt,
+                            commit_hash=task_hash,
+                        )
                     )
                     completed.append(f"{label}) {task.text}")
                     print(
@@ -988,6 +1113,16 @@ def run_loop(
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
+            task_entries.append(
+                TaskEntry(
+                    label=label,
+                    text=task.text,
+                    outcome="failed",
+                    elapsed=round(time.monotonic() - task_start, 2),
+                    model=current_model or "",
+                    attempts=max_retries,
+                )
+            )
             mark_failed(checklist_path, task)
             failed_task = f"{label}) {task.text} [{elapsed}]"
             failed_reason = last_error
@@ -1041,6 +1176,17 @@ def run_loop(
             notes_snapshot,
         )
         if terminal_failure:
+            _build_and_write_summary(
+                project_dir,
+                run_start_iso,
+                elapsed_seconds=total,
+                mode=_run_mode,
+                task_entries=task_entries,
+                check_entries=check_entries,
+                commit_hashes=commit_hashes,
+                terminal_status="failure",
+                failure_detail=terminal_failure,
+            )
             return RunStatus("failure", detail=terminal_failure)
         stuck = [
             t.text
@@ -1049,9 +1195,31 @@ def run_loop(
         ]
         if stuck:
             notify(f"Bug-only mode: {len(stuck)} bug(s) could not be fixed", level="error")
+            _build_and_write_summary(
+                project_dir,
+                run_start_iso,
+                elapsed_seconds=total,
+                mode=_run_mode,
+                task_entries=task_entries,
+                check_entries=check_entries,
+                commit_hashes=commit_hashes,
+                terminal_status="failure",
+                failure_detail="Bug-only mode: unfixed bugs remain",
+                stuck=stuck,
+            )
             return RunStatus("failure", stuck=stuck, detail="Bug-only mode: unfixed bugs remain")
         else:
             notify("Bug-only mode: all bugs fixed")
+            _build_and_write_summary(
+                project_dir,
+                run_start_iso,
+                elapsed_seconds=total,
+                mode=_run_mode,
+                task_entries=task_entries,
+                check_entries=check_entries,
+                commit_hashes=commit_hashes,
+                terminal_status="success",
+            )
             return RunStatus("success")
 
     # --- Post-loop processing ---
@@ -1062,6 +1230,9 @@ def run_loop(
     summary_remaining_tasks: list[Task] = []
     completed_stage: str = ""
     success_msg: str | None = None
+    _summary_full_suite: bool | None = None
+    _summary_build: bool | None = None
+    _summary_audit: str | None = None
 
     if terminal_failure is None:
         # Check if we stopped at a stage boundary
@@ -1080,6 +1251,14 @@ def run_loop(
             _full_suite_start = time.monotonic()
             full_check = run_checks(project_dir)
             _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
+            _summary_full_suite = full_check.passed
+            check_entries.append(
+                CheckEntry(
+                    command=full_check.command or "full-suite",
+                    passed=full_check.passed,
+                    elapsed=round(time.monotonic() - _full_suite_start, 2),
+                )
+            )
             if not full_check.passed:
                 print(
                     formatting.error_msg(
@@ -1103,6 +1282,7 @@ def run_loop(
 
             if terminal_failure is None:
                 build_result = _run_build(project_dir)
+                _summary_build = build_result.passed
                 if not build_result.passed:
                     notify(
                         f"Build failed at stage boundary ({build_result.command})",
@@ -1127,6 +1307,14 @@ def run_loop(
             _full_suite_start = time.monotonic()
             full_check = run_checks(project_dir)
             _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
+            _summary_full_suite = full_check.passed
+            check_entries.append(
+                CheckEntry(
+                    command=full_check.command or "full-suite",
+                    passed=full_check.passed,
+                    elapsed=round(time.monotonic() - _full_suite_start, 2),
+                )
+            )
             if not full_check.passed:
                 print(
                     formatting.error_msg(
@@ -1166,6 +1354,7 @@ def run_loop(
                         formatting.system_msg("Audit skipped (unchecked tasks remain)"),
                         flush=True,
                     )
+                    _summary_audit = "skipped"
                 elif not no_audit:
                     from mcloop.audit import AuditResult
 
@@ -1177,7 +1366,13 @@ def run_loop(
                         log_dir,
                         model=model,
                     )
+                    _summary_audit = audit_result.value
                     _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
+                    # Capture audit fix commit hash if bugs were fixed
+                    if audit_result == AuditResult.fixed:
+                        _audit_hash = _get_git_hash(project_dir)
+                        if _audit_hash:
+                            commit_hashes.append(_audit_hash)
                     if audit_result == AuditResult.failed:
                         print(
                             formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
@@ -1197,6 +1392,7 @@ def run_loop(
 
             if terminal_failure is None:
                 build_result = _run_build(project_dir)
+                _summary_build = build_result.passed
                 if not build_result.passed:
                     notify(
                         f"Build failed at end of run ({build_result.command})",
@@ -1221,6 +1417,23 @@ def run_loop(
         project_dir,
         notes_snapshot,
         completed_stage=completed_stage or "",
+    )
+    _terminal_status = "failure" if terminal_failure else "success"
+    _stuck = [t.text for t in summary_remaining_tasks if not t.checked and not t.failed]
+    _build_and_write_summary(
+        project_dir,
+        run_start_iso,
+        elapsed_seconds=total,
+        mode=_run_mode,
+        task_entries=task_entries,
+        check_entries=check_entries,
+        commit_hashes=commit_hashes,
+        terminal_status=_terminal_status,
+        failure_detail=terminal_failure or "",
+        stuck=_stuck if terminal_failure else [],
+        full_suite_passed=_summary_full_suite,
+        build_passed=_summary_build,
+        audit_result=_summary_audit,
     )
     if terminal_failure:
         return RunStatus("failure", detail=terminal_failure)

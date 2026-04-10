@@ -227,14 +227,14 @@ def _stage_safe(project_dir: Path, *, label: str = "") -> None:
         _git(["git", "add", "--", f], cwd=project_dir, label=f"{label} add {f}")
 
 
-def _commit(project_dir: Path, task_text: str) -> None:
-    """Stage all changes, commit, and push."""
+def _commit(project_dir: Path, task_text: str) -> str:
+    """Stage all changes, commit, and push. Returns the new HEAD hash."""
     if not (project_dir / ".git").exists():
         print(
             formatting.error_msg("Git commit skipped: no .git directory"),
             flush=True,
         )
-        return
+        return ""
     # Stage untracked files individually, skipping sensitive patterns
     _git(["git", "add", "-u"], cwd=project_dir, label="commit add -u")
     untracked = _git(
@@ -273,12 +273,13 @@ def _commit(project_dir: Path, task_text: str) -> None:
         cwd=project_dir,
         label="commit remote check",
     )
+    commit_hash = _get_git_hash(project_dir)
     if not result.stdout.strip():
         print(
             formatting.system_msg("No git remote configured; skipping push."),
             flush=True,
         )
-        return
+        return commit_hash
     print(formatting.system_msg("Pushing..."), flush=True)
     push_result = _git(
         ["git", "push"],
@@ -290,6 +291,7 @@ def _commit(project_dir: Path, task_text: str) -> None:
         raise RuntimeError(
             f"git push failed (exit {push_result.returncode}). Fix the remote and re-run mcloop."
         )
+    return commit_hash
 
 
 def _has_meaningful_changes(project_dir: Path) -> bool:

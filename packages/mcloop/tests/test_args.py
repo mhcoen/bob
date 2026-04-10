@@ -8612,9 +8612,10 @@ def _run_loop_with_patches(plan, extra_patches=None, **kwargs):
         "mcloop.main._check_user_input": None,
         "mcloop.main.run_task": result,
         "mcloop.main.run_checks": checks_side_effect,
-        "mcloop.main._commit": None,
+        "mcloop.main._commit": "",
         "mcloop.main._reinject_wrappers": None,
         "mcloop.main._print_summary": None,
+        "mcloop.main._build_and_write_summary": None,
     }
     if extra_patches:
         patches.update(extra_patches)
@@ -8708,6 +8709,7 @@ def test_terminal_failure_commit_failure_skips_build(tmp_path):
         patch("mcloop.main._commit", side_effect=RuntimeError("git commit failed")),
         patch("mcloop.main._reinject_wrappers"),
         patch("mcloop.main._print_summary"),
+        patch("mcloop.main._build_and_write_summary"),
         patch("mcloop.main.notify"),
         patch("mcloop.main._run_build") as mock_build,
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
@@ -8921,3 +8923,234 @@ def test_terminal_failure_build_end_of_run_distinct_notification(tmp_path):
     msgs = _notify_messages(mock_notify)
     assert any("Build failed" in m and "end of run" in m for m in msgs)
     assert not any("All tasks completed" in m for m in msgs)
+
+
+# ---- Run summary tests ----
+
+
+def test_run_summary_schema_fields():
+    """RunSummary dataclass has all required fields."""
+    from mcloop.run_summary import CheckEntry, RunSummary, TaskEntry
+
+    s = RunSummary(
+        run_start="2026-01-01T00:00:00+00:00",
+        run_end="2026-01-01T00:05:00+00:00",
+        elapsed_seconds=300.0,
+        mode="plan",
+    )
+    assert s.terminal_status == ""
+    assert s.failure_detail == ""
+    assert s.tasks == []
+    assert s.checks == []
+    assert s.commit_hashes == []
+    assert s.stuck == []
+    assert s.full_suite_passed is None
+    assert s.build_passed is None
+    assert s.audit_result is None
+
+    t = TaskEntry(
+        label="1",
+        text="Do thing",
+        outcome="success",
+        elapsed=10.0,
+        model="opus",
+        attempts=1,
+        commit_hash="abc123",
+    )
+    assert t.label == "1"
+    assert t.commit_hash == "abc123"
+
+    c = CheckEntry(command="pytest", passed=True, elapsed=5.0)
+    assert c.command == "pytest"
+
+
+def test_run_summary_write_and_latest(tmp_path):
+    """write_run_summary writes dated file and copies to latest.json."""
+    from mcloop.run_summary import RunSummary, write_run_summary
+
+    s = RunSummary(
+        run_start="2026-04-10T12:00:00+00:00",
+        run_end="2026-04-10T12:05:00+00:00",
+        elapsed_seconds=300.0,
+        mode="plan",
+        terminal_status="success",
+    )
+    path = write_run_summary(tmp_path, s)
+    assert path.exists()
+    assert "20260410_120000" in path.name
+
+    latest = tmp_path / ".mcloop" / "runs" / "latest.json"
+    assert latest.exists()
+
+    data = json.loads(path.read_text())
+    latest_data = json.loads(latest.read_text())
+    assert data == latest_data
+    assert data["mode"] == "plan"
+    assert data["terminal_status"] == "success"
+    assert data["elapsed_seconds"] == 300.0
+
+
+def test_run_summary_all_fields_populated(tmp_path):
+    """A fully populated RunSummary serializes all fields."""
+    from mcloop.run_summary import CheckEntry, RunSummary, TaskEntry, write_run_summary
+
+    s = RunSummary(
+        run_start="2026-04-10T12:00:00+00:00",
+        run_end="2026-04-10T12:10:00+00:00",
+        elapsed_seconds=600.0,
+        mode="plan",
+        tasks=[
+            TaskEntry("1", "Do task", "success", 120.5, "opus", 1, "abc123"),
+            TaskEntry("2", "Fix bug", "failed", 60.0, "sonnet", 3, ""),
+        ],
+        checks=[
+            CheckEntry("pytest", True, 30.0),
+            CheckEntry("ruff check .", True, 2.5),
+        ],
+        full_suite_passed=True,
+        build_passed=True,
+        audit_result="no_bugs",
+        terminal_status="success",
+        failure_detail="",
+        stuck=[],
+        commit_hashes=["abc123", "def456"],
+    )
+    path = write_run_summary(tmp_path, s)
+    data = json.loads(path.read_text())
+
+    assert len(data["tasks"]) == 2
+    assert data["tasks"][0]["label"] == "1"
+    assert data["tasks"][0]["commit_hash"] == "abc123"
+    assert data["tasks"][1]["outcome"] == "failed"
+    assert len(data["checks"]) == 2
+    assert data["full_suite_passed"] is True
+    assert data["build_passed"] is True
+    assert data["audit_result"] == "no_bugs"
+    assert data["commit_hashes"] == ["abc123", "def456"]
+
+
+def test_run_summary_successful_run(tmp_path):
+    """Successful run_loop produces a run summary with success status."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+        # Also capture positional args
+        captured["_positional"] = args
+
+    status, _ = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main._build_and_write_summary": capture_summary,
+        },
+        no_audit=True,
+    )
+
+    assert status.status == "success"
+    assert captured.get("terminal_status") == "success"
+    assert captured.get("mode") == "plan"
+
+
+def test_run_summary_failed_run(tmp_path):
+    """Failed run produces a summary with failure detail."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    fail_result = MagicMock()
+    fail_result.success = False
+    fail_result.output = "error"
+    fail_result.exit_code = 1
+
+    from mcloop.checks import CheckResult
+
+    status, _ = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main.run_task": fail_result,
+            "mcloop.main.run_checks": CheckResult(passed=True, output="ok", command="true"),
+            "mcloop.main._build_and_write_summary": capture_summary,
+        },
+        max_retries=1,
+    )
+
+    assert status.status == "failure"
+    assert "failure" in captured.get("terminal_status", "")
+    assert captured.get("failure_detail", "") != ""
+
+
+def test_run_summary_interrupted_run(tmp_path):
+    """Interrupted run still produces a summary."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    captured = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    result = MagicMock()
+    result.success = True
+    result.output = "session limit"
+    result.exit_code = 2
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.is_session_limited", return_value=True),
+        patch("mcloop.main.time.sleep", side_effect=KeyboardInterrupt),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
+        patch("mcloop.main.notify"),
+    ):
+        status = run_loop(plan)
+
+    assert status.status == "interrupted"
+    assert captured.get("terminal_status") == "interrupted"
+
+
+def test_commit_returns_hash(tmp_path):
+    """_commit returns the new HEAD hash after committing."""
+    import subprocess
+
+    from mcloop.git_ops import _commit, _get_git_hash
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    # Create initial commit
+    (tmp_path / "a.txt").write_text("a")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
+
+    # Make a change and commit via _commit
+    (tmp_path / "b.txt").write_text("b")
+    with patch("mcloop.git_ops.notify"):
+        result_hash = _commit(tmp_path, "Add b.txt")
+
+    assert result_hash != ""
+    assert len(result_hash) == 40
+    assert result_hash == _get_git_hash(tmp_path)

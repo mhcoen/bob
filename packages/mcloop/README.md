@@ -987,6 +987,41 @@ When McLoop finishes, it reminds you if NOTES.md exists.
 One log file per task attempt in `logs/`, named `{timestamp}_{task-slug}.log`.
 Each log captures the full CLI output and exit code.
 
+## Run summaries
+
+Every `run_loop()` invocation writes a JSON summary to
+`.mcloop/runs/`. The file is written on all exit paths: success,
+failure, and interruption. Two files are produced:
+
+- **`YYYYMMDD_HHMMSS_run-summary.json`** — timestamped archive.
+- **`latest.json`** — a copy of the most recent summary so
+  automation has a stable filename to read.
+
+The summary schema:
+
+| Field | Type | Description |
+|---|---|---|
+| `run_start` | string | ISO 8601 UTC start time |
+| `run_end` | string | ISO 8601 UTC end time |
+| `elapsed_seconds` | float | Total wall-clock seconds |
+| `mode` | string | `"plan"`, `"bug-only"`, or `"maintain"` |
+| `tasks` | array | Per-task entries (see below) |
+| `checks` | array | Per-check entries |
+| `full_suite_passed` | bool/null | Full test suite result |
+| `build_passed` | bool/null | Build result |
+| `audit_result` | string/null | `"no_bugs"`, `"fixed"`, `"failed"`, `"skipped"` |
+| `terminal_status` | string | `"success"`, `"failure"`, `"interrupted"` |
+| `failure_detail` | string | Why the run failed (empty on success) |
+| `stuck` | array | Task texts that could not be completed |
+| `commit_hashes` | array | Git hashes for all commits produced |
+
+Each task entry contains: `label`, `text`, `outcome` (`"success"` or
+`"failed"`), `elapsed` (seconds), `model`, `attempts`, and
+`commit_hash` (empty if the task did not produce a commit).
+
+Each check entry contains: `command`, `passed`, and `elapsed`
+(seconds).
+
 ## Token auditing
 
 `bin/mcloop-audit` parses log directories and produces per-task cost
