@@ -19,10 +19,10 @@ over-abstraction.
    - [x] Send the same distinct stop notification used in plan mode so the user can tell it stopped because of the flag
    - [x] Add a real maintain-mode test that exercises stop_after_one end to end (do not just assert subcommand parsing). The current coverage at tests/test_maintain.py:390 only checks parsing
 
-- [ ] [BATCH] Stop-after exit messages do not clearly indicate the run stopped because of a flag (main.py:1156, main.py:1274, main.py:1363, main.py:1511, output.py:154)
-   - [ ] The distinct stop-reason strings exist for notify(), but the printed terminal summary still says generic things like "{stage} complete. Run mcloop again for the next stage." or shows no stop reason at all for --stop-after-one
-   - [ ] Pass an explicit stop_reason parameter into _print_summary(), or print a clearly labeled success_msg to stdout immediately before returning, so the terminal output distinguishes a checkpoint stop from a normal completion
-   - [ ] Add tests that do NOT patch _print_summary(). The current stop-flag tests at tests/test_args.py:9209, 9254, 9302, 9347, 9387, and 9428 all stub _print_summary out, which is why this regression slipped past coverage
+- [x] [BATCH] Stop-after exit messages do not clearly indicate the run stopped because of a flag (main.py:1156, main.py:1274, main.py:1363, main.py:1511, output.py:154)
+   - [x] The distinct stop-reason strings exist for notify(), but the printed terminal summary still says generic things like "{stage} complete. Run mcloop again for the next stage." or shows no stop reason at all for --stop-after-one
+   - [x] Pass an explicit stop_reason parameter into _print_summary(), or print a clearly labeled success_msg to stdout immediately before returning, so the terminal output distinguishes a checkpoint stop from a normal completion
+   - [x] Add tests that do NOT patch _print_summary(). The current stop-flag tests at tests/test_args.py:9209, 9254, 9302, 9347, 9387, and 9428 all stub _print_summary out, which is why this regression slipped past coverage
 
 - [ ] [BATCH] run-summary.json reports stop-flag exits as plain success (run_summary.py:47, main.py:1175, main.py:1293, main.py:1492)
    - [ ] Add an explicit terminal_status value of "stopped" (or per-flag variants like "stopped_after_stage" / "stopped_after_one") distinct from success, failure, and interrupted
