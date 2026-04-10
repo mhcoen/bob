@@ -9,6 +9,7 @@ build/
 *.egg
 .ruff_cache/
 .pytest_cache/
+pytest-of-mhcoen/
 logs/
 *~
 \#*\#
