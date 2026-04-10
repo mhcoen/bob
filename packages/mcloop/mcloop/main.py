@@ -522,6 +522,7 @@ def run_loop(
     completed: list[str] = []
     failed_task: str | None = None
     failed_reason: str = ""
+    terminal_failure: str | None = None  # Set by any fatal failure; gates success path
     batch_exhausted: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
     primary_model = current_model
@@ -926,20 +927,10 @@ def run_loop(
                             formatting.error_msg(str(exc)),
                             flush=True,
                         )
-                        total = time.monotonic() - run_start
-                        _print_summary(
-                            completed,
-                            f"{label}) {task.text}",
-                            str(exc),
-                            parse(checklist_path),
-                            total,
-                            project_dir,
-                            notes_snapshot,
-                        )
-                        return RunStatus(
-                            "failure",
-                            detail=f"Commit failed: {exc}",
-                        )
+                        failed_task = f"{label}) {task.text}"
+                        failed_reason = str(exc)
+                        terminal_failure = f"Commit failed: {exc}"
+                        break
                     if reviewer_config:
                         _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
@@ -978,6 +969,11 @@ def run_loop(
 
             if success:
                 break
+            if terminal_failure:
+                break
+
+        if terminal_failure:
+            break
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -988,59 +984,53 @@ def run_loop(
                 f"Giving up on: {task.text}",
                 level="error",
             )
-            total = time.monotonic() - run_start
-            _print_summary(
-                completed,
-                failed_task,
-                failed_reason,
-                parse(checklist_path),
-                total,
-                project_dir,
-                notes_snapshot,
-            )
-            return RunStatus("failure", detail=f"Task failed: {task.text}")
+            terminal_failure = f"Task failed: {task.text}"
+            break
 
     # Bug-only mode: verify the fix by launching the app, then exit.
     # Skip stage transitions, audit cycle, and build.
     if bug_only:
-        remaining_bugs = has_unchecked_bugs(parse(checklist_path))
-        if remaining_bugs:
-            print(
-                formatting.error_msg("Bug-only mode: some bugs could not be fixed"),
-                flush=True,
-            )
-        else:
-            print(
-                formatting.system_msg("Bug-only mode: all bugs fixed"),
-                flush=True,
-            )
-            purge_completed_bugs(checklist_path)
-            # Verify the fix by launching the app
-            failure = _launch_app_verification(project_dir)
-            if failure:
+        if terminal_failure is None:
+            remaining_bugs = has_unchecked_bugs(parse(checklist_path))
+            if remaining_bugs:
                 print(
-                    formatting.error_msg(f"Bug verification failed: {failure}"),
+                    formatting.error_msg("Bug-only mode: some bugs could not be fixed"),
                     flush=True,
                 )
             else:
                 print(
-                    formatting.system_msg("Bug verification passed"),
+                    formatting.system_msg("Bug-only mode: all bugs fixed"),
                     flush=True,
                 )
-                # Clear errors.json now that all bugs are fixed and verified
-                errors_path = project_dir / ".mcloop" / "errors.json"
-                if errors_path.is_file():
-                    errors_path.unlink()
+                purge_completed_bugs(checklist_path)
+                # Verify the fix by launching the app
+                failure = _launch_app_verification(project_dir)
+                if failure:
+                    print(
+                        formatting.error_msg(f"Bug verification failed: {failure}"),
+                        flush=True,
+                    )
+                else:
+                    print(
+                        formatting.system_msg("Bug verification passed"),
+                        flush=True,
+                    )
+                    # Clear errors.json now that all bugs are fixed and verified
+                    errors_path = project_dir / ".mcloop" / "errors.json"
+                    if errors_path.is_file():
+                        errors_path.unlink()
         total = time.monotonic() - run_start
         _print_summary(
             completed,
-            None,
-            "",
+            failed_task,
+            failed_reason,
             parse(checklist_path),
             total,
             project_dir,
             notes_snapshot,
         )
+        if terminal_failure:
+            return RunStatus("failure", detail=terminal_failure)
         stuck = [
             t.text
             for t in parse(checklist_path)
@@ -1053,209 +1043,177 @@ def run_loop(
             notify("Bug-only mode: all bugs fixed")
             return RunStatus("success")
 
-    # Check if we stopped at a stage boundary
-    final_tasks = parse(checklist_path)
-    status = stage_status(final_tasks)
+    # --- Post-loop processing ---
+    # terminal_failure may already be set from a task/commit failure above.
+    # Each post-loop check sets terminal_failure and sends its own distinct
+    # notification on failure. The success path is gated on terminal_failure
+    # being None, so adding a new check cannot accidentally skip the gate.
+    summary_remaining_tasks: list[Task] = []
+    completed_stage: str | None = None
+    success_msg: str | None = None
 
-    if status.startswith("stage_complete:"):
-        done_stage = status.split(":", 1)[1]
-        next_stg = current_stage(parse(checklist_path))
-        print(formatting.system_msg("Running full test suite (stage boundary)..."), flush=True)
-        _full_suite_start = time.monotonic()
-        full_check = run_checks(project_dir)
-        _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
-        if not full_check.passed:
+    if terminal_failure is None:
+        # Check if we stopped at a stage boundary
+        final_tasks = parse(checklist_path)
+        status = stage_status(final_tasks)
+
+        if status.startswith("stage_complete:"):
+            done_stage = status.split(":", 1)[1]
+            next_stg = current_stage(parse(checklist_path))
+            summary_remaining_tasks = final_tasks
+
             print(
-                formatting.error_msg(
-                    f"Full suite failed at stage boundary: "
-                    f"{full_check.command} [{_full_suite_elapsed}]"
-                ),
+                formatting.system_msg("Running full test suite (stage boundary)..."),
                 flush=True,
             )
-            _print_error_tail(full_check.output)
-            total = time.monotonic() - run_start
-            _print_summary(
-                completed,
-                None,
-                "",
-                final_tasks,
-                total,
-                project_dir,
-                notes_snapshot,
-            )
-            notify(
-                "Run ended with red repo: full suite failed"
-                f" at stage boundary ({full_check.command})",
-                level="error",
-            )
-            return RunStatus(
-                "failure",
-                detail=f"Full suite failed at stage boundary: {full_check.command}",
-            )
+            _full_suite_start = time.monotonic()
+            full_check = run_checks(project_dir)
+            _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
+            if not full_check.passed:
+                print(
+                    formatting.error_msg(
+                        f"Full suite failed at stage boundary: "
+                        f"{full_check.command} [{_full_suite_elapsed}]"
+                    ),
+                    flush=True,
+                )
+                _print_error_tail(full_check.output)
+                notify(
+                    "Run ended with red repo: full suite failed"
+                    f" at stage boundary ({full_check.command})",
+                    level="error",
+                )
+                terminal_failure = f"Full suite failed at stage boundary: {full_check.command}"
+            else:
+                print(
+                    formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
+                    flush=True,
+                )
+
+            if terminal_failure is None:
+                build_result = _run_build(project_dir)
+                if not build_result.passed:
+                    notify(
+                        f"Build failed at stage boundary ({build_result.command})",
+                        level="error",
+                    )
+                    terminal_failure = f"Build failed at stage boundary: {build_result.command}"
+
+            if terminal_failure is None:
+                completed_stage = done_stage
+                msg = f"{done_stage} complete."
+                if next_stg:
+                    msg += f" Run mcloop again to start {next_stg}."
+                success_msg = msg
+
         else:
+            # Normal end of run (not a stage boundary)
             print(
-                formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
+                formatting.system_msg("Running full test suite (end of run)..."),
                 flush=True,
             )
-        build_result = _run_build(project_dir)
-        if not build_result.passed:
-            total = time.monotonic() - run_start
-            _print_summary(
-                completed,
-                None,
-                "",
-                final_tasks,
-                total,
-                project_dir,
-                notes_snapshot,
-            )
-            notify(
-                f"Build failed at stage boundary ({build_result.command})",
-                level="error",
-            )
-            return RunStatus(
-                "failure",
-                detail=f"Build failed at stage boundary: {build_result.command}",
-            )
-        total = time.monotonic() - run_start
-        _print_summary(
-            completed,
-            None,
-            "",
-            final_tasks,
-            total,
-            project_dir,
-            notes_snapshot,
-            completed_stage=done_stage,
-        )
-        msg = f"{done_stage} complete."
-        if next_stg:
-            msg += f" Run mcloop again to start {next_stg}."
-        notify(msg)
-        return RunStatus("success")
+            _full_suite_start = time.monotonic()
+            full_check = run_checks(project_dir)
+            _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
+            if not full_check.passed:
+                print(
+                    formatting.error_msg(
+                        f"Full suite failed at end of run: "
+                        f"{full_check.command} [{_full_suite_elapsed}]"
+                    ),
+                    flush=True,
+                )
+                _print_error_tail(full_check.output)
+                notify(
+                    "Run ended with red repo: full suite failed"
+                    f" at end of run ({full_check.command})",
+                    level="error",
+                )
+                terminal_failure = f"Full suite failed at end of run: {full_check.command}"
+            else:
+                print(
+                    formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
+                    flush=True,
+                )
 
-    # Full test suite at end of run
-    print(formatting.system_msg("Running full test suite (end of run)..."), flush=True)
-    _full_suite_start = time.monotonic()
-    full_check = run_checks(project_dir)
-    _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
-    if not full_check.passed:
-        print(
-            formatting.error_msg(
-                f"Full suite failed at end of run: {full_check.command} [{_full_suite_elapsed}]"
-            ),
-            flush=True,
-        )
-        _print_error_tail(full_check.output)
-        total = time.monotonic() - run_start
-        _print_summary(
-            completed,
-            None,
-            "",
-            [],
-            total,
-            project_dir,
-            notes_snapshot,
-        )
-        notify(
-            f"Run ended with red repo: full suite failed at end of run ({full_check.command})",
-            level="error",
-        )
-        return RunStatus(
-            "failure",
-            detail=f"Full suite failed at end of run: {full_check.command}",
-        )
+            # Audit: only if every task in every stage is complete
+            if terminal_failure is None:
+                final_for_audit = parse(checklist_path)
 
-    print(formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"), flush=True)
+                def _any_unchecked(task_list: list[Task]) -> bool:
+                    for t in task_list:
+                        if not t.checked and not t.failed:
+                            return True
+                        if _any_unchecked(t.children):
+                            return True
+                    return False
 
-    # Only audit if every task in every stage is complete
-    final_for_audit = parse(checklist_path)
-    has_unchecked = False
+                has_unchecked = _any_unchecked(final_for_audit)
+                if has_unchecked:
+                    print(
+                        formatting.system_msg("Audit skipped (unchecked tasks remain)"),
+                        flush=True,
+                    )
+                elif not no_audit:
+                    from mcloop.audit import AuditResult
 
-    def _any_unchecked(task_list: list[Task]) -> bool:
-        for t in task_list:
-            if not t.checked and not t.failed:
-                return True
-            if _any_unchecked(t.children):
-                return True
-        return False
+                    _lifecycle._current_phase = "audit"
+                    _lifecycle._phase_start_time = time.monotonic()
+                    _audit_start = time.monotonic()
+                    audit_result = _run_audit_fix_cycle(
+                        project_dir,
+                        log_dir,
+                        model=model,
+                    )
+                    _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
+                    if audit_result == AuditResult.failed:
+                        print(
+                            formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
+                            flush=True,
+                        )
+                        notify(
+                            "Run ended: audit session failed (crashed, timed out,"
+                            " or BUGS.md not produced). Build and completion skipped.",
+                            level="error",
+                        )
+                        terminal_failure = "Audit failed: session crashed or BUGS.md not produced"
+                    else:
+                        print(
+                            formatting.system_msg(f"Audit completed [{_audit_elapsed}]"),
+                            flush=True,
+                        )
 
-    has_unchecked = _any_unchecked(final_for_audit)
-    if has_unchecked:
-        print(
-            formatting.system_msg("Audit skipped (unchecked tasks remain)"),
-            flush=True,
-        )
-    elif not no_audit:
-        from mcloop.audit import AuditResult
+            if terminal_failure is None:
+                build_result = _run_build(project_dir)
+                if not build_result.passed:
+                    notify(
+                        f"Build failed at end of run ({build_result.command})",
+                        level="error",
+                    )
+                    terminal_failure = f"Build failed at end of run: {build_result.command}"
 
-        _lifecycle._current_phase = "audit"
-        _lifecycle._phase_start_time = time.monotonic()
-        _audit_start = time.monotonic()
-        audit_result = _run_audit_fix_cycle(
-            project_dir,
-            log_dir,
-            model=model,
-        )
-        _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
-        if audit_result == AuditResult.failed:
-            print(
-                formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
-                flush=True,
-            )
-            total = time.monotonic() - run_start
-            _print_summary(
-                completed,
-                None,
-                "",
-                [],
-                total,
-                project_dir,
-                notes_snapshot,
-            )
-            notify(
-                "Run ended: audit session failed (crashed, timed out,"
-                " or BUGS.md not produced). Build and completion skipped.",
-                level="error",
-            )
-            return RunStatus(
-                "failure",
-                detail="Audit failed: session crashed or BUGS.md not produced",
-            )
-        print(formatting.system_msg(f"Audit completed [{_audit_elapsed}]"), flush=True)
+            if terminal_failure is None:
+                success_msg = "All tasks completed!"
+    else:
+        # Task/commit failure: show remaining tasks in summary
+        summary_remaining_tasks = parse(checklist_path)
 
-    build_result = _run_build(project_dir)
-    if not build_result.passed:
-        total = time.monotonic() - run_start
-        _print_summary(
-            completed,
-            None,
-            "",
-            [],
-            total,
-            project_dir,
-            notes_snapshot,
-        )
-        notify(
-            f"Build failed at end of run ({build_result.command})",
-            level="error",
-        )
-        return RunStatus(
-            "failure",
-            detail=f"Build failed at end of run: {build_result.command}",
-        )
-
+    # --- Single exit point for all non-bug-only paths ---
     total = time.monotonic() - run_start
     _print_summary(
         completed,
-        None,
-        "",
-        [],
+        failed_task,
+        failed_reason,
+        summary_remaining_tasks,
         total,
         project_dir,
         notes_snapshot,
+        completed_stage=completed_stage,
     )
-    notify("All tasks completed!")
+    if terminal_failure:
+        return RunStatus("failure", detail=terminal_failure)
+    if success_msg:
+        notify(success_msg)
     return RunStatus("success")
 
 

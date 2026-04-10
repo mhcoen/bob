@@ -8545,3 +8545,354 @@ def test_run_status_frozen():
     status = RunStatus("success")
     with pytest.raises(dataclasses.FrozenInstanceError):
         status.status = "failure"
+
+
+# --- terminal_failure sentinel tests ---
+# Verify each failure mode produces its distinct notification AND skips
+# the success/all-done notification. This prevents the recurring bug
+# where a new failure mode is added but forgets to skip the success path.
+
+
+def _run_loop_with_patches(plan, extra_patches=None, **kwargs):
+    """Helper to run run_loop with standard mocks, returning (status, mock_notify).
+
+    extra_patches is a dict of "mcloop.main.X" -> mock_value overrides.
+    """
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+
+    full_suite_check = MagicMock()
+    full_suite_check.passed = True
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    patches = {
+        "mcloop.main._checkpoint": None,
+        "mcloop.main._push_or_die": None,
+        "mcloop.main._kill_orphan_sessions": None,
+        "mcloop.main._ensure_git": None,
+        "mcloop.main._check_errors_json": True,
+        "mcloop.main._has_meaningful_changes": True,
+        "mcloop.main._changed_files": ["foo.py"],
+        "mcloop.main._worktree_status": "",
+        "mcloop.main.check_claude_md_freshness": True,
+        "mcloop.main._check_user_input": None,
+        "mcloop.main.run_task": result,
+        "mcloop.main.run_checks": checks_side_effect,
+        "mcloop.main._commit": None,
+        "mcloop.main._reinject_wrappers": None,
+        "mcloop.main._print_summary": None,
+    }
+    if extra_patches:
+        patches.update(extra_patches)
+
+    # Build context manager stack
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        mock_notify = stack.enter_context(patch("mcloop.main.notify"))
+        for name, val in patches.items():
+            if isinstance(val, Exception):
+                stack.enter_context(patch(name, side_effect=val))
+            elif callable(val) and not isinstance(val, MagicMock):
+                stack.enter_context(patch(name, side_effect=val))
+            elif val is None:
+                stack.enter_context(patch(name))
+            elif isinstance(val, bool):
+                stack.enter_context(patch(name, return_value=val))
+            elif isinstance(val, (list, str)):
+                stack.enter_context(patch(name, return_value=val))
+            elif isinstance(val, MagicMock):
+                stack.enter_context(patch(name, return_value=val))
+            else:
+                stack.enter_context(patch(name, return_value=val))
+
+        status = run_loop(plan, **kwargs)
+    return status, mock_notify
+
+
+def _notify_messages(mock_notify):
+    """Extract message strings from notify mock calls."""
+    return [str(c) for c in mock_notify.call_args_list]
+
+
+def test_terminal_failure_commit_failure_skips_success(tmp_path):
+    """Commit failure sets terminal_failure, skips build/audit/all-done notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    status, mock_notify = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main._commit": RuntimeError("git commit failed"),
+            "mcloop.main._run_build": MagicMock(),
+            "mcloop.main._run_audit_fix_cycle": MagicMock(),
+        },
+    )
+
+    assert status.status == "failure"
+    assert "Commit failed" in status.detail
+    msgs = _notify_messages(mock_notify)
+    assert not any("All tasks completed" in m for m in msgs)
+    assert not any("complete." in m for m in msgs)
+
+
+def test_terminal_failure_commit_failure_skips_build(tmp_path):
+    """Commit failure should not run _run_build."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+    full_suite_check = MagicMock()
+    full_suite_check.passed = True
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", side_effect=checks_side_effect),
+        patch("mcloop.main._commit", side_effect=RuntimeError("git commit failed")),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+    ):
+        run_loop(plan)
+
+    mock_build.assert_not_called()
+    mock_audit.assert_not_called()
+
+
+def test_terminal_failure_task_exhausted_skips_success(tmp_path):
+    """Task exhausting retries sets terminal_failure, skips all-done notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Hopeless task\n")
+    (tmp_path / ".git").mkdir()
+
+    fail_result = MagicMock()
+    fail_result.success = False
+    fail_result.output = "error"
+    fail_result.exit_code = 1
+
+    from mcloop.checks import CheckResult
+
+    status, mock_notify = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main.run_task": fail_result,
+            "mcloop.main.run_checks": CheckResult(passed=True, output="ok", command="true"),
+            "mcloop.main._run_build": MagicMock(),
+            "mcloop.main._run_audit_fix_cycle": MagicMock(),
+        },
+        max_retries=2,
+    )
+
+    assert status.status == "failure"
+    assert "Task failed" in status.detail
+    msgs = _notify_messages(mock_notify)
+    # Distinct notification for giving up
+    assert any("Giving up" in m for m in msgs)
+    # Success path skipped
+    assert not any("All tasks completed" in m for m in msgs)
+
+
+def test_terminal_failure_task_exhausted_skips_build(tmp_path):
+    """Task failure should not run _run_build or audit."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Hopeless task\n")
+    (tmp_path / ".git").mkdir()
+
+    fail_result = MagicMock()
+    fail_result.success = False
+    fail_result.output = "error"
+    fail_result.exit_code = 1
+
+    from mcloop.checks import CheckResult
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=fail_result),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=CheckResult(passed=True, output="ok", command="true"),
+        ),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+    ):
+        run_loop(plan, max_retries=1)
+
+    mock_build.assert_not_called()
+    mock_audit.assert_not_called()
+
+
+def test_terminal_failure_audit_failure_skips_build_and_success(tmp_path):
+    """Audit failure sets terminal_failure, skips build and all-done notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    ok_build = BuildResult(ran=True, passed=True, command="make")
+
+    status, mock_notify = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main._run_audit_fix_cycle": AuditResult.failed,
+            "mcloop.main._run_build": ok_build,
+        },
+    )
+
+    assert status.status == "failure"
+    assert "Audit failed" in status.detail
+    msgs = _notify_messages(mock_notify)
+    # Distinct audit failure notification
+    assert any("audit session failed" in m for m in msgs)
+    # Success path skipped
+    assert not any("All tasks completed" in m for m in msgs)
+
+
+def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
+    """Audit failure should not call _run_build."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+    full_suite_check = MagicMock()
+    full_suite_check.passed = True
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", side_effect=checks_side_effect),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle", return_value=AuditResult.failed),
+        patch("mcloop.main._run_build") as mock_build,
+    ):
+        run_loop(plan)
+
+    mock_build.assert_not_called()
+
+
+def test_terminal_failure_full_suite_end_of_run_distinct_notification(tmp_path):
+    """Full suite failure at end of run produces distinct notification, skips success."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    per_task_check = MagicMock()
+    per_task_check.passed = True
+    full_suite_check = MagicMock()
+    full_suite_check.passed = False
+    full_suite_check.command = "pytest"
+    full_suite_check.output = "FAILED"
+
+    def checks_side_effect(project_dir, changed_files=None):
+        if changed_files is not None:
+            return per_task_check
+        return full_suite_check
+
+    status, mock_notify = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main.run_checks": checks_side_effect,
+            "mcloop.main._run_build": MagicMock(),
+            "mcloop.main._run_audit_fix_cycle": MagicMock(),
+        },
+    )
+
+    assert status.status == "failure"
+    assert "Full suite failed" in status.detail
+    assert "end of run" in status.detail
+    msgs = _notify_messages(mock_notify)
+    assert any("red repo" in m and "end of run" in m for m in msgs)
+    assert not any("All tasks completed" in m for m in msgs)
+
+
+def test_terminal_failure_build_end_of_run_distinct_notification(tmp_path):
+    """Build failure at end of run produces distinct notification, skips success."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    (tmp_path / ".git").mkdir()
+
+    failed_build = BuildResult(ran=True, passed=False, command="swift build")
+
+    status, mock_notify = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main._run_build": failed_build,
+            "mcloop.main._run_audit_fix_cycle": MagicMock(),
+        },
+        no_audit=True,
+    )
+
+    assert status.status == "failure"
+    assert "Build failed" in status.detail
+    assert "end of run" in status.detail
+    msgs = _notify_messages(mock_notify)
+    assert any("Build failed" in m and "end of run" in m for m in msgs)
+    assert not any("All tasks completed" in m for m in msgs)
