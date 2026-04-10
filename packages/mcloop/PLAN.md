@@ -13,41 +13,13 @@ over-abstraction.
 
 ## Bugs
 
-- [x] [BATCH] ruff autofix inside run_checks() makes verification non-read-only (checks.py:104)
-   - [x] Move ruff check --fix and ruff format out of run_checks() into a separate autofix step that runs before verification, or run them only in the task session prompt
-   - [x] After run_checks() returns success, verify no uncommitted changes exist (git diff --quiet). If changes were introduced by the checker, route them back through commit or treat as failure
-   - [x] Ensure the no-op detection path, full-suite path, and stage-boundary path all use the side-effect-free version of run_checks()
-
-- [x] [BATCH] Targeted testing skips changed test files entirely (targeted.py:27, checks.py:70)
-   - [x] In map_to_tests(), include changed test files (tests/test_*.py) directly in the targeted set, not just source-to-test mappings
-   - [x] When only test files changed and no source files changed, run those test files instead of skipping pytest
-   - [x] Fix tests at tests/test_targeted.py:47 and tests/test_targeted.py:128 that encode the current (wrong) behavior
-
-- [x] [BATCH] _run_build() outcome is ignored (main.py:1043, 1125, 1246)
-   - [x] Make _run_build() return a structured result indicating success or failure
-   - [x] In the stage-complete and all-done paths, check the build result and treat failure as a terminal run error
-   - [x] Send a failure notification instead of stage-complete/all-done when the build fails
-
-- [x] [BATCH] Stale reviewer findings injected when reviewer is disabled (main.py:477, 548)
-   - [x] Gate review-file cleanup and collection on reviewer_config being present
-   - [x] At startup, if reviewer is disabled, delete any existing .mcloop/reviews/*.json files to prevent stale findings from previous runs
-
-- [x] [BATCH] Session memory for Bash stores exact command strings, not prefixes (telegram-permission-hook.py:54, 409)
-   - [x] Normalize Bash session approvals to store the command prefix (the executable and subcommand) rather than the full command with arguments
-   - [x] For example, store "Bash:git add" instead of "Bash:git add a.py", so all git add invocations are covered by a single session approval
-   - [x] Preserve exact-string matching for non-Bash tools where the current behavior is correct
 
 
 
-- [x] Fix review finding from commit ebe60c8e: The bug-fix loop incorrectly uses `_changed_files` to detect uncommitted changes after `run_autofix`. `_changed_files` returns only files with meaningful changes (excluding logs/, .mcloop/, PLAN.md). This means changes to those filtered files (e.g., formatting changes to PLAN.md) would not be detected, allowing the loop to proceed when it should fail. Use `_has_uncommitted_changes` (newly added) instead, which checks the entire working tree.
-- [x] Fix review finding from commit ebe60c8e: In `_run_batch`, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. `_changed_files` filters out metadata files (logs/, .mcloop/, PLAN.md). If `run_autofix` modifies PLAN.md (e.g., formatting), the change will be ignored, causing the batch to incorrectly succeed. Replace with `_has_uncommitted_changes` to catch all modifications.
-- [x] Fix review finding from commit ebe60c8e: In the individual task loop, after `run_autofix`, the code uses `_changed_files` to detect uncommitted changes. This will miss changes to filtered files (logs/, .mcloop/, PLAN.md). If auto‑formatting changes PLAN.md, the check will pass incorrectly. Use `_has_uncommitted_changes` instead.
-- [x] Fix review finding from commit 54b7bfaa: The bug-fix loop incorrectly uses `_worktree_status` to detect uncommitted changes after `run_autofix`. `_worktree_status` returns the raw `git status --porcelain` output, which includes all files (including logs/, .mcloop/, PLAN.md). This is correct for detecting changes introduced by the checker. However, the comparison `_worktree_status(project_dir) != pre_check_status` may fail if the order of lines in the porcelain output changes (e.g., due to git sorting). The comparison should be done on sets of lines or normalized strings to avoid false positives. Fix by splitting the output into lines and comparing sets.
-- [x] Fix review finding from commit 54b7bfaa: In `_run_batch`, after `run_autofix`, the code uses `_worktree_status` to detect uncommitted changes. The comparison `_worktree_status(project_dir) != pre_check_status` may fail if the order of lines in the porcelain output changes. This could cause the batch to incorrectly fail or succeed. Replace with a set comparison of lines.
-- [x] Fix review finding from commit 54b7bfaa: In the individual task loop, after `run_autofix`, the code uses `_worktree_status` to detect uncommitted changes. The comparison `_worktree_status(project_dir) != pre_check_status` may fail due to line order changes. This could cause the task to incorrectly retry or pass. Replace with a set comparison of lines.
-- [x] Fix review finding from commit e19ad3f5: The comparison `post != set(pre_check_status.splitlines())` will always be True when `pre_check_status` is an empty string (no changes). Splitting an empty string yields `['']`, creating a set with one empty string element, while `post` will be an empty set. This causes false positives when there are no changes before the check. Fix by checking if `pre_check_status` is empty before splitting, or handle the empty string case specially.
-- [x] Fix review finding from commit e19ad3f5: Same issue as in audit.py: when `pre_check_status` is empty (no uncommitted changes before checks), `set(pre_check_status.splitlines())` becomes `{''}` (a set containing an empty string), while `post` will be an empty set after checks if no changes were introduced. This will incorrectly detect a change and cause batch failure. Fix by handling empty status specially.
-- [ ] Fix review finding from commit e19ad3f5: Same issue as above: empty `pre_check_status` leads to `{''}` vs empty set comparison, causing false detection of checker-introduced changes. This will incorrectly trigger retries for individual tasks. Fix by handling empty status before splitting into lines.
+
+
+
+
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)

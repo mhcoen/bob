@@ -94,12 +94,20 @@ def run_checks(
 
     if changed_files is not None:
         test_files = map_to_tests(changed_files, project_dir)
+        # If Python source files changed but no targeted tests were
+        # found (e.g. new module with no test file yet), fall back to
+        # the full configured test command rather than skipping tests
+        # entirely.  Otherwise untested code could commit.
+        py_changed = any(f.endswith(".py") for f in changed_files)
+        fallback_to_full = py_changed and not test_files
         narrowed: list[str] = []
         for cmd in commands:
             if is_test_command(cmd):
                 if test_files:
                     narrowed.append(targeted_pytest_command(test_files))
-                # else: skip the test command entirely
+                elif fallback_to_full:
+                    narrowed.append(cmd)
+                # else: no Python changes at all, safe to skip tests
             else:
                 narrowed.append(cmd)
         commands = narrowed

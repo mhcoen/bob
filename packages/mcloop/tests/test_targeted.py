@@ -159,7 +159,11 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
 
 
 def test_run_checks_targeted_no_matching_tests(tmp_path):
-    """When no test files match source changes, test command is skipped."""
+    """When Python source changes but no matching tests exist, fall back to full pytest.
+
+    This prevents untested code from committing when a new module has no
+    test file yet.  The fallback is to the full configured test command.
+    """
     from mcloop.checks import run_checks
 
     (tmp_path / "pyproject.toml").write_text(
@@ -178,7 +182,34 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
             tmp_path,
             changed_files=["mcloop/main.py"],
         )
-        # No test_main.py exists — only ruff check runs, pytest skipped
+        # No test_main.py exists, but main.py is Python: fall back to full pytest
+        assert mock_run.call_count == 2
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert calls[0] == ["ruff", "check", "."]
+        assert calls[1] == ["pytest"]
+
+
+def test_run_checks_targeted_no_python_changes(tmp_path):
+    """When only non-Python files change, pytest is correctly skipped."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["README.md", "docs/guide.md"],
+        )
+        # Only docs changed, no Python: ruff runs, pytest skipped
         assert mock_run.call_count == 1
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
