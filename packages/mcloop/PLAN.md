@@ -13,11 +13,11 @@ over-abstraction.
 
 ## Bugs
 
-- [ ] [BATCH] --stop-after-one is not implemented for maintain mode (main.py:194, main.py:1614, maintain.py:221)
-   - [ ] Thread stop_after_one through _main() into _cmd_maintain() and then into run_maintain()
-   - [ ] In run_maintain(), after the first invariant completes successfully (commit landed for `fixed`, or no-op for `satisfied`), exit at the same post-commit boundary the plan-mode loop uses
-   - [ ] Send the same distinct stop notification used in plan mode so the user can tell it stopped because of the flag
-   - [ ] Add a real maintain-mode test that exercises stop_after_one end to end (do not just assert subcommand parsing). The current coverage at tests/test_maintain.py:390 only checks parsing
+- [x] [BATCH] --stop-after-one is not implemented for maintain mode (main.py:194, main.py:1614, maintain.py:221)
+   - [x] Thread stop_after_one through _main() into _cmd_maintain() and then into run_maintain()
+   - [x] In run_maintain(), after the first invariant completes successfully (commit landed for `fixed`, or no-op for `satisfied`), exit at the same post-commit boundary the plan-mode loop uses
+   - [x] Send the same distinct stop notification used in plan mode so the user can tell it stopped because of the flag
+   - [x] Add a real maintain-mode test that exercises stop_after_one end to end (do not just assert subcommand parsing). The current coverage at tests/test_maintain.py:390 only checks parsing
 
 - [ ] [BATCH] Stop-after exit messages do not clearly indicate the run stopped because of a flag (main.py:1156, main.py:1274, main.py:1363, main.py:1511, output.py:154)
    - [ ] The distinct stop-reason strings exist for notify(), but the printed terminal summary still says generic things like "{stage} complete. Run mcloop again for the next stage." or shows no stop reason at all for --stop-after-one
