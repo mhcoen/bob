@@ -402,18 +402,18 @@ The debugging playbook this enforces:
    - [x] Add an `mcloop idea "some text"` subcommand that appends a timestamped line to IDEAS.md in the project root, creating the file if it does not exist
    - [x] Document IDEAS.md in the README, contrasting it with PLAN.md (PLAN.md is executable, IDEAS.md is a scratchpad)
 
-- [ ] [BATCH] MAINTAIN.md parser and maintain mode
-   - [ ] Create a MAINTAIN.md parser that reuses the existing checklist parser. Each entry is an invariant (a statement of desired state), not a task
-   - [ ] Add an `mcloop maintain` subcommand that loops over MAINTAIN.md entries independently. Each invariant gets its own Claude Code session
-   - [ ] The maintenance prompt must instruct the session to: check whether the invariant holds, fix it if not, run project checks, and report one of three outcomes: satisfied, fixed, or failed
-   - [ ] Failure of one invariant must not stop the run. Each invariant is independent. Continue to the next on failure
-   - [ ] On `fixed`, commit with a message like `maintain: <invariant text>`. On `satisfied`, do nothing. On `failed`, surface the failure in the run summary
-   - [ ] When the session needs human judgment, send a Telegram message with the question via the same PreToolUse hook flow used elsewhere. The 10-minute hook ceiling applies, same as everywhere else in mcloop
-   - [ ] If no Telegram reply within 10 minutes, the session proceeds with its best independent judgment and notes the autonomous decision in the commit message
-   - [ ] Write all maintain decisions (satisfied, fixed, failed, autonomous) to .mcloop/maintain-log.json for post-hoc audit
-   - [ ] Print a maintain run summary at the end: X satisfied, Y fixed, Z failed, and a list of any autonomous decisions made without user confirmation
-   - [ ] Maintain mode is a distinct lifecycle from the PLAN.md run_loop. Implement it as a separate code path in main.py, not by overloading run_loop
-   - [ ] Document MAINTAIN.md in the README, contrasting it with PLAN.md (PLAN.md is a feature backlog, MAINTAIN.md is a list of invariants)
+- [x] [BATCH] MAINTAIN.md parser and maintain mode
+   - [x] Create a MAINTAIN.md parser that reuses the existing checklist parser. Each entry is an invariant (a statement of desired state), not a task
+   - [x] Add an `mcloop maintain` subcommand that loops over MAINTAIN.md entries independently. Each invariant gets its own Claude Code session
+   - [x] The maintenance prompt must instruct the session to: check whether the invariant holds, fix it if not, run project checks, and report one of three outcomes: satisfied, fixed, or failed
+   - [x] Failure of one invariant must not stop the run. Each invariant is independent. Continue to the next on failure
+   - [x] On `fixed`, commit with a message like `maintain: <invariant text>`. On `satisfied`, do nothing. On `failed`, surface the failure in the run summary
+   - [x] When the session needs human judgment, send a Telegram message with the question via the same PreToolUse hook flow used elsewhere. The 10-minute hook ceiling applies, same as everywhere else in mcloop
+   - [x] If no Telegram reply within 10 minutes, the session proceeds with its best independent judgment and notes the autonomous decision in the commit message
+   - [x] Write all maintain decisions (satisfied, fixed, failed, autonomous) to .mcloop/maintain-log.json for post-hoc audit
+   - [x] Print a maintain run summary at the end: X satisfied, Y fixed, Z failed, and a list of any autonomous decisions made without user confirmation
+   - [x] Maintain mode is a distinct lifecycle from the PLAN.md run_loop. Implement it as a separate code path in main.py, not by overloading run_loop
+   - [x] Document MAINTAIN.md in the README, contrasting it with PLAN.md (PLAN.md is a feature backlog, MAINTAIN.md is a list of invariants)
 
 - [ ] [BATCH] First proof-of-concept maintain invariant
    - [ ] Add a single concrete, checkable invariant to mcloop's own MAINTAIN.md to validate the mechanism. Suggested: "All top-level modules in mcloop/ are listed in CLAUDE.md" or "pyproject.toml requires Python 3.11 or newer"
