@@ -47,13 +47,37 @@ between sessions:
   command line, or edit the file directly. When an idea matures, move
   it into PLAN.md as a task.
 - **MAINTAIN.md**: A list of invariants — statements of desired state
-  that should always hold (e.g. "All public functions have docstrings",
-  "No TODO comments in production code"). Unlike PLAN.md, which is a
-  feature backlog of tasks to execute once, MAINTAIN.md is a set of
-  ongoing constraints to enforce repeatedly. Run `mcloop maintain` to
-  check each invariant in its own session: if it holds, nothing happens;
-  if it's broken, the session fixes it and commits. Failures don't stop
-  the run. Results are logged to `.mcloop/maintain-log.json`.
+  that should always hold. Unlike PLAN.md, which is a feature backlog
+  of tasks to execute once, MAINTAIN.md is a set of ongoing constraints
+  to enforce repeatedly. Run `mcloop maintain` to check each invariant
+  in its own session: if it holds, nothing happens; if it's broken, the
+  session fixes it and commits. Failures don't stop the run. Results
+  are logged to `.mcloop/maintain-log.json`.
+
+  Invariants are not limited to simple style or structural checks.
+  Each runs in a full Claude Code session with the standard tool set
+  plus WebFetch, so an invariant can do real work: query an external
+  catalog and upgrade a dependency, verify a config file matches the
+  latest API schema, ensure the project uses the most capable current
+  release of a model from a provider, regenerate a manifest from the
+  current source tree, check that pinned versions match the latest
+  stable releases, or anything else that can be expressed as "the
+  desired state is X; check it; fix it if it isn't." When an invariant
+  needs human judgment (e.g. an ambiguous choice between multiple new
+  options), the session asks via Telegram and waits up to ten minutes
+  before falling back to its best independent decision.
+
+  Example invariants:
+
+  ```markdown
+  - [ ] Every .py file in mcloop/ has a corresponding entry in CLAUDE.md
+  - [ ] The reviewer model in .mcloop/config.json is the most capable
+        current DeepSeek model on OpenRouter (use WebFetch on
+        https://openrouter.ai/api/v1/models to verify, update if newer
+        is available)
+  - [ ] pyproject.toml requires Python 3.11 or newer
+  - [ ] No deprecated ruff rules are enabled in pyproject.toml
+  ```
 
 These files live in the repo alongside your code and are the mechanism
 by which one session's knowledge reaches the next.
