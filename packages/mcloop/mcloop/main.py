@@ -226,6 +226,8 @@ def _main() -> None:
         no_audit=args.no_audit,
         allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
         enable_reviewer=args.reviewer,
+        stop_after_stage=args.stop_after_stage,
+        stop_after_one=args.stop_after_one,
     )
     if not result.ok:
         sys.exit(1)
@@ -522,6 +524,8 @@ def run_loop(
     no_audit: bool = False,
     allowed_tools: str | None = None,
     enable_reviewer: bool = False,
+    stop_after_stage: bool = False,
+    stop_after_one: bool = False,
 ) -> RunStatus:
     """Run the main loop. Returns a RunStatus indicating outcome."""
     import mcloop.runner as _runner
@@ -610,6 +614,7 @@ def run_loop(
     failed_task: str | None = None
     failed_reason: str = ""
     terminal_failure: str | None = None  # Set by any fatal failure; gates success path
+    stopped_early: str = ""  # "stage" or "one" when a stop flag caused the exit
     batch_exhausted: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
     primary_model = current_model
@@ -637,6 +642,14 @@ def run_loop(
             formatting.system_msg("Bug-only mode: fixing bugs before continuing"),
             flush=True,
         )
+        if stop_after_stage:
+            print(
+                formatting.system_msg(
+                    "Warning: --stop-after-stage ignored in bug-only mode (no stages)"
+                ),
+                flush=True,
+            )
+            stop_after_stage = False
 
     active_stage_at_start = current_stage(parse(checklist_path))
 
@@ -706,6 +719,8 @@ def run_loop(
         if active_stage_at_start is not None:
             now_stage = current_stage(tasks)
             if now_stage != active_stage_at_start:
+                if stop_after_stage:
+                    stopped_early = "stage"
                 break
 
         task = find_next(tasks)
@@ -754,12 +769,13 @@ def run_loop(
         # Check for [BATCH] on the parent task.
         # If the parent is marked [BATCH], collect all batchable
         # siblings and combine them into a single session.
-        # Skipped when config has "batch": false.
+        # Skipped when config has "batch": false or --stop-after-one.
         parent = find_parent(tasks, task)
         batch_enabled = _load_mcloop_config().get("batch", True)
         parent_label = _task_label(tasks, parent) if parent else ""
         if (
             batch_enabled
+            and not stop_after_one
             and parent is not None
             and is_batch_task(parent)
             and parent_label not in batch_exhausted
@@ -1133,9 +1149,40 @@ def run_loop(
             terminal_failure = f"Task failed: {task.text}"
             break
 
+        # --stop-after-one: exit after one successful task
+        if stop_after_one and success:
+            stopped_early = "one"
+            break
+
     # Bug-only mode: verify the fix by launching the app, then exit.
     # Skip stage transitions, audit cycle, and build.
     if bug_only:
+        if terminal_failure is None and stopped_early == "one":
+            # --stop-after-one: exit cleanly after one bug fix
+            total = time.monotonic() - run_start
+            _stop_msg = "Stopped after one task as requested"
+            notify(_stop_msg)
+            _print_summary(
+                completed,
+                None,
+                "",
+                parse(checklist_path),
+                total,
+                project_dir,
+                notes_snapshot,
+            )
+            _build_and_write_summary(
+                project_dir,
+                run_start_iso,
+                elapsed_seconds=total,
+                mode=_run_mode,
+                task_entries=task_entries,
+                check_entries=check_entries,
+                commit_hashes=commit_hashes,
+                terminal_status="success",
+                failure_detail=_stop_msg,
+            )
+            return RunStatus("success", detail=_stop_msg)
         if terminal_failure is None:
             remaining_bugs = has_unchecked_bugs(parse(checklist_path))
             if remaining_bugs:
@@ -1227,6 +1274,34 @@ def run_loop(
     # Each post-loop check sets terminal_failure and sends its own distinct
     # notification on failure. The success path is gated on terminal_failure
     # being None, so adding a new check cannot accidentally skip the gate.
+
+    # --stop-after-one: skip post-loop processing entirely
+    if stopped_early == "one" and terminal_failure is None:
+        total = time.monotonic() - run_start
+        _stop_msg = "Stopped after one task as requested"
+        notify(_stop_msg)
+        _print_summary(
+            completed,
+            None,
+            "",
+            parse(checklist_path),
+            total,
+            project_dir,
+            notes_snapshot,
+        )
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=total,
+            mode=_run_mode,
+            task_entries=task_entries,
+            check_entries=check_entries,
+            commit_hashes=commit_hashes,
+            terminal_status="success",
+            failure_detail=_stop_msg,
+        )
+        return RunStatus("success", detail=_stop_msg)
+
     summary_remaining_tasks: list[Task] = []
     completed_stage: str = ""
     success_msg: str | None = None
@@ -1292,7 +1367,10 @@ def run_loop(
 
             if terminal_failure is None:
                 completed_stage = done_stage
-                msg = f"{done_stage} complete."
+                if stopped_early == "stage":
+                    msg = f"Stopped after stage as requested ({done_stage} complete)."
+                else:
+                    msg = f"{done_stage} complete."
                 if next_stg:
                     msg += f" Run mcloop again to start {next_stg}."
                 success_msg = msg
@@ -1471,6 +1549,16 @@ def _parse_args() -> argparse.Namespace:
         "--allow-web-tools",
         action="store_true",
         help="Enable WebFetch and WebSearch tools for sessions",
+    )
+    parser.add_argument(
+        "--stop-after-stage",
+        action="store_true",
+        help="Stop after completing the current stage instead of advancing",
+    )
+    parser.add_argument(
+        "--stop-after-one",
+        action="store_true",
+        help="Run exactly one task then exit (bypasses batching)",
     )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")

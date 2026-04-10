@@ -166,6 +166,8 @@ mcloop --cli codex        # Use Codex instead of Claude Code
 mcloop --no-audit         # Skip the post-completion bug audit
 mcloop --reviewer         # Enable background code reviewer
 mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
+mcloop --stop-after-stage # Complete current stage then exit
+mcloop --stop-after-one   # Run exactly one task then exit
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
@@ -380,6 +382,36 @@ scratch using the fallback model (with the same retry count) before
 marking it failed. This lets you run most tasks on a cheaper or
 faster model and only use the stronger model for tasks that need
 it. If no `--fallback-model` is set, behavior is unchanged.
+
+### Checkpoint exits
+
+Two flags let you limit how far a single mcloop invocation goes:
+
+```bash
+mcloop --stop-after-stage   # Complete the current stage, then exit
+mcloop --stop-after-one     # Run exactly one task, then exit
+```
+
+**`--stop-after-stage`** runs the current stage to completion (including
+the full-suite check and build at the stage boundary), then exits with
+success instead of advancing to the next stage. Use this for overnight
+runs where you want to review the output of each stage before continuing,
+or to validate that a stage passes before committing to the next one.
+This flag is ignored in bug-only mode (no stages); mcloop prints a
+warning and proceeds normally.
+
+**`--stop-after-one`** runs exactly one checkable leaf task and exits.
+If the next task is part of a `[BATCH]` parent, the batching logic is
+bypassed: only that single task runs in its own session and is committed
+normally. Use this to inspect one change at a time, or to test that the
+first task in a plan works before letting mcloop run the rest. This flag
+works in all modes including bug-only and maintain.
+
+Both flags produce a distinct exit notification ("Stopped after stage as
+requested" or "Stopped after one task as requested") so you can
+distinguish a checkpoint exit from a normal completion or a failure. The
+stop check happens at a clean boundary: after a successful commit and
+check-off, before pulling the next task.
 
 After each successful commit, McLoop pushes to the remote. If the
 push fails, McLoop stops immediately rather than continuing with

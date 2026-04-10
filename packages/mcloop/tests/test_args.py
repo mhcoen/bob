@@ -9154,3 +9154,315 @@ def test_commit_returns_hash(tmp_path):
     assert result_hash != ""
     assert len(result_hash) == 40
     assert result_hash == _get_git_hash(tmp_path)
+
+
+# --- --stop-after-stage and --stop-after-one tests ---
+
+
+def test_parse_args_stop_after_stage():
+    """--stop-after-stage flag is parsed correctly."""
+    args = _parse("--stop-after-stage")
+    assert args.stop_after_stage is True
+
+
+def test_parse_args_stop_after_one():
+    """--stop-after-one flag is parsed correctly."""
+    args = _parse("--stop-after-one")
+    assert args.stop_after_one is True
+
+
+def test_parse_args_stop_flags_default_false():
+    """Stop flags default to False."""
+    args = _parse()
+    assert args.stop_after_stage is False
+    assert args.stop_after_one is False
+
+
+def test_stop_after_one_exits_after_single_task(tmp_path):
+    """--stop-after-one runs one task then exits with success."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] First task\n- [ ] Second task\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify") as mock_notify,
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    assert result.detail == "Stopped after one task as requested"
+    # Only the first task should have been checked off
+    from mcloop.checklist import parse as cl_parse
+
+    tasks = cl_parse(plan)
+    assert tasks[0].checked
+    assert not tasks[1].checked
+    # Distinct notification
+    mock_notify.assert_any_call("Stopped after one task as requested")
+
+
+def test_stop_after_one_bypasses_batch(tmp_path):
+    """--stop-after-one skips batching and runs a single task."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [ ] Child B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock) as mock_run,
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_batch") as mock_batch,
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    # Batch should NOT have been called
+    mock_batch.assert_not_called()
+    # run_task should have been called once (single child)
+    mock_run.assert_called_once()
+    # Only Child A should be checked off
+    from mcloop.checklist import parse as cl_parse
+
+    tasks = cl_parse(plan)
+    parent = tasks[0]
+    assert parent.children[0].checked
+    assert not parent.children[1].checked
+
+
+def test_stop_after_one_works_in_bug_only_mode(tmp_path):
+    """--stop-after-one works in bug-only mode."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify") as mock_notify,
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    assert result.detail == "Stopped after one task as requested"
+    # Only first bug fixed
+    from mcloop.checklist import parse as cl_parse
+
+    tasks = cl_parse(plan)
+    bugs = [t for t in tasks if t.stage == "Bugs"]
+    assert bugs[0].checked
+    assert not bugs[1].checked
+    mock_notify.assert_any_call("Stopped after one task as requested")
+
+
+def test_stop_after_stage_warns_in_bug_only_mode(tmp_path, capsys):
+    """--stop-after-stage prints warning and is ignored in bug-only mode."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._launch_app_verification", return_value=None),
+    ):
+        result = run_loop(plan, stop_after_stage=True)
+
+    assert result.ok
+    captured = capsys.readouterr()
+    assert "--stop-after-stage ignored in bug-only mode" in captured.out
+
+
+def test_stop_after_stage_distinct_notification(tmp_path):
+    """--stop-after-stage produces a distinct success notification."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify") as mock_notify,
+    ):
+        result = run_loop(plan, stop_after_stage=True, no_audit=True)
+
+    assert result.ok
+    # Check the notification contains the distinct stop message
+    notify_msgs = [str(c) for c in mock_notify.call_args_list]
+    assert any("Stopped after stage as requested" in msg for msg in notify_msgs)
+
+
+def test_stop_after_one_no_post_loop_processing(tmp_path):
+    """--stop-after-one skips full-suite check, audit, and build."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n")
+    (tmp_path / ".git").mkdir()
+
+    result_mock = MagicMock()
+    result_mock.success = True
+    result_mock.output = "done"
+    result_mock.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result_mock),
+        patch("mcloop.main.run_checks", return_value=check_result) as mock_checks,
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+    ):
+        result = run_loop(plan, stop_after_one=True)
+
+    assert result.ok
+    # run_checks is called once (during the task check), NOT again for full-suite
+    assert mock_checks.call_count == 1
+    mock_build.assert_not_called()
+    mock_audit.assert_not_called()
+
+
+def test_main_passes_stop_flags_to_run_loop(tmp_path):
+    """_main() forwards --stop-after-stage and --stop-after-one to run_loop."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] Task\n")
+
+    with (
+        patch("mcloop.main._parse_args") as mock_args,
+        patch("mcloop.main._load_mcloop_config", return_value={}),
+        patch("mcloop.main.run_loop", return_value=RunStatus("success")) as mock_loop,
+    ):
+        mock_args.return_value = MagicMock(
+            file=str(plan),
+            command=None,
+            dry_run=False,
+            max_retries=3,
+            cli=None,
+            model=None,
+            fallback_model=None,
+            no_audit=False,
+            reviewer=False,
+            allow_web_tools=False,
+            stop_after_stage=True,
+            stop_after_one=True,
+        )
+        _main()
+
+    _, kwargs = mock_loop.call_args
+    assert kwargs["stop_after_stage"] is True
+    assert kwargs["stop_after_one"] is True
