@@ -13,11 +13,13 @@ over-abstraction.
 
 ## Bugs
 
-
-
-
-
-
+- [ ] [BATCH] _run_audit_fix_cycle() collapses audit failure and no-bugs-found into the same path (audit.py:84, 89, 99, 135)
+   - [ ] Define a structured audit result type with at least three states: no_bugs (audit ran, found nothing), fixed (audit ran, bugs found and fixed), failed (audit session crashed, timed out, or BUGS.md was not produced)
+   - [ ] Update _run_audit_fix_cycle() to return this structured result instead of a bare bool
+   - [ ] Only write .mcloop-last-audit when the result is no_bugs or fixed. Never on failed, so the next run retries the audit
+   - [ ] Send the "Audit complete: no bugs found" notification only on the no_bugs result. Send a distinct failure notification on failed
+   - [ ] Update all callers in main.py to handle the new return type
+   - [ ] Update existing audit tests to assert the correct state for each path (success, failure, no-bugs, bugs-fixed)
 
 
 ## Stage 1: Core

@@ -84,11 +84,27 @@ def _ensure_git(project_dir: Path) -> None:
             cwd=project_dir,
             capture_output=True,
         )
-        subprocess.run(
+        commit_result = subprocess.run(
             ["git", "commit", "-m", "mcloop: initial commit"],
             cwd=project_dir,
             capture_output=True,
+            text=True,
         )
+        if commit_result.returncode != 0:
+            stderr = commit_result.stderr.strip()
+            msg = (
+                "CRITICAL: initial git commit failed: "
+                f"{stderr or 'unknown error'}"
+            )
+            if "user.email" in stderr or "user.name" in stderr:
+                msg += (
+                    "\nConfigure git first:\n"
+                    "  git config --global user.email 'you@example.com'\n"
+                    "  git config --global user.name 'Your Name'"
+                )
+            print(formatting.error_msg(msg), flush=True)
+            notify(msg, level="error")
+            sys.exit(1)
         print(formatting.system_msg("Git repository initialized."), flush=True)
     except FileNotFoundError:
         msg = "CRITICAL: git is not installed or not on PATH. Mcloop cannot run without git."
