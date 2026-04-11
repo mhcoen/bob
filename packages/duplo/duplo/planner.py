@@ -186,7 +186,7 @@ def parse_completed_tasks(plan_content: str) -> list[CompletedTask]:
 
 def _detect_next_phase_number(current_plan: str) -> int:
     """Return the next phase number inferred from *current_plan* heading."""
-    match = re.search(r"#\s*.*?Phase\s+(\d+)", current_plan, re.IGNORECASE)
+    match = re.search(r"#\s*.*?(?:Phase|Stage)\s+(\d+)", current_plan, re.IGNORECASE)
     return (int(match.group(1)) + 1) if match else 2
 
 

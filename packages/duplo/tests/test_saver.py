@@ -2479,3 +2479,70 @@ class TestAppendToBugsSection:
         result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
         assert '- [ ] Fix: eof bug [fix: "eof bug"]' in result
         assert '- [ ] Fix: existing [fix: "existing"]' in result
+
+    def test_bugs_followed_by_h1_phase_heading(self, tmp_path):
+        """(a) ## Bugs followed by an H1 phase heading stops at the H1."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: old [fix: "old"]\n'
+            "\n"
+            "# Duplo - Phase 2: Features\n"
+            "\n"
+            "- [ ] Add search\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # New bug lands between ## Bugs and # Phase 2.
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new")
+        phase2_pos = result.index("# Duplo - Phase 2")
+        assert bugs_pos < new_pos < phase2_pos
+
+    def test_bugs_followed_by_h2_heading(self, tmp_path):
+        """(b) ## Bugs followed by an H2 heading stops at the H2."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: old [fix: "old"]\n'
+            "\n"
+            "## Manual verification\n"
+            "\n"
+            "- [ ] Check UI\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new")
+        manual_pos = result.index("## Manual verification")
+        assert bugs_pos < new_pos < manual_pos
+
+
+class TestAppendPhaseToHistoryStageRegex:
+    """Tests that append_phase_to_history accepts Stage headings."""
+
+    def test_stage_heading_extracted(self, tmp_path):
+        plan_content = "# MyApp — Stage 1: Core\n\n- [x] Build it\n"
+        result_path = append_phase_to_history(plan_content, target_dir=tmp_path)
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        phase_title = data["phases"][-1]["phase"]
+        assert "Stage 1" in phase_title
+
+    def test_phase_heading_still_works(self, tmp_path):
+        plan_content = "# MyApp — Phase 3: Polish\n\n- [x] Fix bugs\n"
+        result_path = append_phase_to_history(plan_content, target_dir=tmp_path)
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        phase_title = data["phases"][-1]["phase"]
+        assert "Phase 3" in phase_title

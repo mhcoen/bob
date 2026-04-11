@@ -194,7 +194,9 @@ def append_phase_to_history(
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = _safe_read_json(path)
 
-    match = re.search(r"^#\s*.*?(Phase\s+\d+[^\n]*)", plan_content, re.IGNORECASE | re.MULTILINE)
+    match = re.search(
+        r"^#\s*.*?((?:Phase|Stage)\s+\d+[^\n]*)", plan_content, re.IGNORECASE | re.MULTILINE
+    )
     phase_title = match.group(1).strip() if match else "Unknown phase"
 
     entry = {
@@ -1311,9 +1313,9 @@ def append_to_bugs_section(
     for i, line in enumerate(lines):
         if line.strip().lower() == _BUGS_HEADING.lower():
             bugs_start = i
-            # Find the end: next ## heading or EOF.
+            # Find the end: next heading (H1 or H2) or EOF.
             for j in range(i + 1, len(lines)):
-                if lines[j].startswith("## "):
+                if re.match(r"^#{1,2}\s", lines[j]):
                     bugs_end = j
                     break
             if bugs_end is None:

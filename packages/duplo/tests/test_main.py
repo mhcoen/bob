@@ -4339,6 +4339,38 @@ class TestCurrentPhaseContent:
         assert "Monitor" in result
 
 
+class TestCurrentPhaseContentStage:
+    """_current_phase_content accepts Stage headings."""
+
+    def test_extracts_stage_1(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 1)
+        content = (
+            "# MyApp — Stage 1: Setup\n\n"
+            "- [x] Create project\n\n"
+            "# MyApp — Stage 2: Features\n\n"
+            "- [ ] Add search\n"
+        )
+        result = _current_phase_content(content)
+        assert "Stage 1: Setup" in result
+        assert "Create project" in result
+        assert "Stage 2" not in result
+
+    def test_extracts_stage_2(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_phase_data(tmp_path, 2)
+        content = (
+            "# MyApp — Stage 1: Setup\n\n"
+            "- [x] Create project\n\n"
+            "# MyApp — Stage 2: Features\n\n"
+            "- [ ] Add search\n"
+        )
+        result = _current_phase_content(content)
+        assert "Stage 2: Features" in result
+        assert "Add search" in result
+        assert "Stage 1" not in result
+
+
 class TestPlanIsCompleteMultiPhase:
     """_plan_is_complete must scope to the current phase only."""
 

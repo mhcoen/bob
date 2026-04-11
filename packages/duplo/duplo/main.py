@@ -1879,8 +1879,8 @@ def _current_phase_content(content: str) -> str:
         return content
 
     lines = content.splitlines(keepends=True)
-    phase_pattern = re.compile(rf"^#\s+.*Phase\s+{phase_num}\s*:", re.IGNORECASE)
-    next_phase_pattern = re.compile(r"^#\s+.*Phase\s+\d+\s*:", re.IGNORECASE)
+    phase_pattern = re.compile(rf"^#\s+.*(?:Phase|Stage)\s+{phase_num}\s*:", re.IGNORECASE)
+    next_phase_pattern = re.compile(r"^#\s+.*(?:Phase|Stage)\s+\d+\s*:", re.IGNORECASE)
 
     start: int | None = None
     end: int | None = None

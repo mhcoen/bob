@@ -399,6 +399,18 @@ class TestDetectNextPhaseNumber:
         plan = "# McWhisper — Phase 3: Dashboard\n\n## Objective\nAdd dashboard."
         assert _detect_next_phase_number(plan) == 4
 
+    def test_stage_heading(self):
+        plan = "# Stage 1: Core\n\n## Objective\nMinimal app."
+        assert _detect_next_phase_number(plan) == 2
+
+    def test_stage_higher_number(self):
+        plan = "## Stage 2: Features\n\n- [ ] Add search"
+        assert _detect_next_phase_number(plan) == 3
+
+    def test_prefixed_stage_heading(self):
+        plan = "# MyApp — Stage 4: Polish\n\n## Objective\nFinal pass."
+        assert _detect_next_phase_number(plan) == 5
+
 
 _SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search."
 
