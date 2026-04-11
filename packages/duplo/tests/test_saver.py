@@ -3059,6 +3059,94 @@ class TestAppendToBugsSectionMixedBatch:
         assert "- [x] Fix: stale cache" not in result
 
 
+class TestAppendToBugsSectionBoundary:
+    """Tests for ## Bugs section boundary detection."""
+
+    def test_h1_terminates_bugs_section(self, tmp_path):
+        """An H1 heading after ## Bugs marks the section boundary."""
+        plan = (
+            '## Bugs\n\n- [x] Fix: old [fix: "old"]\n\n# Phase 2: Polish\n\n- [ ] Improve perf\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # New bug lands between ## Bugs and # Phase 2.
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new")
+        h1_pos = result.index("# Phase 2")
+        assert bugs_pos < new_pos < h1_pos
+        # Phase 2 content untouched.
+        assert "- [ ] Improve perf" in result
+
+    def test_h2_terminates_bugs_section(self, tmp_path):
+        """An H2 heading after ## Bugs marks the section boundary."""
+        plan = (
+            '## Bugs\n\n- [x] Fix: old [fix: "old"]\n\n## Implementation\n\n- [ ] Build feature\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # New bug lands between ## Bugs and ## Implementation.
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new")
+        impl_pos = result.index("## Implementation")
+        assert bugs_pos < new_pos < impl_pos
+        # Implementation content untouched.
+        assert "- [ ] Build feature" in result
+
+    def test_bugs_at_eof(self, tmp_path):
+        """## Bugs at end of file — section extends to EOF."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] Set up project\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: existing [fix: "existing"]\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: eof bug [fix: "eof"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '- [ ] Fix: existing [fix: "existing"]' in result
+        assert '- [ ] Fix: eof bug [fix: "eof"]' in result
+        # New bug appears after the existing one.
+        existing_pos = result.index("Fix: existing")
+        eof_pos = result.index("Fix: eof bug")
+        assert existing_pos < eof_pos
+
+    def test_reopen_respects_h1_boundary(self, tmp_path):
+        """Reopen only matches entries within ## Bugs, not past H1."""
+        plan = (
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: in section [fix: "target"]\n'
+            "\n"
+            "# Phase 2\n"
+            "\n"
+            '- [x] Fix: outside section [fix: "other"]\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: reopen [fix: "target"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # The entry inside ## Bugs was reopened.
+        assert '- [ ] Fix: in section [fix: "target"]' in result
+        # The entry outside (under # Phase 2) was NOT touched.
+        assert '- [x] Fix: outside section [fix: "other"]' in result
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 
