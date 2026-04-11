@@ -2714,6 +2714,22 @@ class TestAppendToBugsSectionDedupByBody:
         assert "- [ ] Fix: button crash" in result
         assert "- [x] Fix: button crash" not in result
 
+    def test_reopen_by_body_fallback_no_fix_tag(self, tmp_path):
+        """Existing ``- [x] Fix X`` (no fix-tag) reopened by
+        ``- [ ] Fix X`` via body fallback; returns 1."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix X\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix X"]
+        writes = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert writes == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Reopened in place — only one occurrence.
+        assert result.count("Fix X") == 1
+        # Checkbox flipped from [x] to [ ].
+        assert "- [ ] Fix X" in result
+        assert "- [x] Fix X" not in result
+
 
 class TestAppendToBugsSectionDedupByFixTag:
     """Dedup via [fix: "..."] annotation identity key."""
