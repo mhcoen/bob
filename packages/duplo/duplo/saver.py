@@ -1410,7 +1410,11 @@ def append_to_bugs_section(
         if inserted == 0:
             return 0
 
-        plan_path.write_text("\n".join(lines), encoding="utf-8")
+        new_content = "\n".join(lines)
+        if new_content == content:
+            return inserted
+
+        plan_path.write_text(new_content, encoding="utf-8")
         return inserted
 
     # No ## Bugs section found — create one.
@@ -1447,7 +1451,9 @@ def append_to_bugs_section(
     for idx, bline in enumerate(block):
         lines.insert(insert_at + idx, bline)
 
-    plan_path.write_text("\n".join(lines), encoding="utf-8")
+    new_content = "\n".join(lines)
+    if new_content != content:
+        plan_path.write_text(new_content, encoding="utf-8")
     return len(tasks)
 
 

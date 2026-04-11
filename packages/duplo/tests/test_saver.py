@@ -2888,6 +2888,51 @@ class TestAppendToBugsSectionIndentation:
         assert '    - [ ] Fix: deep [fix: "deep"]' in result
 
 
+class TestAppendToBugsSectionIdempotentMtime:
+    """File write is skipped when content is unchanged (mtime preserved)."""
+
+    def test_skip_unchecked_does_not_write(self, tmp_path):
+        """Skipping an already-unchecked entry must not touch the file."""
+        plan = "# App\n\n## Bugs\n\n- [ ] Fix: existing bug\n"
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(plan, encoding="utf-8")
+        mtime_before = plan_path.stat().st_mtime_ns
+        inserted = append_to_bugs_section(["- [ ] Fix: existing bug"], target_dir=tmp_path)
+        assert inserted == 0
+        assert plan_path.stat().st_mtime_ns == mtime_before
+
+    def test_reopen_does_write(self, tmp_path):
+        """Reopening a checked entry changes content, so write occurs."""
+        plan = "# App\n\n## Bugs\n\n- [x] Fix: closed bug\n"
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(plan, encoding="utf-8")
+        inserted = append_to_bugs_section(["- [ ] Fix: closed bug"], target_dir=tmp_path)
+        assert inserted == 1
+        result = plan_path.read_text(encoding="utf-8")
+        assert "- [ ] Fix: closed bug" in result
+        assert "- [x]" not in result
+
+    def test_append_new_does_write(self, tmp_path):
+        """Appending a genuinely new task changes content."""
+        plan = "# App\n\n## Bugs\n\n- [ ] Fix: old bug\n"
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(plan, encoding="utf-8")
+        inserted = append_to_bugs_section(["- [ ] Fix: brand new bug"], target_dir=tmp_path)
+        assert inserted == 1
+        result = plan_path.read_text(encoding="utf-8")
+        assert "brand new bug" in result
+
+    def test_empty_tasks_does_not_write(self, tmp_path):
+        """Empty task list must not touch the file."""
+        plan = "# App\n\n## Bugs\n\n- [ ] Fix: existing\n"
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(plan, encoding="utf-8")
+        mtime_before = plan_path.stat().st_mtime_ns
+        inserted = append_to_bugs_section([], target_dir=tmp_path)
+        assert inserted == 0
+        assert plan_path.stat().st_mtime_ns == mtime_before
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 
