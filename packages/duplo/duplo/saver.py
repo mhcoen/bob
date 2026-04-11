@@ -1269,6 +1269,19 @@ _BUGS_HEADING = "## Bugs"
 _PLAN_FILENAME = "PLAN.md"
 
 
+def _task_body(line: str) -> str:
+    """Extract the text after the checkbox prefix from a task line.
+
+    ``- [ ] Fix: foo`` and ``- [x] Fix: foo`` both return
+    ``Fix: foo``.  Non-checkbox lines return the stripped line.
+    """
+    stripped = line.lstrip()
+    m = re.match(r"^- \[[x ]\] ", stripped)
+    if m:
+        return stripped[m.end() :]
+    return stripped
+
+
 def append_to_bugs_section(
     tasks: list[str],
     *,
@@ -1279,9 +1292,16 @@ def append_to_bugs_section(
     If PLAN.md does not exist, does nothing and returns 0.
 
     If a ``## Bugs`` section already exists (anywhere in the file),
-    new tasks are inserted at the end of that section (before the next
-    ``##`` heading or EOF).  Existing entries — checked or unchecked —
-    are never modified or reordered.
+    new tasks are handled with reopen-in-place semantics:
+
+    - If the task body already exists as an unchecked ``- [ ]`` entry,
+      it is skipped (no duplicate).
+    - If the task body matches an existing checked ``- [x]`` entry,
+      that entry is unchecked in place (reopened) rather than adding a
+      new line.  This counts as an insertion.
+    - Otherwise the task is appended at the end of the section.
+
+    Existing entries are never removed or reordered.
 
     If no ``## Bugs`` section exists, one is created immediately after
     the intro prose / architecture note and before the first ``#``
@@ -1289,16 +1309,12 @@ def append_to_bugs_section(
     very first heading).  If the file has only one heading, the section
     is appended at the end.
 
-    Duplicate detection: a task line is skipped if its text (after the
-    ``- [ ] `` prefix) already appears verbatim in the existing
-    ``## Bugs`` block.
-
     Args:
         tasks: Lines to insert, each should be a ``- [ ] ...`` string.
         target_dir: Directory containing PLAN.md.
 
     Returns:
-        Number of tasks actually inserted (after dedup).
+        Number of tasks actually inserted or reopened (after dedup).
     """
     plan_path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if not plan_path.exists() or not tasks:
@@ -1323,33 +1339,53 @@ def append_to_bugs_section(
             break
 
     if bugs_start is not None:
-        # Collect existing task texts inside the section for dedup.
-        existing_texts: set[str] = set()
+        # Build maps of existing task bodies → line indices, split by
+        # checked vs unchecked so we can implement reopen-in-place.
+        unchecked_bodies: set[str] = set()
+        checked_body_to_line: dict[str, int] = {}
         for k in range(bugs_start + 1, bugs_end):
             stripped = lines[k].lstrip()
-            if stripped.startswith("- ["):
-                # Extract text after the checkbox.
-                existing_texts.add(stripped)
+            if stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
+                body = _task_body(stripped)
+                checked_body_to_line.setdefault(body, k)
+            elif stripped.startswith("- [ ] "):
+                unchecked_bodies.add(_task_body(stripped))
 
-        new_tasks = [t for t in tasks if t.lstrip() not in existing_texts]
-        if not new_tasks:
+        inserted = 0
+        to_append: list[str] = []
+        for task in tasks:
+            body = _task_body(task)
+            if body in unchecked_bodies:
+                # Already exists unchecked — skip.
+                continue
+            if body in checked_body_to_line:
+                # Reopen in place: uncheck the existing line.
+                idx = checked_body_to_line.pop(body)
+                old = lines[idx]
+                lines[idx] = re.sub(r"^(\s*- \[)[xX](\] )", r"\1 \2", old)
+                unchecked_bodies.add(body)
+                inserted += 1
+            else:
+                to_append.append(task)
+                unchecked_bodies.add(body)
+                inserted += 1
+
+        if to_append:
+            # Insert before bugs_end — find the last non-blank line
+            # in the section to append after it.
+            pos = bugs_end - 1
+            while pos > bugs_start and lines[pos].strip() == "":
+                pos -= 1
+            insert_at = pos + 1
+
+            for idx, task in enumerate(to_append):
+                lines.insert(insert_at + idx, task)
+
+        if inserted == 0:
             return 0
 
-        # Insert before bugs_end — find the last non-blank line in
-        # the section to append after it.
-        insert_at = bugs_end
-        # Walk backward from bugs_end to skip trailing blank lines
-        # inside the section, then insert after the last content line.
-        pos = bugs_end - 1
-        while pos > bugs_start and lines[pos].strip() == "":
-            pos -= 1
-        insert_at = pos + 1
-
-        for idx, task in enumerate(new_tasks):
-            lines.insert(insert_at + idx, task)
-
         plan_path.write_text("\n".join(lines), encoding="utf-8")
-        return len(new_tasks)
+        return inserted
 
     # No ## Bugs section found — create one.
     # Place it after intro prose and before the first checklist item

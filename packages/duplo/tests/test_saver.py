@@ -2529,6 +2529,101 @@ class TestAppendToBugsSection:
         manual_pos = result.index("## Manual verification")
         assert bugs_pos < new_pos < manual_pos
 
+    def test_reopen_checked_bug_in_place(self, tmp_path):
+        """Checked bug is unchecked in place instead of appending a dup."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: crash on start [fix: "crash on start"]\n'
+            '- [ ] Fix: open bug [fix: "open bug"]\n'
+            "\n"
+            "## Implementation\n"
+            "\n"
+            "- [ ] Set up project\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: crash on start [fix: "crash on start"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # The previously checked item is now unchecked.
+        assert '- [ ] Fix: crash on start [fix: "crash on start"]' in result
+        # No checked version remains.
+        assert "- [x]" not in result
+        # No duplicate line — only one occurrence of the task.
+        assert result.count('Fix: crash on start [fix: "crash on start"]') == 1
+        # Open bug and implementation are untouched.
+        assert '- [ ] Fix: open bug [fix: "open bug"]' in result
+        assert "## Implementation" in result
+
+    def test_reopen_preserves_position(self, tmp_path):
+        """Reopened bug stays at its original line position."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: first [fix: "first"]\n'
+            '- [ ] Fix: second [fix: "second"]\n'
+            '- [x] Fix: third [fix: "third"]\n'
+            "\n"
+            "## Implementation\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        # Reopen the third bug.
+        tasks = ['- [ ] Fix: third [fix: "third"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        lines = result.split("\n")
+        # "third" should still appear after "second" (in-place).
+        second_idx = next(i for i, ln in enumerate(lines) if "second" in ln)
+        third_idx = next(i for i, ln in enumerate(lines) if "third" in ln)
+        assert third_idx > second_idx
+        # "first" stays checked (not reopened).
+        assert '- [x] Fix: first [fix: "first"]' in result
+
+    def test_reopen_and_append_mixed(self, tmp_path):
+        """Mix of reopen-in-place and new append in one call."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: old resolved [fix: "old resolved"]\n'
+            "\n"
+            "## Implementation\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = [
+            '- [ ] Fix: old resolved [fix: "old resolved"]',
+            '- [ ] Fix: brand new [fix: "brand new"]',
+        ]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 2
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Old resolved is unchecked in place.
+        assert '- [ ] Fix: old resolved [fix: "old resolved"]' in result
+        # Brand new is appended.
+        assert '- [ ] Fix: brand new [fix: "brand new"]' in result
+        # Reopened item appears before the new one.
+        old_pos = result.index("old resolved")
+        new_pos = result.index("brand new")
+        assert old_pos < new_pos
+
+    def test_reopen_idempotent(self, tmp_path):
+        """Reopening an already-unchecked bug is a no-op."""
+        plan = '# MyApp — Phase 1: Core\n\n## Bugs\n\n- [ ] Fix: open bug [fix: "open bug"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: open bug [fix: "open bug"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 0
+
 
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
