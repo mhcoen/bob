@@ -2046,13 +2046,26 @@ def _complete_phase(
 
 
 def _compare_with_references(current: Path) -> None:
-    """Compare *current* screenshot against any reference images and print results."""
-    # Check .duplo/references/ first (video frames from the product demo),
-    # then fall back to screenshots/ (Playwright website captures).
+    """Compare *current* screenshot against any reference images and print results.
+
+    Reference lookup order (backward-compatible fallback):
+
+    1. ``.duplo/references/*.png`` — the canonical location.  Accepted video
+       frames, processed images, and moved reference files all live here.
+    2. ``screenshots/*.png`` — legacy fallback for projects created before the
+       ``.duplo/references/`` migration.  Ignored when (1) finds images.
+
+    The fallback is intentional: removing it would break visual comparison for
+    older projects that still store Playwright website captures in
+    ``screenshots/``.  New projects never need the fallback because all
+    reference material is stored in ``.duplo/references/`` during first run.
+    """
+    # Primary: .duplo/references/ (video frames, processed reference files).
     references: list[Path] = []
     duplo_refs = Path(".duplo") / "references"
     if duplo_refs.is_dir():
         references = sorted(duplo_refs.glob("*.png"))
+    # Fallback: screenshots/ for pre-migration projects (see docstring).
     if not references:
         ref_dir = Path("screenshots")
         references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []

@@ -3663,6 +3663,77 @@ class TestCompareWithReferences:
         out = capsys.readouterr().out
         assert "No reference screenshots found" in out
 
+    def test_empty_duplo_refs_falls_back(self, tmp_path, monkeypatch, capsys):
+        """.duplo/references/ exists but is empty — falls back to screenshots/."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo" / "references").mkdir(parents=True)
+        shot_dir = tmp_path / "screenshots"
+        shot_dir.mkdir()
+        (shot_dir / "capture.png").write_bytes(b"PNG" * 100)
+
+        current = tmp_path / "screenshots" / "current" / "main.png"
+        current.parent.mkdir(parents=True, exist_ok=True)
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.comparator import ComparisonResult
+        from duplo.main import _compare_with_references
+
+        result = ComparisonResult(similar=True, summary="ok", details=[])
+        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+            _compare_with_references(current)
+
+        refs = mock_cmp.call_args[0][1]
+        assert len(refs) == 1
+        assert "screenshots" in str(refs[0])
+        assert "capture.png" in str(refs[0])
+
+    def test_both_dirs_uses_only_duplo_refs(self, tmp_path, monkeypatch, capsys):
+        """When both dirs have PNGs, only .duplo/references/ is used."""
+        monkeypatch.chdir(tmp_path)
+        duplo_refs = tmp_path / ".duplo" / "references"
+        duplo_refs.mkdir(parents=True)
+        (duplo_refs / "ref.png").write_bytes(b"PNG" * 100)
+
+        shot_dir = tmp_path / "screenshots"
+        shot_dir.mkdir()
+        (shot_dir / "legacy.png").write_bytes(b"PNG" * 100)
+
+        current = tmp_path / "current.png"
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.comparator import ComparisonResult
+        from duplo.main import _compare_with_references
+
+        result = ComparisonResult(similar=True, summary="ok", details=[])
+        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+            _compare_with_references(current)
+
+        refs = mock_cmp.call_args[0][1]
+        assert len(refs) == 1
+        assert ".duplo" in str(refs[0])
+        assert "legacy.png" not in str(refs[0])
+
+    def test_duplo_refs_no_dir_falls_back(self, tmp_path, monkeypatch, capsys):
+        """.duplo/references/ doesn't exist at all — falls back to screenshots/."""
+        monkeypatch.chdir(tmp_path)
+        shot_dir = tmp_path / "screenshots"
+        shot_dir.mkdir()
+        (shot_dir / "web.png").write_bytes(b"PNG" * 100)
+
+        current = tmp_path / "current.png"
+        current.write_bytes(b"PNG" * 100)
+
+        from duplo.comparator import ComparisonResult
+        from duplo.main import _compare_with_references
+
+        result = ComparisonResult(similar=True, summary="ok", details=[])
+        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+            _compare_with_references(current)
+
+        refs = mock_cmp.call_args[0][1]
+        assert len(refs) == 1
+        assert "web.png" in str(refs[0])
+
 
 class TestPhase2NotStartedRunDuplo:
     """Run duplo when Phase 1 is complete and Phase 2 PLAN.md has unchecked tasks.
