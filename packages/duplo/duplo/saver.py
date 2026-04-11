@@ -1311,11 +1311,12 @@ def append_to_bugs_section(
     new tasks are handled with reopen-in-place semantics:
 
     - If the task body already exists as an unchecked ``- [ ]`` entry,
-      it is skipped (no duplicate).
+      it is skipped (no duplicate).  Contributes 0 to the return value.
     - If the task body matches an existing checked ``- [x]`` entry,
       that entry is unchecked in place (reopened) rather than adding a
-      new line.  This counts as an insertion.
+      new line.  Contributes 1 to the return value (a write occurred).
     - Otherwise the task is appended at the end of the section.
+      Contributes 1 to the return value (a write occurred).
 
     Existing entries are never removed or reordered.
 
@@ -1330,7 +1331,8 @@ def append_to_bugs_section(
         target_dir: Directory containing PLAN.md.
 
     Returns:
-        Number of tasks actually inserted or reopened (after dedup).
+        Number of tasks that caused a write (insertions plus checkbox
+        flips).  Already-unchecked matches contribute 0.
     """
     plan_path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if not plan_path.exists() or not tasks:
@@ -1375,12 +1377,12 @@ def append_to_bugs_section(
                     unchecked_keys.add(fix_m.group(1))
                 unchecked_keys.add(_task_body(stripped))
 
-        inserted = 0
+        writes = 0
         to_append: list[str] = []
         for task in tasks:
             key = _task_key(task)
             if key in unchecked_keys:
-                # Already exists unchecked — skip.
+                # Already exists unchecked — skip (no write).
                 continue
             if key in checked_key_to_line:
                 # Reopen in place: uncheck the existing line.
@@ -1390,11 +1392,11 @@ def append_to_bugs_section(
                 flipped = re.sub(r"^(- \[)[xX](\] )", r"\1 \2", old.lstrip())
                 lines[idx] = indent + flipped
                 unchecked_keys.add(key)
-                inserted += 1
+                writes += 1
             else:
                 to_append.append(task)
                 unchecked_keys.add(key)
-                inserted += 1
+                writes += 1
 
         if to_append:
             # Insert before bugs_end — find the last non-blank line
@@ -1407,15 +1409,15 @@ def append_to_bugs_section(
             for idx, task in enumerate(to_append):
                 lines.insert(insert_at + idx, task)
 
-        if inserted == 0:
+        if writes == 0:
             return 0
 
         new_content = "\n".join(lines)
         if new_content == content:
-            return inserted
+            return writes
 
         plan_path.write_text(new_content, encoding="utf-8")
-        return inserted
+        return writes
 
     # No ## Bugs section found — create one.
     # Place it after intro prose and before the first checklist item

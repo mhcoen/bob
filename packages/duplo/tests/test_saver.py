@@ -2933,6 +2933,51 @@ class TestAppendToBugsSectionIdempotentMtime:
         assert plan_path.stat().st_mtime_ns == mtime_before
 
 
+class TestAppendToBugsSectionWriteCount:
+    """Return value counts only tasks that caused a write."""
+
+    def test_mixed_new_reopen_and_skip(self, tmp_path):
+        """One new + one reopen + one already-unchecked = 2 writes."""
+        plan = (
+            "# App — Phase 1\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: closed bug [fix: "closed"]\n'
+            '- [ ] Fix: open bug [fix: "open"]\n'
+            "\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = [
+            '- [ ] Fix: closed bug [fix: "closed"]',  # reopen → 1
+            '- [ ] Fix: open bug [fix: "open"]',  # skip → 0
+            '- [ ] Fix: brand new [fix: "new"]',  # append → 1
+        ]
+        writes = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert writes == 2
+
+    def test_all_skipped_returns_zero(self, tmp_path):
+        """All tasks match unchecked entries → 0 writes."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [ ] Fix: a\n- [ ] Fix: b\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        writes = append_to_bugs_section(["- [ ] Fix: a", "- [ ] Fix: b"], target_dir=tmp_path)
+        assert writes == 0
+
+    def test_all_reopened_returns_count(self, tmp_path):
+        """All tasks reopen checked entries → count equals len(tasks)."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix: a\n- [x] Fix: b\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        writes = append_to_bugs_section(["- [ ] Fix: a", "- [ ] Fix: b"], target_dir=tmp_path)
+        assert writes == 2
+
+    def test_new_section_returns_task_count(self, tmp_path):
+        """Creating a new ## Bugs section returns len(tasks)."""
+        plan = "# App — Phase 1\n\n- [ ] Set up project\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        writes = append_to_bugs_section(["- [ ] Fix: a", "- [ ] Fix: b"], target_dir=tmp_path)
+        assert writes == 2
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 

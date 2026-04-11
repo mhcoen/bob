@@ -559,8 +559,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             return
 
         fix_tasks = investigation_to_fix_tasks(result)
-        inserted = append_to_bugs_section(fix_tasks)
-        print(f"Appended {inserted} diagnosed fix task(s) to PLAN.md.")
+        writes = append_to_bugs_section(fix_tasks)
+        print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
         return
 
@@ -581,8 +581,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             return
 
         fix_tasks = investigation_to_fix_tasks(result)
-        inserted = append_to_bugs_section(fix_tasks)
-        print(f"Appended {inserted} diagnosed fix task(s) to PLAN.md.")
+        writes = append_to_bugs_section(fix_tasks)
+        print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
     else:
         # Investigator returned no diagnoses — fall back with error context.
@@ -599,8 +599,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             oneline = desc.replace("\n", " ").strip()
             fix_tasks.append(f'- [ ] Fix: {oneline} [fix: "{oneline}"]')
 
-        inserted = append_to_bugs_section(fix_tasks)
-        print(f"Appended {inserted} fix task(s) to PLAN.md (undiagnosed).")
+        writes = append_to_bugs_section(fix_tasks)
+        print(f"Updated {writes} fix task(s) in PLAN.md (undiagnosed).")
         print("Run mcloop to start fixing.")
 
 
