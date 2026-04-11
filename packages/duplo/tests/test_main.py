@@ -4120,3 +4120,195 @@ class TestPlanIsCompleteMultiPhase:
         _write_phase_data(tmp_path, 2)
         (tmp_path / "PLAN.md").write_text(_MULTI_PHASE_PLAN)
         assert _plan_has_unchecked_tasks() is True
+
+
+class TestSubsequentRunSpecVerificationIndependent:
+    """SPEC verification tasks must append independently of video frames.
+
+    Covers four modes:
+    (a) frame_descs empty, SPEC present → spec verification appended.
+    (b) frame_descs non-empty, vcases empty, SPEC present → no crash.
+    (c) frame_descs non-empty, vcases non-empty, SPEC absent → no crash.
+    (d) Happy path: frame_descs non-empty, vcases non-empty, SPEC present.
+    """
+
+    _BASE_DATA = {
+        "source_url": "",
+        "app_name": "TestApp",
+        "current_phase": 1,
+        "roadmap": [
+            {"phase": 1, "title": "Core", "goal": "Build core", "features": ["Search"]},
+        ],
+        "features": [
+            {"name": "Search", "description": "Search stuff", "category": "core"},
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    _SPEC_VTASKS = (
+        "\n## Functional verification from product spec\n\n"
+        "- [ ] Verify: type `1+1`, expect result `2`\n"
+    )
+
+    def _setup(self, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        from duplo.hasher import compute_hashes, save_hashes
+
+        hashes = compute_hashes(tmp_path)
+        save_hashes(hashes, directory=tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+    def _make_spec(self):
+        """Return a mock spec object with one behavior contract."""
+        contract = type("C", (), {"input": "1+1", "expected": "2"})()
+        return type(
+            "Spec",
+            (),
+            {
+                "raw": "x",
+                "behavior_contracts": [contract],
+                "scope_include": None,
+                "scope_exclude": None,
+            },
+        )()
+
+    def test_no_frames_with_spec(self, capsys, tmp_path, monkeypatch):
+        """(a) No frame_descs, SPEC present → spec vtasks appended."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.extractor import Feature as F
+
+        feat = F(name="Search", description="Search stuff", category="core")
+        spec = self._make_spec()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.load_frame_descriptions", return_value=[]),
+            patch(
+                "duplo.main.format_contracts_as_verification",
+                return_value=self._SPEC_VTASKS,
+            ) as mock_fmt,
+            patch("duplo.main.select_features", return_value=[feat]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 1\n- [ ] task\n",
+            ),
+            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+        ):
+            main()
+
+        mock_fmt.assert_called_once()
+        saved_content = mock_save.call_args[0][0]
+        assert "Functional verification from product spec" in saved_content
+
+    def test_frames_no_vcases_with_spec(self, capsys, tmp_path, monkeypatch):
+        """(b) frame_descs non-empty, vcases empty, SPEC present → no crash."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.extractor import Feature as F
+
+        feat = F(name="Search", description="Search stuff", category="core")
+        spec = self._make_spec()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[{"state": "home"}],
+            ),
+            patch("duplo.main.extract_verification_cases", return_value=[]),
+            patch(
+                "duplo.main.format_contracts_as_verification",
+                return_value=self._SPEC_VTASKS,
+            ),
+            patch("duplo.main.select_features", return_value=[feat]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 1\n- [ ] task\n",
+            ),
+            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+        ):
+            main()
+
+        saved_content = mock_save.call_args[0][0]
+        assert "Functional verification from product spec" in saved_content
+
+    def test_frames_with_vcases_no_spec(self, capsys, tmp_path, monkeypatch):
+        """(c) frame_descs non-empty, vcases non-empty, SPEC absent → no crash."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.extractor import Feature as F
+        from duplo.verification_extractor import VerificationCase
+
+        feat = F(name="Search", description="Search stuff", category="core")
+        vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[{"state": "home"}],
+            ),
+            patch(
+                "duplo.main.extract_verification_cases",
+                return_value=vcases,
+            ),
+            patch(
+                "duplo.main.format_verification_tasks",
+                return_value="\n- [ ] Verify: type `1+1`, expect `2`\n",
+            ),
+            patch("duplo.main.select_features", return_value=[feat]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 1\n- [ ] task\n",
+            ),
+            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+        ):
+            main()
+
+        saved_content = mock_save.call_args[0][0]
+        assert "Verify: type `1+1`" in saved_content
+        assert "Functional verification from product spec" not in saved_content
+
+    def test_happy_path_frames_vcases_and_spec(self, capsys, tmp_path, monkeypatch):
+        """(d) frame_descs + vcases + SPEC → both appended."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.extractor import Feature as F
+        from duplo.verification_extractor import VerificationCase
+
+        feat = F(name="Search", description="Search stuff", category="core")
+        vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
+        spec = self._make_spec()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[{"state": "home"}],
+            ),
+            patch(
+                "duplo.main.extract_verification_cases",
+                return_value=vcases,
+            ),
+            patch(
+                "duplo.main.format_verification_tasks",
+                return_value="\n- [ ] Verify: type `1+1`, expect `2`\n",
+            ),
+            patch(
+                "duplo.main.format_contracts_as_verification",
+                return_value=self._SPEC_VTASKS,
+            ),
+            patch("duplo.main.select_features", return_value=[feat]),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase 1\n- [ ] task\n",
+            ),
+            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+        ):
+            main()
+
+        saved_content = mock_save.call_args[0][0]
+        assert "Verify: type `1+1`" in saved_content
+        assert "Functional verification from product spec" in saved_content

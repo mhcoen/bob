@@ -1574,12 +1574,13 @@ def _subsequent_run() -> None:
             vtasks = format_verification_tasks(vcases)
             content = content.rstrip() + "\n" + vtasks
             print(f"  {len(vcases)} verification case(s) added.")
-            # Append verification tasks from SPEC.md behavior contracts.
-            if spec:
-                spec_vtasks = format_contracts_as_verification(spec)
-        if spec_vtasks:
-            content = content.rstrip() + "\n" + spec_vtasks
-            print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
+    # Append verification tasks from SPEC.md behavior contracts.
+    spec_vtasks = []
+    if spec:
+        spec_vtasks = format_contracts_as_verification(spec)
+    if spec_vtasks:
+        content = content.rstrip() + "\n" + spec_vtasks
+        print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
     saved = save_plan(content)
     print(f"{phase_label} plan saved to {saved}")
     _plan_ready(phase_label)
