@@ -2766,6 +2766,82 @@ class TestAppendToBugsSectionDedupByFixTag:
         assert "- [ ] Fix: button crash" in result
 
 
+class TestAppendToBugsSectionDualIndex:
+    """Existing entries are indexed by both fix-tag and body.
+
+    An incoming task whose key (fix-tag or body) matches either the
+    fix-tag OR the body of an existing entry should be handled by
+    dedup/reopen, not inserted as a duplicate.
+    """
+
+    def test_skip_unchecked_by_body_when_existing_has_fix_tag(self, tmp_path):
+        """Incoming task without tag matches existing unchecked entry's body."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [ ] Fix: button crash [fix: "btn"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        # Incoming task body matches existing body (includes annotation).
+        tasks = ['- [ ] Fix: button crash [fix: "btn"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 0
+
+    def test_skip_unchecked_by_fix_tag_when_lookup_uses_body(self, tmp_path):
+        """Incoming task with fix tag skipped because existing unchecked
+        entry has the same fix tag (indexed via dual key)."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [ ] Fix: original wording [fix: "dup"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: different wording [fix: "dup"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 0
+
+    def test_reopen_checked_by_body_key(self, tmp_path):
+        """Incoming task whose key matches existing checked entry's body
+        (not fix-tag) triggers reopen."""
+        body = "Fix: button crash"
+        plan = f"# App — Phase 1\n\n## Bugs\n\n- [x] {body}\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = [f"- [ ] {body}"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert f"- [ ] {body}" in result
+        assert f"- [x] {body}" not in result
+
+    def test_reopen_checked_by_fix_tag_key(self, tmp_path):
+        """Incoming task whose fix-tag matches existing checked entry's
+        fix-tag (dual-indexed) triggers reopen."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [x] Fix: old text [fix: "tag-z"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new text [fix: "tag-z"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '- [ ] Fix: old text [fix: "tag-z"]' in result
+        assert "new text" not in result.replace("old text", "")
+
+    def test_first_occurrence_wins_checked(self, tmp_path):
+        """When two checked entries share a body, the first one is
+        reopened (first occurrence wins)."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix: crash\n- [x] Fix: crash\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: crash"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        result_lines = result.split("\n")
+        bugs_lines = [ln for ln in result_lines if "Fix: crash" in ln]
+        # First entry was reopened (unchecked), second stays checked.
+        assert bugs_lines[0].strip() == "- [ ] Fix: crash"
+        assert bugs_lines[1].strip() == "- [x] Fix: crash"
+
+    def test_first_occurrence_wins_unchecked(self, tmp_path):
+        """When two unchecked entries share a body, incoming is still
+        skipped — the set catches it."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [ ] Fix: crash\n- [ ] Fix: crash\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: crash"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 0
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 

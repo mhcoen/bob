@@ -1357,17 +1357,23 @@ def append_to_bugs_section(
     if bugs_start is not None:
         # Build maps of existing task keys → line indices, split by
         # checked vs unchecked so we can implement reopen-in-place.
-        # Identity key: [fix: "..."] annotation value if present,
-        # otherwise the body text after the checkbox prefix.
+        # Each entry is indexed by BOTH its fix-tag and body text
+        # (first occurrence wins on each key).  This ensures an
+        # incoming task can match by either key.
         unchecked_keys: set[str] = set()
         checked_key_to_line: dict[str, int] = {}
         for k in range(bugs_start + 1, bugs_end):
             stripped = lines[k].lstrip()
             if stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
-                key = _task_key(stripped)
-                checked_key_to_line.setdefault(key, k)
+                fix_m = _FIX_ANNOTATION_RE.search(stripped)
+                if fix_m:
+                    checked_key_to_line.setdefault(fix_m.group(1), k)
+                checked_key_to_line.setdefault(_task_body(stripped), k)
             elif stripped.startswith("- [ ] "):
-                unchecked_keys.add(_task_key(stripped))
+                fix_m = _FIX_ANNOTATION_RE.search(stripped)
+                if fix_m:
+                    unchecked_keys.add(fix_m.group(1))
+                unchecked_keys.add(_task_body(stripped))
 
         inserted = 0
         to_append: list[str] = []
