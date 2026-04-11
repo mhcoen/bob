@@ -29,6 +29,7 @@ from duplo.saver import (
     _PLAN_FILENAME,
     _find_duplicate_groups,
     _merge_duplicate_group,
+    _task_body,
     append_to_bugs_section,
     _propagate_implemented_status,
     add_issue,
@@ -2623,6 +2624,57 @@ class TestAppendToBugsSection:
         tasks = ['- [ ] Fix: open bug [fix: "open bug"]']
         inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
         assert inserted == 0
+
+
+class TestTaskBody:
+    """Tests for _task_body() helper."""
+
+    def test_strips_unchecked_prefix(self):
+        assert _task_body("- [ ] Fix: crash") == "Fix: crash"
+
+    def test_strips_checked_prefix(self):
+        assert _task_body("- [x] Fix: crash") == "Fix: crash"
+
+    def test_strips_checked_uppercase(self):
+        assert _task_body("- [X] Fix: crash") == "Fix: crash"
+
+    def test_checked_and_unchecked_same_body(self):
+        """Core invariant: checkbox state does not affect the body key."""
+        assert _task_body("- [x] Fix: crash") == _task_body("- [ ] Fix: crash")
+
+    def test_preserves_annotation(self):
+        line = '- [ ] Fix: crash [fix: "crash"]'
+        assert _task_body(line) == 'Fix: crash [fix: "crash"]'
+
+    def test_leading_whitespace_ignored(self):
+        assert _task_body("  - [ ] Fix: indented") == "Fix: indented"
+
+    def test_non_checkbox_returns_stripped(self):
+        assert _task_body("some random line") == "some random line"
+
+
+class TestAppendToBugsSectionDedupByBody:
+    """Regression: dedup must compare body, not full lstripped line.
+
+    Old code compared the full lstripped line, so ``- [x] Fix X`` and
+    ``- [ ] Fix X`` were different keys and re-queueing a fixed bug
+    inserted a duplicate.
+    """
+
+    def test_requeue_fixed_bug_does_not_duplicate(self, tmp_path):
+        """Re-queueing a fixed (checked) bug reopens it, not duplicates."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix: button crash\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: button crash"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Only one occurrence — reopened in place, not duplicated.
+        assert result.count("Fix: button crash") == 1
+        # It is now unchecked.
+        assert "- [ ] Fix: button crash" in result
+        assert "- [x] Fix: button crash" not in result
 
 
 class TestAppendPhaseToHistoryStageRegex:

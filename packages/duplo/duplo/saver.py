@@ -1276,7 +1276,7 @@ def _task_body(line: str) -> str:
     ``Fix: foo``.  Non-checkbox lines return the stripped line.
     """
     stripped = line.lstrip()
-    m = re.match(r"^- \[[x ]\] ", stripped)
+    m = re.match(r"^- \[[xX ]\] ", stripped)
     if m:
         return stripped[m.end() :]
     return stripped
