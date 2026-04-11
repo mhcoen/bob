@@ -1386,7 +1386,9 @@ def append_to_bugs_section(
                 # Reopen in place: uncheck the existing line.
                 idx = checked_key_to_line.pop(key)
                 old = lines[idx]
-                lines[idx] = re.sub(r"^(\s*- \[)[xX](\] )", r"\1 \2", old)
+                indent = old[: len(old) - len(old.lstrip())]
+                flipped = re.sub(r"^(- \[)[xX](\] )", r"\1 \2", old.lstrip())
+                lines[idx] = indent + flipped
                 unchecked_keys.add(key)
                 inserted += 1
             else:

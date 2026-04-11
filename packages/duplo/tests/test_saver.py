@@ -2842,6 +2842,52 @@ class TestAppendToBugsSectionDualIndex:
         assert inserted == 0
 
 
+class TestAppendToBugsSectionIndentation:
+    """Tests that reopening preserves original line indentation."""
+
+    def test_reopen_preserves_leading_spaces(self, tmp_path):
+        """Indented checked line keeps its indent after flip."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n  - [x] Fix: indented bug\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: indented bug"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "  - [ ] Fix: indented bug" in result
+
+    def test_reopen_preserves_tab_indent(self, tmp_path):
+        """Tab-indented checked line keeps its tab after flip."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n\t- [x] Fix: tabbed bug\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: tabbed bug"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "\t- [ ] Fix: tabbed bug" in result
+
+    def test_reopen_no_indent_unchanged(self, tmp_path):
+        """Non-indented checked line stays flush-left after flip."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix: flush bug\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: flush bug"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        lines = result.split("\n")
+        bug_line = next(ln for ln in lines if "flush bug" in ln)
+        assert bug_line == "- [ ] Fix: flush bug"
+
+    def test_reopen_deep_indent_with_fix_tag(self, tmp_path):
+        """Deeply indented line with fix tag keeps indent on reopen."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n    - [x] Fix: deep [fix: "deep"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: deep [fix: "deep"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '    - [ ] Fix: deep [fix: "deep"]' in result
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 
