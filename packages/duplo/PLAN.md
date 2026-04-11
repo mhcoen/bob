@@ -40,7 +40,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Test: reopen by body fallback — existing `- [x] Fix X` (no fix-tag), new task `- [ ] Fix X` flips; returns 1
   - [x] Test: idempotent no-op — existing `- [ ] Fix X`, new task `- [ ] Fix X` leaves file content byte-identical; returns 0
   - [x] Test: indent preservation — existing `  - [x] Fix X` becomes `  - [ ] Fix X` after flip
-  - [ ] Test: mixed batch — one new, one reopen-by-tag, one no-op returns 2 with exactly one new line appended
+  - [x] Test: mixed batch — one new, one reopen-by-tag, one no-op returns 2 with exactly one new line appended
   - [ ] Test: all four pre-existing boundary tests (H1 follows Bugs, H2 follows Bugs, Bugs at EOF, phase regex Phase/Stage) still pass
 
 
