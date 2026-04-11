@@ -3438,8 +3438,12 @@ class TestFixMode:
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert plan.startswith(original.rstrip())
+        # Existing content is preserved (may be reordered by ## Bugs insertion).
+        assert "- [x] done task" in plan
+        assert "- [ ] pending task" in plan
         assert "Fix: new bug diagnosed" in plan
+        # Bug task is in the ## Bugs section.
+        assert "## Bugs" in plan
 
     def test_fix_no_plan_saves_issues_only(self, capsys, tmp_path, monkeypatch):
         """Without PLAN.md, issues are saved but no tasks appended."""
@@ -3592,12 +3596,13 @@ class TestFixModeDiagnosis:
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        # Fallback: raw bug text used as fix task.
+        # Fallback: raw bug text used as fix task in ## Bugs section.
         assert '- [ ] Fix: something broke [fix: "something broke"]' in plan
-        # Error reason surfaced in HTML comment.
-        assert "Investigation failed: connection timeout" in plan
+        assert "## Bugs" in plan
         out = capsys.readouterr().out
+        # Error reason surfaced in stdout output.
         assert "Diagnosis incomplete" in out
+        assert "Investigation failed: connection timeout" in out
         assert "1 fix task" in out
 
 

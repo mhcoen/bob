@@ -1262,6 +1262,131 @@ def write_claude_md(*, target_dir: Path | str = ".") -> Path:
     return path
 
 
+_BUGS_HEADING = "## Bugs"
+
+_PLAN_FILENAME = "PLAN.md"
+
+
+def append_to_bugs_section(
+    tasks: list[str],
+    *,
+    target_dir: Path | str = ".",
+) -> int:
+    """Append bug-fix task lines into the ``## Bugs`` section of PLAN.md.
+
+    If PLAN.md does not exist, does nothing and returns 0.
+
+    If a ``## Bugs`` section already exists (anywhere in the file),
+    new tasks are inserted at the end of that section (before the next
+    ``##`` heading or EOF).  Existing entries — checked or unchecked —
+    are never modified or reordered.
+
+    If no ``## Bugs`` section exists, one is created immediately after
+    the intro prose / architecture note and before the first ``#``
+    phase heading (i.e. the first line starting with ``# `` after the
+    very first heading).  If the file has only one heading, the section
+    is appended at the end.
+
+    Duplicate detection: a task line is skipped if its text (after the
+    ``- [ ] `` prefix) already appears verbatim in the existing
+    ``## Bugs`` block.
+
+    Args:
+        tasks: Lines to insert, each should be a ``- [ ] ...`` string.
+        target_dir: Directory containing PLAN.md.
+
+    Returns:
+        Number of tasks actually inserted (after dedup).
+    """
+    plan_path = (Path(target_dir) / _PLAN_FILENAME).resolve()
+    if not plan_path.exists() or not tasks:
+        return 0
+
+    content = plan_path.read_text(encoding="utf-8")
+    lines = content.split("\n")
+
+    # Locate existing ## Bugs section.
+    bugs_start: int | None = None
+    bugs_end: int | None = None
+    for i, line in enumerate(lines):
+        if line.strip().lower() == _BUGS_HEADING.lower():
+            bugs_start = i
+            # Find the end: next ## heading or EOF.
+            for j in range(i + 1, len(lines)):
+                if lines[j].startswith("## "):
+                    bugs_end = j
+                    break
+            if bugs_end is None:
+                bugs_end = len(lines)
+            break
+
+    if bugs_start is not None:
+        # Collect existing task texts inside the section for dedup.
+        existing_texts: set[str] = set()
+        for k in range(bugs_start + 1, bugs_end):
+            stripped = lines[k].lstrip()
+            if stripped.startswith("- ["):
+                # Extract text after the checkbox.
+                existing_texts.add(stripped)
+
+        new_tasks = [t for t in tasks if t.lstrip() not in existing_texts]
+        if not new_tasks:
+            return 0
+
+        # Insert before bugs_end — find the last non-blank line in
+        # the section to append after it.
+        insert_at = bugs_end
+        # Walk backward from bugs_end to skip trailing blank lines
+        # inside the section, then insert after the last content line.
+        pos = bugs_end - 1
+        while pos > bugs_start and lines[pos].strip() == "":
+            pos -= 1
+        insert_at = pos + 1
+
+        for idx, task in enumerate(new_tasks):
+            lines.insert(insert_at + idx, task)
+
+        plan_path.write_text("\n".join(lines), encoding="utf-8")
+        return len(new_tasks)
+
+    # No ## Bugs section found — create one.
+    # Place it after intro prose and before the first checklist item
+    # or second heading, whichever comes first.
+    first_heading: int | None = None
+    first_checklist: int | None = None
+    second_heading: int | None = None
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            if first_heading is None:
+                first_heading = i
+            elif second_heading is None:
+                second_heading = i
+        stripped = line.lstrip()
+        if first_checklist is None and stripped.startswith("- ["):
+            first_checklist = i
+
+    # Insert position: pick the earliest structural boundary after
+    # the title heading.
+    candidates = [c for c in (second_heading, first_checklist) if c is not None]
+    if candidates:
+        insert_at = min(candidates)
+    elif first_heading is not None:
+        insert_at = len(lines)
+    else:
+        insert_at = len(lines)
+
+    # Build the bugs block.
+    block = ["", _BUGS_HEADING, ""]
+    block.extend(tasks)
+    block.append("")
+
+    for idx, bline in enumerate(block):
+        lines.insert(insert_at + idx, bline)
+
+    plan_path.write_text("\n".join(lines), encoding="utf-8")
+    return len(tasks)
+
+
 def move_references(
     paths: list[Path],
     *,

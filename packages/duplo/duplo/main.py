@@ -250,6 +250,7 @@ from duplo.spec_reader import (
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
+    append_to_bugs_section,
     get_current_phase,
     load_product,
     mark_implemented_features,
@@ -550,7 +551,7 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run mcloop to start fixing.")
             return
 
-        # Append diagnosed fix tasks to PLAN.md.
+        # Append diagnosed fix tasks to PLAN.md ## Bugs section.
         plan_path = Path("PLAN.md")
         if not plan_path.exists():
             print("No PLAN.md found. Diagnoses printed above but no fix tasks appended.")
@@ -558,17 +559,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             return
 
         fix_tasks = investigation_to_fix_tasks(result)
-        plan_content = plan_path.read_text(encoding="utf-8")
-        fix_lines: list[str] = []
-        fix_lines.append("")
-        fix_lines.append("## Investigated bug fixes")
-        fix_lines.append("")
-        fix_lines.extend(fix_tasks)
-        fix_lines.append("")
-
-        updated = plan_content.rstrip() + "\n" + "\n".join(fix_lines)
-        plan_path.write_text(updated, encoding="utf-8")
-        print(f"Appended {len(fix_tasks)} diagnosed fix task(s) to PLAN.md.")
+        inserted = append_to_bugs_section(fix_tasks)
+        print(f"Appended {inserted} diagnosed fix task(s) to PLAN.md.")
         print("Run mcloop to start fixing.")
         return
 
@@ -589,17 +581,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             return
 
         fix_tasks = investigation_to_fix_tasks(result)
-        plan_content = plan_path.read_text(encoding="utf-8")
-        fix_lines: list[str] = []
-        fix_lines.append("")
-        fix_lines.append("## Bug fixes")
-        fix_lines.append("")
-        fix_lines.extend(fix_tasks)
-        fix_lines.append("")
-
-        updated = plan_content.rstrip() + "\n" + "\n".join(fix_lines)
-        plan_path.write_text(updated, encoding="utf-8")
-        print(f"Appended {len(fix_tasks)} diagnosed fix task(s) to PLAN.md.")
+        inserted = append_to_bugs_section(fix_tasks)
+        print(f"Appended {inserted} diagnosed fix task(s) to PLAN.md.")
         print("Run mcloop to start fixing.")
     else:
         # Investigator returned no diagnoses — fall back with error context.
@@ -611,20 +594,13 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        plan_content = plan_path.read_text(encoding="utf-8")
-        fix_lines = []
-        fix_lines.append("")
-        fix_lines.append("## Bug fixes")
-        fix_lines.append(f"<!-- Diagnosis incomplete: {fallback_reason} -->")
-        fix_lines.append("")
+        fix_tasks = []
         for desc in bugs:
             oneline = desc.replace("\n", " ").strip()
-            fix_lines.append(f'- [ ] Fix: {oneline} [fix: "{oneline}"]')
-        fix_lines.append("")
+            fix_tasks.append(f'- [ ] Fix: {oneline} [fix: "{oneline}"]')
 
-        updated = plan_content.rstrip() + "\n" + "\n".join(fix_lines)
-        plan_path.write_text(updated, encoding="utf-8")
-        print(f"Appended {len(bugs)} fix task(s) to PLAN.md (undiagnosed).")
+        inserted = append_to_bugs_section(fix_tasks)
+        print(f"Appended {inserted} fix task(s) to PLAN.md (undiagnosed).")
         print("Run mcloop to start fixing.")
 
 

@@ -348,6 +348,43 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
     return "\n".join(lines) + "\n" + "\n".join(test_tasks) + "\n"
 
 
+def _inject_bugs_section(content: str) -> str:
+    """Insert an empty ``## Bugs`` section into plan content.
+
+    Places it after the intro prose (description paragraph after the
+    first ``#`` heading) and before any checklist items or second
+    heading.  If no heading is found, prepends it.
+    """
+    lines = content.split("\n")
+    # Find the first heading.
+    first_heading: int | None = None
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            first_heading = i
+            break
+
+    if first_heading is None:
+        # No heading — prepend the section.
+        return "## Bugs\n\n" + content
+
+    # Walk past the heading and its following prose until we hit either
+    # a checklist item (``- [ ]``), another heading, or EOF.
+    insert_at = first_heading + 1
+    for i in range(first_heading + 1, len(lines)):
+        stripped = lines[i].lstrip()
+        if stripped.startswith("- [") or stripped.startswith("## "):
+            insert_at = i
+            break
+    else:
+        insert_at = len(lines)
+
+    block = ["", "## Bugs", ""]
+    for idx, bline in enumerate(block):
+        lines.insert(insert_at + idx, bline)
+
+    return "\n".join(lines)
+
+
 def save_plan(
     content: str,
     *,
@@ -357,6 +394,11 @@ def save_plan(
 
     If PLAN.md already exists, new content is appended after a blank
     line so that existing checked and unchecked items are preserved.
+
+    On first write (file does not exist), an empty ``## Bugs`` section
+    is injected after the intro prose and before the first checklist
+    item, so mcloop can insert runtime-bug fix tasks into it.
+
     Returns the path.
     """
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
@@ -364,5 +406,6 @@ def save_plan(
         existing = path.read_text(encoding="utf-8")
         path.write_text(existing.rstrip("\n") + "\n\n" + content + "\n", encoding="utf-8")
     else:
+        content = _inject_bugs_section(content)
         path.write_text(content + "\n", encoding="utf-8")
     return path

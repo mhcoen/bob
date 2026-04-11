@@ -16,6 +16,7 @@ from duplo.planner import (
     _PHASE_SYSTEM,
     _PLAN_FILENAME,
     _detect_next_phase_number,
+    _inject_bugs_section,
     append_test_tasks,
     generate_next_phase_plan,
     generate_phase_plan,
@@ -466,7 +467,10 @@ class TestSavePlan:
         content = "# Phase 1\n"
         path = save_plan(content, target_dir=tmp_path)
         assert path.name == _PLAN_FILENAME
-        assert path.read_text(encoding="utf-8") == content + "\n"
+        text = path.read_text(encoding="utf-8")
+        assert "# Phase 1" in text
+        # First write injects ## Bugs section.
+        assert "## Bugs" in text
 
     def test_returns_absolute_path(self, tmp_path: Path):
         path = save_plan("# Plan", target_dir=tmp_path)
@@ -685,3 +689,55 @@ Web app built with Python/FastAPI.
         assert len(tasks) == 1
         assert tasks[0].features == ["Foo"]
         assert tasks[0].text == "Add feature"
+
+
+class TestInjectBugsSection:
+    """Tests for _inject_bugs_section()."""
+
+    def test_inserts_before_checklist(self):
+        content = (
+            "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project\n- [ ] Add login\n"
+        )
+        result = _inject_bugs_section(content)
+        assert "## Bugs" in result
+        bugs_pos = result.index("## Bugs")
+        task_pos = result.index("- [ ] Set up project")
+        assert bugs_pos < task_pos
+
+    def test_inserts_between_heading_and_second_heading(self):
+        content = "# MyApp — Phase 1: Core\n\nBuild the app.\n\n## Implementation\n\n- [ ] Task\n"
+        result = _inject_bugs_section(content)
+        bugs_pos = result.index("## Bugs")
+        impl_pos = result.index("## Implementation")
+        assert bugs_pos < impl_pos
+
+    def test_no_heading(self):
+        content = "Just some text\n- [ ] Task\n"
+        result = _inject_bugs_section(content)
+        assert result.startswith("## Bugs")
+
+    def test_preserves_all_content(self):
+        content = "# MyApp — Phase 1: Core\n\nDescription.\n\n- [ ] First\n- [ ] Second\n"
+        result = _inject_bugs_section(content)
+        assert "- [ ] First" in result
+        assert "- [ ] Second" in result
+        assert "# MyApp — Phase 1: Core" in result
+        assert "Description." in result
+
+
+class TestSavePlanBugsSection:
+    """Tests that save_plan injects ## Bugs on first write."""
+
+    def test_first_write_injects_bugs_section(self, tmp_path):
+        content = "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project"
+        save_plan(content, target_dir=tmp_path)
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "## Bugs" in result
+
+    def test_append_does_not_inject_bugs(self, tmp_path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text("# Phase 1\n\n- [ ] Existing\n", encoding="utf-8")
+        save_plan("- [ ] New task", target_dir=tmp_path)
+        result = plan_path.read_text(encoding="utf-8")
+        # No ## Bugs injected on append.
+        assert "## Bugs" not in result

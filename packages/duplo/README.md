@@ -233,9 +233,10 @@ the next phase:
 The update cycle is non-destructive. Running `duplo` again never
 removes or overwrites existing code, plans, or configuration:
 
-- **PLAN.md:** New tasks are appended to the end of the file.
-  Existing checked and unchecked items are preserved exactly as
-  they are.
+- **PLAN.md:** New feature tasks are appended to the end of the
+  file. Bug-fix tasks are inserted into the ``## Bugs`` section
+  (created automatically on first plan generation). Existing
+  checked and unchecked items are preserved exactly as they are.
 - **CLAUDE.md:** Only sections with new headings are appended.
   Sections already present are left untouched.
 - **mcloop.json:** New check commands are merged in. Existing
@@ -299,9 +300,13 @@ duplo fix --screenshot              # capture app screenshot + interactive input
 duplo fix                           # interactive input
 ```
 
-Each bug is saved as an issue in duplo.json and appended to PLAN.md
-as a `- [ ] Fix: ...` checklist item with a `[fix: "..."]` annotation
-so phase completion can track resolution.
+Each bug is saved as an issue in duplo.json and inserted into the
+`## Bugs` section of PLAN.md as a `- [ ] Fix: ...` checklist item
+with a `[fix: "..."]` annotation so phase completion can track
+resolution. The `## Bugs` section is created automatically by
+`save_plan()` on first plan generation, and aligns with mcloop's
+contract: mcloop prioritizes unchecked items in `## Bugs` before
+any feature tasks.
 
 ### Intelligent investigation
 
@@ -326,8 +331,8 @@ and produces structured diagnoses with evidence citations.
 Each diagnosis includes the symptom, what it should look like
 (citing specific reference frames, design colors, or code
 examples), severity, and the likely area of the codebase to
-investigate. Diagnoses are appended to PLAN.md as fix tasks
-under an "Investigated bug fixes" heading.
+investigate. Diagnoses are inserted into the `## Bugs` section
+of PLAN.md as fix tasks.
 
 User-supplied screenshots (via `--images`) let you show the
 investigator exactly what's wrong without relying on appshot

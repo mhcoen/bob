@@ -26,8 +26,10 @@ from duplo.saver import (
     PRODUCT_JSON,
     RAW_PAGES_DIR,
     REFERENCES_DIR,
+    _PLAN_FILENAME,
     _find_duplicate_groups,
     _merge_duplicate_group,
+    append_to_bugs_section,
     _propagate_implemented_status,
     add_issue,
     append_phase_to_history,
@@ -2298,3 +2300,182 @@ class TestSaveRoadmap:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["roadmap"] == roadmap
         assert data["current_phase"] == 0
+
+
+class TestAppendToBugsSection:
+    """Tests for append_to_bugs_section()."""
+
+    def test_creates_bugs_section_when_absent(self, tmp_path):
+        """(a) First-run creation of ## Bugs at correct position."""
+        plan = (
+            "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project\n- [ ] Add login\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: crash on start [fix: "crash on start"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # ## Bugs should appear before the first checklist item.
+        bugs_pos = result.index("## Bugs")
+        checklist_pos = result.index("- [ ] Set up project")
+        assert bugs_pos < checklist_pos
+        # The fix task should be inside the ## Bugs section.
+        assert '- [ ] Fix: crash on start [fix: "crash on start"]' in result
+        # Existing tasks are preserved.
+        assert "- [ ] Set up project" in result
+        assert "- [ ] Add login" in result
+
+    def test_appends_to_existing_top_bugs_section(self, tmp_path):
+        """(b) Appending to existing top-of-file ## Bugs."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "Build the app.\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: old bug [fix: "old bug"]\n'
+            "\n"
+            "## Implementation\n"
+            "\n"
+            "- [ ] Set up project\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new bug [fix: "new bug"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Both bugs present.
+        assert '- [ ] Fix: old bug [fix: "old bug"]' in result
+        assert '- [ ] Fix: new bug [fix: "new bug"]' in result
+        # Phase block untouched.
+        assert "## Implementation" in result
+        assert "- [ ] Set up project" in result
+        # New bug is between ## Bugs and ## Implementation.
+        bugs_pos = result.index("## Bugs")
+        new_bug_pos = result.index("new bug")
+        impl_pos = result.index("## Implementation")
+        assert bugs_pos < new_bug_pos < impl_pos
+
+    def test_appends_to_midfile_bugs_section(self, tmp_path):
+        """(c) Appending to existing mid-file ## Bugs."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] Set up project\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: old [fix: "old"]\n'
+            "\n"
+            "## Phase 2\n"
+            "\n"
+            "- [ ] More work\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: mid [fix: "mid"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '- [ ] Fix: mid [fix: "mid"]' in result
+        # Mid bug is between ## Bugs and ## Phase 2.
+        bugs_pos = result.index("## Bugs")
+        mid_pos = result.index("Fix: mid")
+        phase2_pos = result.index("## Phase 2")
+        assert bugs_pos < mid_pos < phase2_pos
+
+    def test_feature_tasks_land_after_bugs(self, tmp_path):
+        """(d) Feature task append lands after ## Bugs and phase blocks."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "Build it.\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: bug1 [fix: "bug1"]\n'
+            "\n"
+            "- [ ] Set up project\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        # Simulating save_plan append (feature task at EOF).
+        existing = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        updated = existing.rstrip("\n") + "\n\n- [ ] New feature\n"
+        (tmp_path / _PLAN_FILENAME).write_text(updated, encoding="utf-8")
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        bugs_pos = result.index("## Bugs")
+        feat_pos = result.index("- [ ] New feature")
+        assert feat_pos > bugs_pos
+
+    def test_idempotency(self, tmp_path):
+        """(e) Running twice with same bug does not duplicate."""
+        plan = "# MyApp — Phase 1: Core\n\n## Bugs\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: dup bug [fix: "dup bug"]']
+
+        inserted1 = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted1 == 1
+
+        inserted2 = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted2 == 0
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # The task line contains "dup bug" twice (text + annotation),
+        # so count the full line to verify no duplication.
+        assert result.count('- [ ] Fix: dup bug [fix: "dup bug"]') == 1
+
+    def test_preserves_checked_items(self, tmp_path):
+        """(f) Existing checked items in ## Bugs are preserved."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: resolved bug [fix: "resolved bug"]\n'
+            '- [ ] Fix: open bug [fix: "open bug"]\n'
+            "\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: another [fix: "another"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '- [x] Fix: resolved bug [fix: "resolved bug"]' in result
+        assert '- [ ] Fix: open bug [fix: "open bug"]' in result
+        assert '- [ ] Fix: another [fix: "another"]' in result
+
+    def test_no_plan_file_returns_zero(self, tmp_path):
+        """Returns 0 when PLAN.md does not exist."""
+        tasks = ['- [ ] Fix: x [fix: "x"]']
+        assert append_to_bugs_section(tasks, target_dir=tmp_path) == 0
+
+    def test_empty_tasks_returns_zero(self, tmp_path):
+        """Returns 0 when tasks list is empty."""
+        plan = "# MyApp\n\n## Bugs\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        assert append_to_bugs_section([], target_dir=tmp_path) == 0
+
+    def test_bugs_section_at_end_of_file(self, tmp_path):
+        """(c) Appending to ## Bugs at the end of the file."""
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] Set up project\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: existing [fix: "existing"]\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: eof bug [fix: "eof bug"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert '- [ ] Fix: eof bug [fix: "eof bug"]' in result
+        assert '- [ ] Fix: existing [fix: "existing"]' in result
