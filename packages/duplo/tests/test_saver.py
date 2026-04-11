@@ -2872,6 +2872,18 @@ class TestAppendToBugsSectionIndentation:
         result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
         assert "  - [ ] Fix: indented bug" in result
 
+    def test_indent_preservation_fix_x(self, tmp_path):
+        """existing '  - [x] Fix X' becomes '  - [ ] Fix X' after flip."""
+        plan = "# App\n\n## Bugs\n\n  - [x] Fix X\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        inserted = append_to_bugs_section(["- [ ] Fix X"], target_dir=tmp_path)
+        assert inserted == 1
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        lines = result.split("\n")
+        bug_line = next(ln for ln in lines if "Fix X" in ln)
+        assert bug_line == "  - [ ] Fix X"
+        assert "- [x]" not in result
+
     def test_reopen_preserves_tab_indent(self, tmp_path):
         """Tab-indented checked line keeps its tab after flip."""
         plan = "# App — Phase 1\n\n## Bugs\n\n\t- [x] Fix: tabbed bug\n\n"
