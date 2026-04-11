@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from duplo.diagnostics import record_failure
+
 _SECTION_HEADER_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 
 
@@ -47,8 +49,13 @@ def save_reference_screenshots(urls: list[str], output_dir: Path) -> list[Path]:
                     page.goto(url, wait_until="domcontentloaded", timeout=30_000)
                     page.screenshot(path=str(dest), full_page=True)
                     saved.append(dest)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    record_failure(
+                        "screenshotter:save_reference_screenshots",
+                        "screenshot",
+                        f"Failed to capture {url}: {exc}",
+                        context={"url": url},
+                    )
         finally:
             browser.close()
 

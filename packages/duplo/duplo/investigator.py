@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query, query_with_images
+from duplo.diagnostics import record_failure
 
 _SYSTEM = """\
 You are a product-level QA analyst. You have deep knowledge of the target
@@ -128,6 +129,11 @@ def investigate(
         try:
             raw = query(prompt, system=_SYSTEM, model=model)
         except ClaudeCliError as exc:
+            record_failure(
+                "investigator:investigate",
+                "llm",
+                f"Investigation query failed: {exc}",
+            )
             return InvestigationResult(
                 diagnoses=[],
                 summary=f"Investigation failed: {exc}",
@@ -137,6 +143,11 @@ def investigate(
         try:
             raw = query_with_images(prompt, image_paths, system=_SYSTEM, model=model)
         except ClaudeCliError as exc:
+            record_failure(
+                "investigator:investigate",
+                "llm",
+                f"Investigation query_with_images failed: {exc}",
+            )
             return InvestigationResult(
                 diagnoses=[],
                 summary=f"Investigation failed: {exc}",

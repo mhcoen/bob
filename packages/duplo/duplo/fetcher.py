@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from duplo.diagnostics import record_failure
 from duplo.doc_examples import CodeExample, extract_code_examples
 from duplo.doc_tables import DocStructures, extract_doc_structures
 
@@ -243,7 +244,13 @@ def fetch_site(
             )
             resp.raise_for_status()
             html = resp.text
-        except Exception:
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Failed to fetch {current_url}: {exc}",
+                context={"url": current_url},
+            )
             continue
 
         final_norm = str(resp.url).rstrip("/")
@@ -423,6 +430,12 @@ def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:
                 for chunk in resp.iter_bytes(chunk_size=8192):
                     f.write(chunk)
         return dest, True
-    except Exception:
+    except Exception as exc:
+        record_failure(
+            "fetcher:_download_file",
+            "fetch",
+            f"Failed to download {url}: {exc}",
+            context={"url": url},
+        )
         dest.unlink(missing_ok=True)
         return None, False

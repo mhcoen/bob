@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from duplo.diagnostics import record_failure
+
 try:
     from PIL import Image
 
@@ -261,9 +263,15 @@ def deduplicate_frames(
         try:
             img = Image.open(frame)
             h = _dhash(img, hash_size)
-        except Exception:
+        except Exception as exc:
             # Can't hash → keep the frame but use None so it never
             # matches valid hashes during deduplication.
+            record_failure(
+                "video_extractor:deduplicate_frames",
+                "hash",
+                f"Failed to hash frame {frame}: {exc}",
+                context={"frame": str(frame)},
+            )
             kept.append((frame, None))
             continue
 

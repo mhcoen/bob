@@ -204,6 +204,7 @@ from pathlib import Path
 from duplo.appshot import capture_appshot
 from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
+from duplo.diagnostics import print_summary as diagnostics_print_summary
 from duplo.design_extractor import (
     DesignRequirements,
     extract_design,
@@ -424,6 +425,8 @@ def main() -> None:
         if args.url:
             print("Project already initialized. URL argument ignored.")
         _subsequent_run()
+
+    diagnostics_print_summary()
 
 
 def _fix_mode(args: argparse.Namespace) -> None:

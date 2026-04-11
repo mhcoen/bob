@@ -9,6 +9,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from duplo.diagnostics import record_failure
 from duplo.doc_examples import CodeExample
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
@@ -353,7 +354,12 @@ def _deduplicate_features_llm(
     prompt = f"Existing features:\n{existing_list}\n\nCandidate features:\n{candidates_list}"
     try:
         raw = query(prompt, system=system, model="haiku")
-    except ClaudeCliError:
+    except ClaudeCliError as exc:
+        record_failure(
+            "saver:_deduplicate_features_llm",
+            "llm",
+            f"Feature dedup LLM call failed: {exc}",
+        )
         return {}
 
     text = raw.strip()
@@ -401,7 +407,12 @@ def _find_duplicate_groups(names: list[str]) -> list[list[str]]:
     prompt = f"Feature names:\n{names_json}"
     try:
         raw = query(prompt, system=system, model="haiku")
-    except ClaudeCliError:
+    except ClaudeCliError as exc:
+        record_failure(
+            "saver:_find_duplicate_groups",
+            "llm",
+            f"Duplicate group detection LLM call failed: {exc}",
+        )
         return []
 
     text = raw.strip()
@@ -495,7 +506,12 @@ def _propagate_implemented_status(features: list[dict]) -> list[str]:
     prompt = f"Implemented features:\n{impl_json}\n\nPending features:\n{pend_json}"
     try:
         raw = query(prompt, system=system, model="haiku")
-    except ClaudeCliError:
+    except ClaudeCliError as exc:
+        record_failure(
+            "saver:_propagate_implemented_status",
+            "llm",
+            f"Status propagation LLM call failed: {exc}",
+        )
         return []
 
     text = raw.strip()
