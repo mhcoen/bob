@@ -28,7 +28,21 @@ the old subcommand parsing or the old init/run/next flow.
 
 ## Bugs
 
-- [ ] Rewrite `append_to_bugs_section()` in `duplo/saver.py` to support reopen-in-place semantics. Current behavior: dedup compares the full lstripped line including the checkbox, so `- [x] Fix X` and `- [ ] Fix X` are different keys and re-queueing a previously-fixed bug inserts a duplicate line. New behavior: for each input task, compute an identity key as (a) the value of its `[fix: "..."]` annotation if present, else (b) the body text after the checkbox. Index existing entries inside the `## Bugs` section by both fix-tag and body (first occurrence wins on each key). For each input task: if its identity matches an existing entry, flip that entry's checkbox from `[x]` to `[ ]` in place if currently checked, otherwise no-op (do not insert a duplicate, do not rewrite the existing line's body or wording); if no match, append at the end of the section as today. Preserve original line indentation when flipping (the existing checkbox regex should be anchored to the lstripped form, then the original indent prefix re-applied on write). Skip the file write entirely if nothing changed (do not touch mtime on idempotent runs). Change the return value semantics from "tasks inserted" to "tasks that caused a write" (insertions plus checkbox flips); already-unchecked matches contribute 0. Update any caller in the codebase that compares the return value to `len(tasks)`. Tests to add: (1) reopen by fix-tag — existing `- [x] old wording [fix: "foo"]`, new task `- [ ] new wording [fix: "foo"]` flips the existing line's checkbox and does NOT rewrite its body, returns 1; (2) reopen by body fallback — existing `- [x] Fix X` (no fix-tag), new task `- [ ] Fix X` flips, returns 1; (3) idempotent no-op — existing `- [ ] Fix X`, new task `- [ ] Fix X` leaves file content byte-identical, returns 0; (4) indent preservation — existing `  - [x] Fix X` becomes `  - [ ] Fix X` after flip; (5) mixed batch — one new, one reopen-by-tag, one no-op returns 2 with exactly one new line appended; (6) all four pre-existing boundary tests (H1 follows Bugs, H2 follows Bugs, Bugs at EOF, phase regex Phase/Stage) still pass. [fix: "append_to_bugs_section reopen-in-place semantics"]
+- [ ] Rewrite `append_to_bugs_section()` in `duplo/saver.py` to support reopen-in-place semantics. [fix: "append_to_bugs_section reopen-in-place semantics"]
+  - **Current behavior:** dedup compares the full lstripped line including the checkbox, so `- [x] Fix X` and `- [ ] Fix X` are different keys and re-queueing a previously-fixed bug inserts a duplicate line.
+  - **New behavior:** for each input task, compute an identity key as (a) the value of its `[fix: "..."]` annotation if present, else (b) the body text after the checkbox.
+  - Index existing entries inside the `## Bugs` section by both fix-tag and body (first occurrence wins on each key).
+  - For each input task: if its identity matches an existing entry, flip that entry's checkbox from `[x]` to `[ ]` in place if currently checked; otherwise no-op (do not insert a duplicate, do not rewrite the existing line's body or wording). If no match, append at the end of the section as today.
+  - Preserve original line indentation when flipping (anchor the checkbox regex to the lstripped form, then re-apply the original indent prefix on write).
+  - Skip the file write entirely if nothing changed (do not touch mtime on idempotent runs).
+  - Change the return value semantics from "tasks inserted" to "tasks that caused a write" (insertions plus checkbox flips); already-unchecked matches contribute 0. Update any caller that compares the return value to `len(tasks)`.
+  - **Tests to add (all six required for this task to be considered done):**
+    - Reopen by fix-tag: existing `- [x] old wording [fix: "foo"]`, new task `- [ ] new wording [fix: "foo"]` flips the existing line's checkbox and does NOT rewrite its body; returns 1.
+    - Reopen by body fallback: existing `- [x] Fix X` (no fix-tag), new task `- [ ] Fix X` flips; returns 1.
+    - Idempotent no-op: existing `- [ ] Fix X`, new task `- [ ] Fix X` leaves file content byte-identical; returns 0.
+    - Indent preservation: existing `  - [x] Fix X` becomes `  - [ ] Fix X` after flip.
+    - Mixed batch: one new, one reopen-by-tag, one no-op returns 2 with exactly one new line appended.
+    - All four pre-existing boundary tests (H1 follows Bugs, H2 follows Bugs, Bugs at EOF, phase regex Phase/Stage) still pass.
 
 
 # Duplo - Phase 1: Bootstrapping
