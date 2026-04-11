@@ -2730,8 +2730,9 @@ class TestAppendToBugsSectionDedupByFixTag:
         result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
         # Original wording preserved, just unchecked.
         assert '- [ ] Fix: old wording [fix: "foo"]' in result
-        # New wording NOT inserted.
-        assert "new wording" not in result.replace("old wording", "") or result.count("foo") == 1
+        # New wording NOT inserted — only one line with fix: "foo".
+        assert "new wording" not in result
+        assert result.count('[fix: "foo"]') == 1
 
     def test_skip_unchecked_by_fix_tag(self, tmp_path):
         """Unchecked entry with same fix tag is a no-op."""
