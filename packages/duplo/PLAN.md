@@ -37,7 +37,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Skip the file write entirely if nothing changed (do not touch mtime on idempotent runs)
   - [x] Change return value semantics from "tasks inserted" to "tasks that caused a write" (insertions plus checkbox flips); already-unchecked matches contribute 0. Update any caller that compares the return value to `len(tasks)`
   - [x] Test: reopen by fix-tag — existing `- [x] old wording [fix: "foo"]`, new task `- [ ] new wording [fix: "foo"]` flips the existing line's checkbox and does NOT rewrite its body; returns 1
-  - [ ] Test: reopen by body fallback — existing `- [x] Fix X` (no fix-tag), new task `- [ ] Fix X` flips; returns 1
+  - [x] Test: reopen by body fallback — existing `- [x] Fix X` (no fix-tag), new task `- [ ] Fix X` flips; returns 1
   - [ ] Test: idempotent no-op — existing `- [ ] Fix X`, new task `- [ ] Fix X` leaves file content byte-identical; returns 0
   - [ ] Test: indent preservation — existing `  - [x] Fix X` becomes `  - [ ] Fix X` after flip
   - [ ] Test: mixed batch — one new, one reopen-by-tag, one no-op returns 2 with exactly one new line appended
