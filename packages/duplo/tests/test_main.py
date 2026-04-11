@@ -3339,26 +3339,49 @@ class TestFixMode:
 
     def test_fix_from_cli_args(self, capsys, tmp_path, monkeypatch):
         """duplo fix 'bug one' 'bug two' appends tasks to PLAN.md."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
         _write_duplo_json(tmp_path, self._BASE_DATA)
         (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["duplo", "fix", "bug one", "bug two"])
 
-        main()
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="bug one",
+                    expected="",
+                    severity="major",
+                    area="",
+                ),
+                Diagnosis(
+                    symptom="bug two",
+                    expected="",
+                    severity="major",
+                    area="",
+                ),
+            ],
+            summary="Two bugs.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert '- [ ] Fix: bug one [fix: "bug one"]' in plan
-        assert '- [ ] Fix: bug two [fix: "bug two"]' in plan
+        assert '[fix: "bug one"]' in plan
+        assert '[fix: "bug two"]' in plan
         data = _read_duplo_json(tmp_path)
         issues = data.get("issues", [])
         assert len(issues) == 2
         assert issues[0]["description"] == "bug one"
         assert issues[0]["source"] == "user"
         out = capsys.readouterr().out
-        assert "2 fix task" in out
+        assert "2 diagnosed fix task" in out
 
     def test_fix_from_file(self, capsys, tmp_path, monkeypatch):
         """duplo fix --file reads paragraphs as bugs."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
         _write_duplo_json(tmp_path, self._BASE_DATA)
         (tmp_path / "PLAN.md").write_text("- [ ] task\n", encoding="utf-8")
         bugs_file = tmp_path / "BUGS.md"
@@ -3369,37 +3392,67 @@ class TestFixMode:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["duplo", "fix", "--file", str(bugs_file)])
 
-        main()
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(symptom="First bug", expected="", severity="major", area=""),
+                Diagnosis(symptom="Second bug", expected="", severity="major", area=""),
+                Diagnosis(symptom="Third bug", expected="", severity="minor", area=""),
+            ],
+            summary="Three bugs.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "Fix: First bug description" in plan
-        assert "Fix: Second bug with details" in plan
+        assert "Fix: First bug" in plan
+        assert "Fix: Second bug" in plan
         assert "Fix: Third bug" in plan
         out = capsys.readouterr().out
         assert "3 bug(s) from" in out
-        assert "3 fix task" in out
+        assert "3 diagnosed fix task" in out
 
     def test_fix_preserves_existing_plan(self, tmp_path, monkeypatch):
         """Fix tasks are appended; existing plan content is preserved."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
         _write_duplo_json(tmp_path, self._BASE_DATA)
         original = "# Phase 0\n- [x] done task\n- [ ] pending task\n"
         (tmp_path / "PLAN.md").write_text(original, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["duplo", "fix", "new bug"])
 
-        main()
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="new bug diagnosed",
+                    expected="",
+                    severity="major",
+                    area="",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert plan.startswith(original.rstrip())
-        assert "Fix: new bug" in plan
+        assert "Fix: new bug diagnosed" in plan
 
     def test_fix_no_plan_saves_issues_only(self, capsys, tmp_path, monkeypatch):
         """Without PLAN.md, issues are saved but no tasks appended."""
+        from duplo.investigator import InvestigationResult
+
         _write_duplo_json(tmp_path, self._BASE_DATA)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["duplo", "fix", "a bug"])
 
-        main()
+        result = InvestigationResult(diagnoses=[], summary="No diagnoses")
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
 
         data = _read_duplo_json(tmp_path)
         assert len(data.get("issues", [])) == 1
@@ -3426,6 +3479,126 @@ class TestFixMode:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 1
+
+
+class TestFixModeDiagnosis:
+    """Tests for duplo fix routing through investigator.investigate()."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "app_name": "TestApp",
+        "features": [],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": [], "test": "ok"},
+        ],
+        "current_phase": 0,
+    }
+
+    def test_single_bug_structured_fix(self, capsys, tmp_path, monkeypatch):
+        """A single bug produces a structured diagnosed fix task via investigator."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "button is broken"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Submit button does not respond to clicks",
+                    expected="Should submit the form",
+                    severity="critical",
+                    area="Form handler",
+                    evidence_sources=["ref_frame.png"],
+                ),
+            ],
+            summary="One bug found.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Submit button does not respond to clicks" in plan
+        assert "Expected: Should submit the form" in plan
+        assert "Area: Form handler" in plan
+        assert '[fix: "Submit button does not respond to clicks"]' in plan
+        out = capsys.readouterr().out
+        assert "1 diagnosed fix task" in out
+        # Issues still saved.
+        data = _read_duplo_json(tmp_path)
+        assert len(data.get("issues", [])) == 1
+
+    def test_multiple_bugs_structured_fixes(self, capsys, tmp_path, monkeypatch):
+        """Multiple bugs each produce a structured diagnosed fix task."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "bug A", "bug B"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Color mismatch on header",
+                    expected="Should be #333",
+                    severity="minor",
+                    area="CSS styles",
+                ),
+                Diagnosis(
+                    symptom="Missing footer link",
+                    expected="Footer should have a privacy link",
+                    severity="major",
+                    area="Footer component",
+                ),
+            ],
+            summary="Two bugs found.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Color mismatch on header" in plan
+        assert "Missing footer link" in plan
+        out = capsys.readouterr().out
+        assert "2 diagnosed fix task" in out
+        data = _read_duplo_json(tmp_path)
+        assert len(data.get("issues", [])) == 2
+
+    def test_investigator_failure_fallback(self, capsys, tmp_path, monkeypatch):
+        """When investigator returns no diagnoses, fallback tasks surface the error."""
+        from duplo.investigator import InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "something broke"])
+
+        result = InvestigationResult(
+            diagnoses=[],
+            summary="Investigation failed: connection timeout",
+        )
+
+        with patch("duplo.main.investigate", return_value=result):
+            main()
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        # Fallback: raw bug text used as fix task.
+        assert '- [ ] Fix: something broke [fix: "something broke"]' in plan
+        # Error reason surfaced in HTML comment.
+        assert "Investigation failed: connection timeout" in plan
+        out = capsys.readouterr().out
+        assert "Diagnosis incomplete" in out
+        assert "1 fix task" in out
 
 
 class TestCompareWithReferences:
