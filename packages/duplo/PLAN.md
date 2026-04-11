@@ -29,7 +29,7 @@ the old subcommand parsing or the old init/run/next flow.
 ## Bugs
 
 - [ ] Rewrite `append_to_bugs_section()` in `duplo/saver.py` to support reopen-in-place semantics [fix: "append_to_bugs_section reopen-in-place"]
-  - [ ] Replace dedup that compares the full lstripped line (so `- [x] Fix X` and `- [ ] Fix X` are different keys and re-queueing a fixed bug inserts a duplicate)
+  - [x] Replace dedup that compares the full lstripped line (so `- [x] Fix X` and `- [ ] Fix X` are different keys and re-queueing a fixed bug inserts a duplicate)
   - [ ] For each input task, compute an identity key: (a) the value of its `[fix: "..."]` annotation if present, else (b) the body text after the checkbox
   - [ ] Index existing entries inside the `## Bugs` section by both fix-tag and body (first occurrence wins on each key)
   - [ ] On identity match to an existing entry: flip its checkbox from `[x]` to `[ ]` in place if currently checked; otherwise no-op. Do not insert a duplicate and do not rewrite the existing line's body or wording. If no match, append at the end of the section as today
