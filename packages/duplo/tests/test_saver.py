@@ -424,6 +424,12 @@ class TestWriteClaudeMd:
         assert "# Debugging" in content
         assert content.count("# Visual verification") == 1
 
+    def test_references_duplo_references_not_screenshots_reference(self, tmp_path):
+        path = write_claude_md(target_dir=tmp_path)
+        content = path.read_text()
+        assert ".duplo/references/" in content
+        assert "screenshots/reference/" not in content
+
     def test_default_target_dir_is_cwd(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
         path = write_claude_md()

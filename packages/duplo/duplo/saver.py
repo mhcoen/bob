@@ -105,8 +105,8 @@ After capturing, examine the screenshot to confirm:
 - No blank screens, missing elements, or rendering artifacts
 - Text is readable and properly styled
 
-Do not delete `screenshots/reference/` -- those are the
-target images duplo uses for visual comparison.
+Do not delete `.duplo/references/` -- those are the reference
+frames and images duplo uses for visual comparison.
 
 # Swift SPM + SwiftUI
 
