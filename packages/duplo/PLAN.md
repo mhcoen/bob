@@ -33,7 +33,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] For each input task, compute an identity key: (a) the value of its `[fix: "..."]` annotation if present, else (b) the body text after the checkbox
   - [x] Index existing entries inside the `## Bugs` section by both fix-tag and body (first occurrence wins on each key)
   - [x] On identity match to an existing entry: flip its checkbox from `[x]` to `[ ]` in place if currently checked; otherwise no-op. Do not insert a duplicate and do not rewrite the existing line's body or wording. If no match, append at the end of the section as today
-  - [ ] Preserve original line indentation when flipping (anchor the checkbox regex to the lstripped form, then re-apply the original indent prefix on write)
+  - [x] Preserve original line indentation when flipping (anchor the checkbox regex to the lstripped form, then re-apply the original indent prefix on write)
   - [ ] Skip the file write entirely if nothing changed (do not touch mtime on idempotent runs)
   - [ ] Change return value semantics from "tasks inserted" to "tasks that caused a write" (insertions plus checkbox flips); already-unchecked matches contribute 0. Update any caller that compares the return value to `len(tasks)`
   - [ ] Test: reopen by fix-tag — existing `- [x] old wording [fix: "foo"]`, new task `- [ ] new wording [fix: "foo"]` flips the existing line's checkbox and does NOT rewrite its body; returns 1
