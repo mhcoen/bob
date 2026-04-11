@@ -2939,6 +2939,18 @@ class TestAppendToBugsSectionIdempotentMtime:
         result = plan_path.read_text(encoding="utf-8")
         assert "brand new bug" in result
 
+    def test_idempotent_noop_byte_identical(self, tmp_path):
+        """Existing unchecked task re-submitted leaves content byte-identical."""
+        plan = "# App\n\n## Bugs\n\n- [ ] Fix X\n"
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(plan, encoding="utf-8")
+        bytes_before = plan_path.read_bytes()
+        mtime_before = plan_path.stat().st_mtime_ns
+        result = append_to_bugs_section(["- [ ] Fix X"], target_dir=tmp_path)
+        assert result == 0
+        assert plan_path.read_bytes() == bytes_before
+        assert plan_path.stat().st_mtime_ns == mtime_before
+
     def test_empty_tasks_does_not_write(self, tmp_path):
         """Empty task list must not touch the file."""
         plan = "# App\n\n## Bugs\n\n- [ ] Fix: existing\n"
