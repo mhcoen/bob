@@ -1282,6 +1282,22 @@ def _task_body(line: str) -> str:
     return stripped
 
 
+_FIX_ANNOTATION_RE = re.compile(r'\[fix:\s*["\'](.+?)["\']\]')
+
+
+def _task_key(line: str) -> str:
+    """Compute an identity key for a task line.
+
+    Returns the value of the ``[fix: "..."]`` annotation if present,
+    otherwise falls back to ``_task_body()`` (the text after the
+    checkbox prefix).
+    """
+    m = _FIX_ANNOTATION_RE.search(line)
+    if m:
+        return m.group(1)
+    return _task_body(line)
+
+
 def append_to_bugs_section(
     tasks: list[str],
     *,
@@ -1339,35 +1355,37 @@ def append_to_bugs_section(
             break
 
     if bugs_start is not None:
-        # Build maps of existing task bodies → line indices, split by
+        # Build maps of existing task keys → line indices, split by
         # checked vs unchecked so we can implement reopen-in-place.
-        unchecked_bodies: set[str] = set()
-        checked_body_to_line: dict[str, int] = {}
+        # Identity key: [fix: "..."] annotation value if present,
+        # otherwise the body text after the checkbox prefix.
+        unchecked_keys: set[str] = set()
+        checked_key_to_line: dict[str, int] = {}
         for k in range(bugs_start + 1, bugs_end):
             stripped = lines[k].lstrip()
             if stripped.startswith("- [x] ") or stripped.startswith("- [X] "):
-                body = _task_body(stripped)
-                checked_body_to_line.setdefault(body, k)
+                key = _task_key(stripped)
+                checked_key_to_line.setdefault(key, k)
             elif stripped.startswith("- [ ] "):
-                unchecked_bodies.add(_task_body(stripped))
+                unchecked_keys.add(_task_key(stripped))
 
         inserted = 0
         to_append: list[str] = []
         for task in tasks:
-            body = _task_body(task)
-            if body in unchecked_bodies:
+            key = _task_key(task)
+            if key in unchecked_keys:
                 # Already exists unchecked — skip.
                 continue
-            if body in checked_body_to_line:
+            if key in checked_key_to_line:
                 # Reopen in place: uncheck the existing line.
-                idx = checked_body_to_line.pop(body)
+                idx = checked_key_to_line.pop(key)
                 old = lines[idx]
                 lines[idx] = re.sub(r"^(\s*- \[)[xX](\] )", r"\1 \2", old)
-                unchecked_bodies.add(body)
+                unchecked_keys.add(key)
                 inserted += 1
             else:
                 to_append.append(task)
-                unchecked_bodies.add(body)
+                unchecked_keys.add(key)
                 inserted += 1
 
         if to_append:

@@ -30,6 +30,7 @@ from duplo.saver import (
     _find_duplicate_groups,
     _merge_duplicate_group,
     _task_body,
+    _task_key,
     append_to_bugs_section,
     _propagate_implemented_status,
     add_issue,
@@ -2653,6 +2654,43 @@ class TestTaskBody:
         assert _task_body("some random line") == "some random line"
 
 
+class TestTaskKey:
+    """Tests for _task_key() identity key computation."""
+
+    def test_fix_annotation_used_as_key(self):
+        line = '- [ ] Fix: button crash [fix: "button crash"]'
+        assert _task_key(line) == "button crash"
+
+    def test_fix_annotation_differs_from_body(self):
+        line = '- [ ] Fix: the UI glitch [fix: "ui-glitch"]'
+        assert _task_key(line) == "ui-glitch"
+
+    def test_no_annotation_falls_back_to_body(self):
+        line = "- [ ] Fix: button crash"
+        assert _task_key(line) == "Fix: button crash"
+
+    def test_checked_line_with_annotation(self):
+        line = '- [x] Fix: old wording [fix: "foo"]'
+        assert _task_key(line) == "foo"
+
+    def test_single_quotes_accepted(self):
+        line = "- [ ] Fix: crash [fix: 'crash']"
+        assert _task_key(line) == "crash"
+
+    def test_checkbox_state_does_not_affect_key(self):
+        checked = '- [x] Fix: crash [fix: "crash"]'
+        unchecked = '- [ ] Fix: crash [fix: "crash"]'
+        assert _task_key(checked) == _task_key(unchecked)
+
+    def test_non_checkbox_with_annotation(self):
+        line = 'some random [fix: "tag"] line'
+        assert _task_key(line) == "tag"
+
+    def test_non_checkbox_no_annotation(self):
+        line = "some random line"
+        assert _task_key(line) == "some random line"
+
+
 class TestAppendToBugsSectionDedupByBody:
     """Regression: dedup must compare body, not full lstripped line.
 
@@ -2675,6 +2713,57 @@ class TestAppendToBugsSectionDedupByBody:
         # It is now unchecked.
         assert "- [ ] Fix: button crash" in result
         assert "- [x] Fix: button crash" not in result
+
+
+class TestAppendToBugsSectionDedupByFixTag:
+    """Dedup via [fix: "..."] annotation identity key."""
+
+    def test_reopen_by_fix_tag_different_wording(self, tmp_path):
+        """Existing checked entry with same fix tag but different body
+        is reopened in place without rewriting the line's body."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [x] Fix: old wording [fix: "foo"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new wording [fix: "foo"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Original wording preserved, just unchecked.
+        assert '- [ ] Fix: old wording [fix: "foo"]' in result
+        # New wording NOT inserted.
+        assert "new wording" not in result.replace("old wording", "") or result.count("foo") == 1
+
+    def test_skip_unchecked_by_fix_tag(self, tmp_path):
+        """Unchecked entry with same fix tag is a no-op."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [ ] Fix: existing [fix: "bar"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: different text [fix: "bar"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 0
+
+    def test_fix_tag_takes_priority_over_body(self, tmp_path):
+        """When fix tags differ, same body text does NOT match."""
+        plan = '# App — Phase 1\n\n## Bugs\n\n- [x] Fix: crash [fix: "tag-a"]\n\n'
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: crash [fix: "tag-b"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Both lines present — different tags means different identity.
+        assert result.count("Fix: crash") == 2
+
+    def test_body_fallback_still_works_without_tags(self, tmp_path):
+        """Tasks without fix tags still dedup by body text."""
+        plan = "# App — Phase 1\n\n## Bugs\n\n- [x] Fix: button crash\n\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ["- [ ] Fix: button crash"]
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert result.count("Fix: button crash") == 1
+        assert "- [ ] Fix: button crash" in result
 
 
 class TestAppendPhaseToHistoryStageRegex:
