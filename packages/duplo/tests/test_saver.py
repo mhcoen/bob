@@ -3019,6 +3019,46 @@ class TestAppendToBugsSectionWriteCount:
         assert writes == 2
 
 
+class TestAppendToBugsSectionMixedBatch:
+    """Mixed batch: one new, one reopen-by-tag, one no-op returns 2."""
+
+    def test_mixed_batch_returns_2_with_one_new_line(self, tmp_path):
+        """New + reopen-by-tag + no-op → returns 2, exactly one line appended."""
+        plan = (
+            "# App — Phase 1\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [x] Fix: stale cache [fix: "cache"]\n'
+            '- [ ] Fix: slow query [fix: "slow"]\n'
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        original_lines = plan.splitlines()
+
+        tasks = [
+            '- [ ] Fix: brand new bug [fix: "newbug"]',  # new → append
+            '- [ ] Fix: stale cache [fix: "cache"]',  # reopen by tag
+            '- [ ] Fix: slow query [fix: "slow"]',  # no-op (already unchecked)
+        ]
+        writes = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert writes == 2
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        result_lines = result.splitlines()
+
+        # Exactly one new line appended compared to original
+        assert len(result_lines) == len(original_lines) + 1
+
+        # The reopened line has its checkbox flipped
+        assert '- [ ] Fix: stale cache [fix: "cache"]' in result
+        # The no-op line is unchanged
+        assert '- [ ] Fix: slow query [fix: "slow"]' in result
+        # The new line is present
+        assert '- [ ] Fix: brand new bug [fix: "newbug"]' in result
+        # The reopened line's body was NOT rewritten
+        assert "- [x] Fix: stale cache" not in result
+
+
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
 
