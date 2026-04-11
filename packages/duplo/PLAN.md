@@ -28,6 +28,8 @@ the old subcommand parsing or the old init/run/next flow.
 
 ## Bugs
 
+- [ ] Fix `append_to_bugs_section()` boundary scan in `duplo/saver.py:1308-1321`. The current loop matches only `lines[j].startswith("## ")`, so when scanning for the end of `## Bugs` it walks past `# Duplo - Phase 1:` and `# Duplo — Phase 2:` (both H1) and stops at `## Manual verification` near EOF. Result: new bug task inserts land deep inside Phase 2. Widen the scan to match both H1 and H2 — e.g. `re.match(r"^#{1,2}\s", lines[j])` or `lines[j].lstrip().startswith("# ")` followed by a `#` count check. Also: while you're there, update the five phase-detection regex sites in `duplo/main.py` (`_current_phase_content`, `_complete_phase`, `append_phase_to_history`, `_advance_to_next`, `_detect_next_phase_number`, `_subsequent_run`) to accept both `Phase` and `Stage` — change `(Phase\s+\d+...)` to `((?:Phase|Stage)\s+\d+...)`. Tests: (a) `## Bugs` followed by an H1 phase heading, (b) `## Bugs` followed by an H2 heading, (c) `## Bugs` as last section in file, (d) phase regex matching `# Duplo — Phase 1:`, `# Stage 1: Title`, `## Stage 2: Title`. [fix: "append_to_bugs_section H1 scoping + Phase/Stage regex"]
+
 # Duplo - Phase 1: Bootstrapping
 
 - [x] Project scaffolding
@@ -120,7 +122,7 @@ the old subcommand parsing or the old init/run/next flow.
 
 ---
 
-# Duplo — Phase 2: Phase Completion and Next-Phase Generation
+## Duplo — Phase 2: Phase Completion and Next-Phase Generation
 
 Duplo currently handles first-run (scrape, extract features, select, generate plan) and incremental updates (detect new files, re-scrape, append gap tasks). What is missing is the phase-completion loop: when all tasks in PLAN.md are done, duplo should track what was implemented, present the remaining work, and generate a scoped next-phase plan.
 
