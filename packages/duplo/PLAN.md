@@ -262,7 +262,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add the `_AUTOGEN_RE` regex per PARSER-design.md § `## Design` parser (matches the BEGIN/END comment markers with DOTALL).
   - [x] If block present: split body into `user_prose` (text before block) and `auto_generated` (block contents, markers stripped).
   - [x] If block absent: entire comment-stripped body becomes `user_prose`; `auto_generated` is empty.
-  - [ ] Set `has_fill_in_marker` by checking `user_prose` (after comment stripping) against `_FILL_IN_RE`.
+  - [x] Set `has_fill_in_marker` by checking `user_prose` (after comment stripping) against `_FILL_IN_RE`.
   - [ ] Tests: block present (correct split); block absent (all to user_prose); malformed BEGIN-only or END-only markers treated as no block; nested or repeated markers handled deterministically.
 
 - [ ] Update `ProductSpec` and audit existing callers
