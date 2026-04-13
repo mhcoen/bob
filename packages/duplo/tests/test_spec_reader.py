@@ -3135,3 +3135,183 @@ class TestFormatDesignForPrompt:
         spec = ProductSpec(design=DesignBlock(user_prose="prose", auto_generated="auto"))
         result = format_design_for_prompt(spec)
         assert "\n\n---\n\n" in result
+
+
+class TestPromptInjectionInvariant:
+    """Pin the safety property: proposed, discovered, and counter-example
+    entries must NEVER appear in format_spec_for_prompt output.
+
+    This is the highest-stakes test in the phase.  Every downstream LLM
+    call site receives the output of format_spec_for_prompt.  If any
+    excluded entry leaks through, the model sees content the user
+    explicitly flagged as untrusted or irrelevant.
+    """
+
+    def _build_spec(self) -> ProductSpec:
+        """Build a spec with one entry of each excluded kind, plus safe
+        entries that SHOULD appear."""
+        return ProductSpec(
+            purpose="Legit purpose text",
+            sources=[
+                # SAFE: included in output.
+                SourceEntry(
+                    url="https://safe-source.example.com",
+                    role="product-reference",
+                    scrape="deep",
+                    notes="SAFE_SOURCE_MARKER_XJ7",
+                ),
+                # EXCLUDED: proposed source.
+                SourceEntry(
+                    url="https://proposed-source.example.com/PROPOSED_SRC_CANARY_A1",
+                    role="product-reference",
+                    scrape="deep",
+                    notes="PROPOSED_SOURCE_NOTES_CANARY_Q9",
+                    proposed=True,
+                ),
+                # EXCLUDED: discovered source.
+                SourceEntry(
+                    url="https://discovered-source.example.com/DISCOVERED_SRC_CANARY_B2",
+                    role="docs",
+                    scrape="shallow",
+                    notes="DISCOVERED_SOURCE_NOTES_CANARY_R8",
+                    discovered=True,
+                ),
+                # EXCLUDED: counter-example source.
+                SourceEntry(
+                    url="https://counter-source.example.com/COUNTER_SRC_CANARY_C3",
+                    role="counter-example",
+                    scrape="none",
+                    notes="COUNTER_SOURCE_NOTES_CANARY_S7",
+                ),
+            ],
+            references=[
+                # SAFE: included in output.
+                ReferenceEntry(
+                    path=Path("ref/safe-image.png"),
+                    roles=["visual-target"],
+                    notes="SAFE_REF_MARKER_YK8",
+                ),
+                # EXCLUDED: proposed reference.
+                ReferenceEntry(
+                    path=Path("ref/proposed-mockup-PROPOSED_REF_CANARY_D4.png"),
+                    roles=["visual-target"],
+                    notes="PROPOSED_REF_NOTES_CANARY_T6",
+                    proposed=True,
+                ),
+                # EXCLUDED: counter-example reference.
+                ReferenceEntry(
+                    path=Path("ref/bad-design-COUNTER_REF_CANARY_E5.png"),
+                    roles=["counter-example"],
+                    notes="COUNTER_REF_NOTES_CANARY_U5",
+                ),
+            ],
+        )
+
+    # Canary strings that must NOT appear in the output.
+    _EXCLUDED_CANARIES = [
+        # Proposed source: URL, distinctive URL path, notes.
+        "proposed-source.example.com",
+        "PROPOSED_SRC_CANARY_A1",
+        "PROPOSED_SOURCE_NOTES_CANARY_Q9",
+        # Discovered source: URL, distinctive URL path, notes.
+        "discovered-source.example.com",
+        "DISCOVERED_SRC_CANARY_B2",
+        "DISCOVERED_SOURCE_NOTES_CANARY_R8",
+        # Counter-example source: URL, distinctive URL path, notes.
+        "counter-source.example.com",
+        "COUNTER_SRC_CANARY_C3",
+        "COUNTER_SOURCE_NOTES_CANARY_S7",
+        # Proposed reference: path fragment, notes.
+        "PROPOSED_REF_CANARY_D4",
+        "PROPOSED_REF_NOTES_CANARY_T6",
+        # Counter-example reference: path fragment, notes.
+        "COUNTER_REF_CANARY_E5",
+        "COUNTER_REF_NOTES_CANARY_U5",
+    ]
+
+    # Canary strings that MUST appear in the output (safe entries).
+    _INCLUDED_CANARIES = [
+        "safe-source.example.com",
+        "SAFE_SOURCE_MARKER_XJ7",
+        "safe-image.png",
+        "SAFE_REF_MARKER_YK8",
+        "Legit purpose text",
+    ]
+
+    def test_excluded_entries_absent(self):
+        """No excluded canary string appears in the prompt output."""
+        spec = self._build_spec()
+        result = format_spec_for_prompt(spec)
+        for canary in self._EXCLUDED_CANARIES:
+            assert canary not in result, (
+                f"SAFETY VIOLATION: excluded canary {canary!r} leaked "
+                f"into format_spec_for_prompt output"
+            )
+
+    def test_safe_entries_present(self):
+        """Safe entries still appear — filtering is targeted, not blanket."""
+        spec = self._build_spec()
+        result = format_spec_for_prompt(spec)
+        for canary in self._INCLUDED_CANARIES:
+            assert canary in result, (
+                f"Safe canary {canary!r} missing from output — filtering is too aggressive"
+            )
+
+    def test_proposed_and_discovered_on_same_entry(self):
+        """An entry with BOTH proposed and discovered flags is excluded."""
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://dual-flag.example.com/DUAL_FLAG_CANARY_F6",
+                    role="docs",
+                    scrape="shallow",
+                    notes="DUAL_FLAG_NOTES_CANARY_V4",
+                    proposed=True,
+                    discovered=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "DUAL_FLAG_CANARY_F6" not in result
+        assert "DUAL_FLAG_NOTES_CANARY_V4" not in result
+
+    def test_counter_example_ref_with_multiple_roles_excluded(self):
+        """A reference with counter-example among its roles is excluded
+        even if it also has a valid role like visual-target."""
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/dual-role-MULTI_CE_CANARY_G7.png"),
+                    roles=["visual-target", "counter-example"],
+                    notes="MULTI_CE_NOTES_CANARY_W3",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "MULTI_CE_CANARY_G7" not in result
+        assert "MULTI_CE_NOTES_CANARY_W3" not in result
+
+    def test_ignore_role_ref_excluded(self):
+        """A reference with ignore role is also excluded from the prompt."""
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/ignored-IGNORE_CANARY_H8.png"),
+                    roles=["ignore"],
+                    notes="IGNORE_NOTES_CANARY_X2",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "IGNORE_CANARY_H8" not in result
+        assert "IGNORE_NOTES_CANARY_X2" not in result
+
+    def test_output_uses_parsed_fields_not_raw(self):
+        """The output is built from parsed fields, so injecting content
+        into spec.raw does NOT cause it to appear in the prompt."""
+        spec = self._build_spec()
+        # Inject a canary into raw that doesn't correspond to any parsed
+        # field — it must not appear in the output.
+        spec.raw = "RAW_INJECTION_CANARY_Z0 " + spec.raw
+        result = format_spec_for_prompt(spec)
+        assert "RAW_INJECTION_CANARY_Z0" not in result
