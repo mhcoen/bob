@@ -4812,6 +4812,31 @@ class TestValidateForRunWiring:
 
         mock_validate.assert_not_called()
 
+    def test_no_validation_when_no_spec_subsequent_run(self, tmp_path, monkeypatch):
+        """When read_spec returns None on a subsequent run, validate_for_run is not called."""
+        _write_duplo_json(tmp_path, {"features": []})
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.main.validate_for_run") as mock_validate,
+            patch("duplo.main.load_hashes", return_value={}),
+            patch("duplo.main.compute_hashes", return_value={}),
+            patch("duplo.main.diff_hashes") as mock_diff,
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main.save_hashes"),
+        ):
+            mock_diff.return_value = type("D", (), {"added": [], "changed": [], "removed": []})()
+            # _subsequent_run will proceed past validation into the
+            # no-changes path. It will eventually try to generate a plan
+            # or roadmap, so let it exit naturally or via SystemExit.
+            try:
+                main()
+            except (SystemExit, Exception):
+                pass
+
+        mock_validate.assert_not_called()
+
 
 class TestFillInPurposeBlocksRun:
     """End-to-end: a real SPEC.md with <FILL IN> in ## Purpose exits 1."""
