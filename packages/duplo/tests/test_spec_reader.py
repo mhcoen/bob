@@ -1908,3 +1908,24 @@ class TestParseDesignBlock:
         assert block.user_prose == "Prose before."
         assert block.auto_generated == "block one"
         assert "block two" not in block.auto_generated
+
+
+class TestParseSpecSourcesIntegration:
+    """Integration tests: _parse_spec wires ## Sources into spec.sources."""
+
+    def test_sources_parsed_into_spec(self):
+        text = "## Sources\n- https://example.com/docs\n  role: docs\n  scrape: deep\n"
+        spec = _parse_spec(text)
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://example.com/docs"
+        assert spec.sources[0].role == "docs"
+        assert spec.sources[0].scrape == "deep"
+
+    def test_no_sources_section_gives_empty_list(self):
+        text = "## Purpose\nSome purpose.\n"
+        spec = _parse_spec(text)
+        assert spec.sources == []
+
+    def test_sources_default_on_new_spec(self):
+        spec = ProductSpec()
+        assert spec.sources == []

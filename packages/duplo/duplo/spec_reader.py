@@ -443,6 +443,7 @@ class ProductSpec:
     architecture: str = ""
     design: DesignBlock = field(default_factory=DesignBlock)
     references: list[ReferenceEntry] = field(default_factory=list)
+    sources: list[SourceEntry] = field(default_factory=list)
     notes: str = ""
     fill_in_purpose: bool = False
     fill_in_architecture: bool = False
@@ -531,6 +532,8 @@ def _parse_spec(text: str) -> ProductSpec:
                     "consider migrating to the new entry format "
                     "(see MIGRATION-design.md)",
                 )
+        elif key == "sources":
+            spec.sources = _parse_source_entries(body)
         elif key == "notes":
             spec.notes = _strip_comments(body).strip()
 
