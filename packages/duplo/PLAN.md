@@ -687,7 +687,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Add the Phase 2 migration message constant and `_check_migration` wrapper
   - [x] Define `_MIGRATION_MESSAGE` as a module-level constant in `duplo/migration.py` containing the Phase 2 message text verbatim per MIGRATION-design.md § Behavior (the "Phase 2 message" block — the version that says "Author a SPEC.md by hand using SPEC-template.md"). Do NOT use the Phase 4 version (which references `duplo init`); `duplo init` does not exist yet.
-  - [ ] Message lists the five steps: create `ref/`, move reference files, hand-author SPEC.md using SPEC-template.md with minimum fields (Purpose, Architecture, Sources, References), run `duplo` again. Mentions that PLAN.md, `.duplo/duplo.json`, and source code are unchanged.
+  - [x] Message lists the five steps: create `ref/`, move reference files, hand-author SPEC.md using SPEC-template.md with minimum fields (Purpose, Architecture, Sources, References), run `duplo` again. Mentions that PLAN.md, `.duplo/duplo.json`, and source code are unchanged.
   - [ ] Implement `_check_migration(target_dir: Path) -> None` per MIGRATION-design.md § Implementation. If `needs_migration(target_dir)` returns True, print `_MIGRATION_MESSAGE` and `sys.exit(1)`. Otherwise return without doing anything.
   - [ ] Tests:
     - [ ] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
