@@ -676,6 +676,176 @@ class TestFormatSpecSourcesFiltering:
         assert "https://counter.example.com" not in result
 
 
+class TestFormatSpecReferencesFiltering:
+    """Verify References filtering in format_spec_for_prompt.
+
+    Only entries where proposed=false AND no role is counter-example
+    AND no role is ignore should appear.
+    """
+
+    def test_proposed_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/logo.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "logo.png" not in result
+
+    def test_counter_example_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/bad-ui.png"),
+                    roles=["counter-example"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "bad-ui.png" not in result
+
+    def test_ignore_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/old-draft.png"),
+                    roles=["ignore"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "old-draft.png" not in result
+
+    def test_dual_role_with_counter_example_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/dual.png"),
+                    roles=["visual-target", "counter-example"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "dual.png" not in result
+
+    def test_dual_role_with_ignore_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/dual-ignore.png"),
+                    roles=["behavioral-target", "ignore"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "dual-ignore.png" not in result
+
+    def test_all_references_filtered_no_heading(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+                ReferenceEntry(
+                    path=Path("ref/counter.png"),
+                    roles=["counter-example"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/ignored.png"),
+                    roles=["ignore"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## References" not in result
+
+    def test_safe_reference_serialization_format(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/hero.png"),
+                    roles=["visual-target"],
+                    notes="Main product screenshot",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "- ref/hero.png" in result
+        assert "  roles: visual-target" in result
+        assert "  notes: Main product screenshot" in result
+
+    def test_mixed_safe_and_excluded_references(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/safe.png"),
+                    roles=["visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["docs"],
+                    proposed=True,
+                ),
+                ReferenceEntry(
+                    path=Path("ref/counter.png"),
+                    roles=["counter-example"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/ignored.png"),
+                    roles=["ignore"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/also-safe.png"),
+                    roles=["behavioral-target", "docs"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## References" in result
+        assert "ref/safe.png" in result
+        assert "ref/also-safe.png" in result
+        assert "ref/proposed.png" not in result
+        assert "ref/counter.png" not in result
+        assert "ref/ignored.png" not in result
+
+    def test_multiple_roles_serialized(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["visual-target", "behavioral-target"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "  roles: visual-target, behavioral-target" in result
+
+    def test_no_notes_omits_notes_line(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/clean.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "- ref/clean.png" in result
+        assert "  notes:" not in result
+
+
 class TestFormatSpecVerbatimSections:
     """Verify user-authored sections appear verbatim in prompt output."""
 
