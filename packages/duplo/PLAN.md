@@ -691,7 +691,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Implement `_check_migration(target_dir: Path) -> None` per MIGRATION-design.md § Implementation. If `needs_migration(target_dir)` returns True, print `_MIGRATION_MESSAGE` and `sys.exit(1)`. Otherwise return without doing anything.
   - [ ] Tests:
     - [x] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
-    - [ ] `_check_migration` on a new-format directory: no output, no exit, function returns None
+    - [x] `_check_migration` on a new-format directory: no output, no exit, function returns None
     - [ ] `_check_migration` on a non-duplo directory (no `.duplo/duplo.json`): no output, no exit
     - [ ] Message text test: pin the exact message content by snapshot comparison to a fixture file. This protects against accidental wording drift.
 
