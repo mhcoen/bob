@@ -288,7 +288,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Add `format_design_for_prompt(spec) -> str`
   - [x] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
   - [x] If only one is present, return that one.
-  - [ ] If neither, return empty string.
+  - [x] If neither, return empty string.
   - [ ] Tests: each combination produces expected output; user_prose comes first when both present.
 
 - [ ] Rewrite `format_spec_for_prompt` to serialize from dataclasses (prompt-injection safety invariant)
