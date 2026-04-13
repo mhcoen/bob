@@ -266,7 +266,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: block present (correct split); block absent (all to user_prose); malformed BEGIN-only or END-only markers treated as no block; nested or repeated markers handled deterministically.
 
 - [ ] Update `ProductSpec` and audit existing callers
-  - [ ] Change `design` field from `str` to `DesignBlock`.
+  - [x] Change `design` field from `str` to `DesignBlock`.
   - [ ] Change `references` field from `str` to `list[ReferenceEntry]`.
   - [ ] Add new fields: `sources: list[SourceEntry]`, `notes: str`, `fill_in_purpose: bool`, `fill_in_architecture: bool`, `fill_in_design: bool`.
   - [ ] Grep the codebase for callers of `spec.references` and `spec.design` accessing them as strings. Update each call site to use `spec.design.user_prose` (or the new `format_design_for_prompt` helper, item below) and to treat `spec.references` as a list.
