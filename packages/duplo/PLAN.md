@@ -207,6 +207,115 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Update `_NEXT_PHASE_SYSTEM` prompt with the same `[BATCH]` instruction for next-phase plan generation.
   - [x] Update the example plan in `_PHASE_SYSTEM` to show a `[BATCH]` parent with concrete subtasks instead of the generic "Subtask if needed" placeholder.
 
+---
 
+## Duplo — Phase 3: SPEC.md parser and prompt-injection-safe formatters
 
+The SPEC.md / `ref/` redesign restructures duplo's input contract so user intent lives in a typed, reviewable spec rather than in interactive prompts and ambient directory scanning. This phase implements the data layer only: parser, dataclasses, validation, role-filtered formatters, and the rewrite of `format_spec_for_prompt` that closes the prompt-injection leak. No pipeline behavior changes; existing callers continue to work via a compatibility layer.
 
+Design reference: `PARSER-design.md` (authoritative), with `SPEC-template.md` and `SPEC-guide.md` defining the on-disk schema and `REDESIGN-overview.md` providing context.
+
+Critical safety invariant introduced in this phase: **no LLM call ever sees raw SPEC.md text.** `format_spec_for_prompt` is rewritten to serialize from parsed dataclasses with role/flag filtering. Without this, `proposed:`, `discovered:`, and `counter-example` entries leak into every LLM prompt despite the role-filter helpers. The invariant has its own dedicated test (item below) that pins the property.
+
+Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code generation. Ruff for linting, pytest for tests. All AI calls go through `claude -p` (no direct API calls).
+
+---
+
+- [ ] [BATCH] Add new dataclasses and the comment-stripping helper to `spec_reader.py`
+  - [ ] Add `SourceEntry` dataclass with fields `url`, `role`, `scrape`, `notes`, `proposed`, `discovered`. Per PARSER-design.md § SourceEntry.
+  - [ ] Add `ReferenceEntry` dataclass with fields `path`, `roles` (list[str]), `notes`, `proposed`. Per PARSER-design.md § ReferenceEntry. Note `roles` is plural to support multiple-roles-per-entry.
+  - [ ] Add `DesignBlock` dataclass with fields `user_prose`, `auto_generated`, `has_fill_in_marker`. Per PARSER-design.md § DesignBlock.
+  - [ ] Add `_HTML_COMMENT_RE` and `_strip_comments(body)` helper. Per PARSER-design.md § `<FILL IN>` detection.
+  - [ ] Tests: dataclass field defaults, `_strip_comments` removes single-line and multi-line HTML comment blocks, comment-stripping leaves non-comment content intact.
+
+- [ ] [BATCH] Add `<FILL IN>` detection for required sections
+  - [ ] Add the `_FILL_IN_RE` regex per PARSER-design.md (matches `<FILL IN>` permissively on whitespace and trailing hint text).
+  - [ ] Apply `_strip_comments` to a section body before regex matching, so commented-out template hints don't trigger detection.
+  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_purpose` after parsing `## Purpose`.
+  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_architecture` after parsing `## Architecture`.
+  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_design` per the rule: true ONLY when `design.has_fill_in_marker` AND no reference entries have `visual-target` in `roles`.
+  - [ ] Tests: marker present in body sets flag; marker present only in an HTML comment does NOT set flag; absent marker keeps flag false; `fill_in_design` rule covers both required conditions.
+
+- [ ] Add `## Sources` parser
+  - [ ] Add `_SOURCE_ENTRY_START` and `_FIELD_LINE` regexes per PARSER-design.md § `## Sources` parser. Entry start matches a list-item line containing an http(s) URL; field lines match indented `key: value` pairs.
+  - [ ] Implement entry-block parser: scan section line-by-line, accumulate field lines until next entry or section end, support multi-line `notes:` continuations indented further than the field name.
+  - [ ] Validation per `SourceEntry`: drop entries with invalid URL; DROP entries with unknown role (do NOT default — typo `role: doc` must not silently widen authority); default unknown `scrape` to `none` (not `deep`); accept both `proposed` and `discovered` set without diagnostic.
+  - [ ] Diagnostic emission via existing `duplo.diagnostics.record_failure`.
+  - [ ] Add `sources` to `_KNOWN_SECTIONS`.
+  - [ ] Tests: single entry, multiple entries, all field combinations, invalid URLs dropped, invalid roles dropped (entry removed entirely), invalid scrape defaulting to `none`, comment-stripped examples not parsed as real entries, multi-line `notes:` parsed correctly.
+
+- [ ] Add `## Notes` parser
+  - [ ] Trivial: store comment-stripped body as `spec.notes`. No structured parsing.
+  - [ ] Add `notes` to `_KNOWN_SECTIONS`.
+  - [ ] Tests: present section captured verbatim; absent section yields empty string; comment blocks stripped before storage.
+
+- [ ] Convert `## References` parser from prose to structured entries
+  - [ ] Add bare and quoted entry-start regexes per PARSER-design.md § `## References` parser. Bare form matches list-item lines starting with `ref/` followed by a path with non-greedy whitespace handling (paths with spaces are common; macOS screenshots default to names like `Screen Shot 2025-10-12 at 14.30.png`). Quoted form matches `- "ref/..."` and strips the quotes after match (for paths with unusual characters).
+  - [ ] Implement entry parser sharing `_FIELD_LINE` with the Sources parser.
+  - [ ] Parse `role:` as comma-separated list into `roles: list[str]`. Support multiple roles per entry (the dual-use case for behavioral-and-visual videos).
+  - [ ] Validation per `ReferenceEntry`: drop entries with paths not under `ref/` (after quote-stripping); drop unknown roles from the comma-separated list with diagnostic; if all roles unknown, default to `["ignore"]`.
+  - [ ] Reject `discovered:` flag with diagnostic (only Sources can be discovered).
+  - [ ] Tests: single entry, multiple entries, paths with spaces (bare form), paths with unusual characters (quoted form), paths outside `ref/` dropped, multiple roles parsed correctly, unknown roles dropped while valid ones kept, all-unknown-roles defaults to `ignore`, `discovered:` rejected.
+  - [ ] Migration test: old prose-form `## References` parses to empty `references` list, prose preserved in `spec.raw`, diagnostic emitted suggesting migration.
+
+- [ ] Add AUTO-GENERATED block parsing in `## Design`
+  - [ ] Add the `_AUTOGEN_RE` regex per PARSER-design.md § `## Design` parser (matches the BEGIN/END comment markers with DOTALL).
+  - [ ] If block present: split body into `user_prose` (text before block) and `auto_generated` (block contents, markers stripped).
+  - [ ] If block absent: entire comment-stripped body becomes `user_prose`; `auto_generated` is empty.
+  - [ ] Set `has_fill_in_marker` by checking `user_prose` (after comment stripping) against `_FILL_IN_RE`.
+  - [ ] Tests: block present (correct split); block absent (all to user_prose); malformed BEGIN-only or END-only markers treated as no block; nested or repeated markers handled deterministically.
+
+- [ ] Update `ProductSpec` and audit existing callers
+  - [ ] Change `design` field from `str` to `DesignBlock`.
+  - [ ] Change `references` field from `str` to `list[ReferenceEntry]`.
+  - [ ] Add new fields: `sources: list[SourceEntry]`, `notes: str`, `fill_in_purpose: bool`, `fill_in_architecture: bool`, `fill_in_design: bool`.
+  - [ ] Grep the codebase for callers of `spec.references` and `spec.design` accessing them as strings. Update each call site to use `spec.design.user_prose` (or the new `format_design_for_prompt` helper, item below) and to treat `spec.references` as a list.
+  - [ ] Tests: existing `test_spec_reader.py` continues to pass for fields that didn't change type (purpose, architecture, scope, behavior); new fields populate correctly on a fully-filled SPEC.md fixture.
+
+- [ ] [BATCH] Add per-stage role-filtering formatters
+  - [ ] `format_visual_references(spec) -> list[ReferenceEntry]`: entries where `visual-target` is in `roles`, excluding `proposed: true`.
+  - [ ] `format_behavioral_references(spec) -> list[ReferenceEntry]`: entries where `behavioral-target` is in `roles`, excluding `proposed: true`. Dual-role entries appear in both this and `format_visual_references` so the caller can detect dual-use via membership check on `entry.roles`.
+  - [ ] `format_doc_references(spec) -> list[ReferenceEntry]`: entries where `docs` is in `roles`, excluding `proposed: true`.
+  - [ ] `format_counter_examples(spec) -> list[ReferenceEntry]`: entries where `counter-example` is in `roles`, excluding `proposed: true`.
+  - [ ] All four return `list[ReferenceEntry]` (not `list[Path]`) so callers can inspect roles, notes, and flags. Path extraction is `[e.path for e in ...]` at the call site.
+  - [ ] Tests: each formatter returns the right filtered list; each excludes `proposed: true`; entries with multiple roles appear in every matching formatter; each handles empty input gracefully.
+
+- [ ] Add `format_scrapeable_sources(spec) -> list[SourceEntry]`
+  - [ ] Returns source entries where `scrape` is `deep` or `shallow`, AND `discovered: false`, AND `proposed: false`, AND `role` is NOT `counter-example`.
+  - [ ] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
+  - [ ] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
+
+- [ ] Add `format_design_for_prompt(spec) -> str`
+  - [ ] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
+  - [ ] If only one is present, return that one.
+  - [ ] If neither, return empty string.
+  - [ ] Tests: each combination produces expected output; user_prose comes first when both present.
+
+- [ ] Rewrite `format_spec_for_prompt` to serialize from dataclasses (prompt-injection safety invariant)
+  - [ ] Replace the existing implementation that returns `spec.raw`. The new implementation serializes from parsed `ProductSpec` fields, NOT from raw text.
+  - [ ] Include user-authored sections verbatim: `## Purpose`, `## Architecture`, `## Design.user_prose`, `## Scope`, `## Behavior`, `## Notes`.
+  - [ ] For `## Sources`: include only entries where `proposed: false` AND `discovered: false` AND `role` is NOT `counter-example`.
+  - [ ] For `## References`: include only entries where `proposed: false` AND no role is `counter-example` AND no role is `ignore`.
+  - [ ] For `## Design`: include `auto_generated` content alongside `user_prose` (autogen is derived from non-proposed visual targets only and has already been filtered upstream).
+  - [ ] Wrap output in the existing labelled prefix ("PRODUCT SPECIFICATION (authored by the user...") so existing consumers see equivalent framing.
+  - [ ] Update existing tests for `format_spec_for_prompt` (output format will differ) so they pin the new behavior.
+  - [ ] **Prompt-injection invariant test (highest-stakes test in the phase)**: construct a spec containing `proposed: true` source, `discovered: true` source, `counter-example` source, `proposed: true` reference, and `counter-example` reference, all with distinctive recognizable content; assert that `format_spec_for_prompt(spec)` output does NOT contain any of those entries' content. This test pins the safety property for all downstream LLM call sites.
+
+- [ ] Add `validate_for_run(spec) -> list[str]` and wire into `main.py`
+  - [ ] Returns list of human-readable error messages; empty list means OK to run.
+  - [ ] Errors: purpose-fill-in, architecture-fill-in, and the no-source-and-no-ref-and-sparse-purpose condition (no scrapeable sources AND no non-ignore references AND `## Purpose` shorter than 50 characters).
+  - [ ] `fill_in_design` produces a WARNING (not an error) per PARSER-design.md § Validation API. The "URL alone" common pattern is valid even when `## Design` has no user prose and no visual-target references — duplo can still proceed by inferring design from scraped product-reference pages. Warnings print but do not block execution.
+  - [ ] Warnings for unreviewed entries: count `proposed: true` references and `discovered: true` sources, emit one warning each summarizing counts and what to do.
+  - [ ] Wire `validate_for_run` into `main.py` so it runs after `read_spec` and before any pipeline work. If errors returned, print them to stderr and exit 1. Warnings print to stdout but do not block.
+  - [ ] Tests: each error condition produces the expected message; valid spec returns empty list; `fill_in_design` produces warning not error; warnings include correct counts.
+  - [ ] Backward compatibility: old-format SPEC.md files (no fill-in markers anywhere because they predate the convention) keep `fill_in_purpose` and `fill_in_architecture` false and pass validation. Test this explicitly.
+
+---
+
+## Manual verification (user must test)
+
+- [ ] Write a fully-populated SPEC.md in the new format (every section filled, including `## Sources`, structured `## References`, `## Notes`) in a scratch directory and confirm `read_spec()` parses every section into the expected dataclass fields. Drop into a Python REPL or write a small script.
+- [ ] Write a SPEC.md with deliberate `proposed: true`, `discovered: true`, and `counter-example` entries. Call `format_spec_for_prompt(spec)` and visually confirm the output contains none of those entries' content. This is the safety invariant.
+- [ ] Write a SPEC.md with a fill-in marker left in `## Purpose`. Run `duplo` and confirm it exits 1 with a clear error message and does NOT proceed to scraping or extraction.
+- [ ] Run `duplo` against an existing pre-redesign project (one with no SPEC.md or an old-format SPEC.md). Confirm it still runs end-to-end without errors. The new validation should not block legacy projects until they migrate.
+- [ ] Write a SPEC.md with a reference path containing spaces (e.g. a list-item entry naming `ref/Screen Shot 2025-10-12 at 14.30.png`) and confirm it parses without dropping the entry. Same for a quoted path with unusual characters.
