@@ -176,7 +176,25 @@ class TestParseSpec:
 
     def test_design(self):
         spec = _parse_spec("## Design\nDark theme, monospace font, #2b2b2b background.")
-        assert "#2b2b2b" in spec.design
+        assert "#2b2b2b" in spec.design.user_prose
+
+    def test_design_is_design_block(self):
+        spec = _parse_spec(
+            "## Design\n"
+            "User notes here.\n\n"
+            "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+            "Generated content.\n"
+            "<!-- END AUTO-GENERATED -->\n"
+        )
+        assert spec.design.user_prose == "User notes here."
+        assert spec.design.auto_generated == "Generated content."
+        assert spec.design.has_fill_in_marker is False
+
+    def test_design_default_is_empty_design_block(self):
+        spec = _parse_spec("## Purpose\nJust purpose, no design.")
+        assert spec.design.user_prose == ""
+        assert spec.design.auto_generated == ""
+        assert spec.design.has_fill_in_marker is False
 
     def test_references_structured(self):
         spec = _parse_spec("## References\n- ref/demo.mp4\n  role: visual-target\n")
@@ -218,7 +236,7 @@ class TestParseSpec:
         assert "JavaScript plugin API" in spec.scope_exclude
         assert len(spec.behavior_contracts) == 2
         assert "SwiftUI" in spec.architecture
-        assert "#2b2b2b" in spec.design
+        assert "#2b2b2b" in spec.design.user_prose
         assert spec.references == []
 
 

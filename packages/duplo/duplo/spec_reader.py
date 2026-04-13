@@ -441,7 +441,7 @@ class ProductSpec:
     behavior: str = ""
     behavior_contracts: list[BehaviorContract] = field(default_factory=list)
     architecture: str = ""
-    design: str = ""
+    design: DesignBlock = field(default_factory=DesignBlock)
     references: list[ReferenceEntry] = field(default_factory=list)
     notes: str = ""
     fill_in_purpose: bool = False
@@ -520,7 +520,7 @@ def _parse_spec(text: str) -> ProductSpec:
             if _FILL_IN_RE.search(_strip_comments(body)):
                 spec.fill_in_architecture = True
         elif key == "design":
-            spec.design = body.strip()
+            spec.design = _parse_design_block(body)
         elif key == "references":
             spec.references = _parse_reference_entries(body)
             if not spec.references and body.strip():
@@ -536,10 +536,8 @@ def _parse_spec(text: str) -> ProductSpec:
 
     # fill_in_design: true only when design body has <FILL IN> marker
     # AND no reference entries have visual-target role.
-    design_body = sections.get("Design", "")
-    has_design_marker = bool(_FILL_IN_RE.search(_strip_comments(design_body)))
     has_visual_target = any("visual-target" in entry.roles for entry in spec.references)
-    spec.fill_in_design = has_design_marker and not has_visual_target
+    spec.fill_in_design = spec.design.has_fill_in_marker and not has_visual_target
 
     return spec
 
