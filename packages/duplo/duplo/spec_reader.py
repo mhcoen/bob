@@ -53,6 +53,15 @@ _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$")
 # Field line: indented key: value pair (at least 2 spaces of indent).
 _FIELD_LINE = re.compile(r"^\s{2,}(\w+):\s*(.*)$")
 
+# Patterns for ## References parser.
+# Bare form: list-item line starting with ref/ followed by a path.
+# Non-greedy match with trailing-whitespace anchor handles paths with spaces
+# (e.g. "Screen Shot 2025-10-12 at 14.30.png").
+_REFERENCE_ENTRY_START_BARE = re.compile(r"^-\s+(ref/.+?)\s*$")
+# Quoted form: list-item line with "ref/..." — strips quotes after match.
+# Allows any character except literal `"` inside the quotes.
+_REFERENCE_ENTRY_START_QUOTED = re.compile(r'^-\s+"(ref/[^"]+)"\s*$')
+
 # Valid values for SourceEntry validation.
 _VALID_SOURCE_ROLES = frozenset({"product-reference", "docs", "counter-example"})
 _VALID_SCRAPE_VALUES = frozenset({"deep", "shallow", "none"})

@@ -17,6 +17,8 @@ from duplo.spec_reader import (
     _FILL_IN_RE,
     _HTML_COMMENT_RE,
     _KNOWN_SECTIONS,
+    _REFERENCE_ENTRY_START_BARE,
+    _REFERENCE_ENTRY_START_QUOTED,
     _SOURCE_ENTRY_START,
     _VALID_SCRAPE_VALUES,
     _VALID_SOURCE_ROLES,
@@ -1250,3 +1252,86 @@ class TestSpecNotes:
         assert "Multi-line" not in spec.notes
         assert "Before comment." in spec.notes
         assert "After comment." in spec.notes
+
+
+class TestReferenceEntryStartBare:
+    def test_matches_simple_path(self):
+        m = _REFERENCE_ENTRY_START_BARE.match("- ref/screenshot.png")
+        assert m is not None
+        assert m.group(1) == "ref/screenshot.png"
+
+    def test_matches_path_with_spaces(self):
+        m = _REFERENCE_ENTRY_START_BARE.match("- ref/Screen Shot 2025-10-12 at 14.30.png")
+        assert m is not None
+        assert m.group(1) == "ref/Screen Shot 2025-10-12 at 14.30.png"
+
+    def test_matches_nested_path(self):
+        m = _REFERENCE_ENTRY_START_BARE.match("- ref/docs/guide.pdf")
+        assert m is not None
+        assert m.group(1) == "ref/docs/guide.pdf"
+
+    def test_strips_trailing_whitespace(self):
+        m = _REFERENCE_ENTRY_START_BARE.match("- ref/image.png   ")
+        assert m is not None
+        assert m.group(1) == "ref/image.png"
+
+    def test_no_match_without_dash(self):
+        assert _REFERENCE_ENTRY_START_BARE.match("ref/image.png") is None
+
+    def test_no_match_without_ref_prefix(self):
+        assert _REFERENCE_ENTRY_START_BARE.match("- images/foo.png") is None
+
+    def test_no_match_indented_line(self):
+        assert _REFERENCE_ENTRY_START_BARE.match("  - ref/image.png") is None
+
+    def test_no_match_bare_ref_slash_only(self):
+        # "ref/" alone with nothing after is not a valid path.
+        assert _REFERENCE_ENTRY_START_BARE.match("- ref/") is None
+
+    def test_path_with_hyphens_and_dots(self):
+        m = _REFERENCE_ENTRY_START_BARE.match("- ref/my-app-v2.3.screenshot.png")
+        assert m is not None
+        assert m.group(1) == "ref/my-app-v2.3.screenshot.png"
+
+
+class TestReferenceEntryStartQuoted:
+    def test_matches_quoted_path(self):
+        m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/screenshot.png"')
+        assert m is not None
+        assert m.group(1) == "ref/screenshot.png"
+
+    def test_matches_quoted_path_with_spaces(self):
+        m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/Screen Shot 2025-10-12 at 14.30.png"')
+        assert m is not None
+        assert m.group(1) == "ref/Screen Shot 2025-10-12 at 14.30.png"
+
+    def test_matches_quoted_path_with_special_chars(self):
+        m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/file (copy).png"')
+        assert m is not None
+        assert m.group(1) == "ref/file (copy).png"
+
+    def test_strips_trailing_whitespace(self):
+        m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/image.png"   ')
+        assert m is not None
+        assert m.group(1) == "ref/image.png"
+
+    def test_no_match_without_ref_prefix(self):
+        assert _REFERENCE_ENTRY_START_QUOTED.match('- "images/foo.png"') is None
+
+    def test_no_match_without_dash(self):
+        assert _REFERENCE_ENTRY_START_QUOTED.match('"ref/image.png"') is None
+
+    def test_no_match_indented_line(self):
+        assert _REFERENCE_ENTRY_START_QUOTED.match('  - "ref/image.png"') is None
+
+    def test_no_match_embedded_quote(self):
+        # A literal `"` inside the path breaks the quoted form.
+        assert _REFERENCE_ENTRY_START_QUOTED.match('- "ref/file"name.png"') is None
+
+    def test_no_match_unquoted_path(self):
+        assert _REFERENCE_ENTRY_START_QUOTED.match("- ref/image.png") is None
+
+    def test_quoted_nested_path(self):
+        m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/sub dir/deep/file.pdf"')
+        assert m is not None
+        assert m.group(1) == "ref/sub dir/deep/file.pdf"
