@@ -539,6 +539,143 @@ class TestFormatSpecForPrompt:
         assert "IGNORED_REF_MARKER" not in result
 
 
+class TestFormatSpecSourcesFiltering:
+    """Verify Sources filtering in format_spec_for_prompt.
+
+    Only entries where proposed=false AND discovered=false AND role
+    is NOT counter-example should appear.
+    """
+
+    def test_both_proposed_and_discovered_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://both-flags.example.com",
+                    role="docs",
+                    scrape="deep",
+                    proposed=True,
+                    discovered=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "both-flags.example.com" not in result
+
+    def test_counter_example_with_proposed_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://double-exclude.example.com",
+                    role="counter-example",
+                    scrape="none",
+                    proposed=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "double-exclude.example.com" not in result
+
+    def test_counter_example_with_discovered_excluded(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://counter-disc.example.com",
+                    role="counter-example",
+                    scrape="none",
+                    discovered=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "counter-disc.example.com" not in result
+
+    def test_all_sources_filtered_no_heading(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://proposed.example.com",
+                    role="docs",
+                    scrape="deep",
+                    proposed=True,
+                ),
+                SourceEntry(
+                    url="https://discovered.example.com",
+                    role="docs",
+                    scrape="shallow",
+                    discovered=True,
+                ),
+                SourceEntry(
+                    url="https://counter.example.com",
+                    role="counter-example",
+                    scrape="none",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Sources" not in result
+
+    def test_safe_source_serialization_format(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://example.com/api",
+                    role="docs",
+                    scrape="deep",
+                    notes="Primary API reference",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "- https://example.com/api" in result
+        assert "  role: docs" in result
+        assert "  scrape: deep" in result
+        assert "  notes: Primary API reference" in result
+
+    def test_mixed_safe_and_excluded_sources(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://safe.example.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+                SourceEntry(
+                    url="https://proposed.example.com",
+                    role="docs",
+                    scrape="deep",
+                    proposed=True,
+                ),
+                SourceEntry(
+                    url="https://discovered.example.com",
+                    role="docs",
+                    scrape="shallow",
+                    discovered=True,
+                ),
+                SourceEntry(
+                    url="https://counter.example.com",
+                    role="counter-example",
+                    scrape="none",
+                ),
+                SourceEntry(
+                    url="https://also-safe.example.com",
+                    role="docs",
+                    scrape="shallow",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Sources" in result
+        assert "https://safe.example.com" in result
+        assert "https://also-safe.example.com" in result
+        assert "https://proposed.example.com" not in result
+        assert "https://discovered.example.com" not in result
+        assert "https://counter.example.com" not in result
+
+
 class TestFormatSpecVerbatimSections:
     """Verify user-authored sections appear verbatim in prompt output."""
 
