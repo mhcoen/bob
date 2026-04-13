@@ -695,16 +695,16 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
     - [x] `_check_migration` on a non-duplo directory (no `.duplo/duplo.json`): no output, no exit
     - [x] Message text test: pin the exact message content by snapshot comparison to a fixture file. This protects against accidental wording drift.
 
-- [ ] Wire `_check_migration` into `main.py` dispatch (Phase 2 dispatch order)
+- [x] Wire `_check_migration` into `main.py` dispatch (Phase 2 dispatch order)
   - [x] Per MIGRATION-design.md § Implementation "Phase 2 dispatch order": at the top of `main()`, after argv parsing but before any other work, branch on subcommand. If subcommand is `fix` or `investigate`, dispatch to the existing handlers WITHOUT calling `_check_migration` (those subcommands work on already-initialized projects regardless of layout and should not be blocked by migration).
   - [x] If there is no subcommand (the default `duplo` invocation), call `_check_migration(Path.cwd())` FIRST, before any other work. If `_check_migration` exits, nothing else in `main()` runs.
   - [x] If `_check_migration` returns, proceed with the existing no-subcommand code path unchanged. `_first_run` and `_subsequent_run` are NOT touched in this phase.
   - [x] Do NOT add an `init` branch — `duplo init` does not exist yet; that lands in Phase 4. If the user types `duplo init` today, argparse should reject it with an unknown-subcommand error as it does now.
-  - [ ] Tests (these are integration-style tests against `main`, using `capsys` and monkeypatching `sys.argv` / `Path.cwd`):
+  - [x] Tests (these are integration-style tests against `main`, using `capsys` and monkeypatching `sys.argv` / `Path.cwd`):
     - [x] `duplo` (no args) in an old-layout temp directory: prints migration message, exits 1, does not call `_subsequent_run` or `_first_run`
     - [x] `duplo` (no args) in a new-format temp directory: migration check passes silently, proceeds to the existing dispatch (may exit for other reasons like missing purpose, but NOT the migration message)
     - [x] `duplo fix` in an old-layout directory: bypasses migration check, dispatches to existing `fix` handler. Confirm by patching the fix handler and asserting it was called.
-    - [ ] `duplo investigate` in an old-layout directory: same as above for the investigate handler.
+    - [x] `duplo investigate` in an old-layout directory: same as above for the investigate handler.
 
 - [ ] Add tests for edge cases specific to migration detection
   - [ ] Case: `.duplo/duplo.json` is corrupted JSON. `needs_migration` should still return True (the presence of the file, not its contents, is what matters for migration detection). The check must NOT try to parse it.
