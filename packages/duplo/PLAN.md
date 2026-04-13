@@ -244,10 +244,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add `sources` to `_KNOWN_SECTIONS`.
   - [x] Tests: single entry, multiple entries, all field combinations, invalid URLs dropped, invalid roles dropped (entry removed entirely), invalid scrape defaulting to `none`, comment-stripped examples not parsed as real entries, multi-line `notes:` parsed correctly.
 
-- [ ] Add `## Notes` parser
+- [x] Add `## Notes` parser
   - [x] Trivial: store comment-stripped body as `spec.notes`. No structured parsing.
   - [x] Add `notes` to `_KNOWN_SECTIONS`.
-  - [ ] Tests: present section captured verbatim; absent section yields empty string; comment blocks stripped before storage.
+  - [x] Tests: present section captured verbatim; absent section yields empty string; comment blocks stripped before storage.
 
 - [ ] Convert `## References` parser from prose to structured entries
   - [ ] Add bare and quoted entry-start regexes per PARSER-design.md § `## References` parser. Bare form matches list-item lines starting with `ref/` followed by a path with non-greedy whitespace handling (paths with spaces are common; macOS screenshots default to names like `Screen Shot 2025-10-12 at 14.30.png`). Quoted form matches `- "ref/..."` and strips the quotes after match (for paths with unusual characters).
