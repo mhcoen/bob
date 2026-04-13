@@ -280,10 +280,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] All four return `list[ReferenceEntry]` (not `list[Path]`) so callers can inspect roles, notes, and flags. Path extraction is `[e.path for e in ...]` at the call site.
   - [x] Tests: each formatter returns the right filtered list; each excludes `proposed: true`; entries with multiple roles appear in every matching formatter; each handles empty input gracefully.
 
-- [ ] Add `format_scrapeable_sources(spec) -> list[SourceEntry]`
+- [x] Add `format_scrapeable_sources(spec) -> list[SourceEntry]`
   - [x] Returns source entries where `scrape` is `deep` or `shallow`, AND `discovered: false`, AND `proposed: false`, AND `role` is NOT `counter-example`.
   - [x] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
-  - [ ] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
+  - [x] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
 
 - [ ] Add `format_design_for_prompt(spec) -> str`
   - [ ] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
