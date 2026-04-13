@@ -3678,3 +3678,255 @@ class TestBackwardCompatOldFormatSpec:
         assert spec.references == []
         result = validate_for_run(spec)
         assert result.errors == []
+
+
+class TestReadSpecFullyPopulated:
+    """Write a fully-populated SPEC.md to disk, call read_spec(), verify all fields.
+
+    This is an end-to-end test that exercises the file-reading path (not
+    just _parse_spec).  Every recognised section is present and populated:
+    Purpose, Scope, Behavior, Architecture, Design (with AUTO-GENERATED
+    block), Sources (multiple entries with all fields), References
+    (multiple entries with multi-role and notes), and Notes.
+    """
+
+    FULL_SPEC = """\
+# WidgetApp
+
+## Purpose
+
+A macOS desktop widget manager that lets users create, arrange, and \
+customize sticky widgets on their desktop.
+
+## Scope
+
+- include: sticky notes, clock widget, weather widget
+- exclude: iOS support, Windows support
+
+## Behavior
+
+- `2+2` → `4`
+- `hello world` should produce `HELLO WORLD`
+- `100 USD` => `85 EUR`
+
+## Architecture
+
+Swift 5.9, SwiftUI, macOS 14+. AppKit for window management. \
+No external dependencies except Alamofire for networking.
+
+## Design
+
+Translucent frosted-glass widgets with rounded corners. \
+System font at 14pt. Accent color: teal.
+
+<!-- BEGIN AUTO-GENERATED design-requirements -->
+colors: #1a1a2e, #16213e, #0f3460, #e94560
+fonts: SF Pro Text 14pt, SF Mono 12pt
+spacing: 8px grid
+<!-- END AUTO-GENERATED -->
+
+## Sources
+
+- https://widgetapp.example.com
+  role: product-reference
+  scrape: deep
+  notes: main product site with feature tour
+- https://docs.widgetapp.example.com/api
+  role: docs
+  scrape: shallow
+  notes: API reference for widget extensions
+- https://competitor.example.com
+  role: counter-example
+  scrape: none
+  notes: competitor product to differentiate from
+
+## References
+
+- ref/demo-walkthrough.mp4
+  role: visual-target, behavioral-target
+  notes: full product demo showing widget creation flow
+- ref/design-mockup.png
+  role: visual-target
+  notes: Figma export of final design
+- ref/api-spec.pdf
+  role: docs
+  notes: internal API specification document
+
+## Notes
+
+Focus on the core widget creation flow first. Weather widget \
+depends on a third-party API key — defer to Phase 2. The clock \
+widget should use the system timezone by default.
+"""
+
+    def test_read_spec_returns_product_spec(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert isinstance(spec, ProductSpec)
+
+    def test_raw_is_full_text(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.raw == self.FULL_SPEC
+
+    def test_purpose(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "macOS desktop widget manager" in spec.purpose
+        assert "sticky widgets" in spec.purpose
+
+    def test_scope_raw(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "include:" in spec.scope
+        assert "exclude:" in spec.scope
+
+    def test_scope_include(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "sticky notes" in spec.scope_include
+        assert "clock widget" in spec.scope_include
+        assert "weather widget" in spec.scope_include
+
+    def test_scope_exclude(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "iOS support" in spec.scope_exclude
+        assert "Windows support" in spec.scope_exclude
+
+    def test_behavior_raw(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "`2+2`" in spec.behavior
+        assert "`hello world`" in spec.behavior
+
+    def test_behavior_contracts(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert len(spec.behavior_contracts) == 3
+        inputs = [c.input for c in spec.behavior_contracts]
+        expected = [c.expected for c in spec.behavior_contracts]
+        assert "2+2" in inputs
+        assert "4" in expected
+        assert "hello world" in inputs
+        assert "HELLO WORLD" in expected
+        assert "100 USD" in inputs
+        assert "85 EUR" in expected
+
+    def test_architecture(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "Swift 5.9" in spec.architecture
+        assert "SwiftUI" in spec.architecture
+        assert "Alamofire" in spec.architecture
+
+    def test_design_block_type(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert isinstance(spec.design, DesignBlock)
+
+    def test_design_user_prose(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "frosted-glass" in spec.design.user_prose
+        assert "teal" in spec.design.user_prose
+
+    def test_design_auto_generated(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "#1a1a2e" in spec.design.auto_generated
+        assert "#e94560" in spec.design.auto_generated
+        assert "SF Pro Text" in spec.design.auto_generated
+
+    def test_design_no_fill_in(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.design.has_fill_in_marker is False
+
+    def test_sources_count(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert len(spec.sources) == 3
+
+    def test_sources_product_reference(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        src = spec.sources[0]
+        assert isinstance(src, SourceEntry)
+        assert src.url == "https://widgetapp.example.com"
+        assert src.role == "product-reference"
+        assert src.scrape == "deep"
+        assert src.notes == "main product site with feature tour"
+        assert src.proposed is False
+        assert src.discovered is False
+
+    def test_sources_docs(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        src = spec.sources[1]
+        assert src.url == "https://docs.widgetapp.example.com/api"
+        assert src.role == "docs"
+        assert src.scrape == "shallow"
+        assert src.notes == "API reference for widget extensions"
+
+    def test_sources_counter_example(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        src = spec.sources[2]
+        assert src.url == "https://competitor.example.com"
+        assert src.role == "counter-example"
+        assert src.scrape == "none"
+        assert "competitor" in src.notes
+
+    def test_references_count(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert len(spec.references) == 3
+
+    def test_references_multi_role(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        ref = spec.references[0]
+        assert isinstance(ref, ReferenceEntry)
+        assert ref.path == Path("ref/demo-walkthrough.mp4")
+        assert "visual-target" in ref.roles
+        assert "behavioral-target" in ref.roles
+        assert "widget creation flow" in ref.notes
+        assert ref.proposed is False
+
+    def test_references_single_role(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        ref = spec.references[1]
+        assert ref.path == Path("ref/design-mockup.png")
+        assert ref.roles == ["visual-target"]
+        assert "Figma" in ref.notes
+
+    def test_references_docs_role(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        ref = spec.references[2]
+        assert ref.path == Path("ref/api-spec.pdf")
+        assert ref.roles == ["docs"]
+
+    def test_notes(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert "core widget creation flow" in spec.notes
+        assert "Phase 2" in spec.notes
+        assert "system timezone" in spec.notes
+
+    def test_fill_in_flags_all_false(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.fill_in_purpose is False
+        assert spec.fill_in_architecture is False
+        assert spec.fill_in_design is False
+
+    def test_passes_validation(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(self.FULL_SPEC)
+        spec = read_spec(target_dir=tmp_path)
+        result = validate_for_run(spec)
+        assert result.errors == []
+        assert result.warnings == []
