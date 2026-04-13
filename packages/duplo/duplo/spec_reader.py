@@ -55,6 +55,86 @@ def _strip_comments(body: str) -> str:
     return _HTML_COMMENT_RE.sub("", body)
 
 
+def _parse_source_entries(body: str) -> list[SourceEntry]:
+    """Parse ``## Sources`` section body into :class:`SourceEntry` objects.
+
+    Scans *body* line-by-line.  An entry starts with a list-item line
+    matching ``_SOURCE_ENTRY_START`` (``- <url>``).  Subsequent indented
+    ``key: value`` lines (matching ``_FIELD_LINE``) are accumulated as
+    fields.  Multi-line ``notes:`` values are supported: any line
+    indented further than the field-name column is appended as a
+    continuation.  An entry ends at the next entry start, a blank line,
+    or a line that is neither a field nor a continuation.
+    """
+    entries: list[SourceEntry] = []
+    current_url: str | None = None
+    fields: dict[str, str] = {}
+    in_notes = False
+    notes_indent = 0
+
+    def _flush() -> None:
+        nonlocal current_url, fields, in_notes, notes_indent
+        if current_url is not None:
+            entry = SourceEntry(
+                url=current_url,
+                role=fields.get("role", ""),
+                scrape=fields.get("scrape", ""),
+                notes=fields.get("notes", "").strip(),
+                proposed=fields.get("proposed", "").lower() == "true",
+                discovered=fields.get("discovered", "").lower() == "true",
+            )
+            entries.append(entry)
+        current_url = None
+        fields = {}
+        in_notes = False
+        notes_indent = 0
+
+    for line in body.splitlines():
+        # Check for new entry start.
+        entry_m = _SOURCE_ENTRY_START.match(line)
+        if entry_m:
+            _flush()
+            current_url = entry_m.group(1)
+            continue
+
+        # Outside an entry, skip.
+        if current_url is None:
+            continue
+
+        # Blank line ends the current entry.
+        if not line.strip():
+            _flush()
+            continue
+
+        # Try matching a field line.
+        field_m = _FIELD_LINE.match(line)
+        if field_m:
+            key = field_m.group(1).lower()
+            value = field_m.group(2)
+            fields[key] = value
+            in_notes = key == "notes"
+            if in_notes:
+                # Record the indent of the field name for continuation
+                # detection.  The field name starts after the leading
+                # whitespace, so we measure leading whitespace length.
+                notes_indent = len(line) - len(line.lstrip())
+            continue
+
+        # Continuation of a multi-line notes field: the line must be
+        # indented further than the field-name indent.
+        if in_notes:
+            line_indent = len(line) - len(line.lstrip())
+            if line_indent > notes_indent:
+                fields["notes"] = fields.get("notes", "") + "\n" + line.strip()
+                continue
+
+        # Unrecognised line — end the current entry.
+        _flush()
+
+    _flush()
+    return entries
+
+
 # Patterns inside the Scope section.
 _INCLUDE_RE = re.compile(
     r"^\s*[-*]\s*(?:include|add|keep|want|need)\s*:\s*(.+)",

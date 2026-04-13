@@ -16,6 +16,7 @@ from duplo.spec_reader import (
     _HTML_COMMENT_RE,
     _SOURCE_ENTRY_START,
     _parse_contracts,
+    _parse_source_entries,
     _parse_spec,
     _split_sections,
     _strip_comments,
@@ -558,3 +559,160 @@ class TestFieldLine:
         assert m is not None
         assert m.group(1) == "notes"
         assert m.group(2) == "continuation text"
+
+
+class TestParseSourceEntries:
+    def test_single_entry_all_fields(self):
+        body = (
+            "- https://example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+            "  notes: main site\n"
+            "  proposed: true\n"
+            "  discovered: true\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.url == "https://example.com"
+        assert entry.role == "product-reference"
+        assert entry.scrape == "deep"
+        assert entry.notes == "main site"
+        assert entry.proposed is True
+        assert entry.discovered is True
+
+    def test_single_entry_minimal_fields(self):
+        body = "- https://example.com\n  role: docs\n  scrape: shallow\n"
+        entries = _parse_source_entries(body)
+        assert len(entries) == 1
+        assert entries[0].url == "https://example.com"
+        assert entries[0].role == "docs"
+        assert entries[0].scrape == "shallow"
+        assert entries[0].notes == ""
+        assert entries[0].proposed is False
+        assert entries[0].discovered is False
+
+    def test_multiple_entries(self):
+        body = (
+            "- https://example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+            "\n"
+            "- https://docs.example.com\n"
+            "  role: docs\n"
+            "  scrape: shallow\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 2
+        assert entries[0].url == "https://example.com"
+        assert entries[0].role == "product-reference"
+        assert entries[1].url == "https://docs.example.com"
+        assert entries[1].role == "docs"
+
+    def test_entries_separated_by_new_entry_no_blank_line(self):
+        body = (
+            "- https://a.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "- https://b.com\n"
+            "  role: docs\n"
+            "  scrape: deep\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 2
+        assert entries[0].url == "https://a.com"
+        assert entries[1].url == "https://b.com"
+
+    def test_multiline_notes(self):
+        body = (
+            "- https://example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+            "  notes: first line\n"
+            "    second line\n"
+            "    third line\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 1
+        assert entries[0].notes == "first line\nsecond line\nthird line"
+
+    def test_multiline_notes_stops_at_next_field(self):
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  notes: line one\n"
+            "    line two\n"
+            "  scrape: deep\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 1
+        assert entries[0].notes == "line one\nline two"
+        assert entries[0].scrape == "deep"
+
+    def test_multiline_notes_stops_at_blank_line(self):
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: first\n"
+            "    second\n"
+            "\n"
+            "- https://other.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+        )
+        entries = _parse_source_entries(body)
+        assert len(entries) == 2
+        assert entries[0].notes == "first\nsecond"
+
+    def test_empty_body(self):
+        assert _parse_source_entries("") == []
+
+    def test_body_with_no_entries(self):
+        body = "Some prose about sources.\nNo actual list items."
+        assert _parse_source_entries(body) == []
+
+    def test_missing_optional_fields_default(self):
+        body = "- https://example.com\n  role: docs\n  scrape: none\n"
+        entries = _parse_source_entries(body)
+        assert entries[0].proposed is False
+        assert entries[0].discovered is False
+        assert entries[0].notes == ""
+
+    def test_proposed_false_string(self):
+        body = "- https://example.com\n  role: docs\n  scrape: none\n  proposed: false\n"
+        entries = _parse_source_entries(body)
+        assert entries[0].proposed is False
+
+    def test_notes_empty_value(self):
+        body = "- https://example.com\n  role: docs\n  scrape: none\n  notes:\n"
+        entries = _parse_source_entries(body)
+        assert entries[0].notes == ""
+
+    def test_notes_continuation_requires_deeper_indent(self):
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: start\n"
+            "  not a continuation\n"
+        )
+        # "  not a continuation" has same indent as "  notes:", so it's
+        # not a continuation.  If it matches _FIELD_LINE it becomes a
+        # new field; otherwise the entry ends.  Here "not" has no colon
+        # after a word, so it doesn't match _FIELD_LINE and the entry
+        # ends.
+        entries = _parse_source_entries(body)
+        assert len(entries) == 1
+        assert entries[0].notes == "start"
+
+    def test_multiline_notes_four_space_field_six_space_continuation(self):
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "    notes: deep start\n"
+            "      continued\n"
+        )
+        entries = _parse_source_entries(body)
+        assert entries[0].notes == "deep start\ncontinued"
