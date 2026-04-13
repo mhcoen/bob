@@ -674,7 +674,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Signal 1 (marker-string match, fast path): SPEC.md contains the literal substring `"How the pieces fit together:"`. This string appears in the top-matter comment of SPEC-template.md and will be present in any SPEC.md created by `duplo init` (once it ships) or by a user copying the template.
   - [x] Signal 2 (schema-structural match, fallback): SPEC.md contains an `## Sources` heading (matched via `re.search(r"^## Sources\s*$", spec_text, re.MULTILINE)`). Either signal is sufficient to classify as new-format.
   - [x] Returns False when `.duplo/duplo.json` does not exist (not a duplo project).
-  - [ ] Returns True when `.duplo/duplo.json` exists AND SPEC.md is absent OR SPEC.md has neither signal.
+  - [x] Returns True when `.duplo/duplo.json` exists AND SPEC.md is absent OR SPEC.md has neither signal.
   - [ ] Why two signals: Phase 2 instructs users to author SPEC.md by hand using the template as a starting point. A user who writes a valid minimal new-format SPEC.md without copying the top-matter comment would otherwise stay stuck in migration forever. The `## Sources` structural signal is the lowest-ceremony marker of new-format intent.
   - [ ] Tests:
     - [ ] returns True for old layout (has `.duplo/duplo.json`, no SPEC.md)
