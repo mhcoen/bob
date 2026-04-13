@@ -5065,6 +5065,47 @@ class TestMigrationDispatchOrder:
         assert first_run_called == []
         assert subsequent_run_called == []
 
+    def test_new_format_dir_passes_migration_proceeds(
+        self,
+        capsys,
+        tmp_path,
+        monkeypatch,
+    ):
+        """duplo (no args) in new-format dir: migration passes silently,
+        proceeds to existing dispatch (subsequent run, since duplo.json
+        exists). May exit for other reasons but NOT the migration message."""
+        from duplo.migration import _check_migration as real_check
+
+        monkeypatch.setattr("duplo.main._check_migration", real_check)
+
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text('{"features": []}')
+        # New-format SPEC.md with ## Sources heading.
+        (tmp_path / "SPEC.md").write_text("# My App\n\n## Purpose\nA test app.\n\n## Sources\n")
+        monkeypatch.chdir(tmp_path)
+
+        subsequent_run_called = []
+        first_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._subsequent_run",
+            lambda: subsequent_run_called.append(True),
+        )
+        monkeypatch.setattr(
+            "duplo.main._first_run",
+            lambda **kw: first_run_called.append(kw),
+        )
+
+        main()
+
+        # Migration did NOT fire — no migration message in output.
+        captured = capsys.readouterr()
+        assert "SPEC.md" not in captured.out
+        assert "Migrate manually" not in captured.out
+        # Proceeded to subsequent run (duplo.json exists).
+        assert len(subsequent_run_called) == 1
+        assert first_run_called == []
+
     def test_migration_pass_proceeds_to_first_run(self, tmp_path, monkeypatch):
         """When _check_migration returns, _first_run is called (no duplo.json)."""
         monkeypatch.chdir(tmp_path)
