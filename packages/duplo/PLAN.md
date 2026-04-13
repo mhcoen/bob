@@ -678,7 +678,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Why two signals: Phase 2 instructs users to author SPEC.md by hand using the template as a starting point. A user who writes a valid minimal new-format SPEC.md without copying the top-matter comment would otherwise stay stuck in migration forever. The `## Sources` structural signal is the lowest-ceremony marker of new-format intent.
   - [ ] Tests:
     - [x] returns True for old layout (has `.duplo/duplo.json`, no SPEC.md)
-    - [ ] returns True for old layout with an old-format SPEC.md (has `.duplo/duplo.json`, SPEC.md exists but has neither marker nor `## Sources`)
+    - [x] returns True for old layout with an old-format SPEC.md (has `.duplo/duplo.json`, SPEC.md exists but has neither marker nor `## Sources`)
     - [ ] returns False for new-format with marker string (has `.duplo/duplo.json`, SPEC.md contains `"How the pieces fit together:"`)
     - [ ] returns False for new-format with `## Sources` heading but no marker string (structural fallback)
     - [ ] returns False when `.duplo/duplo.json` does not exist (not a duplo project at all)
