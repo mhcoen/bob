@@ -304,6 +304,32 @@ def test_bom_prefixed_old_format_spec(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is True
 
 
+def test_sources_inside_fenced_code_block(tmp_path: Path) -> None:
+    """## Sources inside a fenced code block is a false positive → no migration.
+
+    The multiline regex ``^## Sources\\s*$`` matches even when the
+    heading appears inside a fenced code block (e.g. an example in
+    the top-matter comment).  This is accepted as intentional: it is
+    better to let through a near-new-format file than to force-migrate
+    it.  This test pins the current behavior so any future fix that
+    adds fence-awareness is deliberate.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    spec = (
+        "# My App\n\n"
+        "Here is an example SPEC.md:\n\n"
+        "```markdown\n"
+        "## Sources\n"
+        "- https://example.com\n"
+        "```\n"
+    )
+    (tmp_path / "SPEC.md").write_text(spec)
+    # False positive: the regex matches inside the fence.
+    # This is acceptable — see migration.py comment.
+    assert needs_migration(tmp_path) is False
+
+
 class TestCheckMigration:
     """Tests for _check_migration()."""
 

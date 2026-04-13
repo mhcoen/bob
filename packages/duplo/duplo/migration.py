@@ -53,6 +53,10 @@ def needs_migration(target_dir: Path) -> bool:
     # Either signal is sufficient to declare the spec new-format.
     if "How the pieces fit together:" in spec_text:
         return False
+    # NOTE: This regex matches ``## Sources`` even inside fenced code blocks.
+    # That is acceptable — a near-new-format file that happens to show
+    # ``## Sources`` in an example should not be force-migrated.  See
+    # test_sources_inside_fenced_code_block for the pinning test.
     if re.search(r"^## Sources\s*$", spec_text, re.MULTILINE):
         return False
     return True
