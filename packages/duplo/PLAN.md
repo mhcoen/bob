@@ -285,11 +285,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
   - [x] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
 
-- [ ] Add `format_design_for_prompt(spec) -> str`
+- [x] Add `format_design_for_prompt(spec) -> str`
   - [x] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
   - [x] If only one is present, return that one.
   - [x] If neither, return empty string.
-  - [ ] Tests: each combination produces expected output; user_prose comes first when both present.
+  - [x] Tests: each combination produces expected output; user_prose comes first when both present.
 
 - [ ] Rewrite `format_spec_for_prompt` to serialize from dataclasses (prompt-injection safety invariant)
   - [ ] Replace the existing implementation that returns `spec.raw`. The new implementation serializes from parsed `ProductSpec` fields, NOT from raw text.
