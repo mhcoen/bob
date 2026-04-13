@@ -36,7 +36,7 @@ the old subcommand parsing or the old init/run/next flow.
   - [x] Add a test asserting `duplo fix` without `--investigate` falls back to raw `- [ ] Fix:` task lines when `result.diagnoses` is empty.
 
 - [ ] Harden `claude_cli.query` and `query_with_images` timeout handling (claude_cli.py:28-45, 78-95). Both call `subprocess.run(..., timeout=300)` but catch only `FileNotFoundError` and non-zero return codes; a `subprocess.TimeoutExpired` propagates up as an uncaught exception. Callers `extractor.extract_features` (extractor.py:113-115) and `design_extractor.extract_design` (design_extractor.py:71-78) do not catch `ClaudeCliError` either, so a hang-then-timeout kills the run. Wrap both subprocess calls to catch `TimeoutExpired`, convert to `ClaudeCliError` with a clear message, and have the two callers catch `ClaudeCliError` and either retry or record a diagnostic via the same pattern used in `investigator.py:127-155` and `saver.py:357-365`.
-  - [ ] Add tests that monkeypatch `subprocess.run` to raise `TimeoutExpired` and assert `query` / `query_with_images` raise `ClaudeCliError` rather than leaking the original exception.
+  - [x] Add tests that monkeypatch `subprocess.run` to raise `TimeoutExpired` and assert `query` / `query_with_images` raise `ClaudeCliError` rather than leaking the original exception.
   - [ ] Add tests that `extract_features` and `extract_design` handle `ClaudeCliError` without crashing the caller.
 
 
