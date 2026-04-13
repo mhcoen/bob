@@ -291,7 +291,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] If neither, return empty string.
   - [x] Tests: each combination produces expected output; user_prose comes first when both present.
 
-- [ ] Rewrite `format_spec_for_prompt` to serialize from dataclasses (prompt-injection safety invariant)
+- [x] Rewrite `format_spec_for_prompt` to serialize from dataclasses (prompt-injection safety invariant)
   - [x] Replace the existing implementation that returns `spec.raw`. The new implementation serializes from parsed `ProductSpec` fields, NOT from raw text.
   - [x] Include user-authored sections verbatim: `## Purpose`, `## Architecture`, `## Design.user_prose`, `## Scope`, `## Behavior`, `## Notes`.
   - [x] For `## Sources`: include only entries where `proposed: false` AND `discovered: false` AND `role` is NOT `counter-example`.
@@ -299,7 +299,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] For `## Design`: include `auto_generated` content alongside `user_prose` (autogen is derived from non-proposed visual targets only and has already been filtered upstream).
   - [x] Wrap output in the existing labelled prefix ("PRODUCT SPECIFICATION (authored by the user...") so existing consumers see equivalent framing.
   - [x] Update existing tests for `format_spec_for_prompt` (output format will differ) so they pin the new behavior.
-  - [ ] **Prompt-injection invariant test (highest-stakes test in the phase)**: construct a spec containing `proposed: true` source, `discovered: true` source, `counter-example` source, `proposed: true` reference, and `counter-example` reference, all with distinctive recognizable content; assert that `format_spec_for_prompt(spec)` output does NOT contain any of those entries' content. This test pins the safety property for all downstream LLM call sites.
+  - [x] **Prompt-injection invariant test (highest-stakes test in the phase)**: construct a spec containing `proposed: true` source, `discovered: true` source, `counter-example` source, `proposed: true` reference, and `counter-example` reference, all with distinctive recognizable content; assert that `format_spec_for_prompt(spec)` output does NOT contain any of those entries' content. This test pins the safety property for all downstream LLM call sites.
 
 - [ ] Add `validate_for_run(spec) -> list[str]` and wire into `main.py`
   - [ ] Returns list of human-readable error messages; empty list means OK to run.
