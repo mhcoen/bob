@@ -4532,7 +4532,7 @@ class TestSubsequentRunSpecVerificationIndependent:
                 "behavior_contracts": [contract],
                 "scope_include": None,
                 "scope_exclude": None,
-                "purpose": "",
+                "purpose": "A" * 50,
                 "scope": "",
                 "behavior": "",
                 "architecture": "",
@@ -4540,6 +4540,9 @@ class TestSubsequentRunSpecVerificationIndependent:
                 "sources": [],
                 "references": [],
                 "notes": "",
+                "fill_in_purpose": False,
+                "fill_in_architecture": False,
+                "fill_in_design": False,
             },
         )()
 
@@ -4678,3 +4681,133 @@ class TestSubsequentRunSpecVerificationIndependent:
         saved_content = mock_save.call_args[0][0]
         assert "Verify: type `1+1`" in saved_content
         assert "Functional verification from product spec" in saved_content
+
+
+class TestValidateForRunWiring:
+    """validate_for_run is called after read_spec in _first_run and _subsequent_run."""
+
+    def test_first_run_exits_on_validation_errors(self, tmp_path, monkeypatch, capsys):
+        """_first_run exits 1 when validate_for_run returns errors."""
+        (tmp_path / "screenshot.png").write_bytes(b"PNG")
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.spec_reader import ValidationResult
+
+        mock_spec = type("Spec", (), {"raw": "x" * 100})()
+        vr = ValidationResult(
+            errors=["## Purpose still contains <FILL IN>"],
+            warnings=["some warning"],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=mock_spec),
+            patch("duplo.main.validate_for_run", return_value=vr),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "some warning" in captured.out
+        assert "## Purpose still contains <FILL IN>" in captured.err
+
+    def test_first_run_continues_on_warnings_only(self, tmp_path, monkeypatch, capsys):
+        """_first_run prints warnings but does not exit when no errors."""
+        (tmp_path / "links.txt").write_text("https://example.com")
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.spec_reader import ValidationResult
+
+        mock_spec = type(
+            "Spec",
+            (),
+            {
+                "raw": "x" * 100,
+                "behavior_contracts": [],
+                "scope_include": None,
+                "scope_exclude": None,
+            },
+        )()
+        vr = ValidationResult(
+            errors=[],
+            warnings=["design will be inferred"],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=mock_spec),
+            patch("duplo.main.validate_for_run", return_value=vr),
+            patch("duplo.main.format_spec_for_prompt", return_value=""),
+            patch(
+                "duplo.main._validate_url",
+                return_value=("https://example.com", "Example"),
+            ),
+            patch("duplo.main._confirm_product", return_value="Example"),
+            patch("duplo.main.fetch_site", return_value=("text", [], None, [], {})),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md", return_value=tmp_path / "CLAUDE.md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        captured = capsys.readouterr()
+        assert "design will be inferred" in captured.out
+
+    def test_subsequent_run_exits_on_validation_errors(self, tmp_path, monkeypatch, capsys):
+        """_subsequent_run exits 1 when validate_for_run returns errors."""
+        _write_duplo_json(tmp_path, {"features": []})
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.spec_reader import ValidationResult
+
+        mock_spec = type("Spec", (), {"raw": "x" * 100})()
+        vr = ValidationResult(
+            errors=["## Architecture still contains <FILL IN>"],
+            warnings=[],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=mock_spec),
+            patch("duplo.main.validate_for_run", return_value=vr),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "## Architecture still contains <FILL IN>" in captured.err
+
+    def test_no_validation_when_no_spec(self, tmp_path, monkeypatch):
+        """When read_spec returns None, validate_for_run is not called."""
+        (tmp_path / "screenshot.png").write_bytes(b"PNG")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.main.validate_for_run") as mock_validate,
+            patch("duplo.main.scan_directory") as mock_scan,
+        ):
+            mock_scan.return_value = type(
+                "S",
+                (),
+                {
+                    "images": [],
+                    "videos": [],
+                    "pdfs": [],
+                    "text_files": [],
+                    "urls": [],
+                    "relevance": [],
+                },
+            )()
+            with pytest.raises(SystemExit):
+                main()
+
+        mock_validate.assert_not_called()

@@ -246,6 +246,7 @@ from duplo.spec_reader import (
     format_contracts_as_verification,
     format_spec_for_prompt,
     read_spec,
+    validate_for_run,
 )
 from duplo.saver import (
     advance_phase,
@@ -629,6 +630,13 @@ def _first_run(*, url: str | None = None) -> None:
     spec = read_spec()
     if spec:
         print(f"Product spec loaded from SPEC.md ({len(spec.raw)} chars).")
+        validation = validate_for_run(spec)
+        for warning in validation.warnings:
+            print(f"Warning: {warning}")
+        if validation.errors:
+            for err in validation.errors:
+                print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
     spec_prompt = format_spec_for_prompt(spec) if spec else ""
 
     scan = scan_directory(".")
@@ -1351,6 +1359,13 @@ def _subsequent_run() -> None:
     spec = read_spec()
     if spec:
         print(f"Product spec loaded from SPEC.md ({len(spec.raw)} chars).")
+        validation = validate_for_run(spec)
+        for warning in validation.warnings:
+            print(f"Warning: {warning}")
+        if validation.errors:
+            for err in validation.errors:
+                print(f"Error: {err}", file=sys.stderr)
+            sys.exit(1)
     spec_prompt = format_spec_for_prompt(spec) if spec else ""
 
     duplo_path = Path(_DUPLO_JSON)
