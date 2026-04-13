@@ -232,12 +232,16 @@ class TestCheckMigration:
         assert "SPEC-template.md" in captured.out
         assert "mkdir ref" in captured.out
 
-    def test_no_exit_on_new_format(self, tmp_path: Path) -> None:
-        """New-format project → returns without exiting."""
+    def test_no_exit_on_new_format(self, tmp_path: Path, capsys) -> None:
+        """New-format project → no output, no exit, returns None."""
         (tmp_path / ".duplo").mkdir()
         (tmp_path / ".duplo" / "duplo.json").write_text("{}")
         (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n")
-        _check_migration(tmp_path)  # should not raise
+        result = _check_migration(tmp_path)
+        assert result is None
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
 
     def test_no_exit_on_non_duplo_dir(self, tmp_path: Path) -> None:
         """Non-duplo directory → returns without exiting."""
