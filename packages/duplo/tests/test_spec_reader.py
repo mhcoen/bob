@@ -306,6 +306,38 @@ class TestFormatSpecForPrompt:
         assert "Dark theme" in result
         assert "colors: #000" in result
 
+    def test_design_auto_generated_only(self):
+        spec = ProductSpec(
+            design=DesignBlock(user_prose="", auto_generated="colors: #2b2b2b"),
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Design" in result
+        assert "colors: #2b2b2b" in result
+
+    def test_design_user_prose_only(self):
+        spec = ProductSpec(
+            design=DesignBlock(user_prose="Dark theme", auto_generated=""),
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Design" in result
+        assert "Dark theme" in result
+
+    def test_design_empty_omitted(self):
+        spec = ProductSpec(
+            purpose="Test",
+            design=DesignBlock(user_prose="", auto_generated=""),
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Design" not in result
+
+    def test_design_both_ordered(self):
+        """user_prose appears before auto_generated in the output."""
+        spec = ProductSpec(
+            design=DesignBlock(user_prose="AAA", auto_generated="ZZZ"),
+        )
+        result = format_spec_for_prompt(spec)
+        assert result.index("AAA") < result.index("ZZZ")
+
     def test_includes_safe_sources(self):
         spec = ProductSpec(
             sources=[
