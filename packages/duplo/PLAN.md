@@ -245,7 +245,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: single entry, multiple entries, all field combinations, invalid URLs dropped, invalid roles dropped (entry removed entirely), invalid scrape defaulting to `none`, comment-stripped examples not parsed as real entries, multi-line `notes:` parsed correctly.
 
 - [ ] Add `## Notes` parser
-  - [ ] Trivial: store comment-stripped body as `spec.notes`. No structured parsing.
+  - [x] Trivial: store comment-stripped body as `spec.notes`. No structured parsing.
   - [ ] Add `notes` to `_KNOWN_SECTIONS`.
   - [ ] Tests: present section captured verbatim; absent section yields empty string; comment blocks stripped before storage.
 
