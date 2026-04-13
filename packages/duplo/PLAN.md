@@ -281,7 +281,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: each formatter returns the right filtered list; each excludes `proposed: true`; entries with multiple roles appear in every matching formatter; each handles empty input gracefully.
 
 - [ ] Add `format_scrapeable_sources(spec) -> list[SourceEntry]`
-  - [ ] Returns source entries where `scrape` is `deep` or `shallow`, AND `discovered: false`, AND `proposed: false`, AND `role` is NOT `counter-example`.
+  - [x] Returns source entries where `scrape` is `deep` or `shallow`, AND `discovered: false`, AND `proposed: false`, AND `role` is NOT `counter-example`.
   - [ ] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
   - [ ] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
 
