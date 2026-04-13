@@ -16,6 +16,7 @@ from duplo.spec_reader import (
     _FIELD_LINE,
     _FILL_IN_RE,
     _HTML_COMMENT_RE,
+    _KNOWN_SECTIONS,
     _SOURCE_ENTRY_START,
     _VALID_SCRAPE_VALUES,
     _VALID_SOURCE_ROLES,
@@ -990,3 +991,10 @@ class TestDiagnosticRecordStructure:
         assert len(errors) == 2
         assert "unknown role" in errors[0]["message"]
         assert "unknown scrape" in errors[1]["message"]
+
+
+class TestKnownSections:
+    """``_KNOWN_SECTIONS`` recognises all expected headings."""
+
+    def test_sources_in_known_sections(self):
+        assert "sources" in _KNOWN_SECTIONS

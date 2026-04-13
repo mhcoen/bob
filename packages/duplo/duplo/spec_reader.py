@@ -37,6 +37,7 @@ _KNOWN_SECTIONS = {
     "architecture",
     "design",
     "references",
+    "sources",
 }
 
 _HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
