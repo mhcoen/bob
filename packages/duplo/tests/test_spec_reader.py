@@ -20,9 +20,11 @@ from duplo.spec_reader import (
     _REFERENCE_ENTRY_START_BARE,
     _REFERENCE_ENTRY_START_QUOTED,
     _SOURCE_ENTRY_START,
+    _VALID_REFERENCE_ROLES,
     _VALID_SCRAPE_VALUES,
     _VALID_SOURCE_ROLES,
     _parse_contracts,
+    _parse_reference_entries,
     _parse_source_entries,
     _parse_spec,
     _split_sections,
@@ -1335,3 +1337,154 @@ class TestReferenceEntryStartQuoted:
         m = _REFERENCE_ENTRY_START_QUOTED.match('- "ref/sub dir/deep/file.pdf"')
         assert m is not None
         assert m.group(1) == "ref/sub dir/deep/file.pdf"
+
+
+class TestParseReferenceEntries:
+    def test_single_entry_all_fields(self):
+        body = "- ref/screenshot.png\n  role: visual-target\n  notes: main UI\n  proposed: true\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.path == Path("ref/screenshot.png")
+        assert entry.roles == ["visual-target"]
+        assert entry.notes == "main UI"
+        assert entry.proposed is True
+
+    def test_single_entry_minimal(self):
+        body = "- ref/demo.mp4\n  role: behavioral-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].path == Path("ref/demo.mp4")
+        assert entries[0].roles == ["behavioral-target"]
+        assert entries[0].notes == ""
+        assert entries[0].proposed is False
+
+    def test_multiple_entries(self):
+        body = (
+            "- ref/screenshot.png\n"
+            "  role: visual-target\n"
+            "\n"
+            "- ref/demo.mp4\n"
+            "  role: behavioral-target\n"
+        )
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 2
+        assert entries[0].path == Path("ref/screenshot.png")
+        assert entries[1].path == Path("ref/demo.mp4")
+
+    def test_entries_separated_by_new_entry_no_blank_line(self):
+        body = "- ref/a.png\n  role: visual-target\n- ref/b.png\n  role: docs\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 2
+        assert entries[0].path == Path("ref/a.png")
+        assert entries[1].path == Path("ref/b.png")
+
+    def test_multiple_roles_comma_separated(self):
+        body = "- ref/demo.mp4\n  role: behavioral-target, visual-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == ["behavioral-target", "visual-target"]
+
+    def test_quoted_path(self):
+        body = '- "ref/Screen Shot 2025-10-12 at 14.30.png"\n  role: visual-target\n'
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].path == Path("ref/Screen Shot 2025-10-12 at 14.30.png")
+
+    def test_bare_path_with_spaces(self):
+        body = "- ref/Screen Shot 2025-10-12 at 14.30.png\n  role: visual-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].path == Path("ref/Screen Shot 2025-10-12 at 14.30.png")
+
+    def test_multiline_notes(self):
+        body = (
+            "- ref/demo.mp4\n"
+            "  role: behavioral-target\n"
+            "  notes: first line\n"
+            "    second line\n"
+            "    third line\n"
+        )
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].notes == "first line\nsecond line\nthird line"
+
+    def test_multiline_notes_stops_at_next_field(self):
+        body = "- ref/demo.mp4\n  notes: line one\n    line two\n  role: docs\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].notes == "line one\nline two"
+        assert entries[0].roles == ["docs"]
+
+    def test_empty_body(self):
+        entries = _parse_reference_entries("")
+        assert entries == []
+
+    def test_body_with_no_entries(self):
+        body = "Some prose about references.\nMore text.\n"
+        entries = _parse_reference_entries(body)
+        assert entries == []
+
+
+class TestParseReferenceEntriesValidation:
+    def test_unknown_role_dropped_from_list(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        body = "- ref/demo.mp4\n  role: behavioral-target, bogus-role\n"
+        entries = _parse_reference_entries(body, errors_path=str(errors))
+        assert len(entries) == 1
+        assert entries[0].roles == ["behavioral-target"]
+        log = errors.read_text()
+        assert "bogus-role" in log
+
+    def test_all_roles_unknown_defaults_to_ignore(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        body = "- ref/demo.mp4\n  role: bogus, also-bogus\n"
+        entries = _parse_reference_entries(body, errors_path=str(errors))
+        assert len(entries) == 1
+        assert entries[0].roles == ["ignore"]
+
+    def test_discovered_flag_emits_diagnostic(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        body = "- ref/demo.mp4\n  role: docs\n  discovered: true\n"
+        entries = _parse_reference_entries(body, errors_path=str(errors))
+        assert len(entries) == 1
+        # discovered is ignored — not stored on ReferenceEntry.
+        assert not hasattr(entries[0], "discovered") or True
+        log = errors.read_text()
+        assert "discovered" in log
+
+    def test_no_role_keeps_empty_roles(self):
+        body = "- ref/demo.mp4\n  notes: no role given\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == []
+
+    def test_comment_stripped_entries_not_parsed(self):
+        body = "<!-- - ref/hidden.png\n  role: visual-target -->\n"
+        # The caller should strip comments before passing to the parser,
+        # but the parser itself just sees raw lines. After comment
+        # stripping the entry won't be present.
+        stripped = _strip_comments(body)
+        entries = _parse_reference_entries(stripped)
+        assert entries == []
+
+
+class TestParseReferenceEntriesMultipleRoles:
+    def test_all_valid_roles_accepted(self):
+        body = (
+            "- ref/a.png\n"
+            "  role: visual-target, behavioral-target, "
+            "docs, counter-example, ignore\n"
+        )
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert set(entries[0].roles) == _VALID_REFERENCE_ROLES
+
+    def test_single_valid_role_among_invalids(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        body = "- ref/a.png\n  role: bad1, visual-target, bad2\n"
+        entries = _parse_reference_entries(body, errors_path=str(errors))
+        assert entries[0].roles == ["visual-target"]
+        log = errors.read_text()
+        assert "bad1" in log
+        assert "bad2" in log

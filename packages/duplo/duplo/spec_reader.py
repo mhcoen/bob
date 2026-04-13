@@ -66,6 +66,11 @@ _REFERENCE_ENTRY_START_QUOTED = re.compile(r'^-\s+"(ref/[^"]+)"\s*$')
 _VALID_SOURCE_ROLES = frozenset({"product-reference", "docs", "counter-example"})
 _VALID_SCRAPE_VALUES = frozenset({"deep", "shallow", "none"})
 
+# Valid values for ReferenceEntry validation.
+_VALID_REFERENCE_ROLES = frozenset(
+    {"visual-target", "behavioral-target", "docs", "counter-example", "ignore"}
+)
+
 
 def _strip_comments(body: str) -> str:
     """Remove HTML comments from *body*."""
@@ -206,6 +211,151 @@ def _validate_source_entries(
                 proposed=entry.proposed,
                 discovered=entry.discovered,
             )
+        valid.append(entry)
+    return valid
+
+
+def _parse_reference_entries(
+    body: str,
+    *,
+    errors_path: Path | str = ".duplo/errors.jsonl",
+) -> list[ReferenceEntry]:
+    """Parse ``## References`` section body into :class:`ReferenceEntry` objects.
+
+    Shares ``_FIELD_LINE`` with the Sources parser.  Entry starts match
+    either ``_REFERENCE_ENTRY_START_BARE`` or
+    ``_REFERENCE_ENTRY_START_QUOTED``.  Field parsing, multi-line
+    ``notes:`` continuation, and flush logic are identical to
+    ``_parse_source_entries``.
+
+    After parsing, entries are validated: unknown roles are dropped from
+    the comma-separated list (if all roles are unknown the entry defaults
+    to ``["ignore"]``).  ``discovered:`` is not valid for References; a
+    diagnostic is emitted if present.
+    """
+    entries: list[ReferenceEntry] = []
+    current_path: str | None = None
+    fields: dict[str, str] = {}
+    in_notes = False
+    notes_indent = 0
+
+    def _flush() -> None:
+        nonlocal current_path, fields, in_notes, notes_indent
+        if current_path is not None:
+            # Parse comma-separated roles.
+            raw_roles = [r.strip() for r in fields.get("role", "").split(",") if r.strip()]
+            entry = ReferenceEntry(
+                path=Path(current_path),
+                roles=raw_roles,
+                notes=fields.get("notes", "").strip(),
+                proposed=fields.get("proposed", "").lower() == "true",
+            )
+            # Warn if discovered: is present (not valid for References).
+            if fields.get("discovered", "").lower() == "true":
+                record_failure(
+                    "spec_reader:_parse_reference_entries",
+                    "io",
+                    f"Reference entry {current_path!r}: "
+                    "'discovered' is not valid for References; ignored",
+                    errors_path=errors_path,
+                )
+            entries.append(entry)
+        current_path = None
+        fields = {}
+        in_notes = False
+        notes_indent = 0
+
+    for line in body.splitlines():
+        # Check for new entry start (bare or quoted form).
+        entry_m = _REFERENCE_ENTRY_START_QUOTED.match(line) or _REFERENCE_ENTRY_START_BARE.match(
+            line
+        )
+        if entry_m:
+            _flush()
+            current_path = entry_m.group(1)
+            continue
+
+        # Outside an entry, skip.
+        if current_path is None:
+            continue
+
+        # Blank line ends the current entry.
+        if not line.strip():
+            _flush()
+            continue
+
+        # Try matching a field line.
+        field_m = _FIELD_LINE.match(line)
+        if field_m:
+            key = field_m.group(1).lower()
+            value = field_m.group(2)
+            fields[key] = value
+            in_notes = key == "notes"
+            if in_notes:
+                notes_indent = len(line) - len(line.lstrip())
+            continue
+
+        # Continuation of a multi-line notes field.
+        if in_notes:
+            line_indent = len(line) - len(line.lstrip())
+            if line_indent > notes_indent:
+                fields["notes"] = fields.get("notes", "") + "\n" + line.strip()
+                continue
+
+        # Unrecognised line — end the current entry.
+        _flush()
+
+    _flush()
+    return _validate_reference_entries(entries, errors_path=errors_path)
+
+
+def _validate_reference_entries(
+    entries: list[ReferenceEntry],
+    *,
+    errors_path: Path | str = ".duplo/errors.jsonl",
+) -> list[ReferenceEntry]:
+    """Validate parsed reference entries.
+
+    - Unknown roles are dropped from the list; if all roles are unknown
+      the entry defaults to ``["ignore"]``.
+    - Path must start with ``ref/``; entries with other paths are dropped.
+    """
+    valid: list[ReferenceEntry] = []
+    for entry in entries:
+        # Path must be under ref/.
+        if not str(entry.path).startswith("ref/"):
+            record_failure(
+                "spec_reader:_validate_reference_entries",
+                "io",
+                f"Dropped reference entry with path outside ref/: {entry.path!r}",
+                errors_path=errors_path,
+            )
+            continue
+        # Filter unknown roles.
+        good_roles = [r for r in entry.roles if r in _VALID_REFERENCE_ROLES]
+        bad_roles = [r for r in entry.roles if r not in _VALID_REFERENCE_ROLES]
+        for bad in bad_roles:
+            record_failure(
+                "spec_reader:_validate_reference_entries",
+                "io",
+                f"Reference entry {entry.path!r}: unknown role {bad!r} dropped",
+                errors_path=errors_path,
+            )
+        if not good_roles and entry.roles:
+            # All roles were unknown — default to ["ignore"].
+            good_roles = ["ignore"]
+            record_failure(
+                "spec_reader:_validate_reference_entries",
+                "io",
+                f"Reference entry {entry.path!r}: all roles unknown, defaulting to ['ignore']",
+                errors_path=errors_path,
+            )
+        entry = ReferenceEntry(
+            path=entry.path,
+            roles=good_roles,
+            notes=entry.notes,
+            proposed=entry.proposed,
+        )
         valid.append(entry)
     return valid
 
