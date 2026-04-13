@@ -3146,6 +3146,23 @@ class TestAppendToBugsSectionBoundary:
         # The entry outside (under # Phase 2) was NOT touched.
         assert '- [x] Fix: outside section [fix: "other"]' in result
 
+    def test_empty_bugs_section_before_h1(self, tmp_path):
+        """Insertion into empty ## Bugs lands before the following H1."""
+        plan = "## Bugs\n\n# Phase 1: Core\n\n- [ ] Build feature\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new bug [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # New bug lands between ## Bugs and # Phase 1.
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new bug")
+        h1_pos = result.index("# Phase 1")
+        assert bugs_pos < new_pos < h1_pos
+        # Phase 1 content untouched.
+        assert "- [ ] Build feature" in result
+
 
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
