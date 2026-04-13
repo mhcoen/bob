@@ -38,6 +38,7 @@ _DUPLO_JSON = ".duplo/duplo.json"
 def _clean_argv(monkeypatch):
     """Prevent argparse from seeing pytest's CLI arguments."""
     monkeypatch.setattr("sys.argv", ["duplo"])
+    monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
 
 
 def _write_duplo_json(tmp_path: Path, data: dict) -> None:
@@ -4904,3 +4905,124 @@ class TestFillInPurposeBlocksRun:
         mock_hash.assert_not_called()
         mock_fetch.assert_not_called()
         mock_extract.assert_not_called()
+
+
+class TestMigrationDispatchOrder:
+    """Migration check runs for no-subcommand but not fix/investigate."""
+
+    def test_no_subcommand_calls_check_migration(self, tmp_path, monkeypatch):
+        """No-subcommand path calls _check_migration before proceeding."""
+        monkeypatch.chdir(tmp_path)
+        called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: called.append(target_dir),
+        )
+        # No .duplo/duplo.json → first run → exits due to no refs.
+        with pytest.raises(SystemExit):
+            main()
+        assert len(called) == 1
+        assert called[0] == Path.cwd()
+
+    def test_fix_skips_check_migration(self, tmp_path, monkeypatch):
+        """duplo fix dispatches without calling _check_migration."""
+        from duplo.investigator import InvestigationResult
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "app_name": "App",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {"phase": 0, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+                ],
+                "current_phase": 0,
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("- [x] done\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "some bug"])
+
+        called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: called.append(target_dir),
+        )
+
+        result = InvestigationResult(diagnoses=[], summary="", raw_response="")
+        with patch("duplo.main.investigate", return_value=result):
+            main()
+
+        assert called == []
+
+    def test_investigate_skips_check_migration(self, tmp_path, monkeypatch):
+        """duplo investigate dispatches without calling _check_migration."""
+        from duplo.investigator import InvestigationResult
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "app_name": "App",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {"phase": 0, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+                ],
+                "current_phase": 0,
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("- [x] done\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["duplo", "investigate", "some bug"],
+        )
+
+        called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: called.append(target_dir),
+        )
+
+        result = InvestigationResult(diagnoses=[], summary="", raw_response="")
+        with patch("duplo.main.investigate", return_value=result):
+            main()
+
+        assert called == []
+
+    def test_migration_blocks_no_subcommand(
+        self,
+        capsys,
+        tmp_path,
+        monkeypatch,
+    ):
+        """When migration is needed, no-subcommand path exits with message."""
+        from duplo.migration import _check_migration as real_check
+
+        monkeypatch.setattr("duplo.main._check_migration", real_check)
+
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text("{}")
+        # No SPEC.md → needs_migration returns True.
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "SPEC.md" in captured.out

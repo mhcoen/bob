@@ -242,6 +242,7 @@ from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
+from duplo.migration import _check_migration
 from duplo.spec_reader import (
     format_contracts_as_verification,
     format_spec_for_prompt,
@@ -424,12 +425,14 @@ def main() -> None:
             print("No duplo project found. Run duplo first to initialize.")
             sys.exit(1)
         _fix_mode(args)
-    elif not duplo_path.exists():
-        _first_run(url=args.url)
     else:
-        if args.url:
-            print("Project already initialized. URL argument ignored.")
-        _subsequent_run()
+        _check_migration(Path.cwd())
+        if not duplo_path.exists():
+            _first_run(url=args.url)
+        else:
+            if args.url:
+                print("Project already initialized. URL argument ignored.")
+            _subsequent_run()
 
     diagnostics_print_summary()
 
