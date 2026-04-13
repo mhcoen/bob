@@ -224,6 +224,18 @@ def test_sources_inline_text(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is True
 
 
+def test_zero_byte_spec(tmp_path: Path) -> None:
+    """Zero-byte SPEC.md → same as absent, needs migration.
+
+    A zero-byte file has neither signal (marker string nor ## Sources),
+    so it is classified the same as SPEC.md being absent entirely.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_bytes(b"")
+    assert needs_migration(tmp_path) is True
+
+
 def test_corrupted_duplo_json(tmp_path: Path) -> None:
     """Corrupted .duplo/duplo.json → still needs migration.
 
