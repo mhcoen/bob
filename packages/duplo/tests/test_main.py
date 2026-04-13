@@ -3605,6 +3605,46 @@ class TestFixModeDiagnosis:
         assert "Investigation failed: connection timeout" in out
         assert "1 fix task" in out
 
+    def test_fix_without_investigate_calls_investigate_once(self, capsys, tmp_path, monkeypatch):
+        """duplo fix (no --investigate) calls investigate() exactly once
+        and appends diagnosed fix tasks when result.diagnoses is non-empty."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "login page crashes"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Login form throws TypeError on submit",
+                    expected="Should authenticate and redirect",
+                    severity="critical",
+                    area="Auth module",
+                    evidence_sources=["current.png"],
+                ),
+            ],
+            summary="One diagnosis.",
+        )
+
+        mock_inv = patch("duplo.main.investigate", return_value=result)
+        with mock_inv as inv:
+            main()
+
+        # investigate() called exactly once.
+        assert inv.call_count == 1
+
+        # Diagnosed fix task appended to PLAN.md.
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "Login form throws TypeError on submit" in plan
+        assert "Expected: Should authenticate and redirect" in plan
+        assert "Area: Auth module" in plan
+        assert '[fix: "Login form throws TypeError on submit"]' in plan
+
+        out = capsys.readouterr().out
+        assert "1 diagnosed fix task" in out
+
 
 class TestCompareWithReferences:
     """Tests for _compare_with_references reference image lookup."""
