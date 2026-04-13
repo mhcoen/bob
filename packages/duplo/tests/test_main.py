@@ -5026,3 +5026,28 @@ class TestMigrationDispatchOrder:
 
         captured = capsys.readouterr()
         assert "SPEC.md" in captured.out
+
+    def test_migration_pass_proceeds_to_first_run(self, tmp_path, monkeypatch):
+        """When _check_migration returns, _first_run is called (no duplo.json)."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+        first_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._first_run",
+            lambda **kw: first_run_called.append(kw),
+        )
+        main()
+        assert len(first_run_called) == 1
+
+    def test_migration_pass_proceeds_to_subsequent_run(self, tmp_path, monkeypatch):
+        """When _check_migration returns, _subsequent_run is called (duplo.json exists)."""
+        _write_duplo_json(tmp_path, {"features": []})
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+        subsequent_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._subsequent_run",
+            lambda: subsequent_run_called.append(True),
+        )
+        main()
+        assert len(subsequent_run_called) == 1
