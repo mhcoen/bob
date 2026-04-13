@@ -5051,3 +5051,29 @@ class TestMigrationDispatchOrder:
         )
         main()
         assert len(subsequent_run_called) == 1
+
+    def test_init_is_not_a_subcommand(self, tmp_path, monkeypatch):
+        """'duplo init' is not a recognised subcommand (lands in Phase 4).
+
+        Today it falls through to the no-subcommand path, so
+        _check_migration is called and 'init' is parsed as the url arg.
+        """
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init"])
+
+        migration_called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: migration_called.append(target_dir),
+        )
+        first_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._first_run",
+            lambda **kw: first_run_called.append(kw),
+        )
+        main()
+        # Went through no-subcommand path (migration check ran).
+        assert len(migration_called) == 1
+        # 'init' was treated as the url positional arg, not a subcommand.
+        assert len(first_run_called) == 1
+        assert first_run_called[0]["url"] == "init"
