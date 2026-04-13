@@ -97,6 +97,24 @@ def test_empty_spec(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is True
 
 
+def test_old_format_spec_with_content(tmp_path: Path) -> None:
+    """Old-format SPEC.md with real content but neither signal → needs migration.
+
+    An old-layout project may have a SPEC.md with substantial content
+    (sections, descriptions) that predates the new-format signals.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    spec = (
+        "# MyApp\n\n"
+        "## Overview\nA calculator app for quick math.\n\n"
+        "## Features\n- Basic arithmetic\n- History\n\n"
+        "## Notes\nSee sources for reference material.\n"
+    )
+    (tmp_path / "SPEC.md").write_text(spec)
+    assert needs_migration(tmp_path) is True
+
+
 def test_sources_h1_heading(tmp_path: Path) -> None:
     """# Sources (H1) is not ## Sources → needs migration."""
     (tmp_path / ".duplo").mkdir()
