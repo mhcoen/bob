@@ -5156,3 +5156,36 @@ class TestMigrationDispatchOrder:
         # 'init' was treated as the url positional arg, not a subcommand.
         assert len(first_run_called) == 1
         assert first_run_called[0]["url"] == "init"
+
+    def test_fix_old_layout_bypasses_migration_dispatches_fix(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """duplo fix in an old-layout dir: skips _check_migration,
+        dispatches to _fix_mode."""
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text("{}")
+        # No SPEC.md → old layout that would trigger migration on bare duplo.
+        (tmp_path / "PLAN.md").write_text("- [x] done\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "some bug"])
+
+        migration_called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: migration_called.append(target_dir),
+        )
+
+        fix_mode_called = []
+        monkeypatch.setattr(
+            "duplo.main._fix_mode",
+            lambda args: fix_mode_called.append(args),
+        )
+
+        main()
+
+        assert migration_called == []
+        assert len(fix_mode_called) == 1
+        assert fix_mode_called[0].command == "fix"
