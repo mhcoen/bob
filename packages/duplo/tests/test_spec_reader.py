@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 from duplo.spec_reader import (
     BehaviorContract,
     DesignBlock,
@@ -15,11 +17,14 @@ from duplo.spec_reader import (
     _FILL_IN_RE,
     _HTML_COMMENT_RE,
     _SOURCE_ENTRY_START,
+    _VALID_SCRAPE_VALUES,
+    _VALID_SOURCE_ROLES,
     _parse_contracts,
     _parse_source_entries,
     _parse_spec,
     _split_sections,
     _strip_comments,
+    _validate_source_entries,
     format_contracts_as_verification,
     format_scope_override_prompt,
     format_spec_for_prompt,
@@ -716,3 +721,184 @@ class TestParseSourceEntries:
         )
         entries = _parse_source_entries(body)
         assert entries[0].notes == "deep start\ncontinued"
+
+
+class TestValidateSourceEntries:
+    def _errors_path(self, tmp_path):
+        return tmp_path / "errors.jsonl"
+
+    def _read_errors(self, path):
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def test_valid_entry_passes(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="product-reference",
+                scrape="deep",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].url == "https://example.com"
+        assert self._read_errors(ep) == []
+
+    def test_invalid_url_dropped(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [SourceEntry(url="ftp://bad.com", role="docs", scrape="none")]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 0
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert "invalid URL" in errors[0]["message"]
+
+    def test_empty_url_dropped(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [SourceEntry(url="", role="docs", scrape="none")]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 0
+
+    def test_unknown_role_drops_entry(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="doc",
+                scrape="deep",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 0
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert "unknown role" in errors[0]["message"]
+        assert "'doc'" in errors[0]["message"]
+
+    def test_empty_role_drops_entry(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [SourceEntry(url="https://example.com", role="", scrape="deep")]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 0
+
+    def test_unknown_scrape_defaults_to_none(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="docs",
+                scrape="full",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert "unknown scrape" in errors[0]["message"]
+
+    def test_empty_scrape_defaults_to_none(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [SourceEntry(url="https://example.com", role="docs", scrape="")]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+
+    def test_both_proposed_and_discovered_accepted(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="docs",
+                scrape="shallow",
+                proposed=True,
+                discovered=True,
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].proposed is True
+        assert result[0].discovered is True
+        assert self._read_errors(ep) == []
+
+    def test_mixed_valid_and_invalid(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://good.com",
+                role="docs",
+                scrape="deep",
+            ),
+            SourceEntry(
+                url="https://bad-role.com",
+                role="doc",
+                scrape="deep",
+            ),
+            SourceEntry(
+                url="ftp://bad-url.com",
+                role="docs",
+                scrape="none",
+            ),
+            SourceEntry(
+                url="https://bad-scrape.com",
+                role="counter-example",
+                scrape="everything",
+            ),
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 2
+        assert result[0].url == "https://good.com"
+        assert result[1].url == "https://bad-scrape.com"
+        assert result[1].scrape == "none"
+
+    def test_all_valid_roles_accepted(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(url=f"https://{role}.com", role=role, scrape="none")
+            for role in sorted(_VALID_SOURCE_ROLES)
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == len(_VALID_SOURCE_ROLES)
+
+    def test_all_valid_scrape_values_accepted(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(url=f"https://{val}.com", role="docs", scrape=val)
+            for val in sorted(_VALID_SCRAPE_VALUES)
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == len(_VALID_SCRAPE_VALUES)
+        assert self._read_errors(ep) == []
+
+
+class TestParseSourceEntriesValidation:
+    """Integration: validation runs inside _parse_source_entries."""
+
+    def test_invalid_role_dropped_during_parse(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        body = "- https://example.com\n  role: doc\n  scrape: deep\n"
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 0
+
+    def test_unknown_scrape_defaults_during_parse(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        body = "- https://example.com\n  role: docs\n  scrape: mega\n"
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 1
+        assert entries[0].scrape == "none"
+
+    def test_valid_entries_pass_through(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        body = (
+            "- https://a.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+            "\n"
+            "- https://b.com\n"
+            "  role: docs\n"
+            "  scrape: shallow\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 2

@@ -24,6 +24,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from duplo.diagnostics import record_failure
+
 _SPEC_FILENAME = "SPEC.md"
 
 # Headings we parse into structured fields.
@@ -49,13 +51,21 @@ _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$")
 # Field line: indented key: value pair (at least 2 spaces of indent).
 _FIELD_LINE = re.compile(r"^\s{2,}(\w+):\s*(.*)$")
 
+# Valid values for SourceEntry validation.
+_VALID_SOURCE_ROLES = frozenset({"product-reference", "docs", "counter-example"})
+_VALID_SCRAPE_VALUES = frozenset({"deep", "shallow", "none"})
+
 
 def _strip_comments(body: str) -> str:
     """Remove HTML comments from *body*."""
     return _HTML_COMMENT_RE.sub("", body)
 
 
-def _parse_source_entries(body: str) -> list[SourceEntry]:
+def _parse_source_entries(
+    body: str,
+    *,
+    errors_path: Path | str = ".duplo/errors.jsonl",
+) -> list[SourceEntry]:
     """Parse ``## Sources`` section body into :class:`SourceEntry` objects.
 
     Scans *body* line-by-line.  An entry starts with a list-item line
@@ -65,6 +75,11 @@ def _parse_source_entries(body: str) -> list[SourceEntry]:
     indented further than the field-name column is appended as a
     continuation.  An entry ends at the next entry start, a blank line,
     or a line that is neither a field nor a continuation.
+
+    After parsing, each entry is validated: invalid URLs and unknown
+    roles cause the entry to be dropped; unknown scrape values default
+    to ``"none"``.  Diagnostics are recorded via
+    :func:`~duplo.diagnostics.record_failure`.
     """
     entries: list[SourceEntry] = []
     current_url: str | None = None
@@ -132,7 +147,56 @@ def _parse_source_entries(body: str) -> list[SourceEntry]:
         _flush()
 
     _flush()
-    return entries
+    return _validate_source_entries(entries, errors_path=errors_path)
+
+
+def _validate_source_entries(
+    entries: list[SourceEntry],
+    *,
+    errors_path: Path | str = ".duplo/errors.jsonl",
+) -> list[SourceEntry]:
+    """Validate parsed source entries, dropping invalid ones.
+
+    - Invalid URL (not ``http://`` or ``https://``): entry dropped.
+    - Unknown role: entry dropped (typo must not silently widen authority).
+    - Unknown scrape value: defaulted to ``none``.
+    """
+    valid: list[SourceEntry] = []
+    for entry in entries:
+        if not entry.url.startswith(("http://", "https://")):
+            record_failure(
+                "spec_reader:_validate_source_entries",
+                "io",
+                f"Dropped source entry with invalid URL: {entry.url!r}",
+                errors_path=errors_path,
+            )
+            continue
+        if entry.role not in _VALID_SOURCE_ROLES:
+            record_failure(
+                "spec_reader:_validate_source_entries",
+                "io",
+                f"Dropped source entry {entry.url!r}: unknown role {entry.role!r}",
+                errors_path=errors_path,
+            )
+            continue
+        if entry.scrape not in _VALID_SCRAPE_VALUES:
+            record_failure(
+                "spec_reader:_validate_source_entries",
+                "io",
+                f"Source entry {entry.url!r}: unknown scrape "
+                f"{entry.scrape!r}, defaulting to 'none'",
+                errors_path=errors_path,
+            )
+            entry = SourceEntry(
+                url=entry.url,
+                role=entry.role,
+                scrape="none",
+                notes=entry.notes,
+                proposed=entry.proposed,
+                discovered=entry.discovered,
+            )
+        valid.append(entry)
+    return valid
 
 
 # Patterns inside the Scope section.
