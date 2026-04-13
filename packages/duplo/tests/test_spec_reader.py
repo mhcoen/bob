@@ -176,13 +176,10 @@ class TestParseSpec:
         spec = _parse_spec("## Design\nDark theme, monospace font, #2b2b2b background.")
         assert "#2b2b2b" in spec.design
 
-    def test_references(self):
-        spec = _parse_spec(
-            "## References\n"
-            "- numi.app demo video is the visual ground truth\n"
-            "- github wiki is the behavioral ground truth\n"
-        )
-        assert "visual ground truth" in spec.references
+    def test_references_structured(self):
+        spec = _parse_spec("## References\n- ref/demo.mp4\n  role: visual-target\n")
+        assert len(spec.references) == 1
+        assert spec.references[0].roles == ["visual-target"]
 
     def test_raw_always_present(self):
         text = "Just free-form guidance, no headings."
@@ -220,7 +217,7 @@ class TestParseSpec:
         assert len(spec.behavior_contracts) == 2
         assert "SwiftUI" in spec.architecture
         assert "#2b2b2b" in spec.design
-        assert "visual ground truth" in spec.references
+        assert spec.references == []
 
 
 class TestParseContracts:
@@ -1604,3 +1601,57 @@ class TestValidateReferenceEntriesPathCheck:
         assert result[0].roles == ["visual-target", "docs"]
         log = errors.read_text()
         assert "fake" in log
+
+
+class TestReferencesMigration:
+    """Old prose-form ## References parses to empty list with diagnostic."""
+
+    def test_prose_references_parses_to_empty_list(self):
+        text = (
+            "## References\n"
+            "- numi.app demo video is the visual ground truth\n"
+            "- github wiki is the behavioral ground truth\n"
+        )
+        spec = _parse_spec(text)
+        assert spec.references == []
+
+    def test_prose_preserved_in_raw(self):
+        text = "## References\n- numi.app demo video is the visual ground truth\n"
+        spec = _parse_spec(text)
+        assert "visual ground truth" in spec.raw
+
+    def test_prose_references_emits_migration_diagnostic(self, tmp_path, monkeypatch):
+        errors = tmp_path / "errors.jsonl"
+        monkeypatch.setattr(
+            "duplo.spec_reader.record_failure",
+            lambda site, cat, msg, **kw: errors.write_text(
+                json.dumps({"site": site, "category": cat, "message": msg}) + "\n"
+            ),
+        )
+        text = "## References\n- numi.app demo video is the visual ground truth\n"
+        _parse_spec(text)
+        log = errors.read_text()
+        assert "prose" in log
+        assert "migrat" in log.lower()
+
+    def test_empty_references_no_diagnostic(self, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "duplo.spec_reader.record_failure",
+            lambda site, cat, msg, **kw: calls.append(msg),
+        )
+        text = "## References\n"
+        _parse_spec(text)
+        ref_calls = [c for c in calls if "References" in c or "references" in c]
+        assert ref_calls == []
+
+    def test_structured_references_no_diagnostic(self, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "duplo.spec_reader.record_failure",
+            lambda site, cat, msg, **kw: calls.append(msg),
+        )
+        text = "## References\n- ref/demo.mp4\n  role: visual-target\n"
+        _parse_spec(text)
+        ref_calls = [c for c in calls if "prose" in c]
+        assert ref_calls == []
