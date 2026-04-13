@@ -4,7 +4,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from duplo.migration import needs_migration
+from duplo.migration import _MIGRATION_MESSAGE, needs_migration
+
+
+class TestMigrationMessage:
+    """Tests for _MIGRATION_MESSAGE constant."""
+
+    def test_mentions_spec_template(self) -> None:
+        """Message tells the user to author SPEC.md from the template."""
+        assert "SPEC-template.md" in _MIGRATION_MESSAGE
+
+    def test_does_not_mention_duplo_init(self) -> None:
+        """Phase 2 message must NOT reference `duplo init` (ships in Phase 4)."""
+        assert "duplo init" not in _MIGRATION_MESSAGE
+
+    def test_mentions_ref_directory(self) -> None:
+        """Message instructs the user to create ref/ and move files."""
+        assert "mkdir ref" in _MIGRATION_MESSAGE
+
+    def test_mentions_run_duplo_again(self) -> None:
+        """Message ends with instruction to re-run duplo."""
+        assert "Run `duplo` again" in _MIGRATION_MESSAGE
+
+    def test_mentions_sources_section(self) -> None:
+        """Message tells the user to fill in ## Sources."""
+        assert "## Sources" in _MIGRATION_MESSAGE
+
+    def test_reassures_no_changes(self) -> None:
+        """Message reassures the user nothing was moved or modified."""
+        assert "Nothing has been moved or modified" in _MIGRATION_MESSAGE
 
 
 def test_no_duplo_json(tmp_path: Path) -> None:
