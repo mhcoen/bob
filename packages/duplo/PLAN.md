@@ -228,13 +228,13 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add `_HTML_COMMENT_RE` and `_strip_comments(body)` helper. Per PARSER-design.md § `<FILL IN>` detection.
   - [x] Tests: dataclass field defaults, `_strip_comments` removes single-line and multi-line HTML comment blocks, comment-stripping leaves non-comment content intact.
 
-- [ ] [BATCH] Add `<FILL IN>` detection for required sections
-  - [ ] Add the `_FILL_IN_RE` regex per PARSER-design.md (matches `<FILL IN>` permissively on whitespace and trailing hint text).
-  - [ ] Apply `_strip_comments` to a section body before regex matching, so commented-out template hints don't trigger detection.
-  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_purpose` after parsing `## Purpose`.
-  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_architecture` after parsing `## Architecture`.
-  - [ ] Wire detection into `_parse_spec` to set `spec.fill_in_design` per the rule: true ONLY when `design.has_fill_in_marker` AND no reference entries have `visual-target` in `roles`.
-  - [ ] Tests: marker present in body sets flag; marker present only in an HTML comment does NOT set flag; absent marker keeps flag false; `fill_in_design` rule covers both required conditions.
+- [x] [BATCH] Add `<FILL IN>` detection for required sections
+  - [x] Add the `_FILL_IN_RE` regex per PARSER-design.md (matches `<FILL IN>` permissively on whitespace and trailing hint text).
+  - [x] Apply `_strip_comments` to a section body before regex matching, so commented-out template hints don't trigger detection.
+  - [x] Wire detection into `_parse_spec` to set `spec.fill_in_purpose` after parsing `## Purpose`.
+  - [x] Wire detection into `_parse_spec` to set `spec.fill_in_architecture` after parsing `## Architecture`.
+  - [x] Wire detection into `_parse_spec` to set `spec.fill_in_design` per the rule: true ONLY when `design.has_fill_in_marker` AND no reference entries have `visual-target` in `roles`.
+  - [x] Tests: marker present in body sets flag; marker present only in an HTML comment does NOT set flag; absent marker keeps flag false; `fill_in_design` rule covers both required conditions.
 
 - [ ] Add `## Sources` parser
   - [ ] Add `_SOURCE_ENTRY_START` and `_FIELD_LINE` regexes per PARSER-design.md § `## Sources` parser. Entry start matches a list-item line containing an http(s) URL; field lines match indented `key: value` pairs.
