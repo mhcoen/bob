@@ -902,3 +902,91 @@ class TestParseSourceEntriesValidation:
         )
         entries = _parse_source_entries(body, errors_path=ep)
         assert len(entries) == 2
+
+
+class TestDiagnosticRecordStructure:
+    """Verify diagnostic records have correct site, category, and timestamp."""
+
+    def _read_errors(self, path):
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def test_invalid_url_record_structure(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [SourceEntry(url="ftp://bad.com", role="docs", scrape="none")]
+        _validate_source_entries(entries, errors_path=ep)
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert errors[0]["site"] == "spec_reader:_validate_source_entries"
+        assert errors[0]["category"] == "io"
+        assert "timestamp" in errors[0]
+
+    def test_unknown_role_record_structure(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [SourceEntry(url="https://x.com", role="doc", scrape="deep")]
+        _validate_source_entries(entries, errors_path=ep)
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert errors[0]["site"] == "spec_reader:_validate_source_entries"
+        assert errors[0]["category"] == "io"
+        assert "timestamp" in errors[0]
+
+    def test_unknown_scrape_record_structure(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [SourceEntry(url="https://x.com", role="docs", scrape="full")]
+        _validate_source_entries(entries, errors_path=ep)
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert errors[0]["site"] == "spec_reader:_validate_source_entries"
+        assert errors[0]["category"] == "io"
+        assert "timestamp" in errors[0]
+
+    def test_multiple_failures_each_recorded(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [
+            SourceEntry(url="ftp://a.com", role="docs", scrape="none"),
+            SourceEntry(url="https://b.com", role="bogus", scrape="deep"),
+            SourceEntry(url="https://c.com", role="docs", scrape="mega"),
+        ]
+        _validate_source_entries(entries, errors_path=ep)
+        errors = self._read_errors(ep)
+        assert len(errors) == 3
+        assert "invalid URL" in errors[0]["message"]
+        assert "unknown role" in errors[1]["message"]
+        assert "unknown scrape" in errors[2]["message"]
+
+    def test_no_diagnostic_for_valid_entries(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="product-reference",
+                scrape="deep",
+            )
+        ]
+        _validate_source_entries(entries, errors_path=ep)
+        assert not ep.exists()
+
+    def test_parse_source_entries_emits_diagnostics(self, tmp_path):
+        """Integration: diagnostics emitted through the parse path."""
+        ep = tmp_path / "errors.jsonl"
+        body = (
+            "- https://good.com\n"
+            "  role: docs\n"
+            "  scrape: deep\n"
+            "\n"
+            "- https://bad-role.com\n"
+            "  role: doc\n"
+            "  scrape: deep\n"
+            "\n"
+            "- https://bad-scrape.com\n"
+            "  role: counter-example\n"
+            "  scrape: mega\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 2
+        errors = self._read_errors(ep)
+        assert len(errors) == 2
+        assert "unknown role" in errors[0]["message"]
+        assert "unknown scrape" in errors[1]["message"]
