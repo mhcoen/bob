@@ -1450,9 +1450,20 @@ class TestParseReferenceEntriesValidation:
         entries = _parse_reference_entries(body, errors_path=str(errors))
         assert len(entries) == 1
         # discovered is ignored — not stored on ReferenceEntry.
-        assert not hasattr(entries[0], "discovered") or True
+        assert not hasattr(entries[0], "discovered")
         log = errors.read_text()
         assert "discovered" in log
+        assert "not valid for References" in log
+
+    def test_discovered_false_still_emits_diagnostic(self, tmp_path):
+        """Any discovered: value triggers diagnostic, not just 'true'."""
+        errors = tmp_path / "errors.jsonl"
+        body = "- ref/demo.mp4\n  role: docs\n  discovered: false\n"
+        entries = _parse_reference_entries(body, errors_path=str(errors))
+        assert len(entries) == 1
+        log = errors.read_text()
+        assert "discovered" in log
+        assert "not valid for References" in log
 
     def test_no_role_keeps_empty_roles(self):
         body = "- ref/demo.mp4\n  notes: no role given\n"

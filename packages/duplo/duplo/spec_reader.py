@@ -251,7 +251,7 @@ def _parse_reference_entries(
                 proposed=fields.get("proposed", "").lower() == "true",
             )
             # Warn if discovered: is present (not valid for References).
-            if fields.get("discovered", "").lower() == "true":
+            if "discovered" in fields:
                 record_failure(
                     "spec_reader:_parse_reference_entries",
                     "io",
