@@ -332,9 +332,9 @@ The design reference is `MIGRATION-design.md` (canonical) plus `REDESIGN-overvie
 
 **What does NOT ship in this phase:** no changes to `_subsequent_run`, no new pipeline code paths, no SPEC.md parser changes, no fetcher signature changes. Those are Phase 3. A project that has already migrated (has SPEC.md in the new format) continues to hit the existing `_subsequent_run` path unchanged.
 
-- [ ] Create `duplo/migration.py` module with `needs_migration` detection
+- [x] Create `duplo/migration.py` module with `needs_migration` detection
   - [x] Implement `needs_migration(target_dir: Path) -> bool` per MIGRATION-design.md § Detection.
-  - [ ] Two-signal detection: returns False if either (a) `SPEC.md` contains the literal string `"How the pieces fit together:"` OR (b) `SPEC.md` contains an `## Sources` heading (regex `^## Sources\s*# Duplo
+  - [x] Two-signal detection: returns False if either (a) `SPEC.md` contains the literal string `"How the pieces fit together:"` OR (b) `SPEC.md` contains an `## Sources` heading (regex `^## Sources\s*# Duplo
 
 Duplo duplicates apps. The user creates a project directory and drops
 in whatever reference material they have: screenshots, PDFs, text files,
