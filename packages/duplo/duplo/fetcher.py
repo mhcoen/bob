@@ -220,8 +220,8 @@ def fetch_site(
     queued.add(seed_norm)
 
     while queue:
-        queue.sort(key=lambda x: -x[0])
-        _, current_url = queue.pop(0)
+        queue.sort(key=lambda x: x[0])
+        _, current_url = queue.pop()
 
         norm = current_url.rstrip("/")
         if norm in visited:

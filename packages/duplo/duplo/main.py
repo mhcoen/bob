@@ -1279,11 +1279,7 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
     if gap_tasks:
         updated = plan_content.rstrip() + "\n" + gap_tasks
         plan_path.write_text(updated, encoding="utf-8")
-        tasks_appended = (
-            len(result.missing_features)
-            + len(result.missing_examples)
-            + len(result.design_refinements)
-        )
+        tasks_appended = sum(1 for line in gap_tasks.splitlines() if line.startswith("- [ ] "))
         print(f"  Appended {tasks_appended} gap task(s) to PLAN.md.")
 
     return (
@@ -1629,7 +1625,7 @@ def _subsequent_run() -> None:
             content = content.rstrip() + "\n" + vtasks
             print(f"  {len(vcases)} verification case(s) added.")
     # Append verification tasks from SPEC.md behavior contracts.
-    spec_vtasks = []
+    spec_vtasks = ""
     if spec:
         spec_vtasks = format_contracts_as_verification(spec)
     if spec_vtasks:

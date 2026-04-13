@@ -16,8 +16,10 @@ def strip_fences(text: str) -> str:
         lines = text.splitlines()
         # strip opening fence
         lines = lines[1:]
-        # strip closing fence
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
+        # strip closing fence (search from end in case text follows it)
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip().startswith("```"):
+                lines = lines[:i]
+                break
         text = "\n".join(lines)
     return text

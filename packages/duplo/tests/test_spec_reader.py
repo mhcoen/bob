@@ -1497,11 +1497,12 @@ class TestValidateSourceEntries:
         assert "unknown role" in errors[0]["message"]
         assert "'doc'" in errors[0]["message"]
 
-    def test_empty_role_drops_entry(self, tmp_path):
+    def test_empty_role_defaults_to_product_reference(self, tmp_path):
         ep = self._errors_path(tmp_path)
         entries = [SourceEntry(url="https://example.com", role="", scrape="deep")]
         result = _validate_source_entries(entries, errors_path=ep)
-        assert len(result) == 0
+        assert len(result) == 1
+        assert result[0].role == "product-reference"
 
     def test_unknown_scrape_defaults_to_none(self, tmp_path):
         ep = self._errors_path(tmp_path)

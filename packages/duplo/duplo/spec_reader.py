@@ -193,6 +193,15 @@ def _validate_source_entries(
                 errors_path=errors_path,
             )
             continue
+        if not entry.role:
+            entry = SourceEntry(
+                url=entry.url,
+                role="product-reference",
+                scrape=entry.scrape,
+                notes=entry.notes,
+                proposed=entry.proposed,
+                discovered=entry.discovered,
+            )
         if entry.role not in _VALID_SOURCE_ROLES:
             record_failure(
                 "spec_reader:_validate_source_entries",

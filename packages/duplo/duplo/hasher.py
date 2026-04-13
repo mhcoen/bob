@@ -59,7 +59,10 @@ def compute_hashes(directory: Path | str = ".") -> dict[str, str]:
             continue
         rel = path.relative_to(root)
         # Skip files inside excluded directories or .app bundles.
-        if any(part in _SKIP_DIRS or part.endswith(".app") for part in rel.parts):
+        if any(
+            part in _SKIP_DIRS or part.startswith(".") or part.endswith(".app")
+            for part in rel.parts
+        ):
             continue
         try:
             hashes[str(rel)] = _hash_file(path)
