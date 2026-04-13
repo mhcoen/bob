@@ -4523,6 +4523,7 @@ class TestSubsequentRunSpecVerificationIndependent:
     def _make_spec(self):
         """Return a mock spec object with one behavior contract."""
         contract = type("C", (), {"input": "1+1", "expected": "2"})()
+        design = type("D", (), {"user_prose": "", "auto_generated": ""})()
         return type(
             "Spec",
             (),
@@ -4531,6 +4532,14 @@ class TestSubsequentRunSpecVerificationIndependent:
                 "behavior_contracts": [contract],
                 "scope_include": None,
                 "scope_exclude": None,
+                "purpose": "",
+                "scope": "",
+                "behavior": "",
+                "architecture": "",
+                "design": design,
+                "sources": [],
+                "references": [],
+                "notes": "",
             },
         )()
 
