@@ -449,6 +449,37 @@ class ProductSpec:
     fill_in_design: bool = False
 
 
+def _parse_design_block(body: str) -> DesignBlock:
+    """Parse ``## Design`` section body into a :class:`DesignBlock`.
+
+    If the body contains an AUTO-GENERATED block (delimited by
+    ``<!-- BEGIN AUTO-GENERATED ... -->`` and
+    ``<!-- END AUTO-GENERATED -->``), the text before the block
+    becomes ``user_prose`` and the block contents (markers stripped)
+    become ``auto_generated``.
+
+    If no AUTO-GENERATED block is found, the entire body (after
+    stripping HTML comments) becomes ``user_prose``; ``auto_generated``
+    is empty.
+
+    ``has_fill_in_marker`` is set by checking ``user_prose`` (after
+    comment stripping) for ``<FILL IN>``.
+    """
+    m = _AUTOGEN_RE.search(body)
+    if m:
+        user_prose = _strip_comments(body[: m.start()]).strip()
+        auto_generated = m.group(1).strip()
+    else:
+        user_prose = _strip_comments(body).strip()
+        auto_generated = ""
+    has_fill_in = bool(_FILL_IN_RE.search(_strip_comments(user_prose)))
+    return DesignBlock(
+        user_prose=user_prose,
+        auto_generated=auto_generated,
+        has_fill_in_marker=has_fill_in,
+    )
+
+
 def read_spec(*, target_dir: Path | str = ".") -> ProductSpec | None:
     """Read and parse ``SPEC.md`` from *target_dir*.
 

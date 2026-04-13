@@ -25,6 +25,7 @@ from duplo.spec_reader import (
     _VALID_SCRAPE_VALUES,
     _VALID_SOURCE_ROLES,
     _parse_contracts,
+    _parse_design_block,
     _parse_reference_entries,
     _parse_source_entries,
     _parse_spec,
@@ -1721,3 +1722,92 @@ class TestAutogenRe:
         m = _AUTOGEN_RE.search(body)
         assert m is not None
         assert m.group(1) == ""
+
+
+class TestParseDesignBlock:
+    """Tests for _parse_design_block splitting body into DesignBlock."""
+
+    def test_block_present_splits_user_prose_and_auto(self):
+        body = (
+            "User-written design notes.\n\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "colors: #2b2b2b\nfonts: Inter\n"
+            "<!-- END AUTO-GENERATED -->\n"
+        )
+        block = _parse_design_block(body)
+        assert block.user_prose == "User-written design notes."
+        assert block.auto_generated == "colors: #2b2b2b\nfonts: Inter"
+
+    def test_block_absent_all_goes_to_user_prose(self):
+        body = "Just user prose, no auto block."
+        block = _parse_design_block(body)
+        assert block.user_prose == "Just user prose, no auto block."
+        assert block.auto_generated == ""
+
+    def test_malformed_markers_treated_as_no_block(self):
+        body = "<!-- BEGINAUTO-GENERATED -->\ncontent\n<!-- END AUTO-GENERATED -->"
+        block = _parse_design_block(body)
+        # Malformed BEGIN marker means no match — all to user_prose.
+        assert block.auto_generated == ""
+        assert "content" in block.user_prose
+
+    def test_html_comments_stripped_from_user_prose(self):
+        body = (
+            "Visible prose. <!-- hidden comment -->\n\n"
+            "<!-- BEGIN AUTO-GENERATED -->\nauto\n<!-- END AUTO-GENERATED -->"
+        )
+        block = _parse_design_block(body)
+        assert "hidden comment" not in block.user_prose
+        assert "Visible prose." in block.user_prose
+        assert block.auto_generated == "auto"
+
+    def test_fill_in_marker_in_user_prose(self):
+        body = "<FILL IN>\n\n<!-- BEGIN AUTO-GENERATED -->\nauto\n<!-- END AUTO-GENERATED -->"
+        block = _parse_design_block(body)
+        assert block.has_fill_in_marker is True
+
+    def test_fill_in_marker_absent(self):
+        body = (
+            "Real design notes.\n\n"
+            "<!-- BEGIN AUTO-GENERATED -->\nauto\n<!-- END AUTO-GENERATED -->"
+        )
+        block = _parse_design_block(body)
+        assert block.has_fill_in_marker is False
+
+    def test_fill_in_marker_in_comment_not_detected(self):
+        body = (
+            "<!-- <FILL IN> -->\nReal design.\n\n"
+            "<!-- BEGIN AUTO-GENERATED -->\nauto\n<!-- END AUTO-GENERATED -->"
+        )
+        block = _parse_design_block(body)
+        assert block.has_fill_in_marker is False
+
+    def test_fill_in_marker_no_block(self):
+        body = "<FILL IN>\nSome initial design."
+        block = _parse_design_block(body)
+        assert block.has_fill_in_marker is True
+        assert block.auto_generated == ""
+
+    def test_empty_body(self):
+        block = _parse_design_block("")
+        assert block.user_prose == ""
+        assert block.auto_generated == ""
+        assert block.has_fill_in_marker is False
+
+    def test_only_auto_block_no_user_prose(self):
+        body = "<!-- BEGIN AUTO-GENERATED -->\nauto only\n<!-- END AUTO-GENERATED -->"
+        block = _parse_design_block(body)
+        assert block.user_prose == ""
+        assert block.auto_generated == "auto only"
+
+    def test_text_after_block_not_in_user_prose(self):
+        body = (
+            "Before.\n"
+            "<!-- BEGIN AUTO-GENERATED -->\nauto\n<!-- END AUTO-GENERATED -->\n"
+            "After the block."
+        )
+        block = _parse_design_block(body)
+        assert block.user_prose == "Before."
+        assert block.auto_generated == "auto"
+        # Text after the block is neither user_prose nor auto_generated.
+        assert "After" not in block.user_prose
