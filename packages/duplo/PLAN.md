@@ -699,7 +699,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per MIGRATION-design.md § Implementation "Phase 2 dispatch order": at the top of `main()`, after argv parsing but before any other work, branch on subcommand. If subcommand is `fix` or `investigate`, dispatch to the existing handlers WITHOUT calling `_check_migration` (those subcommands work on already-initialized projects regardless of layout and should not be blocked by migration).
   - [x] If there is no subcommand (the default `duplo` invocation), call `_check_migration(Path.cwd())` FIRST, before any other work. If `_check_migration` exits, nothing else in `main()` runs.
   - [x] If `_check_migration` returns, proceed with the existing no-subcommand code path unchanged. `_first_run` and `_subsequent_run` are NOT touched in this phase.
-  - [ ] Do NOT add an `init` branch — `duplo init` does not exist yet; that lands in Phase 4. If the user types `duplo init` today, argparse should reject it with an unknown-subcommand error as it does now.
+  - [x] Do NOT add an `init` branch — `duplo init` does not exist yet; that lands in Phase 4. If the user types `duplo init` today, argparse should reject it with an unknown-subcommand error as it does now.
   - [ ] Tests (these are integration-style tests against `main`, using `capsys` and monkeypatching `sys.argv` / `Path.cwd`):
     - [ ] `duplo` (no args) in an old-layout temp directory: prints migration message, exits 1, does not call `_subsequent_run` or `_first_run`
     - [ ] `duplo` (no args) in a new-format temp directory: migration check passes silently, proceeds to the existing dispatch (may exit for other reasons like missing purpose, but NOT the migration message)
