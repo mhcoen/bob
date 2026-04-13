@@ -138,23 +138,47 @@ The function:
    first).
 3. Identifies the insertion point: end of the section, before
    the next `##` heading.
-4. **Deduplicates against existing entries**: any new entry
-   whose URL already appears in the section (regardless of
-   role, scrape depth, or flags) is skipped, with a
-   diagnostic. This prevents the failure mode where a deep
-   crawl rediscovers the same cross-origin URL on every run
-   and re-appends it indefinitely until the user removes the
-   `discovered: true` flag.
-5. Serializes each remaining new entry in canonical format
+4. **Canonicalizes every new entry's URL** via
+   `canonicalize_url` (specified in PIPELINE-design.md § "URL
+   canonicalization") before any comparison. Existing entries
+   in the SPEC.md section were already canonicalized by the
+   parser on read, so both sides of the dedup comparison use
+   the same form. The canonicalized URL is also what gets
+   serialized into the file, so a future parse will find the
+   entry already in canonical form.
+5. **Applies counter-example scrape coercion** to each new
+   entry before serializing: if `entry.role == "counter-example"`
+   and `entry.scrape in {"deep", "shallow"}`, rewrite to
+   `entry.scrape = "none"` and emit a diagnostic. This
+   mirrors the parse-time coercion in PARSER-design.md and
+   prevents a one-run-stale-file window where a Phase 4
+   drafter infers a counter-example role with a non-`none`
+   scrape and serializes the wrong combination — the parser
+   would fix it on next read, but the intervening file state
+   would be incorrect. `append_sources` fixes it at write
+   time so the file is never incorrect. (Phase 3 only
+   constructs `role="docs"` entries through this path, so
+   the coercion is a no-op for Phase 3; Phase 4's drafter
+   depends on it.)
+6. **Deduplicates against existing entries**: any new entry
+   whose canonical URL already appears in the section
+   (regardless of role, scrape depth, or flags) is skipped,
+   with a diagnostic. This prevents the failure mode where
+   a deep crawl rediscovers the same cross-origin URL on
+   every run and re-appends it indefinitely until the user
+   removes the `discovered: true` flag.
+7. Serializes each remaining new entry in canonical format
    with `discovered: true` or `proposed: true` set on the
    entry.
-6. Inserts the entries before the section boundary.
-7. Returns the modified content.
+8. Inserts the entries before the section boundary.
+9. Returns the modified content.
 
-Deduplication is URL-only (after URL normalization: lowercased
-scheme + host, trailing slash on host stripped). Two entries
-with the same URL but different roles are still considered
-duplicates; the first-write-wins rule applies.
+Deduplication is URL-only, comparing canonical forms. Two
+entries with the same URL but different roles are still
+considered duplicates; the first-write-wins rule applies. The
+dedup rule matches `_collect_cross_origin_links` in
+PIPELINE-design.md by construction: both call `canonicalize_url`,
+so a URL that passes one dedup cannot fail the other.
 
 Side-effect-free: takes existing content as a string argument
 rather than reading SPEC.md itself. Caller reads, calls
@@ -385,24 +409,48 @@ A property test:
 def test_round_trip(spec: ProductSpec):
     serialized = format_spec(spec)
     parsed = parse(serialized)
-    # Compare every field except `raw`. The `raw` field on the
-    # parsed result will equal the serialized output, not the
-    # original spec.raw, so equality on `raw` is meaningless.
-    assert _spec_equal_excluding_raw(parsed, spec)
+    # Compare every field except `raw` and the `dropped_*`
+    # lists. See _spec_equal_for_round_trip below.
+    assert _spec_equal_for_round_trip(parsed, spec)
 ```
 
-Where `_spec_equal_excluding_raw` is a helper that compares
-all ProductSpec fields except `raw`. Implementation:
+Where `_spec_equal_for_round_trip` excludes fields that
+legitimately do not survive round-tripping:
 
 ```python
-def _spec_equal_excluding_raw(a: ProductSpec, b: ProductSpec) -> bool:
-    fields = [f for f in dataclasses.fields(ProductSpec) if f.name != "raw"]
+_ROUND_TRIP_EXCLUDED_FIELDS = {
+    "raw",                  # parsed.raw == serialized, not spec.raw
+    "dropped_sources",      # not serialized (format_spec has no
+                            # notion of "dropped"); a round-tripped
+                            # spec has empty dropped_* regardless
+                            # of the original's content.
+    "dropped_references",
+}
+
+def _spec_equal_for_round_trip(a: ProductSpec, b: ProductSpec) -> bool:
+    fields = [
+        f for f in dataclasses.fields(ProductSpec)
+        if f.name not in _ROUND_TRIP_EXCLUDED_FIELDS
+    ]
     return all(getattr(a, f.name) == getattr(b, f.name) for f in fields)
 ```
 
+The `dropped_*` exclusion matters because `format_spec` does
+not (and should not) serialize those lists — they represent
+entries the parser rejected at read time. A round-tripped
+spec will have empty `dropped_*` lists regardless of what the
+original contained, so including them in the comparator
+produces spurious failures for generators that populate them.
+
+Test-generator note: generators producing `ProductSpec`
+instances for this property test MAY populate `dropped_*`
+(the comparator ignores those fields), but a separate test
+pins that `dropped_*` entries round-trip as empty lists
+— documenting the asymmetry rather than hiding it.
+
 Run against generated `ProductSpec` instances covering all
 field combinations. Catches any drift between parser and
-drafter.
+drafter on the fields that DO survive round-tripping.
 
 A second property test:
 
@@ -449,7 +497,12 @@ When this becomes mcloop tasks:
 4. Implement round-trip test infrastructure. Run against
    parser. Pin baseline.
 5. Implement `_modify_section` helper. Tests.
-6. Implement `append_sources`. Tests.
+6. Implement `append_sources`, including canonicalization via
+   `canonicalize_url` and counter-example scrape coercion. Tests
+   pin the dedup behavior across `/docs` vs `/docs/` variants,
+   the coercion (counter-example + scrape: deep → scrape: none
+   on write), and the no-op behavior for Phase 3's `role="docs"`
+   callers. Tests.
 7. Implement `append_references`. Tests.
 8. Implement `update_design_autogen` with write-once-never-
    replace semantics. Tests, including the case where the

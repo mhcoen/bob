@@ -280,6 +280,17 @@ Network failure during init is recoverable. Write the URL into
 SPEC.md with `scrape: none` so the user knows duplo tried, and
 let them edit SPEC.md to retry on the next `duplo` run.
 
+The URL is canonicalized via `canonicalize_url` (per
+PIPELINE-design.md § "URL canonicalization") before being
+written to SPEC.md, regardless of fetch outcome. Without this,
+a user who types `duplo init https://numi.app/` (with trailing
+slash) on a failing network ends up with a Sources entry that
+doesn't canonical-match what a future successful crawl
+produces, leading to a duplicate append when the user retries.
+The entry has no `proposed` or `discovered` flag (the user
+provided the URL explicitly; fetch failure doesn't demote it
+to an unreviewed inference).
+
 ### URL fetch succeeds but identifies nothing
 
 ```
@@ -416,8 +427,19 @@ The first `duplo` run after init does:
 3. If valid, proceed with the normal pipeline:
    - Re-scrape any sources marked `scrape: deep` or `scrape: shallow`
      (deep is the heavy work deferred from init).
-   - Run Vision on `visual-target` references (this also runs
-     during init for proposed-role inference; it's fine to re-run).
+   - If `## Design` has no AUTO-GENERATED block, run Vision
+     (cross-image design synthesis) on `visual-target`
+     references and write the autogen block. This is a
+     DIFFERENT Vision call from the per-image role-proposal
+     call that runs during `duplo init` (see
+     DRAFTER-design.md § "Inferring file roles via Vision"
+     for the role-proposal prompt; see PIPELINE-design.md
+     § `design_extractor.py` for the design-synthesis prompt).
+     Running both is not redundant — they produce different
+     outputs (per-image roles vs. aggregated design
+     requirements) and the design-synthesis call is gated
+     on the autogen block being absent (write-once-never-
+     replace).
    - Extract features, generate roadmap, generate Phase 1
      PLAN.md.
 4. Hand off to mcloop.
@@ -459,10 +481,19 @@ Dependencies:
   there is no separate `shallow=True` boolean.
 - `duplo.validator.validate_product_url` (existing) for URL
   validation.
-- `duplo.design_extractor.extract_design` (existing) for Vision
-  on existing `ref/` files. The prompt is reused but the output
-  is used to *propose* a role (not just extract design details).
-  May need a small extension to return per-image role suggestions.
+- `duplo.design_extractor.extract_design` (existing) is NOT
+  reused for role proposal. Role proposal uses a separate
+  Vision prompt specified in DRAFTER-design.md § "Inferring
+  file roles via Vision" — a two-question prompt that returns
+  `{description, role}` per image from a fixed enum. The
+  module that owns the call is `spec_drafter.py` (same module
+  as the rest of the drafter); the prompt lives alongside the
+  other structured-output prompts there. `extract_design`
+  remains the first-`duplo`-run Vision call (cross-image
+  design synthesis producing the AUTO-GENERATED block); the
+  two calls have different prompts and different outputs.
+  See "Interaction with subsequent duplo runs" below for why
+  running both is not wasteful.
 - `duplo.scanner.scan_directory` (existing, but pointed at `ref/`
   only under the new model) for inventorying existing files.
 

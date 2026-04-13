@@ -126,17 +126,31 @@ def fetch_site(
 Key properties of `raw_pages`:
 
 - For `scrape_depth="shallow"`: contains exactly one entry
-  (the entry URL).
+  (the entry URL) on success; empty dict on fetch failure.
 - For `scrape_depth="deep"`: contains the entry URL plus
   every same-origin page that was followed and successfully
   fetched. Cross-origin pages are NOT in this dict (they
   weren't fetched per the same-origin restriction).
 - For `scrape_depth="none"`: empty dict (no fetch happened).
 - Keys are the absolute URLs actually fetched (post-redirect,
-  normalized the same way `_collect_cross_origin_links`
-  normalizes them).
+  canonicalized via `canonicalize_url`).
 - Values are the raw HTML bytes decoded as UTF-8 with
   error replacement.
+
+**Failed fetches are NOT included in `raw_pages`.** If a
+same-origin link returns 404, times out, has a non-HTML
+content-type, or fails to decode, the fetcher records the
+failure via `record_failure("fetch_site", "fetch", ...)`
+and omits the URL from both `raw_pages` AND `page_records`.
+The two structures stay in sync: for every URL in
+`raw_pages`, there is a corresponding `PageRecord`; for
+every `PageRecord`, the URL is in `raw_pages`. This makes
+the `save_raw_content` invariant (keys match `record.url`
+exactly) hold by construction. A fetch failure is visible
+to the user through diagnostics but silent to downstream
+pipeline stages — they simply see one fewer page, which
+is the correct behavior (they can't do anything about a
+network failure).
 
 The orchestrator uses `raw_pages` for three purposes:
 1. `_collect_cross_origin_links(raw_pages, source_url)` —
@@ -147,13 +161,131 @@ The orchestrator uses `raw_pages` for three purposes:
    embedded `<img>`, `<video>`, `<source>` media from
    product-reference pages.
 3. `save_raw_content(all_raw_pages, page_records)` — cache
-   HTML to `.duplo/raw_pages/` keyed by content hash for
-   diff-based change detection on subsequent runs.
+   HTML to `.duplo/raw_pages/` keyed by canonical-URL hash
+   (see `save_raw_content` signature below for the full
+   rule and rationale; content hash is stored inside each
+   `PageRecord` for change detection, NOT used as the
+   cache-file filename).
 
 Today's `fetch_site` already accumulates per-page HTML
 internally for content-hash computation in `PageRecord`. The
 change is to expose that accumulation as a return value
 rather than discarding it after hashing.
+
+
+## URL canonicalization
+
+Multiple consumers operate on URLs: `raw_pages` keys,
+`PageRecord.url`, `_collect_cross_origin_links` output,
+`append_sources` dedup, `.duplo/raw_pages/` cache keys,
+`save_raw_content`'s lookup. If any two of these use different
+normalization rules, state goes inconsistent silently. This
+section pins the one canonical form used everywhere.
+
+**The canonical form** (applied to every URL at the point it
+enters duplo state — scraped URLs, href-extracted URLs, and
+user-authored `## Sources` URLs alike):
+
+```python
+def canonicalize_url(url: str) -> str:
+    """Normalize a URL to its canonical duplo form.
+
+    1. Lowercase scheme and host.
+    2. Strip default ports (80 on http, 443 on https).
+    3. Strip fragment (#section).
+    4. Strip trailing slash from ALL paths, including the
+       root path "/". That is: https://a.com/ → https://a.com,
+       https://a.com/docs/ → https://a.com/docs,
+       https://a.com/docs → https://a.com/docs (unchanged).
+    5. Preserve query strings (different queries are different
+       resources).
+    """
+```
+
+**Why strip all trailing slashes, including root.** Deep-crawl
+output routinely contains both `/docs/` and `/docs` variants
+of the same page (the site's canonical link tags go one way,
+inline `<a href>` tags go the other). Without uniform
+trailing-slash stripping, dedup in `_collect_cross_origin_links`
+and `append_sources` sees these as distinct, both pass through,
+SPEC.md grows an append entry on every run. This is exactly
+the failure mode dedup was designed to prevent. The root-path
+slash is syntactic rather than a path segment, but it needs
+the same treatment so `https://a.com/` and `https://a.com`
+compare equal — otherwise dedup fails at the most common
+case (the user-authored host-only URL versus the fetcher's
+post-redirect URL).
+
+**Where canonicalization is applied:**
+
+1. `fetch_site` returns `raw_pages` with canonicalized URLs
+   as keys, AND produces `PageRecord` objects whose `url`
+   field is the canonicalized form. These two structures
+   therefore agree by construction; callers can look up HTML
+   by `record.url` without translation.
+2. `fetch_site` follows redirects; the final (post-redirect)
+   URL is canonicalized and used as the key.
+3. `_collect_cross_origin_links` canonicalizes each extracted
+   `<a href>` target before the cross-origin check and before
+   deduplication.
+4. `append_sources` canonicalizes incoming `SourceEntry.url`
+   values before comparing against existing SPEC.md entries.
+   Existing entries in SPEC.md are canonicalized on read by
+   the parser (another point-of-entry).
+5. The parser's `## Sources` entry validator canonicalizes
+   each URL into the stored `SourceEntry`. User-authored
+   `https://numi.app/` and duplo-written `https://numi.app`
+   compare equal.
+6. `.duplo/raw_pages/` uses the SHA-256 of the canonical URL
+   as the filename key. `PageRecord.content_hash` continues
+   to hash the HTML body (it's a content hash, not a URL
+   hash). The two hashes are independent:
+   `<url_hash>.html` identifies the cache slot;
+   `content_hash` inside the record detects changes.
+
+**Source URL overlap handling.** With canonicalization in
+place, a multi-source spec that includes both
+`https://numi.app` and `https://numi.app/docs` may still
+deep-crawl into overlapping same-origin territory (both can
+reach `https://numi.app/about`). The orchestrator's
+accumulation is therefore dedup-by-canonical-URL:
+
+```python
+for source in format_scrapeable_sources(spec):
+    scraped_text, code_examples, doc_structures, page_records, source_raw_pages = (
+        fetch_site(source.url, scrape_depth=source.scrape)
+    )
+    combined_text += scraped_text + "\n"
+    all_code_examples.extend(code_examples)
+    # Dedup page_records by canonical URL: first source to yield
+    # a page for a given URL wins; subsequent duplicate records
+    # are dropped. Prevents two PageRecord entries for one URL
+    # (which would produce inconsistent .duplo/reference_urls/
+    # state when save_reference_urls serializes them).
+    for record in page_records:
+        if record.url not in seen_canonical_urls:
+            all_page_records.append(record)
+            seen_canonical_urls.add(record.url)
+    # Similarly dedup raw_pages: dict.update overwrites, so
+    # subsequent sources would silently win. Use setdefault
+    # to preserve first-seen content for a given canonical URL.
+    for url, html in source_raw_pages.items():
+        all_raw_pages.setdefault(url, html)
+        if source.role == "product-reference":
+            product_ref_raw_pages.setdefault(url, html)
+    # ... doc_structures merge, discovered_urls.extend ...
+```
+
+**First-source-wins rationale.** Within a single run, a page
+fetched twice within the same second will yield identical
+HTML (the network doesn't change in milliseconds). The
+concerns are ordering stability (same canonical URL should
+produce the same record on every run) and single-writer
+discipline for the cache (one HTML body per URL, one
+`PageRecord` per URL). First-source-wins provides both:
+SPEC.md source order is stable across runs, so whichever
+source yields a URL first in run N yields it first in run
+N+1, producing stable cache state.
 
 
 ### `design_extractor.py`
@@ -227,15 +359,39 @@ the new model its signature becomes explicit:
 def _download_site_media(
     raw_pages: dict[str, str],
 ) -> tuple[list[Path], list[Path]]:
-    """Download embedded <img>, <video>, and <source> media from
-    the HTML of product-reference pages.
+    """Collect embedded <img>, <video>, and <source> media paths
+    for the HTML of product-reference pages.
 
-    Returns (image_paths, video_paths). Media files are saved
-    to .duplo/site_media/ keyed by source URL hash. The URLs
-    the media was embedded in are recorded alongside the files
-    so subsequent runs can diff against change.
+    Returns (image_paths, video_paths) where each list contains
+    LOCAL PATHS TO ALL EMBEDDED MEDIA — both files newly
+    downloaded during this call AND files already present in
+    the cache from previous runs. Callers receive a complete
+    media inventory regardless of cache state.
+
+    Media files live in .duplo/site_media/<url-hash>/<filename>.
+    On a cache hit, no HTTP fetch happens; the existing path
+    is returned unchanged. On a cache miss, the file is
+    downloaded and the new path is returned. Either way, the
+    function reads every <img>/<video>/<source> tag in each
+    page and yields a path for every referenced resource that
+    exists locally (cached or newly downloaded).
     """
 ```
+
+**Cached-vs-new rule.** The orchestrator must see a complete
+media inventory on every run, not just "what got downloaded
+this time." Consider: a URL-only project's second run. All
+media is cached; nothing new to download. If
+`_download_site_media` returned only newly-downloaded paths,
+`design_input` would be empty on that second run. Then if the
+user deletes the autogen block to regenerate, the Vision call
+runs against zero inputs and produces nothing. The cache
+becomes a trap that silently breaks regeneration.
+
+The fix: `_download_site_media` returns paths for every
+embedded media resource that exists locally, whether it was
+downloaded this call or previously. Callers can't tell the
+difference, which is what they want.
 
 Key changes from today:
 
@@ -247,6 +403,8 @@ Key changes from today:
   the orchestrator. Videos are no longer discarded; they feed
   `extract_all_videos` alongside ref/-declared behavioral
   targets.
+- Return includes cached paths, not just newly-downloaded
+  paths. See the cached-vs-new rule above.
 - Callers pass only `product_reference_raw_pages` (not the
   full `all_raw_pages`), matching the existing rule that only
   product-reference sources contribute to design and
@@ -349,11 +507,16 @@ New:
   the LLM, not an exclusion filter; using it for exclusion
   fails when the LLM rephrases an excluded concept. Instead,
   the orchestrator filters extracted features against
-  `scope_exclude` after extraction, dropping any feature whose
-  name OR description contains an excluded term (case-
-  insensitive substring match). The LLM is also told via
-  `spec_text` what's excluded; the post-filter is belt-and-
-  braces.
+  `scope_exclude` after extraction using the `_matches_excluded`
+  helper (see orchestrator-helpers section for the full spec).
+  Matching is **case-insensitive word-boundary regex**, not
+  substring: an excluded term `"plugin API"` matches
+  `"Plugin API"` and `"plugin API."` but not
+  `"non-plugin-API"` or a feature description that merely
+  mentions `"plugin API"` as contrast. Word-boundary matching
+  avoids the false positives that substring matching produces.
+  The LLM is also told via `spec_text` what's excluded; the
+  post-filter is belt-and-braces.
 
 
 ### `gap_detector.py`
@@ -423,10 +586,14 @@ def _subsequent_run() -> None:
     # Re-scrape declared sources. Collect raw pages for site-media
     # extraction, code examples and doc structures from all sources,
     # cross-origin discoveries for SPEC.md write-back, and full raw
-    # HTML for the .duplo/raw_pages/ cache.
-    all_raw_pages: dict[str, str] = {}          # url -> HTML, EVERY scraped page
-    product_ref_raw_pages: dict[str, str] = {}  # url -> HTML, product-reference subset
+    # HTML for the .duplo/raw_pages/ cache. Per "URL canonicalization"
+    # above, dedup page records and raw_pages by canonical URL using
+    # first-source-wins to keep cache state consistent when multiple
+    # sources deep-crawl into overlapping same-origin territory.
+    all_raw_pages: dict[str, str] = {}          # canonical url -> HTML, EVERY page
+    product_ref_raw_pages: dict[str, str] = {}  # canonical url -> HTML, product-ref subset
     discovered_urls: list[str] = []             # cross-origin links from deep crawl
+    seen_canonical_urls: set[str] = set()       # dedup guard for page_records
     combined_text = ""
     all_code_examples: list = []
     all_page_records: list = []
@@ -437,22 +604,41 @@ def _subsequent_run() -> None:
         )
         combined_text += scraped_text + "\n"
         all_code_examples.extend(code_examples)
-        all_page_records.extend(page_records)
+        # First-source-wins dedup for PageRecord and raw HTML.
+        for record in page_records:
+            if record.url not in seen_canonical_urls:
+                all_page_records.append(record)
+                seen_canonical_urls.add(record.url)
+        for url, html in source_raw_pages.items():
+            all_raw_pages.setdefault(url, html)
+            if source.role == "product-reference":
+                product_ref_raw_pages.setdefault(url, html)
         if doc_structures:
             merged_doc_structures.feature_tables.extend(doc_structures.feature_tables)
             merged_doc_structures.operation_lists.extend(doc_structures.operation_lists)
             merged_doc_structures.unit_lists.extend(doc_structures.unit_lists)
             merged_doc_structures.function_refs.extend(doc_structures.function_refs)
-        all_raw_pages.update(source_raw_pages)  # cache every scraped page
-        if source.role == "product-reference":
-            product_ref_raw_pages.update(source_raw_pages)
-        discovered_urls.extend(_collect_cross_origin_links(source_raw_pages, source.url))
+        # Cross-origin discovery is a deep-crawl behavior only.
+        # Shallow sources fetched just the entry URL; collecting
+        # cross-origin links from a shallow page and recording
+        # them as `discovered: true` would silently append URLs
+        # the user never asked duplo to explore. Skip discovery
+        # for non-deep sources.
+        if source.scrape == "deep":
+            discovered_urls.extend(
+                _collect_cross_origin_links(source_raw_pages, source.url)
+            )
     if all_code_examples:
         save_examples(all_code_examples)
     if all_page_records:
         save_reference_urls(all_page_records)
         if all_raw_pages:
-            save_raw_content(all_raw_pages, all_page_records)  # .duplo/raw_pages/
+            # save_raw_content writes each page HTML to
+            # .duplo/raw_pages/<sha256(canonical_url)>.html. Because
+            # raw_pages keys and record.url are both canonical (per
+            # URL canonicalization above), the lookup by record.url
+            # succeeds for every record.
+            save_raw_content(all_raw_pages, all_page_records)
     if merged_doc_structures:
         save_doc_structures(merged_doc_structures)
 
@@ -476,8 +662,9 @@ def _subsequent_run() -> None:
         scope_include=spec.scope_include,
         scope_exclude=spec.scope_exclude,
     )
-    # Post-extraction scope_exclude filter (see extractor.py section).
-    # Drops produce diagnostics so false positives are visible.
+    # Post-extraction scope_exclude filter. Uses word-boundary
+    # regex matching via _matches_excluded (see helper spec);
+    # drops produce diagnostics so false positives are visible.
     features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]
     save_features(features)
 
@@ -492,15 +679,23 @@ def _subsequent_run() -> None:
 
     # Behavioral references → frame extraction → verification cases.
     # Behavioral input is the union of ref/-declared behavioral targets
-    # AND scraped videos from product-reference pages.
+    # AND scraped videos from product-reference pages. Source paths
+    # must be unique (ref/ and .duplo/site_media/ live under different
+    # roots, so path collisions require a user error); an assertion
+    # guards the invariant before the per-source lookup is built.
     behavioral_entries = format_behavioral_references(spec)
     behavioral_paths = [e.path for e in behavioral_entries] + site_videos
-    video_results = extract_all_videos(behavioral_paths)
+    assert len(behavioral_paths) == len(set(behavioral_paths)), (
+        "Duplicate source path across ref-declared and scraped videos"
+    )
+    video_results = extract_all_videos(behavioral_paths)  # list[ExtractionResult]
     # Filter rejected frames (transitions, blur, marketing overlays)
     # BEFORE building the per-source lookup. Rejected frames must NOT
-    # flow into design extraction for dual-role videos.
+    # flow into design extraction for dual-role videos. Reuse the
+    # existing ExtractionResult dataclass; replace the frames list
+    # with the filtered subset, preserving source and error fields.
     filtered_results = [
-        VideoResult(source=r.source, frames=apply_filter(filter_frames(r.frames)))
+        dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))
         for r in video_results
     ]
     # ... frame_describer, verification_extractor on filtered_results ...
@@ -528,26 +723,64 @@ def _subsequent_run() -> None:
         for video_path in site_videos
         for frame in accepted_frames_by_path.get(video_path, [])
     ]
-    design_input = visual_paths + visual_video_frames + scraped_video_frames + site_images
+    # Dedup frames by content hash before composing design_input.
+    # A user who ref/-declares a local copy of a demo video that
+    # also appears on a scraped product page will otherwise have
+    # frames from both copies counted twice: once via
+    # visual_video_frames (ref/ dual-role path) and once via
+    # scraped_video_frames (site_media path). The frames are
+    # different files (different paths) but describe identical
+    # visual content, so path-based dedup doesn't help — content
+    # hash does. ref-declared frames win on collision (the user
+    # declared them; their roles carry more intent than a
+    # scraped-page auto-inclusion).
+    seen_frame_hashes: set[str] = set()
+    deduped_visual_video_frames: list[Path] = []
+    for frame in visual_video_frames:
+        h = hashlib.sha256(frame.read_bytes()).hexdigest()
+        if h not in seen_frame_hashes:
+            deduped_visual_video_frames.append(frame)
+            seen_frame_hashes.add(h)
+    deduped_scraped_video_frames: list[Path] = []
+    for frame in scraped_video_frames:
+        h = hashlib.sha256(frame.read_bytes()).hexdigest()
+        if h not in seen_frame_hashes:
+            deduped_scraped_video_frames.append(frame)
+            seen_frame_hashes.add(h)
+    design_input = (
+        visual_paths
+        + deduped_visual_video_frames
+        + deduped_scraped_video_frames
+        + site_images
+    )
 
-    # Check autogen block FIRST. If present, skip the Vision call entirely
-    # — update_design_autogen would silently discard the result anyway
-    # (write-once-never-replace). This avoids burning Vision dollars on
-    # every run for no effect.
-    spec_text_now = (Path.cwd() / "SPEC.md").read_text()
-    if design_input and not _has_autogen_block(spec_text_now):
+    # Check autogen block FIRST via the in-memory dataclass (NOT a
+    # second disk read or a second regex pass). The parser already
+    # produced spec.design.auto_generated; consulting it here keeps
+    # the in-memory spec as the single source of truth and avoids
+    # maintaining two redundant block-detection implementations.
+    # If present, skip the Vision call entirely — update_design_autogen
+    # would silently discard the result anyway (write-once-never-replace).
+    autogen_present = bool(spec.design.auto_generated.strip())
+    if design_input and not autogen_present:
         design = extract_design(design_input)
-        modified = update_design_autogen(spec_text_now, format_design_block(design))
-        if modified != spec_text_now:
+        existing = (Path.cwd() / "SPEC.md").read_text()
+        modified = update_design_autogen(existing, format_design_block(design))
+        if modified != existing:
             (Path.cwd() / "SPEC.md").write_text(modified)
         save_design_requirements(dataclasses.asdict(design))  # cache
     elif design_input:
         # Autogen block already exists; tell the user we skipped
         # extraction so they know any new visual-target files won't
         # produce new design output until they delete the block.
+        # Use category="io" since the existing diagnostics categories
+        # are {fetch, screenshot, llm, hash, io} and this is closest
+        # (file-state-gated skip). If a dedicated "skipped" category
+        # is desired, extending diagnostics.CATEGORIES is a separate
+        # Phase 3 prerequisite task.
         record_failure(
             "orchestrator:design_extraction",
-            "skipped",
+            "io",
             "Autogen design block exists in SPEC.md; skipped Vision "
             "extraction. Delete the BEGIN/END AUTO-GENERATED block "
             f"to regenerate from {len(design_input)} input image(s)."
@@ -586,11 +819,11 @@ logic. Specs:
 
 ### `_collect_cross_origin_links(raw_pages, source_url) -> list[str]`
 
-Given the dict of `{url: HTML}` returned from a deep crawl of
-`source_url`, extract URLs from `<a href="...">` tags whose
-resolved absolute URL has a different origin (scheme + host +
-port) from `source_url`. Returns a deduplicated, normalized
-list.
+Given the dict of `{canonical_url: HTML}` returned from a
+deep crawl of `source_url`, extract URLs from `<a href="...">`
+tags whose resolved absolute URL has a different origin
+(scheme + host + port) from `source_url`. Returns a
+deduplicated list of canonical-form URLs.
 
 Decisions:
 - Only `<a href>` is considered. `<link>`, `<script src>`,
@@ -600,26 +833,30 @@ Decisions:
   CDN images on a deep-crawled page are downloaded as part of
   `_download_site_media`, not recorded as discovered. See
   "Same-origin and embedded media" below.)
-- URLs are normalized before deduplication: lowercase scheme
-  and host, strip default ports (80/443), strip trailing slash
-  on the path-less form, strip URL fragments (`#section`).
-  Query strings are preserved (different queries on the same
-  page are different resources).
+- Every extracted href is resolved to an absolute URL and
+  then passed through `canonicalize_url` (see "URL
+  canonicalization" above). All downstream comparisons
+  (cross-origin check, dedup) operate on canonical form.
+  This is the ONLY normalization rule this helper applies;
+  it does not maintain its own rule set.
 - Cross-origin classification is strict: a link from
   `https://numi.app` to `https://docs.numi.app` is
   cross-origin (different host). A link from `https://numi.app`
   to `https://numi.app/docs` is same-origin.
-- Dedup happens here and again in `append_sources`. Belt and
-  braces; the helper's dedup is per-run, `append_sources` is
-  against existing SPEC.md content.
+- Dedup via canonical form happens here and again in
+  `append_sources`. Belt and braces; the helper's dedup is
+  per-run, `append_sources` is against existing SPEC.md
+  content. Both use the same `canonicalize_url`, so a URL
+  that passes one dedup and fails the other is impossible
+  by construction.
 
 ### `_accepted_frames_by_source(filtered_results) -> dict[Path, list[Path]]`
 
-Given a list of `VideoResult` objects **after `frame_filter`
-has been applied** — each containing a `source` (input video
-path) and `frames` (the accepted frames that survived
-filtering) — build a lookup table from source video path to
-its list of accepted frame paths.
+Given a list of `ExtractionResult` objects **after
+`frame_filter` has been applied** — each containing a
+`source` (input video path) and `frames` (the accepted
+frames that survived filtering) — build a lookup table from
+source video path to its list of accepted frame paths.
 
 Used in the orchestration sketch to thread frames from videos
 with `visual-target` in their roles (or all scraped videos)
@@ -635,7 +872,25 @@ design extraction for dual-role videos — producing a
 degraded `DesignRequirements` where e.g. a frame describing
 "the video is loading" contributes as if it were a real UI
 state. The orchestration sketch runs `apply_filter` on each
-`VideoResult.frames` BEFORE calling this helper.
+`ExtractionResult.frames` BEFORE calling this helper via
+`dataclasses.replace` (preserving `source` and `error`
+fields).
+
+**Source-path preservation contract.** `extract_all_videos`
+MUST preserve each input path as `ExtractionResult.source`
+byte-for-byte — no absolute-path resolution, no symlink
+following, no normalization. The lookup in the orchestration
+sketch does `accepted_frames_by_path.get(entry.path, ...)`
+and `accepted_frames_by_path.get(video_path, ...)`, comparing
+dict keys against paths that came from `ReferenceEntry.path`
+or `site_videos`. If `extract_all_videos` rewrites paths,
+the `.get()` silently returns `[]` and dual-role videos
+contribute zero frames — no error, degraded output. Callers
+are responsible for passing paths in the form they intend to
+look up; `extract_all_videos` is responsible for not
+transforming them. A test pins this: pass a relative path,
+assert `ExtractionResult.source` equals that same relative
+path (not its resolved absolute form).
 
 Implementation is a one-liner (`{r.source: r.frames for r in
 filtered_results}`) but lives as a named helper so the
@@ -645,25 +900,20 @@ post-filter-only contract has a named place to live in tests.
 Tests pin: (a) lookup returns correct frames per source; (b)
 if called with unfiltered results, rejected frames are
 present in the output (demonstrating the contract violation
-is detectable).
+is detectable); (c) path-preservation as described above.
 
-### `_has_autogen_block(spec_text) -> bool`
+### ~~`_has_autogen_block`~~ (removed: use `spec.design.auto_generated`)
 
-Returns True if `spec_text` contains a complete
-`<!-- BEGIN AUTO-GENERATED ... --> ... <!-- END AUTO-GENERATED -->`
-block inside its `## Design` section. Implementation: reuse
-`_AUTOGEN_RE` from PARSER-design.md § `## Design` parser; run
-it against the body of the `## Design` section.
-
-Used by the orchestrator to decide whether to call
-`extract_design` at all (write-once-never-replace semantics
-mean a Vision call when the block exists is wasted).
-
-Lives in `spec_reader.py` rather than orchestrator helpers,
-since it's a parser-adjacent predicate. Tests pin: returns
-True for well-formed block, False for missing block, False
-for malformed BEGIN-only or END-only markers (matching the
-parser's existing handling).
+Earlier drafts specified a helper `_has_autogen_block(spec_text)`
+that re-ran the autogen regex against SPEC.md text from disk.
+That has been removed. The parser already produces
+`spec.design.auto_generated` (a string that is non-empty iff
+a well-formed block exists), and the orchestrator uses
+`bool(spec.design.auto_generated.strip())` directly. Consulting
+the in-memory dataclass is consistent with the "in-memory spec
+is source of truth within a single run" invariant stated
+above, and avoids maintaining two block-detection
+implementations that must stay in lockstep.
 
 ### `format_design_block(design) -> str`
 
@@ -989,7 +1239,8 @@ multiple URLs in `## Sources`. Persistence updates:
   `{url, last_scraped, content_hash, scrape_depth_used}`
   entries, one per scrapeable source.
 - `.duplo/raw_pages/` (existing) continues to store scraped
-  HTML keyed by URL hash. No schema change.
+  HTML keyed by canonical-URL hash. See
+  `save_raw_content` signature below.
 - `.duplo/reference_urls/` (existing) continues to track
   same-origin discovered URLs from deep crawls. No schema
   change.
@@ -1006,6 +1257,66 @@ entry stays in `duplo.json` (idempotent state), but the
 pipeline doesn't re-scrape and doesn't include the cached
 content in subsequent extractions. Users who want to purge
 cached content delete `.duplo/raw_pages/<hash>` manually.
+
+### `save_raw_content` signature
+
+```python
+def save_raw_content(
+    raw_pages: dict[str, str],        # canonical url -> HTML
+    page_records: list[PageRecord],   # record.url is canonical
+    *,
+    target_dir: Path = Path.cwd(),
+) -> None:
+    """Write scraped HTML to .duplo/raw_pages/.
+
+    For each PageRecord, look up raw_pages[record.url] and
+    write the HTML to
+    .duplo/raw_pages/<sha256(record.url)>.html.
+
+    Keys are the SHA-256 of the canonical URL (NOT the HTML
+    content hash — PageRecord.content_hash is stored inside
+    the record and used for change detection, not for cache
+    filenames). Using URL hash as the cache key means a URL
+    fetched multiple times overwrites its own slot rather
+    than accumulating.
+    """
+```
+
+**Why URL hash for the filename, content hash in the record:**
+- URL hash is stable across fetches of the same URL. The
+  cache slot at `.duplo/raw_pages/<url_hash>.html` is the
+  durable home for "the HTML we saw at URL X".
+- Content hash in `PageRecord.content_hash` detects whether
+  the HTML changed between fetches. Change detection compares
+  `content_hash` on the current `PageRecord` with the
+  `content_hash` on the last run's persisted record.
+- Using content hash for the filename would cause
+  `.duplo/raw_pages/` to grow an entry every time the page
+  changed, with no way to find "the current version for URL
+  X" without iterating records. The URL-hash scheme keeps
+  one file per URL.
+
+**The `raw_pages` parameter keys and `PageRecord.url` values
+MUST be in the same canonical form** (per "URL canonicalization"
+above). `fetch_site` enforces this by canonicalizing both at
+construction time, and by omitting failed-fetch URLs from
+both structures (see `fetch_site` § "Failed fetches are NOT
+included in `raw_pages`"). So in normal operation, every
+`record.url` has a matching entry in `raw_pages`.
+
+**Behavior on missing keys: log and skip, do not raise.**
+A `record.url` with no entry in `raw_pages` indicates a
+construction-invariant violation (the two structures have
+drifted). Rather than crash the entire run mid-persistence,
+`save_raw_content` logs the mismatch via
+`record_failure("save_raw_content", "io", ...)` and skips
+that record. Remaining records still get persisted; the
+orchestrator's reference-urls list stays consistent with
+what's in the cache. Rationale: fail-soft here because the
+invariant-violation is already a bug — raising would add a
+second cascading failure (lost cache writes for unrelated
+pages) on top of the first, and the diagnostic is enough
+signal for the user and for tests to catch the drift.
 
 
 ## Backward compatibility during transition

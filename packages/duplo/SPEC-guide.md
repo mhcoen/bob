@@ -124,6 +124,15 @@ with `discovered: true`:
 duplo will not crawl `discovered: true` URLs on subsequent runs
 until you remove the flag, confirming you reviewed them.
 
+Note on the `scrape:` value of discovered entries: duplo writes
+`scrape: deep` by default. When you remove the `discovered: true`
+flag to approve the URL, the entry is then deep-crawled on the
+next run with no further confirmation of the depth. If you want
+to keep the URL declared but never scraped, change `scrape:` to
+`none` before removing the flag. If you want a shallow fetch
+only, change it to `scrape: shallow`. Removing the flag approves
+whatever depth the line currently specifies.
+
 
 ### `## References`
 
@@ -311,11 +320,29 @@ Optional. Use for:
 | `## Purpose`     | yes (init)   | no               | no             |
 | `## Sources`     | yes (init)   | yes (discovered) | no             |
 | `## References`  | yes (init)   | yes (proposed)   | no             |
-| `## Architecture`| yes (init)   | no               | no             |
-| `## Design`      | yes (init)   | yes (auto-gen)   | no             |
+| `## Architecture`| yes (init)*  | no               | no             |
+| `## Design`      | sometimes**  | yes (auto-gen)   | no             |
 | `## Scope`       | no           | no               | no             |
 | `## Behavior`    | no           | no               | no             |
 | `## Notes`       | no           | no               | no             |
+
+\* `## Architecture` is drafted ONLY when `--from-description`
+prose explicitly names a stack, language, or framework. A URL
+scrape does NOT populate `## Architecture` — duplo does not
+infer architecture from product identity. If neither input
+states a stack, the section stays as `<FILL IN>` for the user
+to complete.
+
+\*\* `## Design` is drafted by `duplo init` ONLY when
+`--from-description` prose explicitly describes visual
+direction. A URL scrape does NOT populate `## Design` at init
+time. On the first `duplo` run after init, duplo runs Vision
+over `visual-target` references (or product-reference page
+images) and appends an `AUTO-GENERATED` block to `## Design`.
+So: init may or may not pre-fill user prose; `duplo` always
+appends the autogen block on the first run that has visual
+input. The "yes (auto-gen)" column captures the second
+behavior.
 
 "yes (init)" means duplo may pre-fill the section during
 `duplo init` based on a URL scrape or prose description. Once

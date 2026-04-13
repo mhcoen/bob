@@ -67,7 +67,15 @@ Validation:
 
 - `url` must be a valid HTTP(S) URL (basic check: starts with
   `http://` or `https://`). Invalid URLs are dropped with a
-  diagnostic.
+  diagnostic. Valid URLs are CANONICALIZED via
+  `canonicalize_url` (specified in PIPELINE-design.md § "URL
+  canonicalization") before being stored in `SourceEntry.url`.
+  This means user-authored `https://numi.app/` and
+  duplo-written `https://numi.app` produce equal
+  `SourceEntry.url` values, preventing spurious duplicate
+  entries across parse/write cycles. `append_sources` applies
+  the same canonicalization for the same reason (see
+  DRAFTER-design.md).
 - `role` is REQUIRED and must be one of the three valid values.
   Empty role (no `role:` field at all) and unknown role (typo
   like `role: doc`) are BOTH treated the same: the entry is
@@ -103,6 +111,24 @@ Validation:
   stored value makes the safe property invariant across all
   consumers of `spec.sources`, not just the one formatter that
   happens to filter.
+
+  Coercion is a PARSER RESPONSIBILITY, applied to entries read
+  from SPEC.md. Entries constructed in Python by
+  `spec_drafter.py` and handed to `append_sources` are NOT
+  parsed through this path; they are serialized to the file
+  directly. The Phase 3 orchestrator only constructs
+  `role="docs"` entries in `append_sources` calls, so this
+  isn't a Phase 3 concern. But Phase 4's drafter may infer
+  URL roles from prose (per DRAFTER-design.md) and could in
+  principle propose a `counter-example` entry with a declared
+  scrape depth. Phase 4 is responsible for applying the
+  equivalent coercion in `spec_drafter.append_sources` before
+  serializing — either by calling a shared
+  `_coerce_counter_example_scrape(entry)` helper or by
+  replicating the rule. The parser will also coerce such an
+  entry on the next `read_spec()`, so the invariant self-heals
+  one run later; the Phase 4 requirement prevents the
+  one-run-stale-file window.
 - `proposed` and `discovered` are mutually exclusive in normal
   use but the parser accepts both being true (interpreted as
   "duplo discovered this and proposed it as a Source"). No
@@ -540,10 +566,16 @@ Errors include:
   no actual build input — the pipeline would then run with no
   feature-extraction substrate and produce an empty plan.
 
-The role-missing errors fire BEFORE the no-source-no-ref check.
-If the user has entries that just lack roles, they should see
-specific guidance about which entries need fixing, not a
-generic "declare something" message.
+The role-missing errors and the no-source-no-ref check are
+mutually exclusive: if ANY entries in `dropped_sources` or
+`dropped_references` exist, the no-source-no-ref check does
+NOT fire. Rationale: the user has entries that just lack
+roles, and they should see specific guidance about which
+entries need fixing, not a generic "declare something"
+message on top of the specific ones. All role-missing errors
+are emitted together (one per dropped entry) before exit;
+the no-source-no-ref error is a fallback for the case where
+the user has no entries at all.
 
 `fill_in_design` is a WARNING, not an error. The "URL alone"
 common pattern in SPEC-guide.md is valid even when `## Design`
@@ -682,7 +714,11 @@ When this becomes mcloop tasks:
    `DesignBlock`). Tests for each.
 2. Add the comment-stripping helper. Tests.
 3. Add `<FILL IN>` detection. Tests.
-4. Add `## Sources` parser. Tests.
+4. Add `## Sources` parser, including `canonicalize_url`
+   application to each parsed URL and the parse-time
+   counter-example scrape coercion. Tests pin both: canonical
+   form in stored entries, `scrape: none` on counter-example
+   entries regardless of the source text.
 5. Convert `## References` parser from prose to structured.
    Tests. Migration tests for old format.
 6. Add `## Notes` parser. Tests.
@@ -695,6 +731,12 @@ When this becomes mcloop tasks:
     dataclasses. Tests.
 11. Add `validate_for_run`. Tests.
 12. Wire `validate_for_run` into `main.py` at run start.
+
+(`canonicalize_url` itself is implemented in Phase 3 pipeline
+work, not parser work — it's a shared helper used by fetcher,
+parser, drafter, and orchestrator. Phase 3 lands the function;
+the parser imports and uses it. Order the parser task after
+the `canonicalize_url` task in the Phase 3 PLAN.md.)
 
 Each step is small enough to be one mcloop task with a test
 subtask. Steps 5, 8, and 10 are the highest-risk because they
