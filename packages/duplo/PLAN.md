@@ -28,8 +28,8 @@ the old subcommand parsing or the old init/run/next flow.
 
 ## Bugs
 
-- [ ] Fix `append_to_bugs_section` boundary scan (saver.py:1308-1321). The loop terminating the `## Bugs` section only breaks on the next `## ` (H2) heading and walks past H1 phase headings like `# Duplo - Phase 1: Bootstrapping`, causing newly inserted bug tasks to land inside Phase 2 before `## Manual verification`. Fix: widen the terminator check to match both `^## ` and `^# ` headings, whichever comes first.
-  - [ ] Add a saver test with a PLAN.md containing an empty `## Bugs` section followed by an H1 phase heading and assert the insertion lands inside `## Bugs`, not in the subsequent phase section.
+- [x] Fix `append_to_bugs_section` boundary scan (saver.py:1308-1321). The loop terminating the `## Bugs` section only breaks on the next `## ` (H2) heading and walks past H1 phase headings like `# Duplo - Phase 1: Bootstrapping`, causing newly inserted bug tasks to land inside Phase 2 before `## Manual verification`. Fix: widen the terminator check to match both `^## ` and `^# ` headings, whichever comes first.
+  - [x] Add a saver test with a PLAN.md containing an empty `## Bugs` section followed by an H1 phase heading and assert the insertion lands inside `## Bugs`, not in the subsequent phase section.
 
 - [ ] Remove stale "simple text pipe" comment from `duplo fix` branch. The current behavior (main.py:567-571 calls `investigate()` first, main.py:587-603 falls back to raw `- [ ] Fix:` tasks only when `result.diagnoses` is empty) is the intended behavior: bare `duplo fix` investigates first and degrades to a text pipe only on diagnosis failure. The comment at main.py:433-439 calling it a "simple text pipe" is stale and must be rewritten to describe the investigate-first-with-text-pipe-fallback behavior. Update `duplo fix --help` text and the corresponding README.md section to describe the same behavior. Do not change the runtime code path.
   - [ ] Add a test asserting `duplo fix` without `--investigate` calls `investigate()` exactly once and appends diagnosed fix tasks when `result.diagnoses` is non-empty.
