@@ -613,6 +613,23 @@ def format_counter_examples(spec: ProductSpec) -> list[ReferenceEntry]:
     return [e for e in spec.references if "counter-example" in e.roles and not e.proposed]
 
 
+def scrapeable_sources(spec: ProductSpec) -> list[SourceEntry]:
+    """Return source entries eligible for scraping.
+
+    Filters to entries where scrape is ``deep`` or ``shallow``, AND
+    ``discovered`` is false, AND ``proposed`` is false, AND ``role`` is
+    not ``counter-example``.
+    """
+    return [
+        e
+        for e in spec.sources
+        if e.scrape in ("deep", "shallow")
+        and not e.discovered
+        and not e.proposed
+        and e.role != "counter-example"
+    ]
+
+
 def format_spec_for_prompt(spec: ProductSpec) -> str:
     """Format the spec for injection into an LLM system or user prompt.
 

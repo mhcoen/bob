@@ -41,6 +41,7 @@ from duplo.spec_reader import (
     format_spec_for_prompt,
     format_visual_references,
     read_spec,
+    scrapeable_sources,
 )
 
 
@@ -2226,3 +2227,91 @@ class TestFormatReferenceFilters:
         proposed = self._entry("b.png", ["visual-target"], proposed=True)
         spec = self._make_spec([confirmed, proposed])
         assert format_visual_references(spec) == [confirmed]
+
+
+class TestScrapeable:
+    """Tests for scrapeable_sources."""
+
+    def _entry(
+        self,
+        url: str = "https://example.com",
+        role: str = "product-reference",
+        scrape: str = "deep",
+        proposed: bool = False,
+        discovered: bool = False,
+    ) -> SourceEntry:
+        return SourceEntry(
+            url=url,
+            role=role,
+            scrape=scrape,
+            proposed=proposed,
+            discovered=discovered,
+        )
+
+    def _spec(self, sources: list[SourceEntry]) -> ProductSpec:
+        return ProductSpec(sources=sources)
+
+    def test_deep_scrape_included(self):
+        e = self._entry(scrape="deep")
+        assert scrapeable_sources(self._spec([e])) == [e]
+
+    def test_shallow_scrape_included(self):
+        e = self._entry(scrape="shallow")
+        assert scrapeable_sources(self._spec([e])) == [e]
+
+    def test_none_scrape_excluded(self):
+        e = self._entry(scrape="none")
+        assert scrapeable_sources(self._spec([e])) == []
+
+    def test_discovered_excluded(self):
+        e = self._entry(discovered=True)
+        assert scrapeable_sources(self._spec([e])) == []
+
+    def test_proposed_excluded(self):
+        e = self._entry(proposed=True)
+        assert scrapeable_sources(self._spec([e])) == []
+
+    def test_counter_example_excluded(self):
+        e = self._entry(role="counter-example")
+        assert scrapeable_sources(self._spec([e])) == []
+
+    def test_docs_role_included(self):
+        e = self._entry(role="docs", scrape="deep")
+        assert scrapeable_sources(self._spec([e])) == [e]
+
+    def test_product_reference_role_included(self):
+        e = self._entry(role="product-reference", scrape="shallow")
+        assert scrapeable_sources(self._spec([e])) == [e]
+
+    def test_empty_sources(self):
+        assert scrapeable_sources(self._spec([])) == []
+
+    def test_mixed_entries(self):
+        keep_deep = self._entry(url="https://a.com", scrape="deep")
+        keep_shallow = self._entry(url="https://b.com", scrape="shallow")
+        skip_none = self._entry(url="https://c.com", scrape="none")
+        skip_discovered = self._entry(url="https://d.com", discovered=True)
+        skip_proposed = self._entry(url="https://e.com", proposed=True)
+        skip_counter = self._entry(url="https://f.com", role="counter-example")
+        spec = self._spec(
+            [
+                keep_deep,
+                keep_shallow,
+                skip_none,
+                skip_discovered,
+                skip_proposed,
+                skip_counter,
+            ]
+        )
+        assert scrapeable_sources(spec) == [keep_deep, keep_shallow]
+
+    def test_all_conditions_must_hold(self):
+        """Counter-example with deep scrape, not discovered, not proposed
+        should still be excluded (role filter)."""
+        e = self._entry(
+            role="counter-example",
+            scrape="deep",
+            proposed=False,
+            discovered=False,
+        )
+        assert scrapeable_sources(self._spec([e])) == []
