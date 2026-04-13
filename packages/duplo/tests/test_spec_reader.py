@@ -29,6 +29,7 @@ from duplo.spec_reader import (
     _parse_spec,
     _split_sections,
     _strip_comments,
+    _validate_reference_entries,
     _validate_source_entries,
     format_contracts_as_verification,
     format_scope_override_prompt,
@@ -1513,3 +1514,82 @@ class TestParseReferenceEntriesMultipleRoles:
         assert len(entries) == 1
         assert entries[0].roles == ["visual-target"]
         assert isinstance(entries[0].roles, list)
+
+
+class TestValidateReferenceEntriesPathCheck:
+    def test_path_under_ref_accepted(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("ref/screenshot.png"), roles=["visual-target"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert len(result) == 1
+        assert result[0].path == Path("ref/screenshot.png")
+        assert not errors.exists()
+
+    def test_path_not_under_ref_dropped(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("other/file.png"), roles=["visual-target"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert result == []
+        log = errors.read_text()
+        assert "outside ref/" in log
+
+    def test_absolute_path_dropped(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("/abs/ref/file.png"), roles=["docs"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert result == []
+        log = errors.read_text()
+        assert "outside ref/" in log
+
+    def test_mixed_valid_and_invalid_paths(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("ref/good.png"), roles=["visual-target"]),
+            ReferenceEntry(path=Path("images/bad.png"), roles=["docs"]),
+            ReferenceEntry(path=Path("ref/also-good.pdf"), roles=["docs"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert len(result) == 2
+        assert result[0].path == Path("ref/good.png")
+        assert result[1].path == Path("ref/also-good.pdf")
+
+    def test_path_validation_before_role_validation(self, tmp_path):
+        """Entry with bad path is dropped even if roles are valid."""
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("src/file.py"), roles=["visual-target"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert result == []
+
+    def test_all_roles_unknown_defaults_to_ignore_via_validate(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(path=Path("ref/demo.mp4"), roles=["bogus", "nope"]),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert len(result) == 1
+        assert result[0].roles == ["ignore"]
+        log = errors.read_text()
+        assert "bogus" in log
+        assert "nope" in log
+        assert "defaulting to" in log
+
+    def test_unknown_roles_dropped_keeps_valid(self, tmp_path):
+        errors = tmp_path / "errors.jsonl"
+        entries = [
+            ReferenceEntry(
+                path=Path("ref/a.png"),
+                roles=["visual-target", "fake", "docs"],
+            ),
+        ]
+        result = _validate_reference_entries(entries, errors_path=str(errors))
+        assert result[0].roles == ["visual-target", "docs"]
+        log = errors.read_text()
+        assert "fake" in log
