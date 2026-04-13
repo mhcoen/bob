@@ -34,6 +34,41 @@ class TestMigrationMessage:
         """Message reassures the user nothing was moved or modified."""
         assert "Nothing has been moved or modified" in _MIGRATION_MESSAGE
 
+    def test_lists_four_numbered_steps(self) -> None:
+        """Phase 2 message has exactly four numbered steps."""
+        import re
+
+        steps = re.findall(r"^\s+\d+\.", _MIGRATION_MESSAGE, re.MULTILINE)
+        assert len(steps) == 4
+
+    def test_minimum_field_purpose(self) -> None:
+        """Message lists Purpose as a minimum SPEC.md field."""
+        assert "## Purpose" in _MIGRATION_MESSAGE
+
+    def test_minimum_field_architecture(self) -> None:
+        """Message lists Architecture as a minimum SPEC.md field."""
+        assert "## Architecture" in _MIGRATION_MESSAGE
+
+    def test_minimum_field_references(self) -> None:
+        """Message lists References as a minimum SPEC.md field."""
+        assert "## References" in _MIGRATION_MESSAGE
+
+    def test_mentions_plan_md_unchanged(self) -> None:
+        """Message reassures PLAN.md is unchanged."""
+        assert "PLAN.md" in _MIGRATION_MESSAGE
+
+    def test_mentions_duplo_json_unchanged(self) -> None:
+        """Message reassures .duplo/duplo.json is unchanged."""
+        assert ".duplo/duplo.json" in _MIGRATION_MESSAGE
+
+    def test_mentions_source_code_unchanged(self) -> None:
+        """Message reassures source code is unchanged."""
+        assert "source code" in _MIGRATION_MESSAGE
+
+    def test_move_reference_files_step(self) -> None:
+        """Message instructs moving reference files into ref/."""
+        assert "Move reference files into ref/" in _MIGRATION_MESSAGE
+
 
 def test_no_duplo_json(tmp_path: Path) -> None:
     """No .duplo/duplo.json → not a duplo project, no migration."""
