@@ -379,7 +379,10 @@ def main() -> None:
             "-i",
             action="store_true",
             default=False,
-            help="Run intelligent product-level diagnosis instead of simple text pipe.",
+            help=(
+                "Alias for bare `duplo fix` (which also runs investigation). "
+                "Retained for clarity and for use as `duplo investigate`."
+            ),
         )
         fix_parser.add_argument(
             "--images",
@@ -433,9 +436,26 @@ def main() -> None:
 def _fix_mode(args: argparse.Namespace) -> None:
     """Report bugs and append fix tasks to PLAN.md without phase changes.
 
-    When ``--investigate`` is set (or invoked as ``duplo investigate``),
-    runs intelligent product-level diagnosis using all available context.
-    Otherwise, operates as a simple text pipe.
+    Both ``duplo fix`` and ``duplo fix --investigate`` run intelligent
+    product-level diagnosis via :func:`duplo.investigator.investigate`,
+    using all available context (features, design, examples, issues,
+    current screenshot, reference frames, SPEC.md, user-supplied images).
+
+    Behavior:
+    - If :func:`investigate` returns one or more ``Diagnosis`` entries,
+      they are formatted as structured diagnosed fix tasks and appended
+      to the ``## Bugs`` section of PLAN.md (or reopened in place if
+      already present as checked items).
+    - If :func:`investigate` returns no diagnoses (LLM failure, timeout,
+      or unparseable output), ``_fix_mode`` falls back to appending one
+      raw ``- [ ] Fix: <bug text> [fix: "<bug text>"]`` line per reported
+      bug so work can still proceed.
+
+    In both modes the reported bugs are saved to ``duplo.json`` as
+    open ``issues`` with ``source="user"`` and the current phase label.
+
+    ``--investigate`` / ``duplo investigate`` is retained as an explicit
+    alias for clarity; it does not alter the code path.
 
     Usage:
         duplo fix "labeled expressions don't evaluate"

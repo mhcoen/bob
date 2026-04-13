@@ -43,8 +43,8 @@ it, test, add more reference material if needed, run duplo again.
 duplo https://example.com   # Analyze, extract features, generate PLAN.md
 mcloop                      # Build it (runs until all tasks complete)
 # ... test the result ...
-duplo fix "bug description"  # Record bugs, append fix tasks
-duplo investigate "bug"      # Diagnose bugs with product context
+duplo fix "bug description"  # Diagnose bugs and append fix tasks
+duplo investigate "bug"      # Alias for `duplo fix` (explicit naming)
 duplo                        # Detect gaps, generate next phase
 mcloop                       # Build the next phase
 ```
@@ -285,12 +285,14 @@ product site.
 
 ## Bug reporting and investigation
 
-When testing reveals bugs, Duplo provides two modes for recording
-and diagnosing them.
+When testing reveals bugs, use `duplo fix` (or its alias
+`duplo investigate`) to record them and append diagnosed fix tasks
+to PLAN.md.
 
-### Simple bug reporting
+### How it works
 
-`duplo fix` records bugs and appends fix tasks to PLAN.md:
+`duplo fix` records bugs and runs intelligent product-level
+diagnosis on each one:
 
 ```bash
 duplo fix "labeled expressions don't evaluate"
@@ -300,18 +302,26 @@ duplo fix --screenshot              # capture app screenshot + interactive input
 duplo fix                           # interactive input
 ```
 
-Each bug is saved as an issue in duplo.json and inserted into the
-`## Bugs` section of PLAN.md as a `- [ ] Fix: ...` checklist item
-with a `[fix: "..."]` annotation so phase completion can track
-resolution. The `## Bugs` section is created automatically by
-`save_plan()` on first plan generation, and aligns with mcloop's
-contract: mcloop prioritizes unchecked items in `## Bugs` before
-any feature tasks.
+Every bug is saved as an issue in ``duplo.json``. Duplo then
+gathers all available product context and sends it to the
+investigator for diagnosis (see [Intelligent investigation](#intelligent-investigation)
+below). Structured diagnoses are inserted into the ``## Bugs``
+section of PLAN.md. If the investigator fails or returns no
+diagnoses, Duplo falls back to appending a raw ``- [ ] Fix: ...``
+line per bug with a ``[fix: "..."]`` annotation so phase
+completion can still track resolution.
+
+The ``## Bugs`` section is created automatically by ``save_plan()``
+on first plan generation and aligns with mcloop's contract:
+mcloop prioritises unchecked items in ``## Bugs`` before any
+feature tasks.
 
 ### Intelligent investigation
 
-`duplo investigate` gathers all available product context and sends it
-to an LLM for product-level diagnosis:
+`duplo investigate` is an explicit alias for `duplo fix`; both
+invoke the same investigation pipeline. The `--investigate` flag
+on `duplo fix` exists for the same reason and does not alter the
+code path. Use whichever name reads most clearly in context:
 
 ```bash
 duplo investigate "expressions don't evaluate"
