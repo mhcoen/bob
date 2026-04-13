@@ -561,8 +561,6 @@ def save_features(
             if feat.name in duplicates:
                 continue
             d = dataclasses.asdict(feat)
-            d.setdefault("status", "pending")
-            d.setdefault("implemented_in", "")
             existing.append(d)
             existing_names.add(feat.name)
 
@@ -1178,8 +1176,6 @@ def store_accepted_frames(
     Returns:
         List of destination paths for copied frames.
     """
-    import shutil
-
     refs_dir = Path(target_dir) / REFERENCES_DIR
     refs_dir.mkdir(parents=True, exist_ok=True)
 

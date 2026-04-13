@@ -544,7 +544,8 @@ def _fix_mode(args: argparse.Namespace) -> None:
             stripped = paragraph.strip()
             if stripped:
                 bugs.append(stripped)
-        print(f"Read {len(bugs)} bug(s) from {args.bug_file}.")
+        file_bugs = len(bugs) - len(args.bugs) if args.bugs else len(bugs)
+        print(f"Read {file_bugs} bug(s) from {args.bug_file}.")
 
     # Source 3: interactive input if no bugs provided yet.
     if not bugs:
@@ -1145,15 +1146,18 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         if existing:
             existing_keys = {(e.input, e.source_url) for e in existing}
             merged = list(existing)
+            new_count = 0
             for ex in code_examples:
                 key = (ex.input, ex.source_url)
                 if key not in existing_keys:
                     merged.append(ex)
                     existing_keys.add(key)
+                    new_count += 1
             save_examples(merged)
+            examples_updated = new_count
         else:
             save_examples(code_examples)
-        examples_updated = len(code_examples)
+            examples_updated = len(code_examples)
         print(f"  Updated {examples_updated} code example(s).")
     if doc_structures:
         save_doc_structures(doc_structures)
@@ -1178,7 +1182,8 @@ def _rescrape_product_url() -> tuple[int, int, str]:
     try:
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, FileNotFoundError):
-        pass
+        print("  Warning: could not re-read duplo.json; skipping timestamp update.")
+        return pages_updated, examples_updated, scraped_text
     data["last_scrape_timestamp"] = time.time()
     duplo_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 

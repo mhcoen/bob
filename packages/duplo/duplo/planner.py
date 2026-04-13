@@ -158,21 +158,26 @@ def parse_completed_tasks(plan_content: str) -> list[CompletedTask]:
         indent = len(line) - len(stripped)
         # Remove the checkbox prefix.
         body = stripped[5:].strip()
-        # Extract annotations.
+        # Extract trailing annotations (one or more [feat:]/[fix:] at end).
         features: list[str] = []
         fixes: list[str] = []
-        anno_match = re.search(
-            r"\[(feat|fix):\s*(\"[^\"]+\"(?:,\s*\"[^\"]+\")*)\]\s*$",
+        trailing = re.search(
+            r"(\s*\[(feat|fix):\s*\"[^\"]+\"(?:,\s*\"[^\"]+\")*\])+\s*$",
             body,
         )
-        if anno_match:
-            kind = anno_match.group(1)
-            raw_names = re.findall(r"\"([^\"]+)\"", anno_match.group(2))
-            if kind == "feat":
-                features = raw_names
-            else:
-                fixes = raw_names
-            body = body[: anno_match.start()].rstrip()
+        if trailing:
+            tail = body[trailing.start() :]
+            for anno_match in re.finditer(
+                r"\[(feat|fix):\s*(\"[^\"]+\"(?:,\s*\"[^\"]+\")*)\]",
+                tail,
+            ):
+                kind = anno_match.group(1)
+                raw_names = re.findall(r"\"([^\"]+)\"", anno_match.group(2))
+                if kind == "feat":
+                    features.extend(raw_names)
+                else:
+                    fixes.extend(raw_names)
+            body = body[: trailing.start()].rstrip()
         tasks.append(
             CompletedTask(
                 text=body,
