@@ -243,6 +243,17 @@ class TestCheckMigration:
         """Non-duplo directory → returns without exiting."""
         _check_migration(tmp_path)  # should not raise
 
+    def test_exits_on_old_format_spec(self, tmp_path: Path, capsys) -> None:
+        """Old-format SPEC.md (no signals) → prints message and exits."""
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+        (tmp_path / "SPEC.md").write_text("# Old spec\nSome content\n")
+        with pytest.raises(SystemExit) as exc_info:
+            _check_migration(tmp_path)
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "SPEC-template.md" in captured.out
+
     def test_prints_full_message(self, tmp_path: Path, capsys) -> None:
         """Printed output matches _MIGRATION_MESSAGE exactly."""
         (tmp_path / ".duplo").mkdir()
