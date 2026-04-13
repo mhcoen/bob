@@ -33,9 +33,13 @@ from duplo.spec_reader import (
     _strip_comments,
     _validate_reference_entries,
     _validate_source_entries,
+    format_behavioral_references,
     format_contracts_as_verification,
+    format_counter_examples,
+    format_doc_references,
     format_scope_override_prompt,
     format_spec_for_prompt,
+    format_visual_references,
     read_spec,
 )
 
@@ -2127,3 +2131,98 @@ class TestFullyFilledSpecWithFillInMarkers:
         spec = _parse_spec(text)
         assert spec.design.has_fill_in_marker is True
         assert spec.fill_in_design is False
+
+
+class TestFormatReferenceFilters:
+    """Tests for format_visual_references, format_behavioral_references,
+    format_doc_references, and format_counter_examples."""
+
+    def _make_spec(self, refs: list[ReferenceEntry]) -> ProductSpec:
+        return ProductSpec(references=refs)
+
+    def _entry(
+        self,
+        name: str,
+        roles: list[str],
+        proposed: bool = False,
+    ) -> ReferenceEntry:
+        return ReferenceEntry(
+            path=Path(f"ref/{name}"),
+            roles=roles,
+            proposed=proposed,
+        )
+
+    def test_visual_returns_visual_target(self):
+        e = self._entry("a.png", ["visual-target"])
+        spec = self._make_spec([e])
+        assert format_visual_references(spec) == [e]
+
+    def test_visual_excludes_proposed(self):
+        e = self._entry("a.png", ["visual-target"], proposed=True)
+        spec = self._make_spec([e])
+        assert format_visual_references(spec) == []
+
+    def test_behavioral_returns_behavioral_target(self):
+        e = self._entry("demo.mp4", ["behavioral-target"])
+        spec = self._make_spec([e])
+        assert format_behavioral_references(spec) == [e]
+
+    def test_behavioral_excludes_proposed(self):
+        e = self._entry("demo.mp4", ["behavioral-target"], proposed=True)
+        spec = self._make_spec([e])
+        assert format_behavioral_references(spec) == []
+
+    def test_docs_returns_docs(self):
+        e = self._entry("readme.md", ["docs"])
+        spec = self._make_spec([e])
+        assert format_doc_references(spec) == [e]
+
+    def test_docs_excludes_proposed(self):
+        e = self._entry("readme.md", ["docs"], proposed=True)
+        spec = self._make_spec([e])
+        assert format_doc_references(spec) == []
+
+    def test_counter_example_returns_counter(self):
+        e = self._entry("bad.png", ["counter-example"])
+        spec = self._make_spec([e])
+        assert format_counter_examples(spec) == [e]
+
+    def test_counter_example_excludes_proposed(self):
+        e = self._entry("bad.png", ["counter-example"], proposed=True)
+        spec = self._make_spec([e])
+        assert format_counter_examples(spec) == []
+
+    def test_dual_role_appears_in_both(self):
+        e = self._entry("demo.mp4", ["visual-target", "behavioral-target"])
+        spec = self._make_spec([e])
+        assert format_visual_references(spec) == [e]
+        assert format_behavioral_references(spec) == [e]
+
+    def test_triple_role_appears_in_all_matching(self):
+        e = self._entry("all.png", ["visual-target", "docs", "counter-example"])
+        spec = self._make_spec([e])
+        assert format_visual_references(spec) == [e]
+        assert format_doc_references(spec) == [e]
+        assert format_counter_examples(spec) == [e]
+        assert format_behavioral_references(spec) == []
+
+    def test_empty_references(self):
+        spec = self._make_spec([])
+        assert format_visual_references(spec) == []
+        assert format_behavioral_references(spec) == []
+        assert format_doc_references(spec) == []
+        assert format_counter_examples(spec) == []
+
+    def test_no_matching_role(self):
+        e = self._entry("ignore.png", ["ignore"])
+        spec = self._make_spec([e])
+        assert format_visual_references(spec) == []
+        assert format_behavioral_references(spec) == []
+        assert format_doc_references(spec) == []
+        assert format_counter_examples(spec) == []
+
+    def test_mixed_proposed_and_confirmed(self):
+        confirmed = self._entry("a.png", ["visual-target"])
+        proposed = self._entry("b.png", ["visual-target"], proposed=True)
+        spec = self._make_spec([confirmed, proposed])
+        assert format_visual_references(spec) == [confirmed]

@@ -593,6 +593,26 @@ def _parse_contracts(text: str) -> list[BehaviorContract]:
     return contracts
 
 
+def format_visual_references(spec: ProductSpec) -> list[ReferenceEntry]:
+    """Return reference entries with ``visual-target`` role, excluding proposed."""
+    return [e for e in spec.references if "visual-target" in e.roles and not e.proposed]
+
+
+def format_behavioral_references(spec: ProductSpec) -> list[ReferenceEntry]:
+    """Return reference entries with ``behavioral-target`` role, excluding proposed."""
+    return [e for e in spec.references if "behavioral-target" in e.roles and not e.proposed]
+
+
+def format_doc_references(spec: ProductSpec) -> list[ReferenceEntry]:
+    """Return reference entries with ``docs`` role, excluding proposed."""
+    return [e for e in spec.references if "docs" in e.roles and not e.proposed]
+
+
+def format_counter_examples(spec: ProductSpec) -> list[ReferenceEntry]:
+    """Return reference entries with ``counter-example`` role, excluding proposed."""
+    return [e for e in spec.references if "counter-example" in e.roles and not e.proposed]
+
+
 def format_spec_for_prompt(spec: ProductSpec) -> str:
     """Format the spec for injection into an LLM system or user prompt.
 
