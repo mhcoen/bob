@@ -1,6 +1,7 @@
 """Tests for loop.checklist."""
 
 from mcloop.checklist import (
+    PlanCorruptionError,
     check_off,
     find_next,
     find_parent,
@@ -1401,8 +1402,10 @@ def test_check_off_two_identical_shifted_targets_closest(tmp_path):
     assert ship1.line_number == 1
     assert ship2.line_number == 3
 
-    # Insert 10 lines at the top (tasks shift to 11, 12, 13)
-    shifted = "# H\n" * 10 + md
+    # Insert 10 distinct header lines at the top (tasks shift to 11, 12, 13).
+    # Distinct titles avoid tripping the structural sanity check; the
+    # test's intent is line-shift behavior, not header content.
+    shifted = "".join(f"# Header {i}\n" for i in range(10)) + md
     f.write_text(shifted)
 
     # check_off ship2 (original line 3) — candidates at 11 and 13 (unchecked).
@@ -1674,4 +1677,195 @@ def test_purge_completed_bugs_keeps_prose_in_bugs_section(tmp_path):
     assert "Open one" in result
     assert "# Phase 1: Next" in result
     assert "Feature" in result
+
+
+# ── structural sanity check (PlanCorruptionError) ──
+
+
+def test_parse_clean_plan_passes_sanity_check(tmp_path):
+    """A well-formed multi-phase plan with one Bugs section parses normally."""
+    md = (
+        "# Duplo\n"
+        "\n"
+        "Project description here.\n"
+        "\n"
+        "## Bugs\n"
+        "\n"
+        "# Phase 1: Bootstrapping\n"
+        "- [x] Setup\n"
+        "# Phase 2: Build\n"
+        "- [ ] Implement\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    # Should not raise.
+    tasks = parse(f)
+    assert any(t.text == "Implement" for t in tasks)
+
+
+def test_parse_detects_duplicate_top_header(tmp_path):
+    """Two `# Duplo` headers (the canonical corruption signature) are flagged."""
+    import pytest
+
+    md = (
+        "# Duplo\n"
+        "Some intro.\n"
+        "# Phase 1: Setup\n"
+        "- [x] Done\n"
+        "# Duplo\n"  # duplicated top header partway through
+        "More content.\n"
+        "- [ ] Stranded task\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    msg = str(exc_info.value)
+    assert "duplicate top-level heading" in msg
+    assert "# Duplo" in msg
+    # Both line numbers (1-indexed) should appear.
+    assert "1" in msg and "5" in msg
+
+
+def test_parse_detects_multiple_bugs_sections(tmp_path):
+    """Two `## Bugs` sections in the same file are flagged."""
+    import pytest
+
+    md = (
+        "## Bugs\n"
+        "- [ ] First bug\n"
+        "# Phase 1: Setup\n"
+        "- [x] Done\n"
+        "## Bugs\n"  # duplicated bugs section
+        "- [ ] Second bug\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    msg = str(exc_info.value)
+    assert "multiple Bugs sections" in msg
+
+
+def test_parse_detects_duplicate_phase_number(tmp_path):
+    """Two stage headers with the same Phase number are flagged."""
+    import pytest
+
+    md = (
+        "# Phase 1: First attempt\n"
+        "- [x] Done\n"
+        "# Phase 2: Real work\n"
+        "- [x] Also done\n"
+        "# Phase 2: Second attempt at phase 2\n"  # duplicate Phase 2
+        "- [ ] Conflicted\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    msg = str(exc_info.value)
+    assert "duplicate Phase/Stage 2" in msg
+
+
+def test_parse_detects_duplicate_stage_number_mixed_levels(tmp_path):
+    """Duplicate stage number at different heading levels still flagged."""
+    import pytest
+
+    md = (
+        "## Stage 1: Build\n"
+        "- [x] Done\n"
+        "### Stage 1: Polish\n"  # different heading level, same Stage number
+        "- [ ] Pending\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    assert "duplicate Phase/Stage 1" in str(exc_info.value)
+
+
+def test_parse_reports_all_anomalies_in_one_error(tmp_path):
+    """All structural problems are reported in a single exception."""
+    import pytest
+
+    md = (
+        "# Duplo\n"
+        "## Bugs\n"
+        "# Phase 1: A\n"
+        "- [ ] T\n"
+        "# Duplo\n"  # duplicate H1
+        "## Bugs\n"  # duplicate Bugs
+        "# Phase 1: B\n"  # duplicate Phase 1
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    msg = str(exc_info.value)
+    assert "duplicate top-level heading" in msg
+    assert "multiple Bugs sections" in msg
+    assert "duplicate Phase/Stage 1" in msg
+
+
+def test_parse_check_structure_false_skips_check(tmp_path):
+    """check_structure=False bypasses the sanity check entirely."""
+    md = (
+        "# Duplo\n"
+        "# Duplo\n"  # duplicate that would otherwise raise
+        "- [ ] Task\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    # Should not raise; should parse the task.
+    tasks = parse(f, check_structure=False)
+    assert len(tasks) == 1
+    assert tasks[0].text == "Task"
+
+
+def test_parse_phase_header_does_not_count_as_h1_duplicate(tmp_path):
+    """`# Phase 1` and `# Phase 2` must not be flagged as duplicate H1s.
+
+    They are both H1 headings but with different titles, AND they are
+    classified as stage headers (not plain H1s) by the sanity check.
+    Two phase headers with different numbers are normal structure.
+    """
+    md = (
+        "# Phase 1: First\n"
+        "- [x] Done\n"
+        "# Phase 2: Second\n"
+        "- [ ] Pending\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    # Should not raise.
+    tasks = parse(f)
+    assert len(tasks) == 2
+
+
+def test_parse_single_bugs_section_passes(tmp_path):
+    """Exactly one `## Bugs` section is normal and must pass."""
+    md = (
+        "## Bugs\n"
+        "- [ ] Open\n"
+        "# Phase 1: Work\n"
+        "- [ ] Task\n"
+    )
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    tasks = parse(f)
+    # Both sections produce tasks.
+    assert any(t.stage == "Bugs" for t in tasks)
+    assert any("Phase 1" in t.stage for t in tasks)
+
+
+def test_parse_error_message_includes_path(tmp_path):
+    """PlanCorruptionError message names the offending file."""
+    import pytest
+
+    md = "# X\n# X\n"
+    f = tmp_path / "PLAN.md"
+    f.write_text(md)
+    with pytest.raises(PlanCorruptionError) as exc_info:
+        parse(f)
+    assert str(f) in str(exc_info.value)
 

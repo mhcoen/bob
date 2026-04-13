@@ -12,12 +12,31 @@ CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 # Bugs header: any heading level followed by "Bugs" as the title.
 BUGS_RE = re.compile(r"^#+\s+Bugs\s*$", re.IGNORECASE)
+# H1 headers (single `#` followed by space). Used by the structural
+# sanity check to detect duplicated top-level headings (a hallmark
+# corruption pattern in PLAN.md files that have been bad-edited).
+_H1_RE = re.compile(r"^#\s+(.+)$")
 # Pattern for extracting a stage/phase number from a stage string
 # (the header text with leading # and whitespace stripped).
 _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 _USER_TAG = "[USER]"
 _BATCH_TAG = "[BATCH]"
 _AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
+
+
+class PlanCorruptionError(Exception):
+    """Raised when parse() detects structural corruption in a checklist.
+
+    The check is conservative: only flags anomalies that are very
+    unlikely to be intentional (duplicate top-level headings, multiple
+    ``## Bugs`` sections, repeated phase/stage numbers). Auto-fixing
+    is deliberately not attempted; an attempt to silently "correct"
+    structural corruption is exactly the operation that produces it.
+
+    Callers that intentionally pass malformed input (tests, dry-run
+    inspection of an in-progress edit) can pass ``check_structure=False``
+    to ``parse()``.
+    """
 
 
 @dataclass
@@ -53,7 +72,87 @@ def parse_description(path: str | Path) -> str:
     return "\n".join(desc_lines).strip()
 
 
-def parse(path: str | Path) -> list[Task]:
+def _check_structural_sanity(lines: list[str], path: str | Path) -> None:
+    """Scan a checklist file for structural corruption signals.
+
+    Three anomalies are flagged. Each has been observed in real
+    PLAN.md corruption incidents and none has a legitimate use:
+
+    1. Duplicate H1 headings with identical title text — typically
+       indicates a botched insertion that left the original tail in
+       place, producing two copies of the document's top header.
+    2. Multiple ``## Bugs`` sections (any heading level) — there
+       should only ever be one.
+    3. Duplicate phase/stage numbers across stage headers — e.g. two
+       different headers both numbered ``Phase 2``. This breaks
+       ``task_label`` (which prefixes labels with the stage number)
+       and almost always signals merged content from two attempts at
+       the same phase.
+
+    Raises ``PlanCorruptionError`` listing every anomaly found, with
+    line numbers, so the user can locate and fix the corruption.
+    """
+    h1_titles: dict[str, list[int]] = {}
+    bugs_lines: list[int] = []
+    stage_nums: dict[str, list[int]] = {}
+
+    for i, line in enumerate(lines):
+        # Order matters: STAGE_RE matches lines that are also H1s
+        # (e.g. ``# Phase 1: Bootstrapping``). A header is either a
+        # stage header OR a plain H1 OR a Bugs header — never two of
+        # those at once. Check stage first so we don't double-count
+        # ``# Phase N`` as both an H1 duplicate and a stage duplicate.
+        stage_match = STAGE_RE.match(line)
+        if stage_match:
+            num = stage_match.group(1)
+            stage_nums.setdefault(num, []).append(i)
+            continue
+
+        if BUGS_RE.match(line):
+            bugs_lines.append(i)
+            continue
+
+        h1_match = _H1_RE.match(line)
+        if h1_match:
+            # Only single-# headings (true H1s). _H1_RE already enforces
+            # this; check that it's not actually a deeper heading caught
+            # by accident.
+            if line.startswith("# ") and not line.startswith("## "):
+                title = h1_match.group(1).strip()
+                h1_titles.setdefault(title, []).append(i)
+
+    problems: list[str] = []
+
+    for title, line_nums in h1_titles.items():
+        if len(line_nums) > 1:
+            locs = ", ".join(str(n + 1) for n in line_nums)
+            problems.append(
+                f"duplicate top-level heading '# {title}' at lines {locs}"
+            )
+
+    if len(bugs_lines) > 1:
+        locs = ", ".join(str(n + 1) for n in bugs_lines)
+        problems.append(f"multiple Bugs sections at lines {locs}")
+
+    for num, line_nums in stage_nums.items():
+        if len(line_nums) > 1:
+            locs = ", ".join(str(n + 1) for n in line_nums)
+            problems.append(
+                f"duplicate Phase/Stage {num} at lines {locs}"
+            )
+
+    if problems:
+        joined = "\n  - ".join(problems)
+        raise PlanCorruptionError(
+            f"Structural corruption detected in {path}:\n  - {joined}\n"
+            "Fix the file manually. mcloop will not modify a corrupted"
+            " PLAN.md because doing so risks compounding the corruption."
+            " If the apparent corruption is intentional, pass"
+            " check_structure=False to parse()."
+        )
+
+
+def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
     """Read a markdown file and return a tree of Task objects.
 
     Section headers are any markdown heading (``#``, ``##``, ...)
@@ -64,8 +163,15 @@ def parse(path: str | Path) -> list[Task]:
 
     The ``## Bugs`` header (any heading level) is treated as a
     special section with stage ``"Bugs"``.
+
+    When ``check_structure`` is True (the default), the file is
+    scanned for structural corruption first and ``PlanCorruptionError``
+    is raised on detection. Set ``check_structure=False`` to skip
+    the check (used by tests that intentionally pass malformed input).
     """
     lines = Path(path).read_text().splitlines()
+    if check_structure:
+        _check_structural_sanity(lines, path)
     root_tasks: list[Task] = []
     stack: list[Task] = []
     current_stage = ""
@@ -590,8 +696,16 @@ def purge_completed_bugs(path: str | Path) -> None:
 
 
 def _auto_check_parents(path: Path) -> None:
-    """Re-parse and check off any parent whose children are all done."""
-    tasks = parse(path)
+    """Re-parse and check off any parent whose children are all done.
+
+    Internal call: skip the structural sanity check. This function is
+    invoked immediately after ``check_off`` writes a single line, so the
+    file's structure has not changed since it was last validated by an
+    external ``parse()`` call. Re-validating here would risk raising
+    ``PlanCorruptionError`` from inside a check-off operation, which
+    would obscure the real failure mode.
+    """
+    tasks = parse(path, check_structure=False)
     lines = path.read_text().splitlines()
     changed = False
 

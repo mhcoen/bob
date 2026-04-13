@@ -215,8 +215,13 @@ def test_build_audit_prompt_existing_bugs_no_new_instruction():
     existing = "# Bugs\n\n## foo.py:10 -- Bug\nDesc.\n"
     prompt = build_audit_prompt(existing_bugs=existing)
     assert "no new bugs" in prompt.lower() or "no new" in prompt.lower()
-    # Should NOT contain the "No bugs found." file-creation instruction
-    assert "No bugs found." not in prompt
+    # Should NOT contain the file-creation instruction that overwrites BUGS.md
+    # with "No bugs found." The literal phrase "No bugs found." may still appear
+    # elsewhere in the prompt (e.g. in calibration text describing what the
+    # right audit conclusion looks like), but the file-creation directive
+    # "write BUGS.md containing only ... No bugs found." must not be present
+    # when existing bugs are listed.
+    assert "write BUGS.md containing only" not in prompt
 
 
 # --- bugs_md_has_bugs ---
