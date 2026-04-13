@@ -1800,6 +1800,32 @@ class TestParseDesignBlock:
         assert block.user_prose == ""
         assert block.auto_generated == "auto only"
 
+    def test_block_absent_comments_stripped_from_user_prose(self):
+        body = "Visible text. <!-- hidden --> More visible."
+        block = _parse_design_block(body)
+        assert block.user_prose == "Visible text.  More visible."
+        assert block.auto_generated == ""
+
+    def test_block_absent_multiline_body(self):
+        body = "Line one.\n\nLine two.\nLine three."
+        block = _parse_design_block(body)
+        assert block.user_prose == "Line one.\n\nLine two.\nLine three."
+        assert block.auto_generated == ""
+
+    def test_block_absent_whitespace_only(self):
+        block = _parse_design_block("   \n  \n  ")
+        assert block.user_prose == ""
+        assert block.auto_generated == ""
+        assert block.has_fill_in_marker is False
+
+    def test_block_absent_multiline_comment_stripped(self):
+        body = "Before.\n<!--\nmulti\nline\n-->\nAfter."
+        block = _parse_design_block(body)
+        assert "multi" not in block.user_prose
+        assert "Before." in block.user_prose
+        assert "After." in block.user_prose
+        assert block.auto_generated == ""
+
     def test_text_after_block_not_in_user_prose(self):
         body = (
             "Before.\n"
