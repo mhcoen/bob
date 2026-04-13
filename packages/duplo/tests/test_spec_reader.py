@@ -266,12 +266,277 @@ class TestParseContracts:
 
 
 class TestFormatSpecForPrompt:
-    def test_wraps_raw_text(self):
-        spec = ProductSpec(raw="Build a calculator.")
+    def test_includes_purpose(self):
+        spec = ProductSpec(purpose="Build a calculator.")
         result = format_spec_for_prompt(spec)
         assert "PRODUCT SPECIFICATION" in result
         assert "authoritative" in result
+        assert "## Purpose" in result
         assert "Build a calculator." in result
+
+    def test_empty_spec_returns_empty(self):
+        spec = ProductSpec()
+        assert format_spec_for_prompt(spec) == ""
+
+    def test_includes_all_simple_sections(self):
+        spec = ProductSpec(
+            purpose="A calculator",
+            scope="Desktop only",
+            behavior="`1+1` → `2`",
+            architecture="Python + Qt",
+            notes="Ship by Friday",
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Purpose" in result
+        assert "## Scope" in result
+        assert "## Behavior" in result
+        assert "## Architecture" in result
+        assert "## Notes" in result
+        assert "A calculator" in result
+        assert "Desktop only" in result
+        assert "Python + Qt" in result
+        assert "Ship by Friday" in result
+
+    def test_includes_design(self):
+        spec = ProductSpec(
+            design=DesignBlock(user_prose="Dark theme", auto_generated="colors: #000"),
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Design" in result
+        assert "Dark theme" in result
+        assert "colors: #000" in result
+
+    def test_includes_safe_sources(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## Sources" in result
+        assert "https://example.com" in result
+
+    def test_excludes_proposed_sources(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://proposed.example.com",
+                    role="docs",
+                    scrape="deep",
+                    proposed=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "https://proposed.example.com" not in result
+
+    def test_excludes_discovered_sources(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://discovered.example.com",
+                    role="docs",
+                    scrape="shallow",
+                    discovered=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "https://discovered.example.com" not in result
+
+    def test_excludes_counter_example_sources(self):
+        spec = ProductSpec(
+            purpose="Test",
+            sources=[
+                SourceEntry(
+                    url="https://counter.example.com",
+                    role="counter-example",
+                    scrape="none",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "https://counter.example.com" not in result
+
+    def test_includes_safe_references(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screenshot.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "## References" in result
+        assert "ref/screenshot.png" in result
+
+    def test_excludes_proposed_references(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "ref/proposed.png" not in result
+
+    def test_excludes_counter_example_references(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/counter.png"),
+                    roles=["counter-example"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "ref/counter.png" not in result
+
+    def test_excludes_ignore_references(self):
+        spec = ProductSpec(
+            purpose="Test",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/ignored.png"),
+                    roles=["ignore"],
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "ref/ignored.png" not in result
+
+    def test_source_scrape_none_omitted(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="product-reference",
+                    scrape="none",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "scrape:" not in result
+
+    def test_source_notes_included(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="docs",
+                    scrape="none",
+                    notes="Main API docs",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+        assert "Main API docs" in result
+
+    def test_does_not_use_raw(self):
+        spec = ProductSpec(
+            raw="SECRET RAW TEXT",
+            purpose="Safe purpose",
+        )
+        result = format_spec_for_prompt(spec)
+        assert "SECRET RAW TEXT" not in result
+        assert "Safe purpose" in result
+
+    def test_prompt_injection_invariant(self):
+        """Highest-stakes test: proposed, discovered, and counter-example
+        entries must NEVER appear in the prompt output."""
+        spec = ProductSpec(
+            purpose="A real product",
+            sources=[
+                SourceEntry(
+                    url="https://safe.example.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+                SourceEntry(
+                    url="https://proposed-source.evil.com",
+                    role="docs",
+                    scrape="deep",
+                    notes="PROPOSED_SOURCE_MARKER",
+                    proposed=True,
+                ),
+                SourceEntry(
+                    url="https://discovered-source.evil.com",
+                    role="docs",
+                    scrape="shallow",
+                    notes="DISCOVERED_SOURCE_MARKER",
+                    discovered=True,
+                ),
+                SourceEntry(
+                    url="https://counter-source.evil.com",
+                    role="counter-example",
+                    scrape="none",
+                    notes="COUNTER_SOURCE_MARKER",
+                ),
+            ],
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/safe.png"),
+                    roles=["visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/proposed-ref.png"),
+                    roles=["visual-target"],
+                    notes="PROPOSED_REF_MARKER",
+                    proposed=True,
+                ),
+                ReferenceEntry(
+                    path=Path("ref/counter-ref.png"),
+                    roles=["counter-example"],
+                    notes="COUNTER_REF_MARKER",
+                ),
+                ReferenceEntry(
+                    path=Path("ref/ignored-ref.png"),
+                    roles=["ignore"],
+                    notes="IGNORED_REF_MARKER",
+                ),
+            ],
+        )
+        result = format_spec_for_prompt(spec)
+
+        # Safe entries ARE present.
+        assert "https://safe.example.com" in result
+        assert "ref/safe.png" in result
+
+        # Proposed sources excluded.
+        assert "proposed-source.evil.com" not in result
+        assert "PROPOSED_SOURCE_MARKER" not in result
+
+        # Discovered sources excluded.
+        assert "discovered-source.evil.com" not in result
+        assert "DISCOVERED_SOURCE_MARKER" not in result
+
+        # Counter-example sources excluded.
+        assert "counter-source.evil.com" not in result
+        assert "COUNTER_SOURCE_MARKER" not in result
+
+        # Proposed references excluded.
+        assert "proposed-ref.png" not in result
+        assert "PROPOSED_REF_MARKER" not in result
+
+        # Counter-example references excluded.
+        assert "counter-ref.png" not in result
+        assert "COUNTER_REF_MARKER" not in result
+
+        # Ignored references excluded.
+        assert "ignored-ref.png" not in result
+        assert "IGNORED_REF_MARKER" not in result
 
 
 class TestFormatScopeOverridePrompt:

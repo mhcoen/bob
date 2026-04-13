@@ -666,13 +666,79 @@ def format_design_for_prompt(spec: ProductSpec) -> str:
 def format_spec_for_prompt(spec: ProductSpec) -> str:
     """Format the spec for injection into an LLM system or user prompt.
 
-    Returns the full raw text wrapped in a labelled section so the LLM
-    understands the authority of the content.
+    Serializes from parsed ``ProductSpec`` fields — **never** from
+    ``spec.raw``.  This ensures that ``proposed:``, ``discovered:``,
+    and ``counter-example`` entries are excluded from every LLM prompt.
+
+    Filtering rules:
+
+    - ``## Sources``: only entries where ``proposed`` is false AND
+      ``discovered`` is false AND role is NOT ``counter-example``.
+    - ``## References``: only entries where ``proposed`` is false AND
+      no role is ``counter-example`` AND no role is ``ignore``.
+    - All other user-authored sections are included verbatim.
     """
+    parts: list[str] = []
+
+    if spec.purpose:
+        parts.append(f"## Purpose\n\n{spec.purpose}")
+
+    if spec.scope:
+        parts.append(f"## Scope\n\n{spec.scope}")
+
+    if spec.behavior:
+        parts.append(f"## Behavior\n\n{spec.behavior}")
+
+    if spec.architecture:
+        parts.append(f"## Architecture\n\n{spec.architecture}")
+
+    design_text = format_design_for_prompt(spec)
+    if design_text:
+        parts.append(f"## Design\n\n{design_text}")
+
+    # Sources: exclude proposed, discovered, and counter-example.
+    safe_sources = [
+        s
+        for s in spec.sources
+        if not s.proposed and not s.discovered and s.role != "counter-example"
+    ]
+    if safe_sources:
+        lines: list[str] = []
+        for s in safe_sources:
+            lines.append(f"- {s.url}")
+            lines.append(f"  role: {s.role}")
+            if s.scrape != "none":
+                lines.append(f"  scrape: {s.scrape}")
+            if s.notes:
+                lines.append(f"  notes: {s.notes}")
+        parts.append("## Sources\n\n" + "\n".join(lines))
+
+    # References: exclude proposed, counter-example, and ignore.
+    safe_refs = [
+        r
+        for r in spec.references
+        if not r.proposed and "counter-example" not in r.roles and "ignore" not in r.roles
+    ]
+    if safe_refs:
+        ref_lines: list[str] = []
+        for r in safe_refs:
+            ref_lines.append(f"- {r.path}")
+            if r.roles:
+                ref_lines.append(f"  roles: {', '.join(r.roles)}")
+            if r.notes:
+                ref_lines.append(f"  notes: {r.notes}")
+        parts.append("## References\n\n" + "\n".join(ref_lines))
+
+    if spec.notes:
+        parts.append(f"## Notes\n\n{spec.notes}")
+
+    body = "\n\n".join(parts)
+    if not body:
+        return ""
+
     return (
         "PRODUCT SPECIFICATION (authored by the user — this is authoritative "
-        "and takes precedence over scraped content when they conflict):\n\n"
-        f"{spec.raw}"
+        "and takes precedence over scraped content when they conflict):\n\n" + body
     )
 
 
