@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from duplo.claude_cli import query
+from duplo.claude_cli import ClaudeCliError, query
 
 _SYSTEM = """\
 You are a product analyst. Given scraped text from a product website, extract a
@@ -111,7 +111,10 @@ def extract_features(
             f"Existing features: [{names_list}]"
         )
     prompt = f"Extract features from this product website content:\n\n{content}"
-    raw = query(prompt, system=system)
+    try:
+        raw = query(prompt, system=system)
+    except ClaudeCliError:
+        return []
     features = _parse_features(raw)
 
     # Apply scope overrides.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json as _json
 from unittest.mock import patch
 
+from duplo.claude_cli import ClaudeCliError
 from duplo.extractor import Feature, _parse_features, extract_features
 
 
@@ -141,6 +142,14 @@ class TestExtractFeatures:
         with patch(
             "duplo.extractor.query",
             return_value="I cannot extract features from this.",
+        ):
+            features = extract_features("product text")
+        assert features == []
+
+    def test_returns_empty_on_claude_cli_error(self):
+        with patch(
+            "duplo.extractor.query",
+            side_effect=ClaudeCliError("claude CLI timed out after 300 seconds"),
         ):
             features = extract_features("product text")
         assert features == []

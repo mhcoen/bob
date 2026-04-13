@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from duplo.claude_cli import ClaudeCliError
 from duplo.design_extractor import (
     DesignRequirements,
     _parse_design,
@@ -129,6 +130,17 @@ class TestExtractDesign:
         ):
             result = extract_design([img])
         assert result.colors == {}
+
+    def test_returns_empty_on_claude_cli_error(self, tmp_path):
+        img = _make_image(tmp_path, "test.png")
+        with patch(
+            "duplo.design_extractor.query_with_images",
+            side_effect=ClaudeCliError("claude CLI timed out"),
+        ):
+            result = extract_design([img])
+        assert result.colors == {}
+        assert result.fonts == {}
+        assert result.source_images == ["test.png"]
 
 
 class TestFormatDesignSection:

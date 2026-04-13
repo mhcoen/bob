@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from duplo.claude_cli import query_with_images
+from duplo.claude_cli import ClaudeCliError, query_with_images
 
 _SYSTEM = """\
 You are a visual design analyst. Given screenshot(s) of a product, extract
@@ -72,7 +72,10 @@ def extract_design(images: list[Path]) -> DesignRequirements:
         "Analyse these screenshot(s) and extract the visual design details.\n"
         "Return ONLY the JSON object as described."
     )
-    raw = query_with_images(prompt, to_send, system=_SYSTEM)
+    try:
+        raw = query_with_images(prompt, to_send, system=_SYSTEM)
+    except ClaudeCliError:
+        return DesignRequirements(source_images=source_names)
     result = _parse_design(raw)
     result.source_images = source_names
     return result
