@@ -5189,3 +5189,36 @@ class TestMigrationDispatchOrder:
         assert migration_called == []
         assert len(fix_mode_called) == 1
         assert fix_mode_called[0].command == "fix"
+
+    def test_investigate_old_layout_bypasses_migration_dispatches_fix_mode(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """duplo investigate in an old-layout dir: skips _check_migration,
+        dispatches to _fix_mode."""
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text("{}")
+        # No SPEC.md → old layout that would trigger migration on bare duplo.
+        (tmp_path / "PLAN.md").write_text("- [x] done\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "investigate", "some bug"])
+
+        migration_called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: migration_called.append(target_dir),
+        )
+
+        fix_mode_called = []
+        monkeypatch.setattr(
+            "duplo.main._fix_mode",
+            lambda args: fix_mode_called.append(args),
+        )
+
+        main()
+
+        assert migration_called == []
+        assert len(fix_mode_called) == 1
+        assert fix_mode_called[0].command == "investigate"
