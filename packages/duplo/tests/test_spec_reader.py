@@ -1488,3 +1488,28 @@ class TestParseReferenceEntriesMultipleRoles:
         log = errors.read_text()
         assert "bad1" in log
         assert "bad2" in log
+
+    def test_trailing_comma_ignored(self):
+        body = "- ref/a.png\n  role: visual-target, behavioral-target,\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == ["visual-target", "behavioral-target"]
+
+    def test_no_spaces_around_comma(self):
+        body = "- ref/a.png\n  role: visual-target,behavioral-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == ["visual-target", "behavioral-target"]
+
+    def test_extra_spaces_around_comma(self):
+        body = "- ref/a.png\n  role: visual-target ,  behavioral-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == ["visual-target", "behavioral-target"]
+
+    def test_single_role_produces_list(self):
+        body = "- ref/a.png\n  role: visual-target\n"
+        entries = _parse_reference_entries(body)
+        assert len(entries) == 1
+        assert entries[0].roles == ["visual-target"]
+        assert isinstance(entries[0].roles, list)
