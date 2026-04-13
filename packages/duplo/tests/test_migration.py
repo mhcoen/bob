@@ -1,0 +1,75 @@
+"""Tests for duplo.migration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from duplo.migration import needs_migration
+
+
+def test_no_duplo_json(tmp_path: Path) -> None:
+    """No .duplo/duplo.json → not a duplo project, no migration."""
+    assert needs_migration(tmp_path) is False
+
+
+def test_duplo_json_no_spec(tmp_path: Path) -> None:
+    """duplo.json exists but no SPEC.md → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    assert needs_migration(tmp_path) is True
+
+
+def test_spec_with_marker_string(tmp_path: Path) -> None:
+    """New-format SPEC.md with marker string → no migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# My App\nHow the pieces fit together:\n- stuff\n")
+    assert needs_migration(tmp_path) is False
+
+
+def test_spec_with_sources_heading(tmp_path: Path) -> None:
+    """New-format SPEC.md with ## Sources heading → no migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# My App\n## Sources\n")
+    assert needs_migration(tmp_path) is False
+
+
+def test_spec_with_sources_heading_trailing_spaces(tmp_path: Path) -> None:
+    """## Sources with trailing whitespace still matches."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# My App\n## Sources   \n")
+    assert needs_migration(tmp_path) is False
+
+
+def test_old_format_spec(tmp_path: Path) -> None:
+    """SPEC.md without marker or ## Sources → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Old spec\nSome content\n")
+    assert needs_migration(tmp_path) is True
+
+
+def test_sources_in_body_text_not_heading(tmp_path: Path) -> None:
+    """'Sources' in body text (not as ## heading) → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Old spec\nSee sources below.\n")
+    assert needs_migration(tmp_path) is True
+
+
+def test_sources_wrong_heading_level(tmp_path: Path) -> None:
+    """### Sources (wrong level) → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Old spec\n### Sources\n")
+    assert needs_migration(tmp_path) is True
+
+
+def test_both_signals_present(tmp_path: Path) -> None:
+    """Both marker and ## Sources → no migration (either suffices)."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n## Sources\n")
+    assert needs_migration(tmp_path) is False
