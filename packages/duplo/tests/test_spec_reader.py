@@ -993,6 +993,222 @@ class TestDiagnosticRecordStructure:
         assert "unknown scrape" in errors[1]["message"]
 
 
+class TestParseSourceEntriesCommentStripped:
+    """Entries inside HTML comments must not be parsed as real entries.
+
+    The caller is expected to strip comments before passing body to
+    ``_parse_source_entries``.  These tests verify that the strip +
+    parse pipeline correctly ignores commented-out entries.
+    """
+
+    def test_commented_entry_ignored(self, tmp_path):
+        body = (
+            "- https://real.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "\n"
+            "<!-- - https://commented-out.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep -->\n"
+        )
+        entries = _parse_source_entries(_strip_comments(body), errors_path=tmp_path / "e.jsonl")
+        assert len(entries) == 1
+        assert entries[0].url == "https://real.com"
+
+    def test_all_entries_commented_out(self, tmp_path):
+        body = "<!-- - https://a.com\n  role: docs\n  scrape: none -->\n"
+        entries = _parse_source_entries(_strip_comments(body), errors_path=tmp_path / "e.jsonl")
+        assert entries == []
+
+    def test_inline_comment_around_field(self, tmp_path):
+        body = (
+            "- https://example.com\n  role: docs\n  scrape: shallow\n  <!-- notes: old note -->\n"
+        )
+        entries = _parse_source_entries(_strip_comments(body), errors_path=tmp_path / "e.jsonl")
+        assert len(entries) == 1
+        assert entries[0].notes == ""
+
+    def test_real_entries_before_and_after_commented_block(self, tmp_path):
+        body = (
+            "- https://first.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "\n"
+            "<!-- - https://hidden.com\n"
+            "  role: docs\n"
+            "  scrape: deep -->\n"
+            "\n"
+            "- https://last.com\n"
+            "  role: counter-example\n"
+            "  scrape: shallow\n"
+        )
+        entries = _parse_source_entries(_strip_comments(body), errors_path=tmp_path / "e.jsonl")
+        assert len(entries) == 2
+        assert entries[0].url == "https://first.com"
+        assert entries[1].url == "https://last.com"
+
+
+class TestParseSourceEntriesFieldCombinations:
+    """Verify all field value combinations parse correctly."""
+
+    def test_all_three_roles(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://a.com\n"
+            "  role: product-reference\n"
+            "  scrape: none\n"
+            "\n"
+            "- https://b.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "\n"
+            "- https://c.com\n"
+            "  role: counter-example\n"
+            "  scrape: none\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 3
+        assert entries[0].role == "product-reference"
+        assert entries[1].role == "docs"
+        assert entries[2].role == "counter-example"
+
+    def test_all_three_scrape_values(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://a.com\n"
+            "  role: docs\n"
+            "  scrape: deep\n"
+            "\n"
+            "- https://b.com\n"
+            "  role: docs\n"
+            "  scrape: shallow\n"
+            "\n"
+            "- https://c.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 3
+        assert entries[0].scrape == "deep"
+        assert entries[1].scrape == "shallow"
+        assert entries[2].scrape == "none"
+
+    def test_http_url_accepted(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = "- http://example.com\n  role: docs\n  scrape: none\n"
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 1
+        assert entries[0].url == "http://example.com"
+
+    def test_discovered_true_proposed_false(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  proposed: false\n"
+            "  discovered: true\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert entries[0].proposed is False
+        assert entries[0].discovered is True
+
+    def test_proposed_true_discovered_false(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  proposed: true\n"
+            "  discovered: false\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert entries[0].proposed is True
+        assert entries[0].discovered is False
+
+    def test_notes_with_all_fields(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+            "  notes: authoritative source\n"
+            "  proposed: true\n"
+            "  discovered: true\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 1
+        assert entries[0].notes == "authoritative source"
+        assert entries[0].proposed is True
+        assert entries[0].discovered is True
+
+    def test_many_entries(self, tmp_path):
+        """Five entries in sequence, no blank lines between them."""
+        ep = tmp_path / "e.jsonl"
+        lines = []
+        for i in range(5):
+            lines.append(f"- https://site{i}.com\n")
+            lines.append("  role: docs\n")
+            lines.append("  scrape: none\n")
+        body = "".join(lines)
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 5
+        for i, entry in enumerate(entries):
+            assert entry.url == f"https://site{i}.com"
+
+
+class TestParseSourceEntriesMultilineNotes:
+    """Detailed multi-line notes parsing."""
+
+    def test_three_continuation_lines(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: line one\n"
+            "    line two\n"
+            "    line three\n"
+            "    line four\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert entries[0].notes == "line one\nline two\nline three\nline four"
+
+    def test_multiline_notes_between_entries(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://first.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: note A\n"
+            "    continued A\n"
+            "\n"
+            "- https://second.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: note B\n"
+            "    continued B\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert len(entries) == 2
+        assert entries[0].notes == "note A\ncontinued A"
+        assert entries[1].notes == "note B\ncontinued B"
+
+    def test_multiline_notes_before_proposed(self, tmp_path):
+        ep = tmp_path / "e.jsonl"
+        body = (
+            "- https://example.com\n"
+            "  role: docs\n"
+            "  scrape: none\n"
+            "  notes: first\n"
+            "    second\n"
+            "  proposed: true\n"
+        )
+        entries = _parse_source_entries(body, errors_path=ep)
+        assert entries[0].notes == "first\nsecond"
+        assert entries[0].proposed is True
+
+
 class TestKnownSections:
     """``_KNOWN_SECTIONS`` recognises all expected headings."""
 
