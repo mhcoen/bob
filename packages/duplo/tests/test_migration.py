@@ -236,6 +236,20 @@ def test_zero_byte_spec(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is True
 
 
+def test_marker_inside_html_comment(tmp_path: Path) -> None:
+    """Marker string inside an HTML comment still matches → no migration.
+
+    The template stores the marker in a comment
+    (``<!-- How the pieces fit together: ... -->``).  The substring
+    check intentionally hits — no special comment-stripping needed.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    spec = "<!-- How the pieces fit together: overview of architecture -->\n"
+    (tmp_path / "SPEC.md").write_text(spec)
+    assert needs_migration(tmp_path) is False
+
+
 def test_corrupted_duplo_json(tmp_path: Path) -> None:
     """Corrupted .duplo/duplo.json → still needs migration.
 
