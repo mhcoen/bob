@@ -43,6 +43,8 @@ from duplo.spec_reader import (
     format_visual_references,
     read_spec,
     scrapeable_sources,
+    validate_for_run,
+    ValidationResult,
 )
 
 
@@ -3315,3 +3317,221 @@ class TestPromptInjectionInvariant:
         spec.raw = "RAW_INJECTION_CANARY_Z0 " + spec.raw
         result = format_spec_for_prompt(spec)
         assert "RAW_INJECTION_CANARY_Z0" not in result
+
+
+class TestValidateForRun:
+    """Tests for validate_for_run()."""
+
+    def _valid_spec(self) -> ProductSpec:
+        """Build a spec that passes validation (no errors)."""
+        return ProductSpec(
+            purpose="A fully-featured calculator app for iOS and macOS platforms",
+            sources=[
+                SourceEntry(
+                    url="https://example.com/calc",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+
+    def test_valid_spec_returns_no_errors(self):
+        spec = self._valid_spec()
+        result = validate_for_run(spec)
+        assert result.errors == []
+
+    def test_returns_validation_result(self):
+        spec = self._valid_spec()
+        result = validate_for_run(spec)
+        assert isinstance(result, ValidationResult)
+
+    def test_fill_in_purpose_error(self):
+        spec = self._valid_spec()
+        spec.fill_in_purpose = True
+        result = validate_for_run(spec)
+        assert any("Purpose" in e and "FILL IN" in e for e in result.errors)
+
+    def test_fill_in_architecture_error(self):
+        spec = self._valid_spec()
+        spec.fill_in_architecture = True
+        result = validate_for_run(spec)
+        assert any("Architecture" in e and "FILL IN" in e for e in result.errors)
+
+    def test_fill_in_design_is_warning_not_error(self):
+        spec = self._valid_spec()
+        spec.fill_in_design = True
+        result = validate_for_run(spec)
+        assert result.errors == [] or not any("Design" in e for e in result.errors)
+        assert any("Design" in w for w in result.warnings)
+
+    def test_no_source_no_ref_sparse_purpose_error(self):
+        """No scrapeable sources, no non-ignore refs, short purpose."""
+        spec = ProductSpec(purpose="Short")
+        result = validate_for_run(spec)
+        assert any("No source URL" in e for e in result.errors)
+
+    def test_no_source_no_ref_long_purpose_ok(self):
+        """Long purpose compensates for missing sources/refs."""
+        spec = ProductSpec(
+            purpose="A" * 50,
+        )
+        result = validate_for_run(spec)
+        sparse_errors = [e for e in result.errors if "No source URL" in e]
+        assert sparse_errors == []
+
+    def test_scrapeable_source_prevents_sparse_error(self):
+        """Having a scrapeable source means no sparse error."""
+        spec = ProductSpec(
+            purpose="Short",
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = validate_for_run(spec)
+        assert not any("No source URL" in e for e in result.errors)
+
+    def test_non_ignore_reference_prevents_sparse_error(self):
+        """Having a non-ignore reference means no sparse error."""
+        spec = ProductSpec(
+            purpose="Short",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screenshot.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+        result = validate_for_run(spec)
+        assert not any("No source URL" in e for e in result.errors)
+
+    def test_ignore_only_reference_does_not_prevent_sparse_error(self):
+        """Ignore-only references do not count."""
+        spec = ProductSpec(
+            purpose="Short",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/junk.png"),
+                    roles=["ignore"],
+                ),
+            ],
+        )
+        result = validate_for_run(spec)
+        assert any("No source URL" in e for e in result.errors)
+
+    def test_proposed_reference_does_not_prevent_sparse_error(self):
+        """Proposed references are unreviewed and don't count."""
+        spec = ProductSpec(
+            purpose="Short",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ],
+        )
+        result = validate_for_run(spec)
+        assert any("No source URL" in e for e in result.errors)
+
+    def test_warning_proposed_references(self):
+        spec = self._valid_spec()
+        spec.references = [
+            ReferenceEntry(
+                path=Path("ref/a.png"),
+                roles=["visual-target"],
+                proposed=True,
+            ),
+            ReferenceEntry(
+                path=Path("ref/b.png"),
+                roles=["docs"],
+                proposed=True,
+            ),
+        ]
+        result = validate_for_run(spec)
+        assert any("2 proposed: true" in w for w in result.warnings)
+
+    def test_warning_discovered_sources(self):
+        spec = self._valid_spec()
+        spec.sources.append(
+            SourceEntry(
+                url="https://discovered.example.com",
+                role="docs",
+                scrape="shallow",
+                discovered=True,
+            )
+        )
+        result = validate_for_run(spec)
+        assert any("1 discovered: true" in w for w in result.warnings)
+
+    def test_no_warnings_when_clean(self):
+        spec = self._valid_spec()
+        result = validate_for_run(spec)
+        assert result.warnings == []
+
+    def test_multiple_errors_accumulate(self):
+        spec = ProductSpec(
+            purpose="Short",
+            fill_in_purpose=True,
+            fill_in_architecture=True,
+        )
+        result = validate_for_run(spec)
+        assert len(result.errors) >= 3  # purpose + architecture + sparse
+
+    def test_backward_compat_old_spec_no_fill_in(self):
+        """Old-format specs without fill-in markers pass validation."""
+        spec = ProductSpec(
+            purpose="A calculator app that handles basic arithmetic",
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        # fill_in flags are False by default.
+        result = validate_for_run(spec)
+        assert result.errors == []
+        assert result.warnings == []
+
+    def test_fill_in_design_warning_message_content(self):
+        spec = self._valid_spec()
+        spec.fill_in_design = True
+        result = validate_for_run(spec)
+        assert any("inferred from scraped sources" in w for w in result.warnings)
+
+    def test_discovered_and_proposed_counts_correct(self):
+        spec = self._valid_spec()
+        spec.sources = [
+            SourceEntry(
+                url="https://a.com",
+                role="docs",
+                scrape="none",
+                discovered=True,
+            ),
+            SourceEntry(
+                url="https://b.com",
+                role="docs",
+                scrape="none",
+                discovered=True,
+            ),
+            SourceEntry(
+                url="https://c.com",
+                role="product-reference",
+                scrape="deep",
+            ),
+        ]
+        spec.references = [
+            ReferenceEntry(
+                path=Path("ref/x.png"),
+                roles=["visual-target"],
+                proposed=True,
+            ),
+        ]
+        result = validate_for_run(spec)
+        assert any("2 discovered: true" in w for w in result.warnings)
+        assert any("1 proposed: true" in w for w in result.warnings)

@@ -767,6 +767,80 @@ def format_scope_override_prompt(spec: ProductSpec) -> str:
     return "\n\n" + "\n".join(parts)
 
 
+@dataclass
+class ValidationResult:
+    """Result of :func:`validate_for_run`."""
+
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def validate_for_run(spec: ProductSpec) -> ValidationResult:
+    """Check whether *spec* is complete enough for a duplo run.
+
+    Returns a :class:`ValidationResult` whose ``errors`` list is empty
+    when the spec is OK to run.  Warnings are informational and do not
+    block execution.
+
+    Error conditions:
+
+    - ``## Purpose`` still contains ``<FILL IN>``.
+    - ``## Architecture`` still contains ``<FILL IN>``.
+    - No scrapeable sources AND no non-ignore references AND
+      ``## Purpose`` shorter than 50 characters (too sparse to plan
+      from).
+
+    Warning conditions:
+
+    - ``fill_in_design`` is true (design will be inferred from scraped
+      sources only).
+    - ``proposed: true`` references exist (need user review).
+    - ``discovered: true`` sources exist (need user review).
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if spec.fill_in_purpose:
+        errors.append("## Purpose still contains <FILL IN>")
+
+    if spec.fill_in_architecture:
+        errors.append("## Architecture still contains <FILL IN>")
+
+    # Check the "too sparse to plan" condition: no scrapeable sources,
+    # no non-ignore references, and purpose is too short.
+    has_scrapeable = bool(scrapeable_sources(spec))
+    non_ignore_refs = [r for r in spec.references if r.roles != ["ignore"] and not r.proposed]
+    has_refs = bool(non_ignore_refs)
+    purpose_sparse = len(spec.purpose) < 50
+    if not has_scrapeable and not has_refs and purpose_sparse:
+        errors.append(
+            "No source URL or reference file declared. Add a URL to ## Sources or files to ref/."
+        )
+
+    if spec.fill_in_design:
+        warnings.append(
+            "## Design has <FILL IN> and no visual-target references; "
+            "design will be inferred from scraped sources only."
+        )
+
+    proposed_count = sum(1 for r in spec.references if r.proposed)
+    if proposed_count:
+        warnings.append(
+            f"{proposed_count} proposed: true entries in ## References. "
+            "Review and remove the flag, or delete entries duplo got wrong."
+        )
+
+    discovered_count = sum(1 for s in spec.sources if s.discovered)
+    if discovered_count:
+        warnings.append(
+            f"{discovered_count} discovered: true entries in ## Sources. "
+            "Review and remove the flag, or delete URLs you don't want "
+            "crawled again."
+        )
+
+    return ValidationResult(errors=errors, warnings=warnings)
+
+
 def format_contracts_as_verification(spec: ProductSpec) -> str:
     """Format behavior contracts as PLAN.md verification tasks.
 
