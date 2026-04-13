@@ -40,6 +40,8 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
         )
     except FileNotFoundError:
         raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
+    except subprocess.TimeoutExpired:
+        raise ClaudeCliError("claude CLI timed out after 300 seconds")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
     return result.stdout.strip()
@@ -90,6 +92,8 @@ def query_with_images(
         )
     except FileNotFoundError:
         raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
+    except subprocess.TimeoutExpired:
+        raise ClaudeCliError("claude CLI timed out after 300 seconds")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
     return result.stdout.strip()

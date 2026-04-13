@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -57,6 +58,14 @@ class TestQuery:
             with pytest.raises(ClaudeCliError, match="fail"):
                 query("prompt")
 
+    def test_raises_claude_cli_error_on_timeout(self):
+        with patch(
+            "duplo.claude_cli.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=300),
+        ):
+            with pytest.raises(ClaudeCliError, match="timed out"):
+                query("prompt")
+
 
 class TestQueryWithImages:
     def test_includes_image_paths_in_prompt(self):
@@ -84,4 +93,12 @@ class TestQueryWithImages:
             return_value=_completed(returncode=1, stderr="err"),
         ):
             with pytest.raises(ClaudeCliError, match="err"):
+                query_with_images("go", [Path("/x.png")])
+
+    def test_raises_claude_cli_error_on_timeout(self):
+        with patch(
+            "duplo.claude_cli.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=300),
+        ):
+            with pytest.raises(ClaudeCliError, match="timed out"):
                 query_with_images("go", [Path("/x.png")])
