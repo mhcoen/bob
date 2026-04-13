@@ -3586,3 +3586,95 @@ class TestValidateForRun:
         disc_warnings = [w for w in result.warnings if "discovered" in w]
         assert len(disc_warnings) == 1
         assert "Review" in disc_warnings[0]
+
+
+class TestBackwardCompatOldFormatSpec:
+    """Old-format SPEC.md files predate the <FILL IN> convention.
+
+    They have no fill-in markers anywhere.  Parsing must keep
+    fill_in_purpose and fill_in_architecture false, and the spec
+    must pass validation without errors.
+    """
+
+    OLD_FORMAT_SPEC = (
+        "## Purpose\n\n"
+        "A calculator app that evaluates math expressions typed by the user.\n\n"
+        "## Architecture\n\n"
+        "Swift / SwiftUI, single-window macOS app.\n\n"
+        "## Design\n\n"
+        "Minimal dark-mode interface with a single text field.\n\n"
+        "## Sources\n\n"
+        "- https://example.com/calc\n"
+        "  role: product-reference\n"
+        "  scrape: deep\n"
+    )
+
+    def test_fill_in_purpose_false(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        assert spec.fill_in_purpose is False
+
+    def test_fill_in_architecture_false(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        assert spec.fill_in_architecture is False
+
+    def test_fill_in_design_false(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        assert spec.fill_in_design is False
+
+    def test_passes_validation(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        result = validate_for_run(spec)
+        assert result.errors == []
+
+    def test_no_warnings(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        result = validate_for_run(spec)
+        assert result.warnings == []
+
+    def test_purpose_parsed_correctly(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        assert "calculator" in spec.purpose.lower()
+
+    def test_architecture_parsed_correctly(self):
+        spec = _parse_spec(self.OLD_FORMAT_SPEC)
+        assert "Swift" in spec.architecture
+
+    def test_minimal_old_spec_url_only(self):
+        """Bare minimum old-format spec: just a purpose and a source URL."""
+        text = (
+            "## Purpose\n\n"
+            "Duplicate the Acme Widget app — a desktop productivity tool.\n\n"
+            "## Sources\n\n"
+            "- https://acme.example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+        )
+        spec = _parse_spec(text)
+        assert spec.fill_in_purpose is False
+        assert spec.fill_in_architecture is False
+        assert spec.fill_in_design is False
+        result = validate_for_run(spec)
+        assert result.errors == []
+
+    def test_old_spec_with_prose_references(self):
+        """Old-format specs stored references as prose, not structured entries.
+
+        These parse to an empty references list but must not trigger
+        fill_in errors or validation failures (the source URL is enough).
+        """
+        text = (
+            "## Purpose\n\n"
+            "A note-taking app with markdown support and live preview.\n\n"
+            "## References\n\n"
+            "See the screenshots in the screenshots/ directory.\n\n"
+            "## Sources\n\n"
+            "- https://notes.example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+        )
+        spec = _parse_spec(text)
+        assert spec.fill_in_purpose is False
+        assert spec.fill_in_architecture is False
+        assert spec.references == []
+        result = validate_for_run(spec)
+        assert result.errors == []
