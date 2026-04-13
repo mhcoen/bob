@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 
+from pathlib import Path
+
 from duplo.spec_reader import (
     BehaviorContract,
+    DesignBlock,
     ProductSpec,
+    ReferenceEntry,
+    SourceEntry,
+    _HTML_COMMENT_RE,
     _parse_contracts,
     _parse_spec,
     _split_sections,
+    _strip_comments,
     format_contracts_as_verification,
     format_scope_override_prompt,
     format_spec_for_prompt,
@@ -274,3 +281,111 @@ class TestFormatContractsAsVerification:
         assert "- [ ] Verify: type `2+3`, expect result `5`" in result
         assert "- [ ] Verify: type `10 km in miles`, expect result `6.21 mi`" in result
         assert "SPEC.md" in result
+
+
+class TestSourceEntryDefaults:
+    def test_required_fields(self):
+        entry = SourceEntry(url="https://example.com", role="docs", scrape="deep")
+        assert entry.url == "https://example.com"
+        assert entry.role == "docs"
+        assert entry.scrape == "deep"
+
+    def test_optional_defaults(self):
+        entry = SourceEntry(url="https://example.com", role="docs", scrape="none")
+        assert entry.notes == ""
+        assert entry.proposed is False
+        assert entry.discovered is False
+
+    def test_all_fields(self):
+        entry = SourceEntry(
+            url="https://example.com",
+            role="product-reference",
+            scrape="shallow",
+            notes="main site",
+            proposed=True,
+            discovered=True,
+        )
+        assert entry.notes == "main site"
+        assert entry.proposed is True
+        assert entry.discovered is True
+
+
+class TestReferenceEntryDefaults:
+    def test_required_fields(self):
+        entry = ReferenceEntry(path=Path("ref/demo.mp4"))
+        assert entry.path == Path("ref/demo.mp4")
+
+    def test_optional_defaults(self):
+        entry = ReferenceEntry(path=Path("ref/screenshot.png"))
+        assert entry.roles == []
+        assert entry.notes == ""
+        assert entry.proposed is False
+
+    def test_roles_is_list(self):
+        entry = ReferenceEntry(
+            path=Path("ref/demo.mp4"),
+            roles=["visual-target", "behavioral-target"],
+        )
+        assert len(entry.roles) == 2
+        assert "visual-target" in entry.roles
+        assert "behavioral-target" in entry.roles
+
+    def test_all_fields(self):
+        entry = ReferenceEntry(
+            path=Path("ref/doc.pdf"),
+            roles=["docs"],
+            notes="API reference",
+            proposed=True,
+        )
+        assert entry.notes == "API reference"
+        assert entry.proposed is True
+
+
+class TestDesignBlockDefaults:
+    def test_all_defaults(self):
+        block = DesignBlock()
+        assert block.user_prose == ""
+        assert block.auto_generated == ""
+        assert block.has_fill_in_marker is False
+
+    def test_with_values(self):
+        block = DesignBlock(
+            user_prose="Dark theme",
+            auto_generated="colors: #2b2b2b",
+            has_fill_in_marker=True,
+        )
+        assert block.user_prose == "Dark theme"
+        assert block.auto_generated == "colors: #2b2b2b"
+        assert block.has_fill_in_marker is True
+
+
+class TestStripComments:
+    def test_removes_single_line_comment(self):
+        text = "before <!-- comment --> after"
+        assert _strip_comments(text) == "before  after"
+
+    def test_removes_multi_line_comment(self):
+        text = "before\n<!-- multi\nline\ncomment -->\nafter"
+        assert _strip_comments(text) == "before\n\nafter"
+
+    def test_leaves_non_comment_content_intact(self):
+        text = "no comments here\njust regular text"
+        assert _strip_comments(text) == text
+
+    def test_removes_multiple_comments(self):
+        text = "a <!-- x --> b <!-- y --> c"
+        assert _strip_comments(text) == "a  b  c"
+
+    def test_empty_comment(self):
+        text = "before <!----> after"
+        assert _strip_comments(text) == "before  after"
+
+    def test_comment_with_fill_in_marker(self):
+        text = "Purpose\n<!-- <FILL IN: describe> -->\nReal content"
+        result = _strip_comments(text)
+        assert "<FILL IN" not in result
+        assert "Real content" in result
+
+    def test_html_comment_re_matches_dotall(self):
+        text = "<!-- spans\nmultiple\nlines -->"
+        assert _HTML_COMMENT_RE.fullmatch(text) is not None

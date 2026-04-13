@@ -39,6 +39,14 @@ _KNOWN_SECTIONS = {
 
 _HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
 
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_comments(body: str) -> str:
+    """Remove HTML comments from *body*."""
+    return _HTML_COMMENT_RE.sub("", body)
+
+
 # Patterns inside the Scope section.
 _INCLUDE_RE = re.compile(
     r"^\s*[-*]\s*(?:include|add|keep|want|need)\s*:\s*(.+)",
@@ -63,6 +71,39 @@ class BehaviorContract:
 
     input: str
     expected: str
+
+
+@dataclass
+class SourceEntry:
+    """A URL declared in the ## Sources section."""
+
+    url: str
+    role: str  # "product-reference" | "docs" | "counter-example"
+    scrape: str  # "deep" | "shallow" | "none"
+    notes: str = ""
+    proposed: bool = False
+    discovered: bool = False
+
+
+@dataclass
+class ReferenceEntry:
+    """A file declared in the ## References section."""
+
+    path: Path  # relative to project root, typically ref/<filename>
+    roles: list[str] = field(
+        default_factory=list
+    )  # e.g. "visual-target", "behavioral-target", "docs", etc.
+    notes: str = ""
+    proposed: bool = False
+
+
+@dataclass
+class DesignBlock:
+    """Parsed contents of the ## Design section."""
+
+    user_prose: str = ""
+    auto_generated: str = ""
+    has_fill_in_marker: bool = False
 
 
 @dataclass
