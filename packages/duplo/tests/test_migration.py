@@ -224,6 +224,25 @@ def test_sources_inline_text(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is True
 
 
+def test_corrupted_duplo_json(tmp_path: Path) -> None:
+    """Corrupted .duplo/duplo.json → still needs migration.
+
+    The presence of the file triggers migration detection, not its
+    contents.  needs_migration must NOT try to parse the JSON.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{corrupt not json!!")
+    assert needs_migration(tmp_path) is True
+
+
+def test_corrupted_duplo_json_with_new_spec(tmp_path: Path) -> None:
+    """Corrupted duplo.json + valid new-format SPEC.md → no migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("<<<garbage>>>")
+    (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n## Sources\n")
+    assert needs_migration(tmp_path) is False
+
+
 class TestCheckMigration:
     """Tests for _check_migration()."""
 
