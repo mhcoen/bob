@@ -217,6 +217,25 @@ def _validate_source_entries(
                 proposed=entry.proposed,
                 discovered=entry.discovered,
             )
+        # Counter-example entries should not be scraped.  If the user
+        # declared scrape: deep or scrape: shallow on a counter-example,
+        # they almost certainly meant scrape: none.
+        if entry.role == "counter-example" and entry.scrape in ("deep", "shallow"):
+            record_failure(
+                "spec_reader:_validate_source_entries",
+                "io",
+                f"Source entry {entry.url!r}: counter-example with "
+                f"scrape={entry.scrape!r}, overriding to 'none'",
+                errors_path=errors_path,
+            )
+            entry = SourceEntry(
+                url=entry.url,
+                role=entry.role,
+                scrape="none",
+                notes=entry.notes,
+                proposed=entry.proposed,
+                discovered=entry.discovered,
+            )
         valid.append(entry)
     return valid
 

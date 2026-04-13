@@ -900,6 +900,88 @@ class TestValidateSourceEntries:
         assert len(result) == len(_VALID_SCRAPE_VALUES)
         assert self._read_errors(ep) == []
 
+    def test_counter_example_deep_scrape_overridden_to_none(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="counter-example",
+                scrape="deep",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert "counter-example" in errors[0]["message"]
+        assert "overriding to 'none'" in errors[0]["message"]
+
+    def test_counter_example_shallow_scrape_overridden_to_none(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="counter-example",
+                scrape="shallow",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert "counter-example" in errors[0]["message"]
+
+    def test_counter_example_none_scrape_no_diagnostic(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="counter-example",
+                scrape="none",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+        assert self._read_errors(ep) == []
+
+    def test_counter_example_preserves_other_fields(self, tmp_path):
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="counter-example",
+                scrape="deep",
+                notes="some notes",
+                proposed=True,
+                discovered=True,
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "none"
+        assert result[0].notes == "some notes"
+        assert result[0].proposed is True
+        assert result[0].discovered is True
+        assert result[0].role == "counter-example"
+
+    def test_non_counter_example_deep_scrape_no_override(self, tmp_path):
+        """Only counter-example role triggers the scrape override."""
+        ep = self._errors_path(tmp_path)
+        entries = [
+            SourceEntry(
+                url="https://example.com",
+                role="docs",
+                scrape="deep",
+            )
+        ]
+        result = _validate_source_entries(entries, errors_path=ep)
+        assert len(result) == 1
+        assert result[0].scrape == "deep"
+        assert self._read_errors(ep) == []
+
 
 class TestParseSourceEntriesValidation:
     """Integration: validation runs inside _parse_source_entries."""
@@ -969,6 +1051,23 @@ class TestDiagnosticRecordStructure:
         assert errors[0]["site"] == "spec_reader:_validate_source_entries"
         assert errors[0]["category"] == "io"
         assert "timestamp" in errors[0]
+
+    def test_counter_example_scrape_override_record_structure(self, tmp_path):
+        ep = tmp_path / "errors.jsonl"
+        entries = [
+            SourceEntry(
+                url="https://x.com",
+                role="counter-example",
+                scrape="deep",
+            )
+        ]
+        _validate_source_entries(entries, errors_path=ep)
+        errors = self._read_errors(ep)
+        assert len(errors) == 1
+        assert errors[0]["site"] == "spec_reader:_validate_source_entries"
+        assert errors[0]["category"] == "io"
+        assert "timestamp" in errors[0]
+        assert "counter-example" in errors[0]["message"]
 
     def test_multiple_failures_each_recorded(self, tmp_path):
         ep = tmp_path / "errors.jsonl"
