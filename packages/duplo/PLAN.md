@@ -703,7 +703,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] Tests (these are integration-style tests against `main`, using `capsys` and monkeypatching `sys.argv` / `Path.cwd`):
     - [x] `duplo` (no args) in an old-layout temp directory: prints migration message, exits 1, does not call `_subsequent_run` or `_first_run`
     - [x] `duplo` (no args) in a new-format temp directory: migration check passes silently, proceeds to the existing dispatch (may exit for other reasons like missing purpose, but NOT the migration message)
-    - [ ] `duplo fix` in an old-layout directory: bypasses migration check, dispatches to existing `fix` handler. Confirm by patching the fix handler and asserting it was called.
+    - [x] `duplo fix` in an old-layout directory: bypasses migration check, dispatches to existing `fix` handler. Confirm by patching the fix handler and asserting it was called.
     - [ ] `duplo investigate` in an old-layout directory: same as above for the investigate handler.
 
 - [ ] Add tests for edge cases specific to migration detection
