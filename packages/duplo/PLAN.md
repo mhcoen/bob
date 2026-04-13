@@ -680,7 +680,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
     - [x] returns True for old layout (has `.duplo/duplo.json`, no SPEC.md)
     - [x] returns True for old layout with an old-format SPEC.md (has `.duplo/duplo.json`, SPEC.md exists but has neither marker nor `## Sources`)
     - [x] returns False for new-format with marker string (has `.duplo/duplo.json`, SPEC.md contains `"How the pieces fit together:"`)
-    - [ ] returns False for new-format with `## Sources` heading but no marker string (structural fallback)
+    - [x] returns False for new-format with `## Sources` heading but no marker string (structural fallback)
     - [ ] returns False when `.duplo/duplo.json` does not exist (not a duplo project at all)
     - [ ] returns False when both signals present (belt-and-braces)
     - [ ] `## Sources` check uses multiline anchor so an `## Sources` line mid-document matches, but a line like `My sources` or `### Sources` does not
