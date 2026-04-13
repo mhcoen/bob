@@ -11,6 +11,7 @@ from duplo.spec_reader import (
     ProductSpec,
     ReferenceEntry,
     SourceEntry,
+    _FILL_IN_RE,
     _HTML_COMMENT_RE,
     _parse_contracts,
     _parse_spec,
@@ -389,3 +390,77 @@ class TestStripComments:
     def test_html_comment_re_matches_dotall(self):
         text = "<!-- spans\nmultiple\nlines -->"
         assert _HTML_COMMENT_RE.fullmatch(text) is not None
+
+
+class TestFillInRegex:
+    def test_matches_basic_marker(self):
+        assert _FILL_IN_RE.search("<FILL IN>") is not None
+
+    def test_matches_with_hint_text(self):
+        assert _FILL_IN_RE.search("<FILL IN: describe your product>") is not None
+
+    def test_matches_extra_whitespace(self):
+        assert _FILL_IN_RE.search("<FILL  IN>") is not None
+
+    def test_no_match_without_marker(self):
+        assert _FILL_IN_RE.search("just regular text") is None
+
+    def test_no_match_partial(self):
+        assert _FILL_IN_RE.search("<FILL>") is None
+
+
+class TestFillInPurpose:
+    def test_marker_sets_flag(self):
+        spec = _parse_spec("## Purpose\n<FILL IN: describe>\n")
+        assert spec.fill_in_purpose is True
+
+    def test_marker_in_comment_does_not_set_flag(self):
+        spec = _parse_spec("## Purpose\n<!-- <FILL IN: describe> -->\nReal purpose.\n")
+        assert spec.fill_in_purpose is False
+
+    def test_absent_marker_keeps_flag_false(self):
+        spec = _parse_spec("## Purpose\nA macOS text calculator.\n")
+        assert spec.fill_in_purpose is False
+
+
+class TestFillInArchitecture:
+    def test_marker_sets_flag(self):
+        spec = _parse_spec("## Architecture\n<FILL IN>\n")
+        assert spec.fill_in_architecture is True
+
+    def test_marker_in_comment_does_not_set_flag(self):
+        spec = _parse_spec("## Architecture\n<!-- <FILL IN> -->\nSwiftUI, MVVM.\n")
+        assert spec.fill_in_architecture is False
+
+    def test_absent_marker_keeps_flag_false(self):
+        spec = _parse_spec("## Architecture\nSwift, SwiftUI.\n")
+        assert spec.fill_in_architecture is False
+
+
+class TestFillInDesign:
+    def test_marker_and_no_visual_target_sets_flag(self):
+        text = (
+            "## Design\n<FILL IN: describe visual style>\n"
+            "## References\n- ref/doc.pdf\n  role: docs\n"
+        )
+        spec = _parse_spec(text)
+        assert spec.fill_in_design is True
+
+    def test_marker_but_visual_target_present_keeps_flag_false(self):
+        text = "## Design\n<FILL IN>\n## References\n- ref/demo.mp4\n  role: visual-target\n"
+        spec = _parse_spec(text)
+        assert spec.fill_in_design is False
+
+    def test_no_marker_keeps_flag_false(self):
+        text = "## Design\nDark theme, monospace font.\n"
+        spec = _parse_spec(text)
+        assert spec.fill_in_design is False
+
+    def test_marker_in_comment_keeps_flag_false(self):
+        text = "## Design\n<!-- <FILL IN> -->\nDark theme.\n## References\nNo visual targets.\n"
+        spec = _parse_spec(text)
+        assert spec.fill_in_design is False
+
+    def test_no_references_section_with_marker_sets_flag(self):
+        spec = _parse_spec("## Design\n<FILL IN>\n")
+        assert spec.fill_in_design is True

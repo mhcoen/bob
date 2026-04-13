@@ -41,6 +41,8 @@ _HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
+_FILL_IN_RE = re.compile(r"<FILL\s+IN[^>]*>")
+
 
 def _strip_comments(body: str) -> str:
     """Remove HTML comments from *body*."""
@@ -124,6 +126,9 @@ class ProductSpec:
     architecture: str = ""
     design: str = ""
     references: str = ""
+    fill_in_purpose: bool = False
+    fill_in_architecture: bool = False
+    fill_in_design: bool = False
 
 
 def read_spec(*, target_dir: Path | str = ".") -> ProductSpec | None:
@@ -152,6 +157,8 @@ def _parse_spec(text: str) -> ProductSpec:
         key = heading.lower().strip()
         if key == "purpose":
             spec.purpose = body.strip()
+            if _FILL_IN_RE.search(_strip_comments(body)):
+                spec.fill_in_purpose = True
         elif key == "scope":
             spec.scope = body.strip()
             spec.scope_include = _parse_scope_list(body, _INCLUDE_RE)
@@ -161,10 +168,20 @@ def _parse_spec(text: str) -> ProductSpec:
             spec.behavior_contracts = _parse_contracts(body)
         elif key == "architecture":
             spec.architecture = body.strip()
+            if _FILL_IN_RE.search(_strip_comments(body)):
+                spec.fill_in_architecture = True
         elif key == "design":
             spec.design = body.strip()
         elif key == "references":
             spec.references = body.strip()
+
+    # fill_in_design: true only when design body has <FILL IN> marker
+    # AND no reference entries have visual-target role.
+    design_body = sections.get("Design", "")
+    has_design_marker = bool(_FILL_IN_RE.search(_strip_comments(design_body)))
+    refs_body = sections.get("References", "")
+    has_visual_target = "visual-target" in refs_body
+    spec.fill_in_design = has_design_marker and not has_visual_target
 
     return spec
 
