@@ -36,6 +36,7 @@ from duplo.spec_reader import (
     format_behavioral_references,
     format_contracts_as_verification,
     format_counter_examples,
+    format_design_for_prompt,
     format_doc_references,
     format_scope_override_prompt,
     format_spec_for_prompt,
@@ -2414,3 +2415,34 @@ class TestScrapeable:
             discovered=False,
         )
         assert scrapeable_sources(self._spec([e])) == []
+
+
+class TestFormatDesignForPrompt:
+    def test_both_present(self):
+        spec = ProductSpec(
+            design=DesignBlock(user_prose="User notes", auto_generated="Gen content")
+        )
+        result = format_design_for_prompt(spec)
+        assert result == "User notes\n\n---\n\nGen content"
+
+    def test_only_user_prose(self):
+        spec = ProductSpec(design=DesignBlock(user_prose="User notes", auto_generated=""))
+        assert format_design_for_prompt(spec) == "User notes"
+
+    def test_only_auto_generated(self):
+        spec = ProductSpec(design=DesignBlock(user_prose="", auto_generated="Gen content"))
+        assert format_design_for_prompt(spec) == "Gen content"
+
+    def test_neither_present(self):
+        spec = ProductSpec(design=DesignBlock())
+        assert format_design_for_prompt(spec) == ""
+
+    def test_order_prose_before_auto(self):
+        spec = ProductSpec(design=DesignBlock(user_prose="AAA", auto_generated="ZZZ"))
+        result = format_design_for_prompt(spec)
+        assert result.index("AAA") < result.index("ZZZ")
+
+    def test_separator_between_sections(self):
+        spec = ProductSpec(design=DesignBlock(user_prose="prose", auto_generated="auto"))
+        result = format_design_for_prompt(spec)
+        assert "\n\n---\n\n" in result

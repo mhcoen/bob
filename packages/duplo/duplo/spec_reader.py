@@ -649,6 +649,20 @@ def scrapeable_sources(spec: ProductSpec) -> list[SourceEntry]:
     ]
 
 
+def format_design_for_prompt(spec: ProductSpec) -> str:
+    """Format the design section for plan generation.
+
+    If both ``user_prose`` and ``auto_generated`` are present, returns
+    them in that order separated by a divider.  If only one is present,
+    returns that one.  If neither, returns an empty string.
+    """
+    prose = spec.design.user_prose
+    auto = spec.design.auto_generated
+    if prose and auto:
+        return f"{prose}\n\n---\n\n{auto}"
+    return prose or auto
+
+
 def format_spec_for_prompt(spec: ProductSpec) -> str:
     """Format the spec for injection into an LLM system or user prompt.
 
