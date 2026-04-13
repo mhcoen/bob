@@ -576,15 +576,31 @@ def _split_sections(text: str) -> dict[str, str]:
     for line in text.splitlines(keepends=True):
         match = _HEADING_RE.match(line)
         if match:
-            # Save the previous section.
-            sections[current_heading] = "".join(current_lines)
-            current_heading = match.group(1).strip()
+            # Save the previous section (append if heading seen before).
+            body = "".join(current_lines)
+            if current_heading in sections:
+                sections[current_heading] += body
+            else:
+                sections[current_heading] = body
+            new_heading = match.group(1).strip()
+            if new_heading in sections:
+                record_failure(
+                    "spec_reader:_split_sections",
+                    "io",
+                    f"Duplicate heading '## {new_heading}' in SPEC.md"
+                    " — content merged with earlier section",
+                )
+            current_heading = new_heading
             current_lines = []
         else:
             current_lines.append(line)
 
-    # Save the last section.
-    sections[current_heading] = "".join(current_lines)
+    # Save the last section (append if heading seen before).
+    body = "".join(current_lines)
+    if current_heading in sections:
+        sections[current_heading] += body
+    else:
+        sections[current_heading] = body
     return sections
 
 

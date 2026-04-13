@@ -17,6 +17,7 @@ from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query, query_with_images
 from duplo.diagnostics import record_failure
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a product-level QA analyst. You have deep knowledge of the target
@@ -332,17 +333,7 @@ def _build_prompt(
 
 def _parse_result(raw: str) -> InvestigationResult:
     """Parse the LLM's JSON response into an InvestigationResult."""
-    text = raw.strip()
-
-    # Strip markdown code fences if present.
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]  # Drop opening fence line.
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw.strip())
 
     try:
         data = json.loads(text)

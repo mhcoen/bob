@@ -68,6 +68,10 @@ _LOW_PRIORITY = re.compile(
 # followed as cross-domain docs links. When a product is hosted on
 # one of these platforms (e.g. a GitHub repo), the platform's own
 # docs/features/marketing pages are not part of the product.
+# Product documentation paths on platform domains that should be allowed
+# through even when the domain is in _PLATFORM_DOMAINS.
+_PRODUCT_DOC_PATHS = re.compile(r"^/[^/]+/[^/]+/(wiki|docs|documentation|guide)")
+
 _PLATFORM_DOMAINS = {
     "github.com",
     "docs.github.com",
@@ -110,7 +114,6 @@ def _is_platform_domain(url: str) -> bool:
 
     # Allow product documentation paths on platform domains.
     # e.g. github.com/org/repo/wiki, gitlab.com/org/repo/-/wikis
-    _PRODUCT_DOC_PATHS = re.compile(r"^/[^/]+/[^/]+/(wiki|docs|documentation|guide)")
     if _PRODUCT_DOC_PATHS.search(path):
         return False
 

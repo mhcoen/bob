@@ -1137,7 +1137,7 @@ def _rescrape_product_url() -> tuple[int, int, str]:
     if new_hashes and old_hashes == new_hashes:
         print("  Site content unchanged, skipping feature re-extraction.")
         data["last_scrape_timestamp"] = time.time()
-        duplo_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        duplo_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         return 0, 0, ""
 
     pages_updated = 0
@@ -1207,9 +1207,14 @@ def _rescrape_product_url() -> tuple[int, int, str]:
                         save_design_requirements(dataclasses.asdict(design))
                         print(f"  Updated design from {len(design.source_images)} frame(s).")
 
-    # Record scrape timestamp so subsequent runs within 10 minutes skip re-scrape.
+    # Re-read duplo.json to pick up writes from save_reference_urls,
+    # save_doc_structures, etc. that happened since our initial read.
+    try:
+        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, FileNotFoundError):
+        pass
     data["last_scrape_timestamp"] = time.time()
-    duplo_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    duplo_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     return pages_updated, examples_updated, scraped_text
 
@@ -1599,7 +1604,10 @@ def _subsequent_run() -> None:
     design_data = data.get("design_requirements", {})
     design_section = ""
     if design_data:
-        loaded_design = DesignRequirements(**design_data)
+        _dfields = {f.name for f in dataclasses.fields(DesignRequirements)}
+        loaded_design = DesignRequirements(
+            **{k: v for k, v in design_data.items() if k in _dfields}
+        )
         design_section = format_design_section(loaded_design)
     content = generate_phase_plan(
         source_url,

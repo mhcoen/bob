@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 
 from duplo.claude_cli import query
+from duplo.parsing import strip_fences
 from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
 
@@ -143,15 +144,7 @@ def _parse_result(
     examples: list[CodeExample],
 ) -> GapResult:
     """Parse the JSON response into a :class:`GapResult`."""
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

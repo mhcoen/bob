@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from duplo.claude_cli import query_with_images
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a UI screenshot quality filter. Given a batch of video frames,
@@ -81,15 +82,7 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
 
     Falls back to keeping all frames if parsing fails.
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from duplo.claude_cli import query
 from duplo.fetcher import fetch_text
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a product analyst. Given text scraped from a URL, determine whether
@@ -84,15 +85,7 @@ def _parse_result(raw: str) -> ValidationResult:
     Tolerates markdown code fences. Falls back to single_product=True
     if parsing fails (benefit of the doubt).
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

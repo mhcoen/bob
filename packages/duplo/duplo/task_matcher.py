@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from duplo.claude_cli import query
+from duplo.parsing import strip_fences
 from duplo.extractor import Feature
 from duplo.planner import CompletedTask
 from duplo.saver import save_feature_status, save_features
@@ -122,15 +123,7 @@ def _parse_matches(raw: str, expected_count: int) -> list[dict]:
     Tolerates markdown code fences wrapping the JSON.
     Returns an empty list if parsing fails.
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

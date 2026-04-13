@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 
 from duplo.claude_cli import ClaudeCliError, query
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a product analyst. Given scraped text from a product website, extract a
@@ -133,17 +134,7 @@ def _parse_features(raw: str) -> list[Feature]:
     Tolerates markdown code fences (``` or ```json) wrapping the JSON.
     Returns an empty list if parsing fails.
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        # strip opening fence
-        lines = lines[1:]
-        # strip closing fence
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

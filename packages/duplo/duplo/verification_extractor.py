@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass
 
 from duplo.claude_cli import query
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a test-case extractor. Given descriptions of application UI frames,
@@ -90,15 +91,7 @@ def _parse_cases(raw: str) -> list[VerificationCase]:
 
     Tolerates markdown code fences. Returns an empty list on failure.
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

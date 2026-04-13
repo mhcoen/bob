@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from duplo.diagnostics import record_failure
+from duplo.parsing import strip_fences
 from duplo.doc_examples import CodeExample
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
@@ -364,15 +365,7 @@ def _deduplicate_features_llm(
         )
         return {}
 
-    text = raw.strip()
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw.strip())
 
     try:
         result = json.loads(text)
@@ -417,15 +410,7 @@ def _find_duplicate_groups(names: list[str]) -> list[list[str]]:
         )
         return []
 
-    text = raw.strip()
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw.strip())
 
     try:
         result = json.loads(text)
@@ -516,15 +501,7 @@ def _propagate_implemented_status(features: list[dict]) -> list[str]:
         )
         return []
 
-    text = raw.strip()
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw.strip())
 
     try:
         result = json.loads(text)

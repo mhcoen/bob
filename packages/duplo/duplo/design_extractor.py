@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
+from duplo.parsing import strip_fences
 
 _SYSTEM = """\
 You are a visual design analyst. Given screenshot(s) of a product, extract
@@ -87,15 +88,7 @@ def _parse_design(raw: str) -> DesignRequirements:
     Tolerates markdown code fences wrapping the JSON.
     Returns an empty DesignRequirements if parsing fails.
     """
-    text = raw
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw)
 
     try:
         data = json.loads(text)

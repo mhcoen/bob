@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 
 from duplo.claude_cli import query
+from duplo.parsing import strip_fences
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
 
@@ -114,18 +115,7 @@ def _parse_roadmap(raw: str) -> list[dict]:
     """Parse the JSON roadmap from Claude's response."""
     import json
 
-    text = raw.strip()
-    # Strip markdown fences if present
-    fence_pos = text.find("```")
-    if fence_pos != -1:
-        text = text[fence_pos:]
-        lines = text.splitlines()
-        # strip opening fence
-        lines = lines[1:]
-        # strip closing fence
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines)
+    text = strip_fences(raw.strip())
 
     try:
         data = json.loads(text)
