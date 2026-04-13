@@ -4811,3 +4811,69 @@ class TestValidateForRunWiring:
                 main()
 
         mock_validate.assert_not_called()
+
+
+class TestFillInPurposeBlocksRun:
+    """End-to-end: a real SPEC.md with <FILL IN> in ## Purpose exits 1."""
+
+    SPEC_WITH_FILL_IN = """\
+# My App
+
+## Purpose
+
+<FILL IN>
+
+## Sources
+
+- https://example.com
+  role: product-reference
+  scrape: deep
+"""
+
+    def test_first_run_blocked_by_fill_in_purpose(self, tmp_path, monkeypatch, capsys):
+        """First run (no .duplo/) exits 1 when Purpose has <FILL IN>."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_WITH_FILL_IN)
+        (tmp_path / "screenshot.png").write_bytes(b"PNG")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch("duplo.main.fetch_site") as mock_fetch,
+            patch("duplo.main.extract_features") as mock_extract,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "Purpose" in captured.err
+        assert "FILL IN" in captured.err
+
+        # Must NOT have proceeded to scraping or extraction.
+        mock_scan.assert_not_called()
+        mock_fetch.assert_not_called()
+        mock_extract.assert_not_called()
+
+    def test_subsequent_run_blocked_by_fill_in_purpose(self, tmp_path, monkeypatch, capsys):
+        """Subsequent run (.duplo/ exists) exits 1 when Purpose has <FILL IN>."""
+        _write_duplo_json(tmp_path, {"features": []})
+        (tmp_path / "SPEC.md").write_text(self.SPEC_WITH_FILL_IN)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.compute_hashes") as mock_hash,
+            patch("duplo.main.fetch_site") as mock_fetch,
+            patch("duplo.main.extract_features") as mock_extract,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "Purpose" in captured.err
+        assert "FILL IN" in captured.err
+
+        # Must NOT have proceeded to hashing, scraping, or extraction.
+        mock_hash.assert_not_called()
+        mock_fetch.assert_not_called()
+        mock_extract.assert_not_called()
