@@ -690,7 +690,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Message lists the five steps: create `ref/`, move reference files, hand-author SPEC.md using SPEC-template.md with minimum fields (Purpose, Architecture, Sources, References), run `duplo` again. Mentions that PLAN.md, `.duplo/duplo.json`, and source code are unchanged.
   - [x] Implement `_check_migration(target_dir: Path) -> None` per MIGRATION-design.md § Implementation. If `needs_migration(target_dir)` returns True, print `_MIGRATION_MESSAGE` and `sys.exit(1)`. Otherwise return without doing anything.
   - [ ] Tests:
-    - [ ] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
+    - [x] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
     - [ ] `_check_migration` on a new-format directory: no output, no exit, function returns None
     - [ ] `_check_migration` on a non-duplo directory (no `.duplo/duplo.json`): no output, no exit
     - [ ] Message text test: pin the exact message content by snapshot comparison to a fixture file. This protects against accidental wording drift.
