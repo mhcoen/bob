@@ -4106,3 +4106,148 @@ The calculator should handle locale-specific decimal separators.
         result = format_spec_for_prompt(spec)
         assert "`2+3`" in result
         assert "`10/0`" in result
+
+
+class TestReferencePathsWithSpaces:
+    """End-to-end: reference paths with spaces parse through _parse_spec."""
+
+    def test_bare_path_with_spaces_survives_parse_spec(self):
+        text = "## References\n- ref/Screen Shot 2025-10-12 at 14.30.png\n  role: visual-target\n"
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/Screen Shot 2025-10-12 at 14.30.png")
+        assert spec.references[0].roles == ["visual-target"]
+
+    def test_quoted_path_with_spaces_survives_parse_spec(self):
+        text = (
+            '## References\n- "ref/Screen Shot 2025-10-12 at 14.30.png"\n  role: visual-target\n'
+        )
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/Screen Shot 2025-10-12 at 14.30.png")
+
+    def test_multiple_spaced_paths_all_preserved(self):
+        text = (
+            "## References\n"
+            "- ref/Screen Shot 1.png\n"
+            "  role: visual-target\n"
+            "\n"
+            '- "ref/My App (copy 2).pdf"\n'
+            "  role: docs\n"
+            "\n"
+            "- ref/photo from camera roll.jpg\n"
+            "  role: visual-target\n"
+        )
+        spec = _parse_spec(text)
+        assert len(spec.references) == 3
+        assert spec.references[0].path == Path("ref/Screen Shot 1.png")
+        assert spec.references[1].path == Path("ref/My App (copy 2).pdf")
+        assert spec.references[2].path == Path("ref/photo from camera roll.jpg")
+
+    def test_spaced_path_with_notes_and_proposed(self):
+        text = (
+            "## References\n"
+            "- ref/App Screenshot March 2025.png\n"
+            "  role: visual-target\n"
+            "  notes: main dashboard view\n"
+            "  proposed: true\n"
+        )
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        entry = spec.references[0]
+        assert entry.path == Path("ref/App Screenshot March 2025.png")
+        assert entry.notes == "main dashboard view"
+        assert entry.proposed is True
+
+    def test_read_spec_with_spaced_reference(self, tmp_path):
+        (tmp_path / "SPEC.md").write_text(
+            "## Purpose\n\nA calculator app.\n\n"
+            "## References\n"
+            "- ref/Screen Shot 2025-10-12 at 14.30.png\n"
+            "  role: visual-target\n"
+        )
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/Screen Shot 2025-10-12 at 14.30.png")
+
+    def test_format_spec_includes_spaced_path(self):
+        text = (
+            "## Purpose\n\nA calculator.\n\n"
+            "## References\n"
+            "- ref/Screen Shot 2025-10-12 at 14.30.png\n"
+            "  role: visual-target\n"
+        )
+        spec = _parse_spec(text)
+        result = format_spec_for_prompt(spec)
+        assert "Screen Shot 2025-10-12 at 14.30.png" in result
+
+
+class TestReferencePathsUnusualChars:
+    """Paths with parentheses, unicode, and other unusual characters."""
+
+    def test_bare_path_with_parentheses(self):
+        text = "## References\n- ref/screenshot (1).png\n  role: visual-target\n"
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/screenshot (1).png")
+
+    def test_quoted_path_with_parentheses(self):
+        text = '## References\n- "ref/screenshot (final version).png"\n  role: visual-target\n'
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/screenshot (final version).png")
+
+    def test_quoted_path_with_ampersand(self):
+        text = '## References\n- "ref/Tom & Jerry logo.png"\n  role: visual-target\n'
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/Tom & Jerry logo.png")
+
+    def test_quoted_path_with_hash(self):
+        text = '## References\n- "ref/issue #42 screenshot.png"\n  role: docs\n'
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/issue #42 screenshot.png")
+
+    def test_bare_path_with_unicode(self):
+        text = "## References\n- ref/schéma-principal.png\n  role: visual-target\n"
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/schéma-principal.png")
+
+    def test_quoted_path_with_unicode_spaces(self):
+        text = '## References\n- "ref/画面 キャプチャ.png"\n  role: visual-target\n'
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/画面 キャプチャ.png")
+
+    def test_bare_path_with_dots_and_hyphens(self):
+        text = "## References\n- ref/my-app.v2.3.final.screenshot.png\n  role: visual-target\n"
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/my-app.v2.3.final.screenshot.png")
+
+    def test_quoted_path_with_single_quotes(self):
+        text = '## References\n- "ref/it\'s a test.png"\n  role: visual-target\n'
+        spec = _parse_spec(text)
+        assert len(spec.references) == 1
+        assert spec.references[0].path == Path("ref/it's a test.png")
+
+    def test_mixed_unusual_and_normal_paths(self):
+        text = (
+            "## References\n"
+            "- ref/normal.png\n"
+            "  role: visual-target\n"
+            "\n"
+            '- "ref/Screen Shot (final).png"\n'
+            "  role: visual-target\n"
+            "\n"
+            "- ref/café-menu.pdf\n"
+            "  role: docs\n"
+        )
+        spec = _parse_spec(text)
+        assert len(spec.references) == 3
+        assert spec.references[0].path == Path("ref/normal.png")
+        assert spec.references[1].path == Path("ref/Screen Shot (final).png")
+        assert spec.references[2].path == Path("ref/café-menu.pdf")
