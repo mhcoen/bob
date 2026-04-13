@@ -3645,6 +3645,42 @@ class TestFixModeDiagnosis:
         out = capsys.readouterr().out
         assert "1 diagnosed fix task" in out
 
+    def test_fix_without_investigate_empty_diagnoses_fallback(self, capsys, tmp_path, monkeypatch):
+        """duplo fix (no --investigate) falls back to raw fix tasks
+        when investigate() returns empty diagnoses."""
+        from duplo.investigator import InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "sidebar missing", "font too small"])
+
+        result = InvestigationResult(
+            diagnoses=[],
+            summary="Could not determine root cause",
+        )
+
+        mock_inv = patch("duplo.main.investigate", return_value=result)
+        with mock_inv as inv:
+            main()
+
+        # investigate() still called exactly once.
+        assert inv.call_count == 1
+
+        plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        # Raw fix tasks for each bug in ## Bugs section.
+        assert "## Bugs" in plan
+        assert '- [ ] Fix: sidebar missing [fix: "sidebar missing"]' in plan
+        assert '- [ ] Fix: font too small [fix: "font too small"]' in plan
+
+        out = capsys.readouterr().out
+        # Fallback reason surfaced.
+        assert "Diagnosis incomplete" in out
+        assert "Could not determine root cause" in out
+        # Count reflects undiagnosed tasks.
+        assert "2 fix task" in out
+        assert "(undiagnosed)" in out
+
 
 class TestCompareWithReferences:
     """Tests for _compare_with_references reference image lookup."""
