@@ -47,6 +47,12 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 _FILL_IN_RE = re.compile(r"<FILL\s+IN[^>]*>")
 
+# Pattern for AUTO-GENERATED blocks inside ## Design.
+_AUTOGEN_RE = re.compile(
+    r"<!--\s*BEGIN AUTO-GENERATED[^>]*-->(.*?)<!--\s*END AUTO-GENERATED\s*-->",
+    re.DOTALL,
+)
+
 # Patterns for ## Sources parser.
 # Entry start: a list-item line containing an HTTP(S) URL.
 _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$")

@@ -14,6 +14,7 @@ from duplo.spec_reader import (
     ReferenceEntry,
     SourceEntry,
     _FIELD_LINE,
+    _AUTOGEN_RE,
     _FILL_IN_RE,
     _HTML_COMMENT_RE,
     _KNOWN_SECTIONS,
@@ -1655,3 +1656,68 @@ class TestReferencesMigration:
         _parse_spec(text)
         ref_calls = [c for c in calls if "prose" in c]
         assert ref_calls == []
+
+
+class TestAutogenRe:
+    """Tests for _AUTOGEN_RE regex matching BEGIN/END AUTO-GENERATED markers."""
+
+    def test_matches_standard_block(self):
+        body = (
+            "Some prose.\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "auto content here\n"
+            "<!-- END AUTO-GENERATED -->\n"
+            "More prose."
+        )
+        m = _AUTOGEN_RE.search(body)
+        assert m is not None
+        assert m.group(1).strip() == "auto content here"
+
+    def test_matches_block_with_extra_text_in_begin(self):
+        body = (
+            "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+            "colors: blue\n"
+            "<!-- END AUTO-GENERATED -->"
+        )
+        m = _AUTOGEN_RE.search(body)
+        assert m is not None
+        assert "colors: blue" in m.group(1)
+
+    def test_dotall_multiline_content(self):
+        body = "<!-- BEGIN AUTO-GENERATED -->\nline one\n\nline three\n<!-- END AUTO-GENERATED -->"
+        m = _AUTOGEN_RE.search(body)
+        assert m is not None
+        assert "line one" in m.group(1)
+        assert "line three" in m.group(1)
+
+    def test_no_match_without_end_marker(self):
+        body = "<!-- BEGIN AUTO-GENERATED -->\nsome content\n"
+        m = _AUTOGEN_RE.search(body)
+        assert m is None
+
+    def test_no_match_without_begin_marker(self):
+        body = "some content\n<!-- END AUTO-GENERATED -->"
+        m = _AUTOGEN_RE.search(body)
+        assert m is None
+
+    def test_no_match_on_plain_text(self):
+        body = "Just regular design prose, no markers."
+        m = _AUTOGEN_RE.search(body)
+        assert m is None
+
+    def test_flexible_whitespace_in_markers(self):
+        body = "<!--  BEGIN AUTO-GENERATED  -->\ncontent\n<!--  END AUTO-GENERATED  -->"
+        m = _AUTOGEN_RE.search(body)
+        assert m is not None
+        assert m.group(1).strip() == "content"
+
+    def test_malformed_begin_no_match(self):
+        body = "<!-- BEGINAUTO-GENERATED -->\ncontent\n<!-- END AUTO-GENERATED -->"
+        m = _AUTOGEN_RE.search(body)
+        assert m is None
+
+    def test_captures_empty_block(self):
+        body = "<!-- BEGIN AUTO-GENERATED --><!-- END AUTO-GENERATED -->"
+        m = _AUTOGEN_RE.search(body)
+        assert m is not None
+        assert m.group(1) == ""
