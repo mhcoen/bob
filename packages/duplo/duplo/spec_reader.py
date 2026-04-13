@@ -43,6 +43,12 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 _FILL_IN_RE = re.compile(r"<FILL\s+IN[^>]*>")
 
+# Patterns for ## Sources parser.
+# Entry start: a list-item line containing an HTTP(S) URL.
+_SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$")
+# Field line: indented key: value pair (at least 2 spaces of indent).
+_FIELD_LINE = re.compile(r"^\s{2,}(\w+):\s*(.*)$")
+
 
 def _strip_comments(body: str) -> str:
     """Remove HTML comments from *body*."""

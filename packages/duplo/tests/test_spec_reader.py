@@ -11,8 +11,10 @@ from duplo.spec_reader import (
     ProductSpec,
     ReferenceEntry,
     SourceEntry,
+    _FIELD_LINE,
     _FILL_IN_RE,
     _HTML_COMMENT_RE,
+    _SOURCE_ENTRY_START,
     _parse_contracts,
     _parse_spec,
     _split_sections,
@@ -464,3 +466,95 @@ class TestFillInDesign:
     def test_no_references_section_with_marker_sets_flag(self):
         spec = _parse_spec("## Design\n<FILL IN>\n")
         assert spec.fill_in_design is True
+
+
+class TestSourceEntryStart:
+    def test_matches_http_url(self):
+        m = _SOURCE_ENTRY_START.match("- http://example.com")
+        assert m is not None
+        assert m.group(1) == "http://example.com"
+
+    def test_matches_https_url(self):
+        m = _SOURCE_ENTRY_START.match("- https://example.com/docs")
+        assert m is not None
+        assert m.group(1) == "https://example.com/docs"
+
+    def test_matches_with_trailing_whitespace(self):
+        m = _SOURCE_ENTRY_START.match("- https://example.com   ")
+        assert m is not None
+        assert m.group(1) == "https://example.com"
+
+    def test_no_match_without_dash(self):
+        assert _SOURCE_ENTRY_START.match("https://example.com") is None
+
+    def test_no_match_without_url(self):
+        assert _SOURCE_ENTRY_START.match("- just some text") is None
+
+    def test_no_match_ftp_url(self):
+        assert _SOURCE_ENTRY_START.match("- ftp://example.com") is None
+
+    def test_no_match_indented_line(self):
+        assert _SOURCE_ENTRY_START.match("  - https://example.com") is None
+
+    def test_no_match_url_with_trailing_text(self):
+        assert _SOURCE_ENTRY_START.match("- https://example.com extra") is None
+
+    def test_matches_url_with_path_and_query(self):
+        m = _SOURCE_ENTRY_START.match("- https://example.com/a/b?q=1&r=2#frag")
+        assert m is not None
+        assert m.group(1) == "https://example.com/a/b?q=1&r=2#frag"
+
+
+class TestFieldLine:
+    def test_matches_two_space_indent(self):
+        m = _FIELD_LINE.match("  role: product-reference")
+        assert m is not None
+        assert m.group(1) == "role"
+        assert m.group(2) == "product-reference"
+
+    def test_matches_four_space_indent(self):
+        m = _FIELD_LINE.match("    scrape: deep")
+        assert m is not None
+        assert m.group(1) == "scrape"
+        assert m.group(2) == "deep"
+
+    def test_matches_empty_value(self):
+        m = _FIELD_LINE.match("  notes:")
+        assert m is not None
+        assert m.group(1) == "notes"
+        assert m.group(2) == ""
+
+    def test_matches_value_with_spaces(self):
+        m = _FIELD_LINE.match("  notes: some free text here")
+        assert m is not None
+        assert m.group(1) == "notes"
+        assert m.group(2) == "some free text here"
+
+    def test_matches_boolean_value(self):
+        m = _FIELD_LINE.match("  proposed: true")
+        assert m is not None
+        assert m.group(1) == "proposed"
+        assert m.group(2) == "true"
+
+    def test_no_match_unindented(self):
+        assert _FIELD_LINE.match("role: product-reference") is None
+
+    def test_no_match_single_space_indent(self):
+        assert _FIELD_LINE.match(" role: product-reference") is None
+
+    def test_no_match_list_item(self):
+        assert _FIELD_LINE.match("- https://example.com") is None
+
+    def test_no_match_no_colon(self):
+        assert _FIELD_LINE.match("  just indented text") is None
+
+    def test_matches_tab_indent(self):
+        m = _FIELD_LINE.match("\t\trole: docs")
+        assert m is not None  # \s matches tabs too
+        assert m.group(1) == "role"
+
+    def test_matches_large_indent(self):
+        m = _FIELD_LINE.match("      notes: continuation text")
+        assert m is not None
+        assert m.group(1) == "notes"
+        assert m.group(2) == "continuation text"
