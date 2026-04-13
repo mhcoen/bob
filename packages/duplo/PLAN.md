@@ -714,7 +714,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Case: `SPEC.md` contains `## Sources` inside a fenced code block (e.g. an example in the top-matter comment). The multiline regex will match this as a false positive — document this as acceptable behavior (better to let through a near-new-format file than to force-migrate it) but add a test pinning the current behavior so any future fix is intentional.
 
 - [ ] Update project documentation to reflect Phase 2 shipping
-  - [ ] In `README.md` (if it exists at the project root): add a short section or update the existing "Getting started" to mention that existing duplo projects will be prompted to migrate on their next run, and that migration is manual (author SPEC.md by hand; `duplo init` is not available yet).
+  - [x] In `README.md` (if it exists at the project root): add a short section or update the existing "Getting started" to mention that existing duplo projects will be prompted to migrate on their next run, and that migration is manual (author SPEC.md by hand; `duplo init` is not available yet).
   - [ ] In `CLAUDE.md` (if it exists): if it currently mentions the old subcommand model or describes duplo's behavior in a way that's now stale, update to reference the current state (Phase 2 shipped: migration gate is in place; pipeline still uses `_subsequent_run` / `_first_run` as before).
   - [ ] Do NOT update SPEC-template.md, SPEC-guide.md, or any design doc in `/Users/mhcoen/proj/duplo/*.md` — those are the forward-looking design specifications and are already current.
 
