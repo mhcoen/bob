@@ -121,3 +121,33 @@ def test_sources_h1_heading(tmp_path: Path) -> None:
     (tmp_path / ".duplo" / "duplo.json").write_text("{}")
     (tmp_path / "SPEC.md").write_text("# Sources\nstuff\n")
     assert needs_migration(tmp_path) is True
+
+
+def test_sources_mid_document(tmp_path: Path) -> None:
+    """## Sources appearing mid-document (not at top) still matches."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    spec = (
+        "# MyApp\n\n"
+        "## Purpose\nA calculator.\n\n"
+        "## Design\nMinimal UI.\n\n"
+        "## Sources\n- https://example.com\n"
+    )
+    (tmp_path / "SPEC.md").write_text(spec)
+    assert needs_migration(tmp_path) is False
+
+
+def test_my_sources_not_heading(tmp_path: Path) -> None:
+    """'My sources' on a line does not match ## Sources heading."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Old spec\nMy sources\n")
+    assert needs_migration(tmp_path) is True
+
+
+def test_sources_inline_text(tmp_path: Path) -> None:
+    """'## Sources and references' is not exactly '## Sources'."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Old spec\n## Sources and references\n")
+    assert needs_migration(tmp_path) is True
