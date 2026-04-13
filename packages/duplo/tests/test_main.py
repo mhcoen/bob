@@ -5027,6 +5027,44 @@ class TestMigrationDispatchOrder:
         captured = capsys.readouterr()
         assert "SPEC.md" in captured.out
 
+    def test_old_layout_prints_message_exits_skips_runs(
+        self,
+        capsys,
+        tmp_path,
+        monkeypatch,
+    ):
+        """duplo (no args) in old-layout dir: prints migration, exits 1,
+        never calls _first_run or _subsequent_run."""
+        from duplo.migration import _check_migration as real_check
+
+        monkeypatch.setattr("duplo.main._check_migration", real_check)
+
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text("{}")
+        # No SPEC.md → old layout → needs migration.
+        monkeypatch.chdir(tmp_path)
+
+        first_run_called = []
+        subsequent_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._first_run",
+            lambda **kw: first_run_called.append(kw),
+        )
+        monkeypatch.setattr(
+            "duplo.main._subsequent_run",
+            lambda: subsequent_run_called.append(True),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "SPEC.md" in captured.out
+        assert first_run_called == []
+        assert subsequent_run_called == []
+
     def test_migration_pass_proceeds_to_first_run(self, tmp_path, monkeypatch):
         """When _check_migration returns, _first_run is called (no duplo.json)."""
         monkeypatch.chdir(tmp_path)
