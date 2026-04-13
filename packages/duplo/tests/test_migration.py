@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from duplo.migration import _MIGRATION_MESSAGE, needs_migration
+import pytest
+
+from duplo.migration import _MIGRATION_MESSAGE, _check_migration, needs_migration
 
 
 class TestMigrationMessage:
@@ -214,3 +216,38 @@ def test_sources_inline_text(tmp_path: Path) -> None:
     (tmp_path / ".duplo" / "duplo.json").write_text("{}")
     (tmp_path / "SPEC.md").write_text("# Old spec\n## Sources and references\n")
     assert needs_migration(tmp_path) is True
+
+
+class TestCheckMigration:
+    """Tests for _check_migration()."""
+
+    def test_exits_on_old_layout(self, tmp_path: Path, capsys) -> None:
+        """Old-format project → prints message and exits with code 1."""
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+        with pytest.raises(SystemExit) as exc_info:
+            _check_migration(tmp_path)
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "SPEC-template.md" in captured.out
+        assert "mkdir ref" in captured.out
+
+    def test_no_exit_on_new_format(self, tmp_path: Path) -> None:
+        """New-format project → returns without exiting."""
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+        (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n")
+        _check_migration(tmp_path)  # should not raise
+
+    def test_no_exit_on_non_duplo_dir(self, tmp_path: Path) -> None:
+        """Non-duplo directory → returns without exiting."""
+        _check_migration(tmp_path)  # should not raise
+
+    def test_prints_full_message(self, tmp_path: Path, capsys) -> None:
+        """Printed output matches _MIGRATION_MESSAGE exactly."""
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+        with pytest.raises(SystemExit):
+            _check_migration(tmp_path)
+        captured = capsys.readouterr()
+        assert captured.out.rstrip("\n") == _MIGRATION_MESSAGE

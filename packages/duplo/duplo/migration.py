@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 _MIGRATION_MESSAGE = """\
@@ -22,6 +23,13 @@ This project predates the SPEC.md / ref/ redesign. Migrate manually:
 
 Your existing PLAN.md, .duplo/duplo.json, and source code are
 unchanged. Nothing has been moved or modified by duplo."""
+
+
+def _check_migration(target_dir: Path) -> None:
+    """Print migration instructions and exit if *target_dir* needs migration."""
+    if needs_migration(target_dir):
+        print(_MIGRATION_MESSAGE)
+        sys.exit(1)
 
 
 def needs_migration(target_dir: Path) -> bool:
