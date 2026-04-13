@@ -282,7 +282,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Add `format_scrapeable_sources(spec) -> list[SourceEntry]`
   - [x] Returns source entries where `scrape` is `deep` or `shallow`, AND `discovered: false`, AND `proposed: false`, AND `role` is NOT `counter-example`.
-  - [ ] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
+  - [x] Counter-example entries with `scrape: deep` or `scrape: shallow` get a diagnostic (the user almost certainly meant `scrape: none`) and are treated as `none` regardless of declared value.
   - [ ] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
 
 - [ ] Add `format_design_for_prompt(spec) -> str`
