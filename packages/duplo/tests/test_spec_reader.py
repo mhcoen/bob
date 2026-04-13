@@ -1239,6 +1239,11 @@ class TestSpecNotes:
         spec = _parse_spec(text)
         assert spec.notes == ""
 
+    def test_notes_multiline_preserved_verbatim(self):
+        text = "## Notes\n\nLine one.\nLine two.\n\nParagraph two.\n"
+        spec = _parse_spec(text)
+        assert spec.notes == "Line one.\nLine two.\n\nParagraph two."
+
     def test_notes_multiline_comment_stripped(self):
         text = "## Notes\n\nBefore comment.\n<!--\nMulti-line\ncomment\n-->\nAfter comment.\n"
         spec = _parse_spec(text)
