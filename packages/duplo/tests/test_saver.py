@@ -3163,6 +3163,50 @@ class TestAppendToBugsSectionBoundary:
         # Phase 1 content untouched.
         assert "- [ ] Build feature" in result
 
+    def test_h1_boundary_not_leaked_to_nested_h2(self, tmp_path):
+        """Regression: bug must not land inside Phase 2 before its ## subheading.
+
+        The old code only stopped at ``## `` (H2), walking past ``# ``
+        (H1) phase headings.  A new bug entry would land deep inside
+        Phase 2 just before its ``## Manual verification`` subheading,
+        corrupting PLAN.md structure.
+        """
+        plan = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            '- [ ] Fix: existing [fix: "existing"]\n'
+            "\n"
+            "# MyApp — Phase 2: Features\n"
+            "\n"
+            "- [ ] Add search\n"
+            "- [ ] Add filters\n"
+            "\n"
+            "## Manual verification\n"
+            "\n"
+            "- [ ] Verify search works\n"
+        )
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: new bug [fix: "new"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # New bug is between ## Bugs and # Phase 2 — not past it.
+        bugs_pos = result.index("## Bugs")
+        new_pos = result.index("Fix: new bug")
+        phase2_pos = result.index("# MyApp — Phase 2")
+        manual_pos = result.index("## Manual verification")
+        assert bugs_pos < new_pos < phase2_pos
+        # Phase 2 content is completely untouched.
+        assert "- [ ] Add search" in result
+        assert "- [ ] Add filters" in result
+        assert "- [ ] Verify search works" in result
+        # The bug did NOT land between Phase 2 tasks and ## Manual
+        # verification (the old failure mode).
+        assert new_pos < phase2_pos < manual_pos
+
 
 class TestAppendPhaseToHistoryStageRegex:
     """Tests that append_phase_to_history accepts Stage headings."""
