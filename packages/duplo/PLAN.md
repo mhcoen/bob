@@ -258,12 +258,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: single entry, multiple entries, paths with spaces (bare form), paths with unusual characters (quoted form), paths outside `ref/` dropped, multiple roles parsed correctly, unknown roles dropped while valid ones kept, all-unknown-roles defaults to `ignore`, `discovered:` rejected.
   - [x] Migration test: old prose-form `## References` parses to empty `references` list, prose preserved in `spec.raw`, diagnostic emitted suggesting migration.
 
-- [ ] Add AUTO-GENERATED block parsing in `## Design`
+- [x] Add AUTO-GENERATED block parsing in `## Design`
   - [x] Add the `_AUTOGEN_RE` regex per PARSER-design.md § `## Design` parser (matches the BEGIN/END comment markers with DOTALL).
   - [x] If block present: split body into `user_prose` (text before block) and `auto_generated` (block contents, markers stripped).
   - [x] If block absent: entire comment-stripped body becomes `user_prose`; `auto_generated` is empty.
   - [x] Set `has_fill_in_marker` by checking `user_prose` (after comment stripping) against `_FILL_IN_RE`.
-  - [ ] Tests: block present (correct split); block absent (all to user_prose); malformed BEGIN-only or END-only markers treated as no block; nested or repeated markers handled deterministically.
+  - [x] Tests: block present (correct split); block absent (all to user_prose); malformed BEGIN-only or END-only markers treated as no block; nested or repeated markers handled deterministically.
 
 - [ ] Update `ProductSpec` and audit existing callers
   - [ ] Change `design` field from `str` to `DesignBlock`.
