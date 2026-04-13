@@ -4543,6 +4543,8 @@ class TestSubsequentRunSpecVerificationIndependent:
                 "fill_in_purpose": False,
                 "fill_in_architecture": False,
                 "fill_in_design": False,
+                "dropped_sources": [],
+                "dropped_references": [],
             },
         )()
 

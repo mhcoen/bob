@@ -1497,12 +1497,18 @@ class TestValidateSourceEntries:
         assert "unknown role" in errors[0]["message"]
         assert "'doc'" in errors[0]["message"]
 
-    def test_empty_role_defaults_to_product_reference(self, tmp_path):
+    def test_empty_role_drops_entry(self, tmp_path):
         ep = self._errors_path(tmp_path)
+        dropped: list[SourceEntry] = []
         entries = [SourceEntry(url="https://example.com", role="", scrape="deep")]
-        result = _validate_source_entries(entries, errors_path=ep)
-        assert len(result) == 1
-        assert result[0].role == "product-reference"
+        result = _validate_source_entries(
+            entries,
+            errors_path=ep,
+            dropped_empty_role=dropped,
+        )
+        assert len(result) == 0
+        assert len(dropped) == 1
+        assert dropped[0].url == "https://example.com"
 
     def test_unknown_scrape_defaults_to_none(self, tmp_path):
         ep = self._errors_path(tmp_path)
@@ -2279,11 +2285,13 @@ class TestParseReferenceEntriesValidation:
         assert "discovered" in log
         assert "not valid for References" in log
 
-    def test_no_role_keeps_empty_roles(self):
+    def test_no_role_drops_entry(self):
         body = "- ref/demo.mp4\n  notes: no role given\n"
-        entries = _parse_reference_entries(body)
-        assert len(entries) == 1
-        assert entries[0].roles == []
+        dropped: list[ReferenceEntry] = []
+        entries = _parse_reference_entries(body, dropped_empty_roles=dropped)
+        assert len(entries) == 0
+        assert len(dropped) == 1
+        assert str(dropped[0].path) == "ref/demo.mp4"
 
     def test_comment_stripped_entries_not_parsed(self):
         body = "<!-- - ref/hidden.png\n  role: visual-target -->\n"
@@ -3587,6 +3595,41 @@ class TestValidateForRun:
         disc_warnings = [w for w in result.warnings if "discovered" in w]
         assert len(disc_warnings) == 1
         assert "Review" in disc_warnings[0]
+
+    def test_validate_for_run_errors_on_source_with_empty_role(self):
+        spec = self._valid_spec()
+        spec.dropped_sources = [
+            SourceEntry(url="https://example.com/no-role", role="", scrape="deep"),
+        ]
+        result = validate_for_run(spec)
+        role_errors = [e for e in result.errors if "no role" in e]
+        assert len(role_errors) == 1
+        assert "https://example.com/no-role" in role_errors[0]
+        assert "product-reference, docs, counter-example" in role_errors[0]
+
+    def test_validate_for_run_errors_on_reference_with_empty_roles(self):
+        spec = self._valid_spec()
+        spec.dropped_references = [
+            ReferenceEntry(path="ref/screenshot.png", roles=[]),
+        ]
+        result = validate_for_run(spec)
+        role_errors = [e for e in result.errors if "no role" in e]
+        assert len(role_errors) == 1
+        assert "ref/screenshot.png" in role_errors[0]
+        assert "visual-target, behavioral-target, docs, counter-example, ignore" in role_errors[0]
+
+    def test_error_message_includes_url_and_valid_role_list(self):
+        spec = self._valid_spec()
+        spec.dropped_sources = [
+            SourceEntry(url="https://example.com/a", role="", scrape="none"),
+            SourceEntry(url="https://example.com/b", role="", scrape="deep"),
+        ]
+        result = validate_for_run(spec)
+        role_errors = [e for e in result.errors if "no role" in e]
+        assert len(role_errors) == 2
+        urls = {e.split(" ")[2] for e in role_errors}
+        assert "https://example.com/a" in urls
+        assert "https://example.com/b" in urls
 
 
 class TestBackwardCompatOldFormatSpec:

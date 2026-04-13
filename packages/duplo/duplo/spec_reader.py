@@ -87,6 +87,7 @@ def _parse_source_entries(
     body: str,
     *,
     errors_path: Path | str = ".duplo/errors.jsonl",
+    dropped_empty_role: list[SourceEntry] | None = None,
 ) -> list[SourceEntry]:
     """Parse ``## Sources`` section body into :class:`SourceEntry` objects.
 
@@ -169,17 +170,23 @@ def _parse_source_entries(
         _flush()
 
     _flush()
-    return _validate_source_entries(entries, errors_path=errors_path)
+    return _validate_source_entries(
+        entries,
+        errors_path=errors_path,
+        dropped_empty_role=dropped_empty_role,
+    )
 
 
 def _validate_source_entries(
     entries: list[SourceEntry],
     *,
     errors_path: Path | str = ".duplo/errors.jsonl",
+    dropped_empty_role: list[SourceEntry] | None = None,
 ) -> list[SourceEntry]:
     """Validate parsed source entries, dropping invalid ones.
 
     - Invalid URL (not ``http://`` or ``https://``): entry dropped.
+    - Empty role: entry dropped, appended to *dropped_empty_role* if provided.
     - Unknown role: entry dropped (typo must not silently widen authority).
     - Unknown scrape value: defaulted to ``none``.
     """
@@ -194,14 +201,15 @@ def _validate_source_entries(
             )
             continue
         if not entry.role:
-            entry = SourceEntry(
-                url=entry.url,
-                role="product-reference",
-                scrape=entry.scrape,
-                notes=entry.notes,
-                proposed=entry.proposed,
-                discovered=entry.discovered,
+            record_failure(
+                "spec_reader:_validate_source_entries",
+                "io",
+                f"Dropped source entry {entry.url!r}: no role specified",
+                errors_path=errors_path,
             )
+            if dropped_empty_role is not None:
+                dropped_empty_role.append(entry)
+            continue
         if entry.role not in _VALID_SOURCE_ROLES:
             record_failure(
                 "spec_reader:_validate_source_entries",
@@ -253,6 +261,7 @@ def _parse_reference_entries(
     body: str,
     *,
     errors_path: Path | str = ".duplo/errors.jsonl",
+    dropped_empty_roles: list[ReferenceEntry] | None = None,
 ) -> list[ReferenceEntry]:
     """Parse ``## References`` section body into :class:`ReferenceEntry` objects.
 
@@ -340,16 +349,22 @@ def _parse_reference_entries(
         _flush()
 
     _flush()
-    return _validate_reference_entries(entries, errors_path=errors_path)
+    return _validate_reference_entries(
+        entries,
+        errors_path=errors_path,
+        dropped_empty_roles=dropped_empty_roles,
+    )
 
 
 def _validate_reference_entries(
     entries: list[ReferenceEntry],
     *,
     errors_path: Path | str = ".duplo/errors.jsonl",
+    dropped_empty_roles: list[ReferenceEntry] | None = None,
 ) -> list[ReferenceEntry]:
     """Validate parsed reference entries.
 
+    - Empty roles: entry dropped, appended to *dropped_empty_roles* if provided.
     - Unknown roles are dropped from the list; if all roles are unknown
       the entry defaults to ``["ignore"]``.
     - Path must start with ``ref/``; entries with other paths are dropped.
@@ -364,6 +379,16 @@ def _validate_reference_entries(
                 f"Dropped reference entry with path outside ref/: {entry.path!r}",
                 errors_path=errors_path,
             )
+            continue
+        if not entry.roles:
+            record_failure(
+                "spec_reader:_validate_reference_entries",
+                "io",
+                f"Dropped reference entry {entry.path!r}: no roles specified",
+                errors_path=errors_path,
+            )
+            if dropped_empty_roles is not None:
+                dropped_empty_roles.append(entry)
             continue
         # Filter unknown roles.
         good_roles = [r for r in entry.roles if r in _VALID_REFERENCE_ROLES]
@@ -476,6 +501,8 @@ class ProductSpec:
     fill_in_purpose: bool = False
     fill_in_architecture: bool = False
     fill_in_design: bool = False
+    dropped_sources: list[SourceEntry] = field(default_factory=list)
+    dropped_references: list[ReferenceEntry] = field(default_factory=list)
 
 
 def _parse_design_block(body: str) -> DesignBlock:
@@ -551,7 +578,10 @@ def _parse_spec(text: str) -> ProductSpec:
         elif key == "design":
             spec.design = _parse_design_block(body)
         elif key == "references":
-            spec.references = _parse_reference_entries(body)
+            spec.references = _parse_reference_entries(
+                body,
+                dropped_empty_roles=spec.dropped_references,
+            )
             if not spec.references and body.strip():
                 record_failure(
                     "spec_reader:_parse_spec",
@@ -561,7 +591,10 @@ def _parse_spec(text: str) -> ProductSpec:
                     "(see MIGRATION-design.md)",
                 )
         elif key == "sources":
-            spec.sources = _parse_source_entries(body)
+            spec.sources = _parse_source_entries(
+                body,
+                dropped_empty_role=spec.dropped_sources,
+            )
         elif key == "notes":
             spec.notes = _strip_comments(body).strip()
 
@@ -840,6 +873,17 @@ def validate_for_run(spec: ProductSpec) -> ValidationResult:
     if not has_scrapeable and not has_refs and purpose_sparse:
         errors.append(
             "No source URL or reference file declared. Add a URL to ## Sources or files to ref/."
+        )
+
+    for entry in spec.dropped_sources:
+        errors.append(
+            f"Source URL {entry.url} in ## Sources has no role: field. "
+            "Required values: product-reference, docs, counter-example."
+        )
+    for entry in spec.dropped_references:
+        errors.append(
+            f"Reference {entry.path} in ## References has no role: field. "
+            "Required values: visual-target, behavioral-target, docs, counter-example, ignore."
         )
 
     if spec.fill_in_design:
