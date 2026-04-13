@@ -539,6 +539,91 @@ class TestFormatSpecForPrompt:
         assert "IGNORED_REF_MARKER" not in result
 
 
+class TestFormatSpecVerbatimSections:
+    """Verify user-authored sections appear verbatim in prompt output."""
+
+    def test_purpose_verbatim(self):
+        text = "Build a calculator.\n\nIt should handle decimals."
+        spec = ProductSpec(purpose=text)
+        result = format_spec_for_prompt(spec)
+        assert f"## Purpose\n\n{text}" in result
+
+    def test_architecture_verbatim(self):
+        text = "Python 3.11+\n- Use Qt for GUI\n- SQLite for storage"
+        spec = ProductSpec(architecture=text)
+        result = format_spec_for_prompt(spec)
+        assert f"## Architecture\n\n{text}" in result
+
+    def test_scope_verbatim(self):
+        text = "- include: basic arithmetic\n- exclude: graphing"
+        spec = ProductSpec(scope=text)
+        result = format_spec_for_prompt(spec)
+        assert f"## Scope\n\n{text}" in result
+
+    def test_behavior_verbatim(self):
+        text = "`2+2` → `4`\n`10/3` → `3.333`"
+        spec = ProductSpec(behavior=text)
+        result = format_spec_for_prompt(spec)
+        assert f"## Behavior\n\n{text}" in result
+
+    def test_notes_verbatim(self):
+        text = "Ship by Friday.\nNo external APIs."
+        spec = ProductSpec(notes=text)
+        result = format_spec_for_prompt(spec)
+        assert f"## Notes\n\n{text}" in result
+
+    def test_design_user_prose_verbatim(self):
+        prose = "Dark theme with rounded corners.\nUse system font."
+        spec = ProductSpec(design=DesignBlock(user_prose=prose))
+        result = format_spec_for_prompt(spec)
+        assert f"## Design\n\n{prose}" in result
+
+    def test_design_user_prose_first_when_both_present(self):
+        prose = "Minimal, clean look"
+        auto = "colors: #fff, #000"
+        spec = ProductSpec(
+            design=DesignBlock(user_prose=prose, auto_generated=auto),
+        )
+        result = format_spec_for_prompt(spec)
+        assert f"## Design\n\n{prose}\n\n---\n\n{auto}" in result
+
+    def test_all_sections_verbatim_order(self):
+        spec = ProductSpec(
+            purpose="Purpose text",
+            scope="Scope text",
+            behavior="Behavior text",
+            architecture="Architecture text",
+            design=DesignBlock(user_prose="Design text"),
+            notes="Notes text",
+        )
+        result = format_spec_for_prompt(spec)
+        # All sections present with exact content.
+        for heading, text in [
+            ("Purpose", "Purpose text"),
+            ("Scope", "Scope text"),
+            ("Behavior", "Behavior text"),
+            ("Architecture", "Architecture text"),
+            ("Design", "Design text"),
+            ("Notes", "Notes text"),
+        ]:
+            assert f"## {heading}\n\n{text}" in result
+        # Purpose comes before Notes (ordering check).
+        assert result.index("## Purpose") < result.index("## Notes")
+
+    def test_multiline_with_special_chars_preserved(self):
+        purpose = (
+            "Build a **Markdown** parser.\n"
+            "\n"
+            "Support:\n"
+            "- `code blocks`\n"
+            "- <html> tags\n"
+            '- "quoted strings"'
+        )
+        spec = ProductSpec(purpose=purpose)
+        result = format_spec_for_prompt(spec)
+        assert f"## Purpose\n\n{purpose}" in result
+
+
 class TestFormatScopeOverridePrompt:
     def test_empty_when_no_overrides(self):
         spec = ProductSpec()
