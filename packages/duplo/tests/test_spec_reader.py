@@ -3535,3 +3535,54 @@ class TestValidateForRun:
         result = validate_for_run(spec)
         assert any("2 discovered: true" in w for w in result.warnings)
         assert any("1 proposed: true" in w for w in result.warnings)
+
+    def test_no_warning_when_no_proposed_or_discovered(self):
+        spec = self._valid_spec()
+        # Confirmed (non-proposed) references and non-discovered sources.
+        spec.references = [
+            ReferenceEntry(
+                path=Path("ref/ok.png"),
+                roles=["visual-target"],
+                proposed=False,
+            ),
+        ]
+        spec.sources = [
+            SourceEntry(
+                url="https://example.com",
+                role="product-reference",
+                scrape="deep",
+                discovered=False,
+            ),
+        ]
+        result = validate_for_run(spec)
+        assert not any("proposed" in w for w in result.warnings)
+        assert not any("discovered" in w for w in result.warnings)
+
+    def test_proposed_warning_includes_guidance(self):
+        spec = self._valid_spec()
+        spec.references = [
+            ReferenceEntry(
+                path=Path("ref/a.png"),
+                roles=["visual-target"],
+                proposed=True,
+            ),
+        ]
+        result = validate_for_run(spec)
+        proposed_warnings = [w for w in result.warnings if "proposed" in w]
+        assert len(proposed_warnings) == 1
+        assert "Review" in proposed_warnings[0]
+
+    def test_discovered_warning_includes_guidance(self):
+        spec = self._valid_spec()
+        spec.sources.append(
+            SourceEntry(
+                url="https://disc.example.com",
+                role="docs",
+                scrape="none",
+                discovered=True,
+            )
+        )
+        result = validate_for_run(spec)
+        disc_warnings = [w for w in result.warnings if "discovered" in w]
+        assert len(disc_warnings) == 1
+        assert "Review" in disc_warnings[0]
