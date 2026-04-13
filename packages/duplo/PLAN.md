@@ -241,7 +241,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Implement entry-block parser: scan section line-by-line, accumulate field lines until next entry or section end, support multi-line `notes:` continuations indented further than the field name.
   - [x] Validation per `SourceEntry`: drop entries with invalid URL; DROP entries with unknown role (do NOT default — typo `role: doc` must not silently widen authority); default unknown `scrape` to `none` (not `deep`); accept both `proposed` and `discovered` set without diagnostic.
   - [x] Diagnostic emission via existing `duplo.diagnostics.record_failure`.
-  - [ ] Add `sources` to `_KNOWN_SECTIONS`.
+  - [x] Add `sources` to `_KNOWN_SECTIONS`.
   - [ ] Tests: single entry, multiple entries, all field combinations, invalid URLs dropped, invalid roles dropped (entry removed entirely), invalid scrape defaulting to `none`, comment-stripped examples not parsed as real entries, multi-line `notes:` parsed correctly.
 
 - [ ] Add `## Notes` parser
