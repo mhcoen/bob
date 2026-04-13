@@ -295,7 +295,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Replace the existing implementation that returns `spec.raw`. The new implementation serializes from parsed `ProductSpec` fields, NOT from raw text.
   - [x] Include user-authored sections verbatim: `## Purpose`, `## Architecture`, `## Design.user_prose`, `## Scope`, `## Behavior`, `## Notes`.
   - [x] For `## Sources`: include only entries where `proposed: false` AND `discovered: false` AND `role` is NOT `counter-example`.
-  - [ ] For `## References`: include only entries where `proposed: false` AND no role is `counter-example` AND no role is `ignore`.
+  - [x] For `## References`: include only entries where `proposed: false` AND no role is `counter-example` AND no role is `ignore`.
   - [ ] For `## Design`: include `auto_generated` content alongside `user_prose` (autogen is derived from non-proposed visual targets only and has already been filtered upstream).
   - [ ] Wrap output in the existing labelled prefix ("PRODUCT SPECIFICATION (authored by the user...") so existing consumers see equivalent framing.
   - [ ] Update existing tests for `format_spec_for_prompt` (output format will differ) so they pin the new behavior.
