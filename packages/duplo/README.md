@@ -259,6 +259,26 @@ processed reference files; `examples/` for extracted code examples;
 `raw_pages/` for scraped HTML content; `file_hashes.json` for
 change detection.
 
+## Migrating existing projects
+
+Duplo's project layout is changing. Existing projects (created before
+the migration) will see a migration prompt the next time you run
+`duplo`. Migration is manual:
+
+1. Create a `ref/` directory in your project root.
+2. Move your reference files (screenshots, PDFs, text files) into `ref/`.
+3. Author a `SPEC.md` by hand using `SPEC-template.md` as a starting
+   point. At minimum, include Purpose, Architecture, Sources, and
+   References sections.
+4. Run `duplo` again.
+
+`duplo init` is not available yet. For now, write `SPEC.md` by hand.
+Your existing PLAN.md, `.duplo/duplo.json`, and source code are not
+affected by the migration — only the project layout changes.
+
+The `duplo fix` and `duplo investigate` subcommands continue to work
+on old-layout projects without requiring migration.
+
 ## Feature tracking
 
 Duplo maintains a persistent feature list in `duplo.json`. Each
