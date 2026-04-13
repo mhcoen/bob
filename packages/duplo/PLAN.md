@@ -286,7 +286,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: each filter condition exercised independently; counter-example with non-`none` scrape diagnostic emitted; counter-example with `scrape: none` silent.
 
 - [ ] Add `format_design_for_prompt(spec) -> str`
-  - [ ] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
+  - [x] If both `user_prose` and `auto_generated` are present, format them in that order with a separator.
   - [ ] If only one is present, return that one.
   - [ ] If neither, return empty string.
   - [ ] Tests: each combination produces expected output; user_prose comes first when both present.
