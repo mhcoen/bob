@@ -3930,3 +3930,179 @@ widget should use the system timezone by default.
         result = validate_for_run(spec)
         assert result.errors == []
         assert result.warnings == []
+
+
+class TestSafetyInvariantEndToEnd:
+    """End-to-end test: write a SPEC.md with proposed, discovered, and
+    counter-example entries, parse it via read_spec(), then confirm
+    format_spec_for_prompt() output contains NONE of those entries.
+
+    Unlike TestPromptInjectionInvariant (which builds ProductSpec objects
+    programmatically), this test exercises the full file → parse → format
+    pipeline to ensure no step silently drops or mishandles the flags.
+    """
+
+    SPEC_MD = """\
+# MyApp Spec
+
+## Purpose
+
+A calculator app that evaluates math expressions in real time.
+
+## Scope
+
+- include: basic arithmetic, parentheses
+- exclude: graphing, matrix operations
+
+## Behavior
+
+`2+3` → `5`
+`10/0` → `Error`
+
+## Architecture
+
+Python 3.12, no external dependencies beyond the stdlib.
+
+## Design
+
+Minimal dark theme with monospace font for the input field.
+
+## Sources
+
+- https://safe-calc.example.com
+  role: product-reference
+  scrape: deep
+  notes: SAFE_SOURCE_SENTINEL_K9
+
+- https://proposed-calc.example.com/PROPOSED_SENTINEL_P1
+  role: docs
+  scrape: shallow
+  proposed: true
+  notes: PROPOSED_SOURCE_NOTES_SENTINEL_P2
+
+- https://discovered-calc.example.com/DISCOVERED_SENTINEL_D1
+  role: product-reference
+  scrape: deep
+  discovered: true
+  notes: DISCOVERED_SOURCE_NOTES_SENTINEL_D2
+
+- https://counter-calc.example.com/COUNTER_SRC_SENTINEL_X1
+  role: counter-example
+  scrape: none
+  notes: COUNTER_SOURCE_NOTES_SENTINEL_X2
+
+## References
+
+- ref/safe-screenshot.png
+  role: visual-target
+  notes: SAFE_REF_SENTINEL_R9
+
+- ref/proposed-mockup-PROPOSED_REF_SENTINEL_M1.png
+  role: visual-target
+  proposed: true
+  notes: PROPOSED_REF_NOTES_SENTINEL_M2
+
+- ref/bad-example-COUNTER_REF_SENTINEL_C1.png
+  role: counter-example
+  notes: COUNTER_REF_NOTES_SENTINEL_C2
+
+- ref/ignored-file-IGNORE_REF_SENTINEL_I1.png
+  role: ignore
+  notes: IGNORE_REF_NOTES_SENTINEL_I2
+
+## Notes
+
+The calculator should handle locale-specific decimal separators.
+"""
+
+    # Canary strings that must NOT appear in format_spec_for_prompt output.
+    _EXCLUDED = [
+        # Proposed source
+        "proposed-calc.example.com",
+        "PROPOSED_SENTINEL_P1",
+        "PROPOSED_SOURCE_NOTES_SENTINEL_P2",
+        # Discovered source
+        "discovered-calc.example.com",
+        "DISCOVERED_SENTINEL_D1",
+        "DISCOVERED_SOURCE_NOTES_SENTINEL_D2",
+        # Counter-example source
+        "counter-calc.example.com",
+        "COUNTER_SRC_SENTINEL_X1",
+        "COUNTER_SOURCE_NOTES_SENTINEL_X2",
+        # Proposed reference
+        "PROPOSED_REF_SENTINEL_M1",
+        "PROPOSED_REF_NOTES_SENTINEL_M2",
+        # Counter-example reference
+        "COUNTER_REF_SENTINEL_C1",
+        "COUNTER_REF_NOTES_SENTINEL_C2",
+        # Ignored reference
+        "IGNORE_REF_SENTINEL_I1",
+        "IGNORE_REF_NOTES_SENTINEL_I2",
+    ]
+
+    # Canary strings that MUST appear (safe entries survive filtering).
+    _INCLUDED = [
+        "safe-calc.example.com",
+        "SAFE_SOURCE_SENTINEL_K9",
+        "safe-screenshot.png",
+        "SAFE_REF_SENTINEL_R9",
+        "A calculator app that evaluates math expressions",
+        "basic arithmetic",
+        "Python 3.12",
+        "dark theme",
+        "locale-specific decimal separators",
+    ]
+
+    def test_excluded_entries_absent(self, tmp_path):
+        """Full pipeline: excluded canaries do not leak into prompt."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_MD)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        result = format_spec_for_prompt(spec)
+        for canary in self._EXCLUDED:
+            assert canary not in result, (
+                f"SAFETY VIOLATION: {canary!r} leaked through "
+                f"read_spec → format_spec_for_prompt pipeline"
+            )
+
+    def test_safe_entries_present(self, tmp_path):
+        """Full pipeline: safe entries survive filtering."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_MD)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        result = format_spec_for_prompt(spec)
+        for canary in self._INCLUDED:
+            assert canary in result, f"Safe canary {canary!r} missing — filtering too aggressive"
+
+    def test_parse_captures_flags_correctly(self, tmp_path):
+        """Verify read_spec parsed the proposed/discovered flags."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_MD)
+        spec = read_spec(target_dir=tmp_path)
+
+        proposed_sources = [s for s in spec.sources if s.proposed]
+        assert len(proposed_sources) == 1
+        assert "PROPOSED_SENTINEL_P1" in proposed_sources[0].url
+
+        discovered_sources = [s for s in spec.sources if s.discovered]
+        assert len(discovered_sources) == 1
+        assert "DISCOVERED_SENTINEL_D1" in discovered_sources[0].url
+
+        counter_sources = [s for s in spec.sources if s.role == "counter-example"]
+        assert len(counter_sources) == 1
+        assert "COUNTER_SRC_SENTINEL_X1" in counter_sources[0].url
+
+        proposed_refs = [r for r in spec.references if r.proposed]
+        assert len(proposed_refs) == 1
+        assert "PROPOSED_REF_SENTINEL_M1" in str(proposed_refs[0].path)
+
+        counter_refs = [r for r in spec.references if "counter-example" in r.roles]
+        assert len(counter_refs) == 1
+        assert "COUNTER_REF_SENTINEL_C1" in str(counter_refs[0].path)
+
+    def test_behavior_contracts_survive(self, tmp_path):
+        """Behavior contracts are not affected by source/ref filtering."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_MD)
+        spec = read_spec(target_dir=tmp_path)
+        result = format_spec_for_prompt(spec)
+        assert "`2+3`" in result
+        assert "`10/0`" in result
