@@ -692,7 +692,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] Tests:
     - [x] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
     - [x] `_check_migration` on a new-format directory: no output, no exit, function returns None
-    - [ ] `_check_migration` on a non-duplo directory (no `.duplo/duplo.json`): no output, no exit
+    - [x] `_check_migration` on a non-duplo directory (no `.duplo/duplo.json`): no output, no exit
     - [ ] Message text test: pin the exact message content by snapshot comparison to a fixture file. This protects against accidental wording drift.
 
 - [ ] Wire `_check_migration` into `main.py` dispatch (Phase 2 dispatch order)
