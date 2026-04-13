@@ -71,6 +71,12 @@ class TestMigrationMessage:
         """Message instructs moving reference files into ref/."""
         assert "Move reference files into ref/" in _MIGRATION_MESSAGE
 
+    def test_snapshot_matches_fixture(self) -> None:
+        """Pin exact message content against fixture file."""
+        fixture = Path(__file__).parent / "fixtures" / "migration_message.txt"
+        expected = fixture.read_text()
+        assert _MIGRATION_MESSAGE == expected
+
 
 def test_no_duplo_json(tmp_path: Path) -> None:
     """No .duplo/duplo.json → not a duplo project, no migration."""
