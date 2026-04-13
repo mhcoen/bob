@@ -243,9 +243,13 @@ class TestCheckMigration:
         assert captured.out == ""
         assert captured.err == ""
 
-    def test_no_exit_on_non_duplo_dir(self, tmp_path: Path) -> None:
-        """Non-duplo directory → returns without exiting."""
-        _check_migration(tmp_path)  # should not raise
+    def test_no_exit_on_non_duplo_dir(self, tmp_path: Path, capsys) -> None:
+        """Non-duplo directory (no .duplo/duplo.json) → no output, no exit."""
+        result = _check_migration(tmp_path)
+        assert result is None
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
 
     def test_exits_on_old_format_spec(self, tmp_path: Path, capsys) -> None:
         """Old-format SPEC.md (no signals) → prints message and exits."""
