@@ -68,19 +68,55 @@ Validation:
 - `url` must be a valid HTTP(S) URL (basic check: starts with
   `http://` or `https://`). Invalid URLs are dropped with a
   diagnostic.
-- `role` must be one of the three valid values. Unknown roles
-  cause the entry to be DROPPED with a diagnostic. Defaulting
-  unknown roles silently widens authority (a typo `role: doc`
-  could turn a docs link into a `product-reference`); dropping
-  is safer.
+- `role` is REQUIRED and must be one of the three valid values.
+  Empty role (no `role:` field at all) and unknown role (typo
+  like `role: doc`) are BOTH treated the same: the entry is
+  dropped at parse time with a diagnostic, AND its URL is
+  recorded on `ProductSpec` so `validate_for_run` can surface
+  a hard error referencing the specific URL. Rationale: an
+  entry without a valid role is unroutable — the pipeline
+  cannot pick between deep-crawl (`product-reference`),
+  shallow-fetch (`docs`), and never-scrape (`counter-example`)
+  without the user saying. Defaulting silently to any of these
+  (especially `product-reference`, the most aggressive option)
+  is an arbitrary guess that can scrape URLs the user never
+  authorized. The redesign's "inference is visible" principle
+  requires the user to declare intent explicitly.
 - `scrape` must be one of the three valid values. Unknown values
   default to `none` with a diagnostic. Defaulting to `none`
   keeps the entry visible in the spec but prevents accidental
-  scraping until the user fixes the value.
+  scraping until the user fixes the value. (This is safe to
+  default — unlike role, `none` produces no pipeline action,
+  so silent defaulting cannot widen authority.)
+- **Counter-example coercion happens at parse time, not formatter
+  time.** If `role` is `counter-example` and `scrape` is `deep`
+  or `shallow`, the parser rewrites `scrape` to `none` on the
+  stored `SourceEntry` and emits a diagnostic (the user almost
+  certainly meant `none` — counter-example URLs are declarative
+  context, never scraped). This is coercion of the STORED VALUE
+  in the dataclass, not just a filter applied in
+  `format_scrapeable_sources`. Rationale: if coercion happened
+  only at the formatter, any code path iterating `spec.sources`
+  directly (e.g. a future feature that enumerates sources for
+  a UI) would see the user's original `scrape: deep` on a
+  counter-example entry and could act on it. Rewriting the
+  stored value makes the safe property invariant across all
+  consumers of `spec.sources`, not just the one formatter that
+  happens to filter.
 - `proposed` and `discovered` are mutually exclusive in normal
   use but the parser accepts both being true (interpreted as
   "duplo discovered this and proposed it as a Source"). No
   diagnostic for that case.
+
+To support the hard-error surface in `validate_for_run`, the
+parser stores dropped-due-to-missing-role entries on a new
+`ProductSpec` field: `dropped_sources: list[SourceEntry]`. The
+validator reads this and emits one error per entry, extracting
+the URL from each entry for the message. Storing the full entry
+(rather than just the URL) keeps any other fields the user
+wrote available for richer diagnostics later. The same pattern
+applies to References via `dropped_references: list[ReferenceEntry]`
+(see below).
 
 Diagnostics go through `duplo.diagnostics.record_failure`, the
 existing failure-recording channel. They surface in the run
@@ -105,16 +141,26 @@ Validation:
 
 - `path` must be a relative path under `ref/`. Absolute paths
   and paths outside `ref/` are dropped with a diagnostic.
-- `roles` accepts one or more of the five valid values, written
-  comma-separated in SPEC.md (`role: behavioral-target, visual-target`).
-  Multiple roles per entry support the dual-use case (a demo
-  video that is both `behavioral-target` for verification and
-  `visual-target` for design extraction). Per-stage formatters
-  return the entry if any of its roles match.
-- Unknown roles in the comma-separated list are dropped with a
-  diagnostic; the remaining valid roles are kept. If all roles
-  are unknown, the entry defaults to `["ignore"]` with a
-  diagnostic.
+- `roles` is REQUIRED. The field accepts one or more of the
+  five valid values, written comma-separated in SPEC.md
+  (`role: behavioral-target, visual-target`). Multiple roles
+  per entry support the dual-use case (a demo video that is
+  both `behavioral-target` for verification and `visual-target`
+  for design extraction). Per-stage formatters return the
+  entry if any of its roles match.
+- Empty role (no `role:` field) and the case where ALL listed
+  roles are unknown are BOTH treated the same: the entry is
+  dropped at parse time with a diagnostic, AND it is recorded
+  on `ProductSpec` (`dropped_references: list[ReferenceEntry]`)
+  so `validate_for_run` can surface a hard error referencing
+  the specific path. Same rationale as Sources: the pipeline
+  has five different routings (Vision, video frames, doc text,
+  investigation-only, ignore) and cannot pick correctly
+  without the user saying. Note this differs from the per-role
+  validation: when SOME listed roles are valid and others are
+  unknown, the unknown ones are dropped and the valid ones are
+  kept (no entry-level error). The hard error fires only when
+  the entry would have NO valid roles.
 - File existence is NOT checked at parse time. The parser
   produces entries; a separate validation pass (in `main.py`
   or a verification module) checks that referenced files exist
@@ -171,6 +217,12 @@ class ProductSpec:
     fill_in_architecture: bool = False     # NEW
     fill_in_design: bool = False           # NEW (warning condition only;
                                            # see Validation API)
+    dropped_sources: list[SourceEntry] = ...      # NEW: source entries dropped
+                                                  # due to missing/invalid role.
+                                                  # validate_for_run reads this to
+                                                  # emit hard errors; URL extracted
+                                                  # from each entry for the message.
+    dropped_references: list[ReferenceEntry] = ...  # NEW: same for References.
 ```
 
 Two fields change type from `str` to a structured form
@@ -434,11 +486,14 @@ Returns source entries where:
 - `scrape` is `deep` or `shallow`.
 - `discovered` is false (don't auto-scrape unreviewed discoveries).
 - `proposed` is false (same reason).
-- `role` is NOT `counter-example`. Counter-example URLs are
-  declarative context, never scraped for extraction. The parser
-  emits a diagnostic if a counter-example has `scrape: deep` or
-  `scrape: shallow` (the user almost certainly meant `none`)
-  and treats it as `none` regardless of the declared value.
+- `role` is NOT `counter-example`. (Per the parse-time
+  coercion rule in `SourceEntry` validation above,
+  counter-example entries already have `scrape: none`, so
+  the first filter alone would exclude them. The explicit
+  role filter here is belt-and-braces: it ensures a
+  hand-authored counter-example with `scrape: deep` that
+  somehow slipped past parse-time coercion still doesn't
+  get scraped. The two filters are independent safeguards.)
 
 Used by the scraping pipeline to decide what URLs to fetch.
 
@@ -466,7 +521,29 @@ Errors include:
 
 - `"## Purpose still contains <FILL IN>"` if `fill_in_purpose`.
 - `"## Architecture still contains <FILL IN>"` if `fill_in_architecture`.
-- `"No source URL or reference file declared. Add a URL to ## Sources or files to ref/."` if no scrapeable sources AND no non-ignore references AND `## Purpose` is shorter than 50 characters (heuristic for "too sparse to plan from").
+- For each entry in `spec.dropped_sources`:
+  `"Source URL <entry.url> in ## Sources has no role: field (or an unrecognized value). Required values: product-reference, docs, counter-example."`
+  One error per dropped entry; all are emitted before exit.
+- For each entry in `spec.dropped_references`:
+  `"Reference <entry.path> in ## References has no role: field (or all values are unrecognized). Required values: visual-target, behavioral-target, docs, counter-example, ignore."`
+  One error per dropped entry; all are emitted before exit.
+- `"No source URL or reference file declared. Add a URL to ## Sources or files to ref/."` if no scrapeable sources AND no build-bearing references AND `## Purpose` is shorter than 50 characters (heuristic for "too sparse to plan from").
+
+  "Build-bearing references" means entries with `proposed: false`
+  AND at least one role in `{visual-target, behavioral-target,
+  docs}`. Counter-example refs are excluded (they're declarative
+  context only, never plan input). Ignore-role refs are excluded
+  (they're explicitly marked as not-input). Proposed refs are
+  excluded (they're inert until the user removes the flag).
+  Without this stricter count, a spec with only counter-example
+  or proposed references would pass validation despite having
+  no actual build input — the pipeline would then run with no
+  feature-extraction substrate and produce an empty plan.
+
+The role-missing errors fire BEFORE the no-source-no-ref check.
+If the user has entries that just lack roles, they should see
+specific guidance about which entries need fixing, not a
+generic "declare something" message.
 
 `fill_in_design` is a WARNING, not an error. The "URL alone"
 common pattern in SPEC-guide.md is valid even when `## Design`
@@ -487,6 +564,21 @@ mode. The pipeline always ignores unreviewed entries
 (`proposed: true`, `discovered: true`); a strict mode that
 turns warnings into errors would add friction without adding
 safety, since unreviewed entries are already inert.
+
+**Prose-only runs with only-proposed references are valid
+(warning, not error).** A spec with a substantive
+`## Purpose` (>= 50 chars), no scrapeable sources, and only
+`proposed: true` references passes validation: the 50-char
+Purpose defeats the no-input check even though no build-bearing
+reference is available. This is intentional — the prose-only
+run is a supported path (per Open Question 5 below: CLIs,
+libraries, behaviorally-specified apps). The existing
+"<n> proposed: true entries" warning surfaces that the
+proposed references contributed nothing; the user can review
+and remove flags to activate them on the next run. If the
+user wants duplo to require review of proposed references
+before proceeding, they should remove them from SPEC.md
+entirely rather than expecting the validator to block.
 
 This function is called from `main.py` at the start of every
 `duplo` run (after `read_spec`, before any pipeline work). If

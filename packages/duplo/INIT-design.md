@@ -450,8 +450,13 @@ Dependencies:
 - `duplo.spec_drafter` (new module, separate design doc) for
   generating the SPEC.md content.
 - `duplo.fetcher.fetch_site` (existing) for the shallow scrape.
-  Add a `shallow=True` parameter that fetches only the entry
-  URL, no link-following.
+  Per PIPELINE-design.md § fetcher.py, `fetch_site` gains a
+  `scrape_depth` parameter (`"deep"` | `"shallow"` | `"none"`).
+  Init calls it with `scrape_depth="shallow"` to fetch only
+  the entry URL with no link-following. (When `--deep` is
+  passed to `duplo init`, init calls `scrape_depth="deep"`
+  instead.) The `scrape_depth` enum is the single fetcher API;
+  there is no separate `shallow=True` boolean.
 - `duplo.validator.validate_product_url` (existing) for URL
   validation.
 - `duplo.design_extractor.extract_design` (existing) for Vision

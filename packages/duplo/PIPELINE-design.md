@@ -100,6 +100,61 @@ current run's extraction. They are not separately recorded
 as discovered, since they fall under the source's declared
 authority.
 
+#### Return signature
+
+`fetch_site` today returns a 4-tuple of
+`(scraped_text, code_examples, doc_structures, page_records)`.
+Under the new model it returns a 5-tuple, adding `raw_pages`
+as the final element:
+
+```python
+def fetch_site(
+    url: str,
+    *,
+    scrape_depth: Literal["deep", "shallow", "none"] = "deep",
+) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]:
+    """Fetch *url* and return extracted artifacts plus raw HTML.
+
+    The returned raw_pages dict maps EVERY fetched URL (entry
+    point plus any same-origin links followed during deep crawl)
+    to its HTML content. This is the substrate that the
+    orchestrator uses for site-media extraction and
+    cross-origin link collection.
+    """
+```
+
+Key properties of `raw_pages`:
+
+- For `scrape_depth="shallow"`: contains exactly one entry
+  (the entry URL).
+- For `scrape_depth="deep"`: contains the entry URL plus
+  every same-origin page that was followed and successfully
+  fetched. Cross-origin pages are NOT in this dict (they
+  weren't fetched per the same-origin restriction).
+- For `scrape_depth="none"`: empty dict (no fetch happened).
+- Keys are the absolute URLs actually fetched (post-redirect,
+  normalized the same way `_collect_cross_origin_links`
+  normalizes them).
+- Values are the raw HTML bytes decoded as UTF-8 with
+  error replacement.
+
+The orchestrator uses `raw_pages` for three purposes:
+1. `_collect_cross_origin_links(raw_pages, source_url)` —
+   extract cross-origin `<a href>` targets from every fetched
+   page. This means cross-origin links on followed same-origin
+   pages are discovered, not just links on the entry page.
+2. `_download_site_media(product_ref_raw_pages)` — download
+   embedded `<img>`, `<video>`, `<source>` media from
+   product-reference pages.
+3. `save_raw_content(all_raw_pages, page_records)` — cache
+   HTML to `.duplo/raw_pages/` keyed by content hash for
+   diff-based change detection on subsequent runs.
+
+Today's `fetch_site` already accumulates per-page HTML
+internally for content-hash computation in `PageRecord`. The
+change is to expose that accumulation as a return value
+rather than discarding it after hashing.
+
 
 ### `design_extractor.py`
 
@@ -123,6 +178,15 @@ New: the input set comes from three sources, all role-filtered:
    only `## Sources` and no `ref/` files still gets visual
    design extracted from product pages. Counter-example and
    docs sources do NOT contribute site media.
+4. Accepted frames from scraped product-reference VIDEOS
+   (also via `_download_site_media`). Scraped demo videos
+   flow through `extract_all_videos` → frame filter → frame
+   describer the same way ref/-declared videos do, and
+   accepted frames feed both verification case extraction
+   and design extraction. This preserves today's behavior
+   where a marketing demo video on a product page produces
+   verification cases and design frames without the user
+   needing to download and ref/-declare it.
 
 Unreviewed proposals (`proposed: true`) never appear in any of
 the three input sources.
@@ -152,6 +216,66 @@ diff detection (per the open-question resolution to keep
 `duplo.json` design fields as a cache during transition), but
 SPEC.md is the source of truth for what gets injected into
 plan generation.
+
+#### `_download_site_media` signature under the new model
+
+Today's `_download_site_media` lives in the fetcher/pipeline
+glue and pulls images and videos from scraped pages. Under
+the new model its signature becomes explicit:
+
+```python
+def _download_site_media(
+    raw_pages: dict[str, str],
+) -> tuple[list[Path], list[Path]]:
+    """Download embedded <img>, <video>, and <source> media from
+    the HTML of product-reference pages.
+
+    Returns (image_paths, video_paths). Media files are saved
+    to .duplo/site_media/ keyed by source URL hash. The URLs
+    the media was embedded in are recorded alongside the files
+    so subsequent runs can diff against change.
+    """
+```
+
+Key changes from today:
+
+- Parameter is a `dict[str, str]` mapping URL to HTML rather
+  than a single page's HTML. This matches the multi-source
+  model — a deep crawl produces multiple pages, each of which
+  may contain embedded media.
+- Return is a tuple `(images, videos)` where BOTH are used by
+  the orchestrator. Videos are no longer discarded; they feed
+  `extract_all_videos` alongside ref/-declared behavioral
+  targets.
+- Callers pass only `product_reference_raw_pages` (not the
+  full `all_raw_pages`), matching the existing rule that only
+  product-reference sources contribute to design and
+  behavioral extraction.
+
+Embedded-media origin handling follows "Same-origin and
+embedded media" below: media is downloaded regardless of
+origin because the page that embeds it was user-authorized.
+
+#### `format_design_block` location
+
+`format_design_block(design) -> str` is the serializer that
+produces the markdown body for the AUTO-GENERATED block in
+SPEC.md's `## Design` section. It's specified in the
+orchestrator-helpers section, but its IMPLEMENTATION LOCATION
+is `design_extractor.py`, not `spec_drafter.py`.
+
+Rationale: `format_design_block` wraps the existing
+`format_design_section(design)` already in
+`design_extractor.py`, minus the section heading. Placing
+`format_design_block` in `spec_drafter.py` would create a
+drafter → pipeline import inversion (the drafter is supposed
+to be a text-layer module independent of pipeline stages).
+Keeping it in `design_extractor.py` preserves clean layering:
+the orchestrator calls `design_extractor.format_design_block`,
+then passes the resulting string into
+`spec_drafter.update_design_autogen(existing, body)`. The
+drafter sees only a string; it doesn't depend on the design
+dataclass or on the extraction pipeline.
 
 
 ### `video_extractor.py` and friends
@@ -252,10 +376,18 @@ Today: `investigate(bugs, ...)` collects all available context
 and sends to Claude.
 
 New: gains role-filtered context:
-- `counter-example` references get included in the prompt
-  with a "AVOID this pattern" label. Today, counter-examples
-  exist nowhere in the pipeline; the new model surfaces them
-  here.
+- `counter-example` references (files in `ref/` with role
+  `counter-example`, via `format_counter_examples(spec)`) get
+  included in the prompt with a "AVOID this pattern" label.
+  Today, counter-examples exist nowhere in the pipeline; the
+  new model surfaces them here.
+- `counter-example` SOURCES (URLs in `## Sources` with role
+  `counter-example`, via `format_counter_example_sources(spec)`)
+  get included as URL+notes context with the same "AVOID"
+  framing. The URL is NOT fetched — declarative context only.
+  This closes the gap where counter-example URLs would
+  otherwise be inert (filtered out of scraping AND out of
+  `format_spec_for_prompt`, with no consumer).
 - `docs` references (PDF text, doc-role files) get included
   as supplementary context.
 - `## Behavior` contracts get included as ground-truth
@@ -289,28 +421,52 @@ def _subsequent_run() -> None:
     # File-change detection (unchanged) ...
 
     # Re-scrape declared sources. Collect raw pages for site-media
-    # extraction and cross-origin discoveries for SPEC.md write-back.
-    raw_pages: dict[str, str] = {}        # url -> HTML, for product-reference sources
-    discovered_urls: list[str] = []       # cross-origin links found during deep crawl
+    # extraction, code examples and doc structures from all sources,
+    # cross-origin discoveries for SPEC.md write-back, and full raw
+    # HTML for the .duplo/raw_pages/ cache.
+    all_raw_pages: dict[str, str] = {}          # url -> HTML, EVERY scraped page
+    product_ref_raw_pages: dict[str, str] = {}  # url -> HTML, product-reference subset
+    discovered_urls: list[str] = []             # cross-origin links from deep crawl
     combined_text = ""
+    all_code_examples: list = []
+    all_page_records: list = []
+    merged_doc_structures = DocStructures()
     for source in format_scrapeable_sources(spec):
         scraped_text, code_examples, doc_structures, page_records, source_raw_pages = (
             fetch_site(source.url, scrape_depth=source.scrape)
         )
         combined_text += scraped_text + "\n"
+        all_code_examples.extend(code_examples)
+        all_page_records.extend(page_records)
+        if doc_structures:
+            merged_doc_structures.feature_tables.extend(doc_structures.feature_tables)
+            merged_doc_structures.operation_lists.extend(doc_structures.operation_lists)
+            merged_doc_structures.unit_lists.extend(doc_structures.unit_lists)
+            merged_doc_structures.function_refs.extend(doc_structures.function_refs)
+        all_raw_pages.update(source_raw_pages)  # cache every scraped page
         if source.role == "product-reference":
-            raw_pages.update(source_raw_pages)
+            product_ref_raw_pages.update(source_raw_pages)
         discovered_urls.extend(_collect_cross_origin_links(source_raw_pages, source.url))
+    if all_code_examples:
+        save_examples(all_code_examples)
+    if all_page_records:
+        save_reference_urls(all_page_records)
+        if all_raw_pages:
+            save_raw_content(all_raw_pages, all_page_records)  # .duplo/raw_pages/
+    if merged_doc_structures:
+        save_doc_structures(merged_doc_structures)
 
     # Append discovered URLs to ## Sources with discovered: true.
-    # `append_sources` deduplicates against existing entries.
+    # `append_sources` deduplicates against existing entries; only
+    # write SPEC.md if the content actually changed.
     if discovered_urls:
         existing = (Path.cwd() / "SPEC.md").read_text()
         modified = append_sources(existing, [
             SourceEntry(url=u, role="docs", scrape="deep", discovered=True)
             for u in discovered_urls
         ])
-        (Path.cwd() / "SPEC.md").write_text(modified)
+        if modified != existing:
+            (Path.cwd() / "SPEC.md").write_text(modified)
 
     # Re-extract features.
     features = extract_features(
@@ -321,23 +477,45 @@ def _subsequent_run() -> None:
         scope_exclude=spec.scope_exclude,
     )
     # Post-extraction scope_exclude filter (see extractor.py section).
+    # Drops produce diagnostics so false positives are visible.
     features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]
     save_features(features)
 
-    # Behavioral references → frame extraction → verification cases.
-    behavioral_entries = format_behavioral_references(spec)
-    behavioral_paths = [e.path for e in behavioral_entries]
-    video_results = extract_all_videos(behavioral_paths)  # existing pipeline
-    # ... frame_filter, frame_describer, verification_extractor ...
-    # Map each behavioral entry's path to its accepted frames for the
-    # dual-use lookup below.
-    accepted_frames_by_path: dict[Path, list[Path]] = _accepted_frames_by_source(video_results)
+    # Download site media from product-reference pages. Returns BOTH
+    # images (for design extraction) and videos (for behavioral pipeline).
+    # Scraped videos are first-class behavioral input — the URL-only
+    # common pattern relies on demo videos producing verification cases.
+    site_images, site_videos = (
+        _download_site_media(product_ref_raw_pages)
+        if product_ref_raw_pages else ([], [])
+    )
 
-    # Compose the design extraction input set from THREE sources.
-    # All three return Paths; extract_design takes list[Path].
+    # Behavioral references → frame extraction → verification cases.
+    # Behavioral input is the union of ref/-declared behavioral targets
+    # AND scraped videos from product-reference pages.
+    behavioral_entries = format_behavioral_references(spec)
+    behavioral_paths = [e.path for e in behavioral_entries] + site_videos
+    video_results = extract_all_videos(behavioral_paths)
+    # Filter rejected frames (transitions, blur, marketing overlays)
+    # BEFORE building the per-source lookup. Rejected frames must NOT
+    # flow into design extraction for dual-role videos.
+    filtered_results = [
+        VideoResult(source=r.source, frames=apply_filter(filter_frames(r.frames)))
+        for r in video_results
+    ]
+    # ... frame_describer, verification_extractor on filtered_results ...
+    accepted_frames_by_path: dict[Path, list[Path]] = (
+        _accepted_frames_by_source(filtered_results)
+    )
+
+    # Compose the design extraction input set from FOUR sources.
+    # All return Paths; extract_design takes list[Path].
     #   1. visual-target reference files in ref/
     #   2. accepted frames from videos that include visual-target in their roles
-    #   3. images downloaded from product-reference sources via _download_site_media
+    #      (ref/-declared dual-role videos)
+    #   3. accepted frames from scraped product-reference videos
+    #      (always contribute; no role declaration possible)
+    #   4. images downloaded from product-reference sources
     visual_paths = [e.path for e in format_visual_references(spec)]
     visual_video_frames = [
         frame
@@ -345,19 +523,310 @@ def _subsequent_run() -> None:
         if "visual-target" in entry.roles
         for frame in accepted_frames_by_path.get(entry.path, [])
     ]
-    site_images, _site_videos = _download_site_media(raw_pages) if raw_pages else ([], [])
-    design_input = visual_paths + visual_video_frames + site_images
+    scraped_video_frames = [
+        frame
+        for video_path in site_videos
+        for frame in accepted_frames_by_path.get(video_path, [])
+    ]
+    design_input = visual_paths + visual_video_frames + scraped_video_frames + site_images
 
-    if design_input:
+    # Check autogen block FIRST. If present, skip the Vision call entirely
+    # — update_design_autogen would silently discard the result anyway
+    # (write-once-never-replace). This avoids burning Vision dollars on
+    # every run for no effect.
+    spec_text_now = (Path.cwd() / "SPEC.md").read_text()
+    if design_input and not _has_autogen_block(spec_text_now):
         design = extract_design(design_input)
-        existing = (Path.cwd() / "SPEC.md").read_text()
-        modified = update_design_autogen(existing, format_design_block(design))
-        (Path.cwd() / "SPEC.md").write_text(modified)
+        modified = update_design_autogen(spec_text_now, format_design_block(design))
+        if modified != spec_text_now:
+            (Path.cwd() / "SPEC.md").write_text(modified)
         save_design_requirements(dataclasses.asdict(design))  # cache
+    elif design_input:
+        # Autogen block already exists; tell the user we skipped
+        # extraction so they know any new visual-target files won't
+        # produce new design output until they delete the block.
+        record_failure(
+            "orchestrator:design_extraction",
+            "skipped",
+            "Autogen design block exists in SPEC.md; skipped Vision "
+            "extraction. Delete the BEGIN/END AUTO-GENERATED block "
+            f"to regenerate from {len(design_input)} input image(s)."
+        )
 
     # Phase planning (unchanged from today).
     ...
 ```
+
+Note on the in-memory spec dataclass: the `spec` variable from
+`read_spec()` at the top of `_subsequent_run` is the source of
+truth for pipeline decisions within a single run. SPEC.md is
+re-read only to stage writes (the discovered-URL append and the
+autogen update), not to drive extraction. Validation, formatter
+filtering, and prompt construction all run against the in-memory
+dataclass as it existed before any writes. This invariant must
+hold even through future refactors: "the spec we validated is
+the spec we acted on."
+
+Note on the autogen-cache divergence: when the autogen block is
+skipped above, `save_design_requirements` is also skipped, so the
+`.duplo/duplo.json` cache stays consistent with the SPEC.md autogen
+block. The cache and SPEC.md never diverge silently. The cost is
+that new visual-target files added after the first design extraction
+don't update the cache either — but that's the intended semantics
+of write-once-never-replace, surfaced consistently in both stores.
+
+
+## Orchestrator helper functions
+
+The orchestration sketch above references several helpers that
+don't exist yet. They live in `main.py` (or a new
+`duplo/orchestrator.py` module if separation feels worthwhile)
+because they're orchestration glue, not parser or pipeline
+logic. Specs:
+
+### `_collect_cross_origin_links(raw_pages, source_url) -> list[str]`
+
+Given the dict of `{url: HTML}` returned from a deep crawl of
+`source_url`, extract URLs from `<a href="...">` tags whose
+resolved absolute URL has a different origin (scheme + host +
+port) from `source_url`. Returns a deduplicated, normalized
+list.
+
+Decisions:
+- Only `<a href>` is considered. `<link>`, `<script src>`,
+  `<img src>`, and other resource references are NOT collected.
+  Resource URLs are loaded by the page itself and don't
+  represent user-actionable navigation targets. (This means
+  CDN images on a deep-crawled page are downloaded as part of
+  `_download_site_media`, not recorded as discovered. See
+  "Same-origin and embedded media" below.)
+- URLs are normalized before deduplication: lowercase scheme
+  and host, strip default ports (80/443), strip trailing slash
+  on the path-less form, strip URL fragments (`#section`).
+  Query strings are preserved (different queries on the same
+  page are different resources).
+- Cross-origin classification is strict: a link from
+  `https://numi.app` to `https://docs.numi.app` is
+  cross-origin (different host). A link from `https://numi.app`
+  to `https://numi.app/docs` is same-origin.
+- Dedup happens here and again in `append_sources`. Belt and
+  braces; the helper's dedup is per-run, `append_sources` is
+  against existing SPEC.md content.
+
+### `_accepted_frames_by_source(filtered_results) -> dict[Path, list[Path]]`
+
+Given a list of `VideoResult` objects **after `frame_filter`
+has been applied** — each containing a `source` (input video
+path) and `frames` (the accepted frames that survived
+filtering) — build a lookup table from source video path to
+its list of accepted frame paths.
+
+Used in the orchestration sketch to thread frames from videos
+with `visual-target` in their roles (or all scraped videos)
+into the design extraction input set, while leaving
+`behavioral-target`-only ref videos unaffected.
+
+**Critical: the input must be post-filter, not the raw
+`extract_all_videos` output.** Today's `extract_all_videos`
+returns frames BEFORE `frame_filter.apply_filter` removes
+transitions, blur, and marketing overlays. Building the
+lookup over unfiltered frames would leak rejected frames into
+design extraction for dual-role videos — producing a
+degraded `DesignRequirements` where e.g. a frame describing
+"the video is loading" contributes as if it were a real UI
+state. The orchestration sketch runs `apply_filter` on each
+`VideoResult.frames` BEFORE calling this helper.
+
+Implementation is a one-liner (`{r.source: r.frames for r in
+filtered_results}`) but lives as a named helper so the
+orchestration sketch reads cleanly and so the
+post-filter-only contract has a named place to live in tests.
+
+Tests pin: (a) lookup returns correct frames per source; (b)
+if called with unfiltered results, rejected frames are
+present in the output (demonstrating the contract violation
+is detectable).
+
+### `_has_autogen_block(spec_text) -> bool`
+
+Returns True if `spec_text` contains a complete
+`<!-- BEGIN AUTO-GENERATED ... --> ... <!-- END AUTO-GENERATED -->`
+block inside its `## Design` section. Implementation: reuse
+`_AUTOGEN_RE` from PARSER-design.md § `## Design` parser; run
+it against the body of the `## Design` section.
+
+Used by the orchestrator to decide whether to call
+`extract_design` at all (write-once-never-replace semantics
+mean a Vision call when the block exists is wasted).
+
+Lives in `spec_reader.py` rather than orchestrator helpers,
+since it's a parser-adjacent predicate. Tests pin: returns
+True for well-formed block, False for missing block, False
+for malformed BEGIN-only or END-only markers (matching the
+parser's existing handling).
+
+### `format_design_block(design) -> str`
+
+Given a `DesignRequirements` dataclass (the return type of
+`extract_design`), serialize it to the markdown body that goes
+inside the AUTO-GENERATED block in `## Design`. Format matches
+the existing `format_design_section(design)` in
+`design_extractor.py`, minus the section heading (the heading
+belongs to the user-authored part of `## Design` above the
+block; the block contains only the body content).
+
+**Lives in `design_extractor.py`, NOT `spec_drafter.py`.** See
+`design_extractor.py` § `format_design_block` location above
+for the layering rationale. The orchestrator imports
+`format_design_block` from `design_extractor`, calls it, and
+passes the resulting string into
+`spec_drafter.update_design_autogen`. The drafter stays a
+text-layer module with no dependency on pipeline stages.
+
+### `_matches_excluded(feature, scope_exclude) -> bool`
+
+Returns True if `feature.name` or `feature.description`
+should cause the feature to be dropped per
+`spec.scope_exclude`. Replaces a naive substring match (which
+produces false positives like "plugin API" excluding a
+feature whose description mentions "plugin API" only as
+contrast).
+
+Matching rule:
+- Compare each excluded term against `feature.name` and
+  `feature.description` using **word-boundary regex match**
+  (case-insensitive). `\bPLUGIN API\b` matches "Plugin API"
+  and "plugin API." but not "non-plugin-API" or
+  "plugins'-API".
+- For multi-word excluded terms, the entire phrase must
+  match as a contiguous word sequence.
+- When a feature is dropped, emit a diagnostic via
+  `duplo.diagnostics.record_failure` naming the excluded term
+  and the feature title:
+  `"scope_exclude '<term>' matched feature '<name>'; dropped"`.
+  Diagnostics surface in the run summary so false positives
+  are visible to the user.
+
+Lives in `main.py` orchestrator section (or `extractor.py`
+if the function naturally fits there).
+
+### `format_counter_example_sources(spec) -> list[SourceEntry]`
+
+Returns source entries where `role` is `counter-example`,
+excluding `proposed: true` and `discovered: true`. Used by
+the investigator to include counter-example URLs as
+declarative context ("these URLs are anti-patterns; do not
+emulate").
+
+This closes a gap in the previous design where
+counter-example URLs were filtered out of
+`format_scrapeable_sources` and `format_spec_for_prompt`,
+but had no consumer. Without this helper, declaring a URL
+as `role: counter-example` would have no effect.
+
+The investigator uses it as follows: for each entry, include
+the URL and the `notes:` field (if any) in the prompt's
+"counter-examples" section, with framing like "User has
+flagged the following URLs as patterns to AVOID:". The URL
+itself is not fetched — declarative context only, matching
+the "declarative, never scraped" semantics of
+counter-example sources.
+
+Lives in `spec_reader.py` alongside the other per-stage
+formatters.
+
+### `parse_build_preferences(architecture_prose) -> BuildPreferences`
+
+Specified in "BuildPreferences and app_name" below. Lives in
+`questioner.py` (which currently owns the
+`ask_preferences` interactive flow being replaced) or a new
+`build_prefs.py` module. NOT in `spec_reader.py` — PARSER-design.md
+explicitly forbids LLM calls in the parser, and this is an
+LLM call.
+
+The invalidation mechanism ("re-parsed when `## Architecture`
+changes per file-hash detection") uses a section-scoped hash:
+the SHA-256 of `spec.architecture` content (the parsed string
+for the section, not the whole SPEC.md file), stored in
+`.duplo/duplo.json` under `architecture_hash`. When the hash
+changes, re-parse. A whole-file SPEC.md hash would re-parse
+on any edit anywhere; section-scoped is precise.
+
+**Exact bytes hashed: the comment-stripped section body.**
+Per PARSER-design.md, `_strip_comments` is applied to section
+bodies before they're stored in the dataclass — so
+`spec.architecture` contains the user's prose with
+`<!-- ... -->` comments already removed. Hashing this value
+means a user who toggles an explanatory comment (e.g.
+`<!-- TODO: reconsider Swift vs Rust -->`) does NOT invalidate
+the cache. That's the intended semantic: comments are
+non-normative and shouldn't trigger an LLM call. The tradeoff
+is that a commented-out stack declaration (e.g.
+`<!-- language: Swift -->` with a replacement above it)
+changes the hash only when the uncommented content changes,
+which is correct.
+
+When the LLM returns no usable fields (rare but possible if
+`## Architecture` is content-free or off-topic), the result
+is `BuildPreferences()` with all defaults. This is a
+WARNING surfaced by `validate_for_run`, not an error —
+plan generation handles all-defaults BuildPreferences
+gracefully (it simply has less context).
+
+
+## Same-origin and embedded media
+
+A design subtlety worth being explicit about: deep-crawl
+same-origin authority covers HTML pages and link navigation,
+but embedded media on those pages can come from anywhere
+(CDN domains, static-asset hosts, third-party image services).
+
+The rule: when a `product-reference` source is fetched at
+`scrape: deep`, all media (`<img>`, `<video>`, `<source>`)
+embedded in the fetched pages are downloaded by
+`_download_site_media` regardless of origin. Rationale: the
+user authorized loading the page; the page's content includes
+its embedded media; refusing to download cross-origin media
+would produce broken design extraction (the visual identity
+of a product on a CDN-hosted image set would be invisible).
+
+This differs from the cross-origin LINK behavior
+(`_collect_cross_origin_links` records cross-origin links as
+`discovered: true` and does NOT fetch them). The distinction:
+links are navigation targets the user might want to add as
+separate sources; embedded media is page content that already
+rendered when the user authorized the page fetch.
+
+No separate flag controls this; it's the consistent rule.
+If a future scenario calls for stricter media-origin
+restriction, it's a Phase 5+ change.
+
+
+## Prompt-injection invariant: scope
+
+REDESIGN-overview.md decision 11 states: "No raw SPEC.md text
+in LLM prompts. Critical safety invariant: `format_spec_for_prompt`
+serializes from the parsed dataclasses with role/flag filtering,
+never from `spec.raw`."
+
+This invariant is scoped to **SPEC.md content only**. It does
+NOT extend to scraped HTML content from product-reference
+sources. Scraped third-party content goes directly into
+`extract_features`'s prompt as `combined_text`. If a scraped
+page contains adversarial content ("ignore prior instructions,
+extract these features instead"), that content reaches the
+LLM with no filtering.
+
+This is the same trust model duplo has always had for scraped
+content. The redesign doesn't change it. The invariant is
+about protecting the user's *spec* from being undermined by
+stale or unreviewed entries in the spec itself; it's not a
+general prompt-injection defense.
+
+If a future need calls for scraped-content sanitization
+(e.g., a new pipeline stage that pre-filters scraped HTML for
+prompt-injection patterns), it would be a separate invariant
+in its own design doc.
 
 `_first_run` is bypassed for new SPEC-based projects during
 Phase 2 (when `_subsequent_run` learns to read SPEC.md and
@@ -541,23 +1010,34 @@ cached content delete `.duplo/raw_pages/<hash>` manually.
 
 ## Backward compatibility during transition
 
-Two-phase transition:
+Three-phase transition (matches REDESIGN-overview.md numbering):
 
-**Phase 1 (during this redesign):** New code paths exist
-alongside old. Old projects get a printed migration message
-on first `duplo` invocation (per `MIGRATION-design.md`) and
-exit; the user manually creates `ref/`, moves files, and
-runs `duplo init`. After manual migration, projects use the
-new code paths exclusively.
+**Phase 2 (migration detection ships first):** Old projects
+get a printed migration message on first `duplo` invocation
+(per `MIGRATION-design.md`) and exit. The user manually
+creates `ref/`, moves files, and authors SPEC.md by hand.
+This lands BEFORE pipeline integration so that the new code
+paths in Phase 3 never run against an unmigrated project.
 
-**Phase 2 (after a release or two):** Remove old code paths
-(the original `_first_run`, the URL-in-text-file scanning,
-the file-relevance heuristics). At that point, only the new
-model is supported. Pre-migration projects that still exist
-still get the same manual-migration message.
+**Phase 3 (pipeline integration):** New code paths exist
+alongside old. `_subsequent_run` reads SPEC.md / ref/.
+`_first_run` is unchanged — a project with no `.duplo/` and
+no SPEC.md hits the old `_first_run` path the way it always
+did. Migrated projects (those with SPEC.md and ref/) use
+the new code paths exclusively.
 
-Phase 2 isn't part of the immediate redesign. It happens
-when we're confident the new model has shaken out.
+**Phase 4 (drafter and `duplo init`):** Manual SPEC.md
+authoring is replaced by `duplo init` for new projects. The
+migration message from Phase 2 is updated to reference
+`duplo init` (one-line change).
+
+**Phase 5 (cleanup):** Remove old code paths (`_first_run`,
+URL-in-text-file scanning, file-relevance heuristics). At
+that point, only the new model is supported. Pre-migration
+projects that still exist still get the migration message.
+
+Phase 5 isn't part of pipeline integration. It happens when
+we're confident the new model has shaken out.
 
 
 ## Test plan
@@ -596,13 +1076,28 @@ Integration tests at the orchestrator level:
 
 ## Implementation order
 
-Pipeline integration (Phase 2) consumes the parser from
-Phase 1; drafter/init (Phase 3) and migration (Phase 4) come
-later and are not preconditions. The cleanup work in this
-section that depends on `_first_run` removal lands in Phase 5.
-Within Phase 2, the work is mostly:
+Pipeline integration is **Phase 3** in the redesign sequence
+(parser=1, migration detection=2, pipeline=3, drafter+init=4,
+cleanup=5). It consumes the parser from Phase 1 and the
+migration check from Phase 2; drafter/init (Phase 4) comes
+later and is not a precondition (Phase 3 ships the minimal
+drafter write helpers it needs — `append_sources` and
+`update_design_autogen` — with the rest deferred to Phase 4).
 
-1. Add `scrape_depth` parameter to `fetch_site`. Tests.
+**`_first_run` removal is NOT part of Phase 3.** It lands in
+Phase 5 (cleanup), after `duplo init` exists in Phase 4. If
+`_first_run` were removed in Phase 3, projects without a
+`.duplo/` directory would have no entry path — they wouldn't
+be pre-redesign (so migration wouldn't fire) and they'd have
+no SPEC.md (so the new `_subsequent_run` would error). Phase 3
+leaves `_first_run` untouched; Phase 5 removes it once
+`duplo init` is the documented replacement.
+
+Within Phase 3, the work is:
+
+1. Add `scrape_depth` parameter to `fetch_site` and add the
+   new `raw_pages` return value (5-tuple instead of today's
+   4-tuple). Tests.
 2. Add per-stage formatters in `spec_reader` (already in
    PARSER-design.md). Tests.
 3. Refactor `scanner.scan_directory` to point at `ref/`.
@@ -610,21 +1105,25 @@ Within Phase 2, the work is mostly:
 4. Update `extract_design` callers to use
    `format_visual_references`. Tests.
 5. Update video pipeline callers to use
-   `format_behavioral_references`. Tests.
+   `format_behavioral_references`, AND extend the input set
+   with `_site_videos` from `_download_site_media` so scraped
+   demo videos still feed frame extraction. Tests.
 6. Update PDF extractor callers to use docs-role filter.
    Tests.
 7. Update `extract_features` callers to consume merged
    scraped text from multiple sources. Tests.
-8. Wire SPEC.md write-back into `_subsequent_run`:
+8. Implement the minimal `spec_drafter.py` subset needed for
+   write-back: `append_sources` and `update_design_autogen`.
+   The rest of the drafter (drafting from inputs via LLM)
+   is Phase 4. Tests.
+9. Wire SPEC.md write-back into `_subsequent_run`:
    discovered URLs → `append_sources`, design extraction
    → `update_design_autogen`. Tests.
-9. Update investigator to include counter-examples and
-   behavior contracts. Tests.
-10. Restructure `_subsequent_run` and `_fix_mode` to use
+10. Update investigator to include counter-examples and
+    behavior contracts. Tests.
+11. Restructure `_subsequent_run` and `_fix_mode` to use
     the new orchestration shape. Tests, including the
-    integration tests above.
-11. Remove `_first_run` and direct users to `duplo init`.
-    Tests.
+    integration tests above. Leave `_first_run` untouched.
 
 This is the largest implementation phase by far. Worth
 breaking into sub-phases when writing the actual PLAN.md

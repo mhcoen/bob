@@ -119,7 +119,11 @@ These came out of the conversation that produced these docs:
     parsed dataclasses with role/flag filtering, never from
     `spec.raw`. Without this, `proposed:`, `discovered:`, and
     `counter-example` entries would leak into every LLM call
-    despite the role-filter helpers.
+    despite the role-filter helpers. The invariant is scoped
+    to SPEC.md content; scraped HTML from product-reference
+    sources reaches the LLM unfiltered, matching the existing
+    trust model. See PIPELINE-design.md § "Prompt-injection
+    invariant: scope" for the full discussion.
 
 12. **Same-origin deep crawl, cross-origin discovered-only.**
     A `scrape: deep` source crawls and uses content from
@@ -159,33 +163,56 @@ accessed `spec.references` and `spec.design` as strings.
 End state: parser handles new schema and old schema; existing
 callers continue to work via the compatibility layer; safety
 invariant is in place before any code reads from the parser.
+**Status: shipped.**
 
-**Phase 2: Minimal pipeline support.** Wire the parser into
-the existing pipeline orchestration: route role-filtered
-inputs to design extraction, video pipeline, PDF/text
-extraction, feature extraction. Add `BuildPreferences`
-parsing from `## Architecture`. Add `app_name` derivation.
-Add same-origin restriction to `fetch_site` deep mode. Add
-multi-source persistence to `duplo.json`. End state: a
-project with a manually-authored SPEC.md (in the new format)
-in a fresh `ref/` directory works end-to-end through the
-existing `_subsequent_run` path. `_first_run` is unchanged.
+**Phase 2: Migration detection (small, ships before pipeline).**
+Add the `needs_migration` check and the printed instructions
+message that runs at the start of `main()` for the no-subcommand
+path. Pre-redesign projects (no SPEC.md, no `ref/`, but
+`.duplo/duplo.json` exists) get redirected before they hit any
+new code paths. The instructions message at this stage reads
+"manually create `ref/`, move your reference files into it,
+then author a SPEC.md by hand using SPEC-template.md as a
+guide" — `duplo init` doesn't yet exist. Phase 4 will upgrade
+the message to reference `duplo init` once it ships. End state:
+existing projects get a clear instructions-and-exit message
+instead of running into pipeline failures; new projects (with
+a hand-authored SPEC.md and `ref/`) proceed to the existing
+`_subsequent_run` path unchanged.
 
-**Phase 3: Drafter and `duplo init`.** Implement
-`spec_drafter.py` (drafting from inputs, append operations,
-AUTO-GENERATED block insertion). Implement `duplo init` as
-a new subcommand that uses the drafter. End state:
-`duplo init` creates new projects in the new format;
-`duplo` runs against them via the Phase 2 pipeline
-integration.
+The ordering rationale: pipeline integration in Phase 3
+restructures `_subsequent_run` to require SPEC.md. Without
+migration detection landing first, an existing project running
+`duplo` at the Phase 3 boundary would hit the new SPEC.md-
+requiring code path with no SPEC.md and no actionable error.
+Migration detection is small enough (a single check + a printed
+message) that landing it ahead of pipeline integration costs
+little and prevents a real broken-state window.
 
-**Phase 4: Migration detection.** Add `needs_migration`
-check and the manual-migration message that prints when an
-old project tries to run. No auto-migration, no dry-run —
-per `MIGRATION-design.md`, migration is intentionally
-minimal (handful of projects affected). End state: existing
-projects get a clear printed instructions and exit; the user
-performs the manual steps and runs `duplo init`.
+**Phase 3: Pipeline integration.** Wire the parser into the
+existing pipeline orchestration: route role-filtered inputs
+to design extraction, video pipeline, PDF/text extraction,
+feature extraction. Add `BuildPreferences` parsing from
+`## Architecture`. Add `app_name` derivation. Add same-origin
+restriction to `fetch_site` deep mode. Add multi-source
+persistence to `duplo.json`. Implement the minimal subset of
+`spec_drafter.py` needed for write-backs (`append_sources`
+for discovered URLs, `update_design_autogen` for design
+write-back) — the rest of the drafter (drafting from inputs,
+the LLM call) waits for Phase 4. End state: a project with a
+manually-authored SPEC.md (in the new format) in a fresh
+`ref/` directory works end-to-end through the existing
+`_subsequent_run` path. `_first_run` is unchanged.
+
+**Phase 4: Drafter and `duplo init`.** Implement the rest
+of `spec_drafter.py` (drafting from inputs via LLM, the
+remaining append/format helpers). Implement `duplo init` as
+a new subcommand that uses the drafter. Update the migration
+message from Phase 2 to reference `duplo init` (one-line
+change). End state: `duplo init` creates new projects in the
+new format; `duplo` runs against them via the Phase 3
+pipeline integration; the migration path is now fully
+self-service.
 
 **Phase 5: Cleanup and full pipeline transition.** Remove
 the old `_first_run` path. Remove URL-in-text-file scanning.
@@ -202,10 +229,10 @@ phase ships a feature that depends on a not-yet-implemented
 piece. Phase 5's removals are deliberately last so the new
 code has time to prove itself before old paths are deleted.
 
-Estimated relative size: Phase 2 is the largest (most
+Estimated relative size: Phase 3 is the largest (most
 pipeline modules touched). Phase 5 is the second-largest
-(removals require careful caller audits). Phases 1, 3, 4 are
-smaller and more focused.
+(removals require careful caller audits). Phases 2 and 4
+are smaller and more focused.
 
 
 ## What stays the same
@@ -298,14 +325,11 @@ In order of priority:
    warrant sub-phases). Worth thinking about how mcloop can
    deliver useful intermediate state.
 
-4. **Pick a phase to start.** Phase 1 (parser with backward
-   compatibility) is the obvious starting point: no
-   user-visible changes, gets the data layer in place, lands
-   the prompt-injection safety invariant before anything
-   depends on it. Phase 2 (minimal pipeline support) is the
-   natural follow-on — it consumes Phase 1's parser output and
-   gives a working end-to-end run for users who manually
-   author SPEC.md in the new format.
+4. **Pick a phase to start.** Phase 1 (parser) is shipped.
+   Phase 2 (migration detection) is the next thing to land
+   — small (a check + a message) and required before the
+   pipeline restructure in Phase 3 can ship without breaking
+   existing projects.
 
 5. **For the chosen phase, write a real PLAN.md.** Each task
    gets concrete deliverables and test subtasks. Apply the
