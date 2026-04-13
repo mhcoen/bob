@@ -546,7 +546,7 @@ def read_spec(*, target_dir: Path | str = ".") -> ProductSpec | None:
     if not path.exists():
         return None
 
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     if not text.strip():
         return None
 

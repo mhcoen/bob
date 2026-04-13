@@ -254,6 +254,7 @@ from duplo.saver import (
     append_phase_to_history,
     append_to_bugs_section,
     get_current_phase,
+    load_examples,
     load_product,
     mark_implemented_features,
     move_references,
@@ -281,6 +282,61 @@ _SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 _DUPLO_JSON = ".duplo/duplo.json"
 # Files that are project artifacts, not user-provided reference materials.
 _PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md", "SPEC.md"}
+
+_FEATURE_FIELDS = {fld.name for fld in dataclasses.fields(Feature)}
+
+
+def _feature_from_dict(d: dict) -> Feature:
+    """Build a :class:`Feature` from a raw dict, ignoring unknown keys."""
+    return Feature(**{k: v for k, v in d.items() if k in _FEATURE_FIELDS})
+
+
+def _run_video_frame_pipeline(
+    videos: list[Path],
+    *,
+    indent: str = "",
+) -> list[Path]:
+    """Extract, filter, describe, and store video frames.
+
+    Returns the list of accepted frame paths after filtering.
+    """
+    frames_dir = Path(".duplo") / "video_frames"
+    results = extract_all_videos(videos, frames_dir)
+    video_frames: list[Path] = []
+    for vr in results:
+        if vr.error:
+            print(f"{indent}  {vr.source.name}: {vr.error}")
+        elif vr.frames:
+            print(f"{indent}  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
+            video_frames.extend(vr.frames)
+    if not video_frames:
+        return []
+    print(f"{indent}Filtering frames with Vision \u2026")
+    decisions = filter_frames(video_frames)
+    video_frames = apply_filter(decisions)
+    kept = sum(1 for d in decisions if d.keep)
+    rejected = len(decisions) - kept
+    if rejected:
+        print(f"{indent}  Kept {kept}, rejected {rejected} frame(s)")
+    if not video_frames:
+        return []
+    print(f"{indent}Describing UI states \u2026")
+    frame_descs = describe_frames(video_frames)
+    for fd in frame_descs:
+        print(f"{indent}  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
+    frame_entries = [
+        {
+            "path": fd.path,
+            "filename": fd.path.name,
+            "state": fd.state,
+            "detail": fd.detail,
+        }
+        for fd in frame_descs
+    ]
+    stored = store_accepted_frames(frame_entries)
+    if stored:
+        print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
+    return video_frames
 
 
 @dataclasses.dataclass
@@ -763,41 +819,9 @@ def _first_run(*, url: str | None = None) -> None:
     relevant_videos = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
     if relevant_videos:
         print(f"\nExtracting frames from {len(relevant_videos)} video(s) \u2026")
-        frames_dir = Path(".duplo") / "video_frames"
-        results = extract_all_videos(relevant_videos, frames_dir)
-        for vr in results:
-            if vr.error:
-                print(f"  {vr.source.name}: {vr.error}")
-            elif vr.frames:
-                print(f"  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
-                video_frames.extend(vr.frames)
+        video_frames = _run_video_frame_pipeline(relevant_videos)
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
-            print("Filtering frames with Vision \u2026")
-            decisions = filter_frames(video_frames)
-            video_frames = apply_filter(decisions)
-            kept = sum(1 for d in decisions if d.keep)
-            rejected = len(decisions) - kept
-            if rejected:
-                print(f"  Kept {kept}, rejected {rejected} frame(s)")
-            if video_frames:
-                print("Describing UI states \u2026")
-                frame_descs = describe_frames(video_frames)
-                for fd in frame_descs:
-                    print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
-                # Store accepted frames in .duplo/references/.
-                frame_entries = [
-                    {
-                        "path": fd.path,
-                        "filename": fd.path.name,
-                        "state": fd.state,
-                        "detail": fd.detail,
-                    }
-                    for fd in frame_descs
-                ]
-                stored = store_accepted_frames(frame_entries)
-                if stored:
-                    print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
 
     # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
@@ -943,45 +967,9 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         relevant_vids = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
         if relevant_vids:
             print(f"\nExtracting frames from {len(relevant_vids)} new video(s) \u2026")
-            frames_dir = Path(".duplo") / "video_frames"
-            vid_results = extract_all_videos(relevant_vids, frames_dir)
-            for vr in vid_results:
-                if vr.error:
-                    print(f"  {vr.source.name}: {vr.error}")
-                elif vr.frames:
-                    print(f"  {vr.source.name}: {len(vr.frames)} frame(s)")
-                    video_frames.extend(vr.frames)
+            video_frames = _run_video_frame_pipeline(relevant_vids)
             summary.videos_found = len(relevant_vids)
             analyzed_anything = True
-
-            # Filter frames with Vision before design extraction.
-            if video_frames:
-                print("Filtering frames with Vision \u2026")
-                decisions = filter_frames(video_frames)
-                video_frames = apply_filter(decisions)
-                kept = sum(1 for d in decisions if d.keep)
-                rejected = len(decisions) - kept
-                if rejected:
-                    print(f"  Kept {kept}, rejected {rejected} frame(s)")
-                if video_frames:
-                    print("Describing UI states \u2026")
-                    frame_descs = describe_frames(video_frames)
-                    for fd in frame_descs:
-                        print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
-                    # Store accepted frames in .duplo/references/.
-                    frame_entries = [
-                        {
-                            "path": fd.path,
-                            "filename": fd.path.name,
-                            "state": fd.state,
-                            "detail": fd.detail,
-                        }
-                        for fd in frame_descs
-                    ]
-                    stored = store_accepted_frames(frame_entries)
-                    if stored:
-                        print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
-
             summary.video_frames_extracted = len(video_frames)
         else:
             summary.videos_found = len(scan.videos)
@@ -1153,7 +1141,18 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         pages_updated = len(page_records)
         print(f"  Updated {pages_updated} page record(s).")
     if code_examples:
-        save_examples(code_examples)
+        existing = load_examples()
+        if existing:
+            existing_keys = {(e.input, e.source_url) for e in existing}
+            merged = list(existing)
+            for ex in code_examples:
+                key = (ex.input, ex.source_url)
+                if key not in existing_keys:
+                    merged.append(ex)
+                    existing_keys.add(key)
+            save_examples(merged)
+        else:
+            save_examples(code_examples)
         examples_updated = len(code_examples)
         print(f"  Updated {examples_updated} code example(s).")
     if doc_structures:
@@ -1167,48 +1166,12 @@ def _rescrape_product_url() -> tuple[int, int, str]:
             print(f"  Downloaded {len(site_images)} new image(s) from product site.")
         if site_videos:
             print(f"  Downloaded {len(site_videos)} new video(s) from product site.")
-            # Run the full frame pipeline on new videos.
-            frames_dir = Path(".duplo") / "video_frames"
-            results = extract_all_videos(site_videos, frames_dir)
-            video_frames: list[Path] = []
-            for vr in results:
-                if vr.error:
-                    print(f"  {vr.source.name}: {vr.error}")
-                elif vr.frames:
-                    print(f"  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
-                    video_frames.extend(vr.frames)
-                else:
-                    print(f"  {vr.source.name}: no scene changes detected")
+            video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
             if video_frames:
-                print("  Filtering frames with Vision \u2026")
-                decisions = filter_frames(video_frames)
-                video_frames = apply_filter(decisions)
-                kept = sum(1 for d in decisions if d.keep)
-                rejected = len(decisions) - kept
-                if rejected:
-                    print(f"  Kept {kept}, rejected {rejected} frame(s)")
-                if video_frames:
-                    print("  Describing UI states \u2026")
-                    frame_descs = describe_frames(video_frames)
-                    for fd in frame_descs:
-                        print(f"  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
-                    frame_entries = [
-                        {
-                            "path": fd.path,
-                            "filename": fd.path.name,
-                            "state": fd.state,
-                            "detail": fd.detail,
-                        }
-                        for fd in frame_descs
-                    ]
-                    stored = store_accepted_frames(frame_entries)
-                    if stored:
-                        print(f"  Stored {len(stored)} frame(s) in .duplo/references/")
-                    # Update design requirements from new frames.
-                    design = extract_design(video_frames)
-                    if design.colors or design.fonts or design.layout:
-                        save_design_requirements(dataclasses.asdict(design))
-                        print(f"  Updated design from {len(design.source_images)} frame(s).")
+                design = extract_design(video_frames)
+                if design.colors or design.fonts or design.layout:
+                    save_design_requirements(dataclasses.asdict(design))
+                    print(f"  Updated design from {len(design.source_images)} frame(s).")
 
     # Re-read duplo.json to pick up writes from save_reference_urls,
     # save_doc_structures, etc. that happened since our initial read.
@@ -1242,15 +1205,9 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
     except json.JSONDecodeError:
         return 0, 0, 0, 0
 
-    _feature_keys = {f.name for f in dataclasses.fields(Feature)}
-    features = [
-        Feature(**{k: v for k, v in f.items() if k in _feature_keys})
-        for f in data.get("features", [])
-    ]
+    features = [_feature_from_dict(f) for f in data.get("features", [])]
     if not features:
         return 0, 0, 0, 0
-
-    from duplo.saver import load_examples
 
     examples = load_examples()
 
@@ -1587,10 +1544,7 @@ def _subsequent_run() -> None:
 
     # Generate plan for current phase.
     source_url = data.get("source_url", "")
-    _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
-    features = [
-        Feature(**{k: v for k, v in f.items() if k in _fkeys}) for f in data.get("features", [])
-    ]
+    features = [_feature_from_dict(f) for f in data.get("features", [])]
     prefs_data = data.get("preferences", {})
     preferences = BuildPreferences(
         platform=prefs_data.get("platform", ""),
@@ -1651,8 +1605,7 @@ def _partition_features(
     implemented: list[Feature] = []
     remaining: list[Feature] = []
     for f in data.get("features", []):
-        _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
-        feat = Feature(**{k: v for k, v in f.items() if k in _fkeys})
+        feat = _feature_from_dict(f)
         if f.get("status", "pending") == "implemented":
             implemented.append(feat)
         else:
@@ -2005,11 +1958,7 @@ def _complete_phase(
             data = json.loads(duplo_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             data = {}
-        _fkeys = {fld.name for fld in dataclasses.fields(Feature)}
-        features = [
-            Feature(**{k: v for k, v in f.items() if k in _fkeys})
-            for f in data.get("features", [])
-        ]
+        features = [_feature_from_dict(f) for f in data.get("features", [])]
         if features:
             unannotated = [t for t in tasks if not t.features and not t.fixes]
             if unannotated:

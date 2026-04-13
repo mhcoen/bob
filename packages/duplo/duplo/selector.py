@@ -129,7 +129,8 @@ def select_issues(
       - "1,3,5"         – comma-separated numbers
       - "1-4,7"         – ranges and individual numbers mixed
 
-    Returns the list of selected issue dicts.
+    Returns the list of selected issue dicts.  Blank input selects all
+    open issues (matching the ``[all]`` prompt default).
     """
     open_issues = [iss for iss in issues if iss.get("status", "open") == "open"]
     if not open_issues:

@@ -331,6 +331,15 @@ def _build_prompt(
     return "\n\n".join(sections)
 
 
+def _ensure_list(value: object) -> list[str]:
+    """Coerce *value* to a list of strings."""
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        return [value]
+    return []
+
+
 def _parse_result(raw: str) -> InvestigationResult:
     """Parse the LLM's JSON response into an InvestigationResult."""
     text = strip_fences(raw.strip())
@@ -374,7 +383,7 @@ def _parse_result(raw: str) -> InvestigationResult:
                 expected=str(item.get("expected", "")),
                 severity=str(item.get("severity", "major")),
                 area=str(item.get("area", "")),
-                evidence_sources=item.get("evidence_sources", []),
+                evidence_sources=_ensure_list(item.get("evidence_sources", [])),
             )
         )
 

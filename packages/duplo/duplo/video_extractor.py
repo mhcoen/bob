@@ -74,18 +74,30 @@ def extract_scene_frames(
     # If we got too few frames, retry with a lower threshold.
     if len(frames) < min_frames and threshold > 0.1:
         lower = max(0.1, threshold - 0.15)
-        # Save original frame paths before retry (which deletes them from disk).
+        # Rename original frames so the retry cleanup does not delete them.
         original_frames = list(frames)
+        preserved: list[tuple[Path, Path]] = []
+        for fp in original_frames:
+            backup = fp.with_suffix(".orig.png")
+            try:
+                fp.rename(backup)
+                preserved.append((backup, fp))
+            except OSError:
+                pass
         retry = _run_ffmpeg_scene_detect(video, output_dir, stem, lower, max_frames)
         if isinstance(retry, list) and len(retry) > len(original_frames):
+            # Retry improved — remove preserved originals.
+            for backup, _ in preserved:
+                backup.unlink(missing_ok=True)
             frames = retry
         else:
-            # Retry didn't improve; original files were deleted by retry's
-            # cleanup, so use whatever retry produced (or re-run original).
-            if isinstance(retry, list):
-                frames = retry
-            else:
-                frames = []
+            # Retry didn't improve — restore originals.
+            for backup, orig in preserved:
+                try:
+                    backup.rename(orig)
+                except OSError:
+                    pass
+            frames = original_frames
 
     # If scene detection found nothing (smooth video with no hard cuts),
     # fall back to uniform time-based sampling.

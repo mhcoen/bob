@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from duplo.claude_cli import query_with_images
+from duplo.claude_cli import ClaudeCliError, query_with_images
 from duplo.parsing import strip_fences
 
 _SYSTEM = """\
@@ -73,7 +73,10 @@ def _filter_batch(frames: list[Path]) -> list[FilterDecision]:
         "Classify each frame above. Return ONLY the JSON object "
         "with a decisions array as described."
     )
-    raw = query_with_images(prompt, frames, system=_SYSTEM)
+    try:
+        raw = query_with_images(prompt, frames, system=_SYSTEM)
+    except ClaudeCliError:
+        return [FilterDecision(path=f, keep=True, reason="cli error") for f in frames]
     return _parse_decisions(raw, frames)
 
 

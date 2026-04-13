@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from duplo.claude_cli import query_with_images
+from duplo.claude_cli import ClaudeCliError, query_with_images
 from duplo.parsing import strip_fences
 
 _SYSTEM = """\
@@ -69,7 +69,10 @@ def _describe_batch(frames: list[Path]) -> list[FrameDescription]:
         "Return ONLY the JSON object with a descriptions array "
         "as described."
     )
-    raw = query_with_images(prompt, frames, system=_SYSTEM)
+    try:
+        raw = query_with_images(prompt, frames, system=_SYSTEM)
+    except ClaudeCliError:
+        return [FrameDescription(path=f, state="unknown", detail="cli error") for f in frames]
     return _parse_descriptions(raw, frames)
 
 
