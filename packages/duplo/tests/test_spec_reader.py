@@ -1837,3 +1837,56 @@ class TestParseDesignBlock:
         assert block.auto_generated == "auto"
         # Text after the block is neither user_prose nor auto_generated.
         assert "After" not in block.user_prose
+
+    def test_begin_only_marker_treated_as_no_block(self):
+        body = "User prose.\n<!-- BEGIN AUTO-GENERATED -->\norphaned content"
+        block = _parse_design_block(body)
+        # No END marker → regex doesn't match → all to user_prose.
+        assert block.auto_generated == ""
+        assert "User prose." in block.user_prose
+        assert "orphaned content" in block.user_prose
+
+    def test_end_only_marker_treated_as_no_block(self):
+        body = "User prose.\norphaned content\n<!-- END AUTO-GENERATED -->"
+        block = _parse_design_block(body)
+        # No BEGIN marker → regex doesn't match → all to user_prose.
+        assert block.auto_generated == ""
+        assert "User prose." in block.user_prose
+        assert "orphaned content" in block.user_prose
+
+    def test_nested_markers_first_match_wins(self):
+        body = (
+            "Outer prose.\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "first auto\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "nested auto\n"
+            "<!-- END AUTO-GENERATED -->\n"
+            "between\n"
+            "<!-- END AUTO-GENERATED -->"
+        )
+        block = _parse_design_block(body)
+        # _AUTOGEN_RE is non-greedy (.*?) so it matches the first
+        # BEGIN to the first END deterministically.
+        assert block.user_prose == "Outer prose."
+        assert "first auto" in block.auto_generated
+        assert "nested auto" in block.auto_generated
+        # The first END closes the match; content after is excluded.
+        assert "between" not in block.auto_generated
+
+    def test_repeated_markers_first_block_wins(self):
+        body = (
+            "Prose before.\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "block one\n"
+            "<!-- END AUTO-GENERATED -->\n"
+            "Middle text.\n"
+            "<!-- BEGIN AUTO-GENERATED -->\n"
+            "block two\n"
+            "<!-- END AUTO-GENERATED -->"
+        )
+        block = _parse_design_block(body)
+        # .search() returns the first match — second block is ignored.
+        assert block.user_prose == "Prose before."
+        assert block.auto_generated == "block one"
+        assert "block two" not in block.auto_generated
