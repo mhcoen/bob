@@ -49,7 +49,7 @@ def needs_migration(target_dir: Path) -> bool:
         return False
     if not spec.exists():
         return True
-    spec_text = spec.read_text()
+    spec_text = spec.read_text(encoding="utf-8-sig")
     # Either signal is sufficient to declare the spec new-format.
     if "How the pieces fit together:" in spec_text:
         return False

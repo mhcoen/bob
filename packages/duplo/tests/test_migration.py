@@ -269,6 +269,41 @@ def test_corrupted_duplo_json_with_new_spec(tmp_path: Path) -> None:
     assert needs_migration(tmp_path) is False
 
 
+def test_bom_prefixed_spec_with_marker(tmp_path: Path) -> None:
+    """UTF-8 BOM-prefixed SPEC.md with marker string → no migration.
+
+    Some editors (notably Windows Notepad) write a UTF-8 BOM
+    (``\\xef\\xbb\\xbf``) at the start of the file.  The read must
+    strip it so the marker substring match still succeeds.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    bom = b"\xef\xbb\xbf"
+    content = bom + "How the pieces fit together:\n## Purpose\nStuff\n".encode()
+    (tmp_path / "SPEC.md").write_bytes(content)
+    assert needs_migration(tmp_path) is False
+
+
+def test_bom_prefixed_spec_with_sources(tmp_path: Path) -> None:
+    """UTF-8 BOM-prefixed SPEC.md with ## Sources heading → no migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    bom = b"\xef\xbb\xbf"
+    content = bom + "# MyApp\n## Sources\n- https://example.com\n".encode()
+    (tmp_path / "SPEC.md").write_bytes(content)
+    assert needs_migration(tmp_path) is False
+
+
+def test_bom_prefixed_old_format_spec(tmp_path: Path) -> None:
+    """UTF-8 BOM-prefixed old-format SPEC.md (no signals) → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    bom = b"\xef\xbb\xbf"
+    content = bom + "# Old spec\nSome content\n".encode()
+    (tmp_path / "SPEC.md").write_bytes(content)
+    assert needs_migration(tmp_path) is True
+
+
 class TestCheckMigration:
     """Tests for _check_migration()."""
 
