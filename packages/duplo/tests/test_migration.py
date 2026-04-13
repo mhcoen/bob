@@ -73,3 +73,33 @@ def test_both_signals_present(tmp_path: Path) -> None:
     (tmp_path / ".duplo" / "duplo.json").write_text("{}")
     (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n## Sources\n")
     assert needs_migration(tmp_path) is False
+
+
+def test_hand_authored_spec_with_sources(tmp_path: Path) -> None:
+    """Minimal hand-authored SPEC.md with ## Sources but no template comment.
+
+    Phase 2 instructs users to write SPEC.md by hand.  A user who writes
+    a valid spec without copying the template top-matter comment should
+    not be stuck in migration.  The ## Sources heading is sufficient.
+    """
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    spec = "# MyApp\n\n## Purpose\nA calculator app.\n\n## Sources\n- https://example.com\n"
+    (tmp_path / "SPEC.md").write_text(spec)
+    assert needs_migration(tmp_path) is False
+
+
+def test_empty_spec(tmp_path: Path) -> None:
+    """Empty SPEC.md has neither signal → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("")
+    assert needs_migration(tmp_path) is True
+
+
+def test_sources_h1_heading(tmp_path: Path) -> None:
+    """# Sources (H1) is not ## Sources → needs migration."""
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+    (tmp_path / "SPEC.md").write_text("# Sources\nstuff\n")
+    assert needs_migration(tmp_path) is True
