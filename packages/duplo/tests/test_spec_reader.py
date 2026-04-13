@@ -1214,3 +1214,34 @@ class TestKnownSections:
 
     def test_sources_in_known_sections(self):
         assert "sources" in _KNOWN_SECTIONS
+
+    def test_notes_in_known_sections(self):
+        assert "notes" in _KNOWN_SECTIONS
+
+
+class TestSpecNotes:
+    """``spec.notes`` stores comment-stripped body from ``## Notes``."""
+
+    def test_notes_stored(self):
+        text = "## Notes\n\nSome project notes here.\n"
+        spec = _parse_spec(text)
+        assert spec.notes == "Some project notes here."
+
+    def test_notes_comments_stripped(self):
+        text = "## Notes\n\nVisible text.\n<!-- hidden -->\nMore visible.\n"
+        spec = _parse_spec(text)
+        assert "hidden" not in spec.notes
+        assert "Visible text." in spec.notes
+        assert "More visible." in spec.notes
+
+    def test_notes_empty_when_absent(self):
+        text = "## Purpose\n\nA calculator.\n"
+        spec = _parse_spec(text)
+        assert spec.notes == ""
+
+    def test_notes_multiline_comment_stripped(self):
+        text = "## Notes\n\nBefore comment.\n<!--\nMulti-line\ncomment\n-->\nAfter comment.\n"
+        spec = _parse_spec(text)
+        assert "Multi-line" not in spec.notes
+        assert "Before comment." in spec.notes
+        assert "After comment." in spec.notes

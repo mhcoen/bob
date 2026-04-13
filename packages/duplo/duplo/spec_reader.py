@@ -38,6 +38,7 @@ _KNOWN_SECTIONS = {
     "design",
     "references",
     "sources",
+    "notes",
 }
 
 _HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
@@ -277,6 +278,7 @@ class ProductSpec:
     architecture: str = ""
     design: str = ""
     references: str = ""
+    notes: str = ""
     fill_in_purpose: bool = False
     fill_in_architecture: bool = False
     fill_in_design: bool = False
@@ -325,6 +327,8 @@ def _parse_spec(text: str) -> ProductSpec:
             spec.design = body.strip()
         elif key == "references":
             spec.references = body.strip()
+        elif key == "notes":
+            spec.notes = _strip_comments(body).strip()
 
     # fill_in_design: true only when design body has <FILL IN> marker
     # AND no reference entries have visual-target role.
