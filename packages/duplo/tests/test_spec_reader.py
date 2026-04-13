@@ -1929,3 +1929,201 @@ class TestParseSpecSourcesIntegration:
     def test_sources_default_on_new_spec(self):
         spec = ProductSpec()
         assert spec.sources == []
+
+
+class TestFullyFilledSpec:
+    """Parse a SPEC.md that exercises every section and field.
+
+    Verifies that unchanged-type fields (purpose, architecture, scope,
+    behavior) still populate correctly alongside the new structured
+    fields (design as DesignBlock, references as list[ReferenceEntry],
+    sources as list[SourceEntry], notes, fill_in_* flags).
+    """
+
+    FULL_SPEC = (
+        "# CalcApp\n\n"
+        "## Purpose\n"
+        "A macOS text calculator inspired by numi.app.\n\n"
+        "## Scope\n"
+        "- include: arithmetic, unit conversion\n"
+        "- exclude: JavaScript plugin API\n\n"
+        "## Behavior\n"
+        "- `2+3` → `5`\n"
+        "- `10 km in miles` should produce `6.21 mi`\n\n"
+        "## Architecture\n"
+        "Swift, SwiftUI, SPM, macOS 14+. No external dependencies.\n\n"
+        "## Design\n"
+        "Dark theme, monospace font.\n\n"
+        "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+        "colors: #2b2b2b, #a3be8c\n"
+        "<!-- END AUTO-GENERATED -->\n\n"
+        "## References\n"
+        "- ref/demo.mp4\n"
+        "  role: visual-target, behavioral-target\n"
+        "  notes: product walkthrough\n"
+        "- ref/api-docs.pdf\n"
+        "  role: docs\n\n"
+        "## Sources\n"
+        "- https://numi.app\n"
+        "  role: product-reference\n"
+        "  scrape: deep\n"
+        "  notes: main product site\n"
+        "- https://docs.numi.app\n"
+        "  role: docs\n"
+        "  scrape: shallow\n\n"
+        "## Notes\n"
+        "Focus on core arithmetic first.\n"
+    )
+
+    def test_raw_contains_full_text(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.raw == self.FULL_SPEC
+
+    # --- Unchanged-type fields: purpose, architecture, scope, behavior ---
+
+    def test_purpose_populated(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "macOS text calculator" in spec.purpose
+
+    def test_architecture_populated(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "SwiftUI" in spec.architecture
+        assert "SPM" in spec.architecture
+
+    def test_scope_include(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "arithmetic" in spec.scope_include
+        assert "unit conversion" in spec.scope_include
+
+    def test_scope_exclude(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "JavaScript plugin API" in spec.scope_exclude
+
+    def test_scope_raw(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "include: arithmetic" in spec.scope
+
+    def test_behavior_contracts(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert len(spec.behavior_contracts) == 2
+        assert spec.behavior_contracts[0] == BehaviorContract(input="2+3", expected="5")
+        assert spec.behavior_contracts[1] == BehaviorContract(
+            input="10 km in miles", expected="6.21 mi"
+        )
+
+    def test_behavior_raw(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "`2+3`" in spec.behavior
+
+    # --- New structured fields ---
+
+    def test_design_is_design_block(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert isinstance(spec.design, DesignBlock)
+
+    def test_design_user_prose(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "Dark theme" in spec.design.user_prose
+        assert "monospace font" in spec.design.user_prose
+
+    def test_design_auto_generated(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "#2b2b2b" in spec.design.auto_generated
+        assert "#a3be8c" in spec.design.auto_generated
+
+    def test_design_no_fill_in_marker(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.design.has_fill_in_marker is False
+
+    def test_references_is_list(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert isinstance(spec.references, list)
+        assert len(spec.references) == 2
+
+    def test_references_first_entry(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        ref = spec.references[0]
+        assert isinstance(ref, ReferenceEntry)
+        assert ref.path == Path("ref/demo.mp4")
+        assert "visual-target" in ref.roles
+        assert "behavioral-target" in ref.roles
+        assert ref.notes == "product walkthrough"
+
+    def test_references_second_entry(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        ref = spec.references[1]
+        assert ref.path == Path("ref/api-docs.pdf")
+        assert ref.roles == ["docs"]
+
+    def test_sources_populated(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert len(spec.sources) == 2
+        assert spec.sources[0].url == "https://numi.app"
+        assert spec.sources[0].role == "product-reference"
+        assert spec.sources[0].scrape == "deep"
+        assert spec.sources[0].notes == "main product site"
+
+    def test_sources_second_entry(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.sources[1].url == "https://docs.numi.app"
+        assert spec.sources[1].role == "docs"
+        assert spec.sources[1].scrape == "shallow"
+
+    def test_notes_populated(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert "Focus on core arithmetic first" in spec.notes
+
+    def test_fill_in_purpose_false(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.fill_in_purpose is False
+
+    def test_fill_in_architecture_false(self):
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.fill_in_architecture is False
+
+    def test_fill_in_design_false_with_visual_target(self):
+        """fill_in_design is false because design has no <FILL IN> marker."""
+        spec = _parse_spec(self.FULL_SPEC)
+        assert spec.fill_in_design is False
+
+
+class TestFullyFilledSpecWithFillInMarkers:
+    """Variant with <FILL IN> markers to verify fill_in_* flags go True."""
+
+    SPEC_WITH_MARKERS = (
+        "## Purpose\n"
+        "<FILL IN: describe purpose>\n\n"
+        "## Architecture\n"
+        "<FILL IN: describe architecture>\n\n"
+        "## Design\n"
+        "<FILL IN: describe design>\n\n"
+        "## References\n"
+        "- ref/doc.pdf\n"
+        "  role: docs\n"
+    )
+
+    def test_fill_in_purpose_true(self):
+        spec = _parse_spec(self.SPEC_WITH_MARKERS)
+        assert spec.fill_in_purpose is True
+
+    def test_fill_in_architecture_true(self):
+        spec = _parse_spec(self.SPEC_WITH_MARKERS)
+        assert spec.fill_in_architecture is True
+
+    def test_fill_in_design_true_no_visual_target(self):
+        """No visual-target in references, so fill_in_design is True."""
+        spec = _parse_spec(self.SPEC_WITH_MARKERS)
+        assert spec.fill_in_design is True
+
+    def test_fill_in_design_false_with_visual_target(self):
+        """Adding a visual-target reference suppresses fill_in_design."""
+        text = (
+            "## Design\n"
+            "<FILL IN: describe design>\n\n"
+            "## References\n"
+            "- ref/demo.mp4\n"
+            "  role: visual-target\n"
+        )
+        spec = _parse_spec(text)
+        assert spec.design.has_fill_in_marker is True
+        assert spec.fill_in_design is False
