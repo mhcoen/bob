@@ -710,7 +710,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Case: `.duplo/duplo.json` is corrupted JSON. `needs_migration` should still return True (the presence of the file, not its contents, is what matters for migration detection). The check must NOT try to parse it.
   - [x] Case: `SPEC.md` is zero bytes. Same classification as "SPEC.md absent" — neither signal matches, so migration needed.
   - [x] Case: `SPEC.md` contains only the marker string inside an HTML comment (`<!-- How the pieces fit together: ... -->`). The substring match still hits; classifies as new-format. This is intentional — the marker exists in the template as part of a comment, and that's where it will appear in real specs. No special comment-handling needed.
-  - [ ] Case: `SPEC.md` is a BOM-prefixed UTF-8 file. The read must handle BOM correctly (use `Path.read_text(encoding="utf-8")` which strips BOM automatically, or equivalent). Test with a fixture that has a UTF-8 BOM and a new-format signal.
+  - [x] Case: `SPEC.md` is a BOM-prefixed UTF-8 file. The read must handle BOM correctly (use `Path.read_text(encoding="utf-8")` which strips BOM automatically, or equivalent). Test with a fixture that has a UTF-8 BOM and a new-format signal.
   - [ ] Case: `SPEC.md` contains `## Sources` inside a fenced code block (e.g. an example in the top-matter comment). The multiline regex will match this as a false positive — document this as acceptable behavior (better to let through a near-new-format file than to force-migrate it) but add a test pinning the current behavior so any future fix is intentional.
 
 - [ ] Update project documentation to reflect Phase 2 shipping
