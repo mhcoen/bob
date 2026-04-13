@@ -13,12 +13,6 @@ over-abstraction.
 
 ## Bugs
 
-
-
-
-
-
-
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)

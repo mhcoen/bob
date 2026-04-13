@@ -7,8 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
-STAGE_RE = re.compile(r"^##\s+Stage\s+\d+", re.IGNORECASE)
-BUGS_RE = re.compile(r"^##\s+Bugs\s*$", re.IGNORECASE)
+# Section headers: any heading level (# or more) whose title contains
+# "Stage N" or "Phase N" anywhere in the line. The number is captured.
+STAGE_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
+# Bugs header: any heading level followed by "Bugs" as the title.
+BUGS_RE = re.compile(r"^#+\s+Bugs\s*$", re.IGNORECASE)
+# Pattern for extracting a stage/phase number from a stage string
+# (the header text with leading # and whitespace stripped).
+_STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 _USER_TAG = "[USER]"
 _BATCH_TAG = "[BATCH]"
 _AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
@@ -50,8 +56,14 @@ def parse_description(path: str | Path) -> str:
 def parse(path: str | Path) -> list[Task]:
     """Read a markdown file and return a tree of Task objects.
 
-    Tasks under ``## Stage N: ...`` headers are tagged with the
-    stage name.  Tasks before any stage header have stage ``""``.
+    Section headers are any markdown heading (``#``, ``##``, ...)
+    whose title contains ``Stage N`` or ``Phase N`` anywhere in
+    the line.  Tasks under such a header are tagged with the full
+    header text (minus leading ``#`` and whitespace).  Tasks
+    before any section header have stage ``""``.
+
+    The ``## Bugs`` header (any heading level) is treated as a
+    special section with stage ``"Bugs"``.
     """
     lines = Path(path).read_text().splitlines()
     root_tasks: list[Task] = []
@@ -59,13 +71,14 @@ def parse(path: str | Path) -> list[Task]:
     current_stage = ""
 
     for i, line in enumerate(lines):
-        # Detect stage headers
+        # Detect section headers (any heading level containing
+        # "Stage N" or "Phase N")
         if STAGE_RE.match(line):
             current_stage = line.lstrip("#").strip()
             stack.clear()
             continue
 
-        # Detect ## Bugs header
+        # Detect Bugs header (any heading level)
         if BUGS_RE.match(line):
             current_stage = "Bugs"
             stack.clear()
@@ -555,7 +568,9 @@ def purge_completed_bugs(path: str | Path) -> None:
     for i, line in enumerate(lines):
         if BUGS_RE.match(line.strip()):
             bugs_start = i
-        elif bugs_start is not None and line.strip().startswith("## "):
+        elif bugs_start is not None and (
+            STAGE_RE.match(line) or BUGS_RE.match(line.strip())
+        ):
             bugs_end = i
             break
 
@@ -598,18 +613,19 @@ def _auto_check_parents(path: Path) -> None:
 def task_label(tasks: list[Task], target: Task) -> str:
     """Return a label like '6.3' or '6.3.2' for a task's position.
 
-    The first number is the stage number (extracted from the
-    ``## Stage N:`` header).  Tasks without a stage header use
-    a global positional index.  Subtask numbers are relative to
+    The first number is the stage/phase number extracted from
+    the section header (any heading level containing ``Stage N``
+    or ``Phase N``).  Tasks without a section header use a
+    global positional index.  Subtask numbers are relative to
     their parent.
     """
-    # Extract stage number from the stage string (e.g. "Stage 6: ..." -> "6")
+    # Extract stage/phase number from the stage string.
+    # Matches "Stage N" or "Phase N" anywhere in the header text.
     stage_num = ""
-    if target.stage and target.stage.startswith("Stage "):
-        rest = target.stage[len("Stage ") :]
-        num_part = rest.split(":")[0].split()[0]
-        if num_part.isdigit():
-            stage_num = num_part
+    if target.stage:
+        m = _STAGE_NUM_RE.search(target.stage)
+        if m:
+            stage_num = m.group(1)
 
     # Filter root tasks to only those in the same stage
     if stage_num:

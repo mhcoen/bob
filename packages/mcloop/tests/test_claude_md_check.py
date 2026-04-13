@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcloop.claude_md_check import (
+    SyncResult,
     _is_source_file,
     _is_test_file,
+    _parse_llm_response,
     auto_update_claude_md,
     check_claude_md_freshness,
 )
@@ -208,93 +210,99 @@ class TestCheckClaudeMdFreshness:
 class TestAutoUpdateClaudeMdTypeError:
     """TypeError is caught when API response contains None in the chain."""
 
-    def test_none_message_returns_false(self, tmp_path):
+    def test_none_message_returns_transient_failed(self, tmp_path):
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Project\n")
 
-        config = {
-            "base_url": "https://api.example.com/v1",
-            "model": "test-model",
-            "api_key": "sk-test",
-        }
-        api_response = json.dumps({"choices": [{"message": None}]}).encode()
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = api_response
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
         with (
-            patch("mcloop.claude_md_check._load_update_config", return_value=config),
+            patch("mcloop.claude_md_check._load_update_config", return_value={
+                "base_url": "https://api.example.com/v1",
+                "model": "test-model",
+                "api_key": "sk-test",
+            }),
             patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
-            patch(
-                "mcloop.claude_md_check.urllib.request.urlopen",
-                return_value=mock_resp,
-            ),
+            patch("mcloop.claude_md_check._call_deepseek", return_value=None),
+            patch("mcloop.claude_md_check._call_sonnet_fallback", return_value=None),
+            patch("mcloop.claude_md_check._DEEPSEEK_RETRY_SLEEP", 0),
         ):
-            assert auto_update_claude_md(tmp_path) is False
+            assert auto_update_claude_md(tmp_path) is SyncResult.TRANSIENT_FAILED
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"choices": []},
-        {"choices": "not a list"},
-        {"choices": [None]},
-        {"choices": [{"message": {"content": 42}}]},
-        {"choices": [[]]},
-        {"no_choices": True},
-        "not a dict",
-        {"choices": [{"message": 123}]},
-        {"choices": None},
-        {"choices": [{"message": {"content": None}}]},
-        {"choices": [{"no_message": True}]},
-        {"choices": [{"message": {"no_content": True}}]},
-        None,
-        42,
-        [1, 2, 3],
-        {"choices": {"key": "val"}},
-    ],
-    ids=[
-        "empty_choices",
-        "choices_not_list",
-        "first_choice_none",
-        "content_not_string",
-        "first_choice_not_dict",
-        "missing_choices_key",
-        "body_not_dict",
-        "message_not_dict",
-        "choices_null",
-        "content_null",
-        "missing_message_key",
-        "missing_content_key",
-        "body_null",
-        "body_integer",
-        "body_list",
-        "choices_dict",
-    ],
-)
-def test_auto_update_malformed_response_shape(tmp_path, body):
-    """Malformed response shapes return False."""
+def test_auto_update_both_providers_fail_returns_transient(tmp_path):
+    """When both DeepSeek and Sonnet fail, returns TRANSIENT_FAILED."""
     claude_md = tmp_path / "CLAUDE.md"
     claude_md.write_text("# Project\n")
 
-    config = {
-        "base_url": "https://api.example.com/v1",
-        "model": "test-model",
-        "api_key": "sk-test",
-    }
-    api_response = json.dumps(body).encode()
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = api_response
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
     with (
-        patch("mcloop.claude_md_check._load_update_config", return_value=config),
+        patch("mcloop.claude_md_check._load_update_config", return_value={
+            "base_url": "https://api.example.com/v1",
+            "model": "test-model",
+            "api_key": "sk-test",
+        }),
         patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
-        patch(
-            "mcloop.claude_md_check.urllib.request.urlopen",
-            return_value=mock_resp,
-        ),
+        patch("mcloop.claude_md_check._call_deepseek", return_value=None),
+        patch("mcloop.claude_md_check._call_sonnet_fallback", return_value=None),
+        patch("mcloop.claude_md_check._DEEPSEEK_RETRY_SLEEP", 0),
     ):
-        assert auto_update_claude_md(tmp_path) is False
+        assert auto_update_claude_md(tmp_path) is SyncResult.TRANSIENT_FAILED
+
+
+class TestParseLlmResponse:
+    """Pure-function tests for _parse_llm_response."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"choices": []},
+            {"choices": "not a list"},
+            {"choices": [None]},
+            {"choices": [{"message": {"content": 42}}]},
+            {"choices": [[]]},
+            {"no_choices": True},
+            "not a dict",
+            {"choices": [{"message": 123}]},
+            {"choices": None},
+            {"choices": [{"message": {"content": None}}]},
+            {"choices": [{"no_message": True}]},
+            {"choices": [{"message": {"no_content": True}}]},
+            None,
+            42,
+            [1, 2, 3],
+            {"choices": {"key": "val"}},
+        ],
+        ids=[
+            "empty_choices",
+            "choices_not_list",
+            "first_choice_none",
+            "content_not_string",
+            "first_choice_not_dict",
+            "missing_choices_key",
+            "body_not_dict",
+            "message_not_dict",
+            "choices_null",
+            "content_null",
+            "missing_message_key",
+            "missing_content_key",
+            "body_null",
+            "body_integer",
+            "body_list",
+            "choices_dict",
+        ],
+    )
+    def test_malformed_response_returns_none(self, body):
+        assert _parse_llm_response(body) is None
+
+    def test_valid_response_returns_content(self):
+        body = {"choices": [{"message": {"content": "x" * 200}}]}
+        result = _parse_llm_response(body)
+        assert result == "x" * 200
+
+    def test_short_content_returns_none(self):
+        body = {"choices": [{"message": {"content": "short"}}]}
+        assert _parse_llm_response(body) is None
+
+    def test_strips_markdown_fences(self):
+        body = {"choices": [{"message": {"content": "```markdown\n" + "x" * 200 + "\n```"}}]}
+        result = _parse_llm_response(body)
+        assert result is not None
+        assert not result.startswith("```")

@@ -7821,8 +7821,8 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
 # --- CLAUDE.md freshness gate tests ---
 
 
-def test_run_loop_claude_md_freshness_blocks_commit(tmp_path):
-    """run_loop treats CLAUDE.md freshness failure as check failure."""
+def test_run_loop_commits_then_defers_claude_md_sync(tmp_path):
+    """run_loop commits code first, then calls handle_sync for CLAUDE.md."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("- [ ] Do something\n")
     (tmp_path / ".git").mkdir()
@@ -7843,11 +7843,12 @@ def test_run_loop_claude_md_freshness_blocks_commit(tmp_path):
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
         patch("mcloop.main._worktree_status", return_value=""),
-        patch("mcloop.main.check_claude_md_freshness", return_value=False),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
         patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
-        patch("mcloop.main._commit") as mock_commit,
+        patch("mcloop.main._commit", return_value="abc123") as mock_commit,
+        patch("mcloop.main.handle_sync") as mock_sync,
         patch("mcloop.main._reinject_wrappers"),
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
@@ -7856,7 +7857,8 @@ def test_run_loop_claude_md_freshness_blocks_commit(tmp_path):
     ):
         run_loop(plan, no_audit=True)
 
-    mock_commit.assert_not_called()
+    mock_commit.assert_called_once()
+    mock_sync.assert_called_once()
 
 
 def test_run_loop_claude_md_freshness_passes(tmp_path):
@@ -7906,8 +7908,8 @@ def test_run_loop_claude_md_freshness_passes(tmp_path):
     mock_commit.assert_called_once()
 
 
-def test_run_loop_claude_md_freshness_feeds_prior_errors(tmp_path, capsys):
-    """CLAUDE.md freshness failure message appears in output."""
+def test_run_loop_claude_md_sync_failure_does_not_block_commit(tmp_path):
+    """CLAUDE.md sync failure no longer blocks or retries the task commit."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("- [ ] Do something\n")
     (tmp_path / ".git").mkdir()
@@ -7928,11 +7930,12 @@ def test_run_loop_claude_md_freshness_feeds_prior_errors(tmp_path, capsys):
         patch("mcloop.main._has_meaningful_changes", return_value=True),
         patch("mcloop.main._changed_files", return_value=["mcloop/foo.py"]),
         patch("mcloop.main._worktree_status", return_value=""),
-        patch("mcloop.main.check_claude_md_freshness", return_value=False),
+        patch("mcloop.main.check_claude_md_freshness", return_value=True),
         patch("mcloop.main._check_user_input", return_value=None),
-        patch("mcloop.main.run_task", return_value=result) as mock_run,
+        patch("mcloop.main.run_task", return_value=result),
         patch("mcloop.main.run_checks", return_value=check_result),
-        patch("mcloop.main._commit"),
+        patch("mcloop.main._commit", return_value="def456") as mock_commit,
+        patch("mcloop.main.handle_sync") as mock_sync,
         patch("mcloop.main._reinject_wrappers"),
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
@@ -7941,13 +7944,9 @@ def test_run_loop_claude_md_freshness_feeds_prior_errors(tmp_path, capsys):
     ):
         run_loop(plan, no_audit=True)
 
-    captured = capsys.readouterr()
-    assert "CLAUDE.md not updated" in captured.out
-    # The prior_errors kwarg should contain the freshness message
-    # on the retry call (second call onwards)
-    for c in mock_run.call_args_list[1:]:
-        if "prior_errors" in c.kwargs:
-            assert "CLAUDE.md" in c.kwargs["prior_errors"]
+    # Commit happens regardless of sync outcome
+    mock_commit.assert_called_once()
+    mock_sync.assert_called_once()
 
 
 def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, capsys):

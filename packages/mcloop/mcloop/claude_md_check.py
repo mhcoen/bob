@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import os
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+
+class SyncResult(enum.Enum):
+    """Outcome of a CLAUDE.md auto-update attempt."""
+
+    OK = "ok"
+    NO_WORK = "no_work"
+    TRANSIENT_FAILED = "transient_failed"
+    PERMANENT_FAILED = "permanent_failed"
 
 _SOURCE_EXTENSIONS = frozenset(
     (
@@ -23,6 +35,8 @@ _SOURCE_EXTENSIONS = frozenset(
         ".sh",
     )
 )
+
+_DEEPSEEK_RETRY_SLEEP = 5  # seconds between DeepSeek retry attempts
 
 _UPDATE_SYSTEM_PROMPT = """\
 You maintain a project manifest file called CLAUDE.md. You will receive
@@ -126,32 +140,43 @@ def _load_update_config() -> dict | None:
     }
 
 
-def auto_update_claude_md(project_dir: Path) -> bool:
-    """Auto-update CLAUDE.md using a cheap LLM call.
+def _build_user_message(current_content: str, diff_text: str) -> str:
+    """Build the user message for CLAUDE.md auto-update."""
+    return f"## Current CLAUDE.md\n\n{current_content}\n\n## Git diff\n\n```diff\n{diff_text}\n```"
 
-    Reads the current CLAUDE.md and git diff, sends them to the
-    configured model, and writes the updated content back.
 
-    Returns True if CLAUDE.md was successfully updated, False otherwise.
+def _parse_llm_response(body: object) -> str | None:
+    """Extract and clean CLAUDE.md content from an LLM response body.
+
+    Returns the cleaned content string, or None if the response is
+    malformed, missing content, or too short (<100 chars).
     """
-    claude_md = project_dir / "CLAUDE.md"
-    if not claude_md.exists():
-        return False
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if not isinstance(choices, list) or len(choices) == 0:
+        return None
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, str):
+        return None
 
-    config = _load_update_config()
-    if not config or not config["base_url"] or not config["model"]:
-        return False
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
 
-    diff_text = _get_diff_text(project_dir)
-    if not diff_text:
-        return False
+    if not content or len(content) < 100:
+        return None
+    return content
 
-    current_content = claude_md.read_text()
 
-    user_msg = (
-        f"## Current CLAUDE.md\n\n{current_content}\n\n## Git diff\n\n```diff\n{diff_text}\n```"
-    )
-
+def _call_deepseek(config: dict, user_msg: str) -> str | None:
+    """Call DeepSeek via OpenRouter. Returns content or None on transient failure."""
     payload = {
         "model": config["model"],
         "messages": [
@@ -178,24 +203,40 @@ def auto_update_claude_md(project_dir: Path) -> bool:
         with urllib.request.urlopen(req, timeout=120) as resp:
             body = json.loads(resp.read().decode())
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        print(f"  CLAUDE.md auto-update failed: {exc}", flush=True)
-        return False
+        print(f"  CLAUDE.md DeepSeek call failed: {exc}", flush=True)
+        return None
 
-    choices = body.get("choices") if isinstance(body, dict) else None
-    if not isinstance(choices, list) or len(choices) == 0:
-        print("  CLAUDE.md auto-update: no content in response", flush=True)
-        return False
-    first = choices[0]
-    message = first.get("message") if isinstance(first, dict) else None
-    if not isinstance(message, dict):
-        print("  CLAUDE.md auto-update: no content in response", flush=True)
-        return False
-    content = message.get("content")
-    if not isinstance(content, str):
-        print("  CLAUDE.md auto-update: no content in response", flush=True)
-        return False
+    content = _parse_llm_response(body)
+    if content is None:
+        print("  CLAUDE.md DeepSeek: malformed or too-short response", flush=True)
+    return content
 
-    content = content.strip()
+
+def _call_sonnet_fallback(user_msg: str) -> str | None:
+    """Call Claude Sonnet via ``claude -p`` subprocess as fallback.
+
+    Strips ANTHROPIC_API_KEY from the environment so the subprocess
+    bills against the Max subscription, not API credits.
+    """
+    prompt = f"{_UPDATE_SYSTEM_PROMPT}\n\n{user_msg}"
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    try:
+        result = subprocess.run(
+            ["claude", "-p", "--model", "sonnet", prompt],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        print(f"  CLAUDE.md Sonnet fallback failed: {exc}", flush=True)
+        return None
+
+    if result.returncode != 0:
+        print(f"  CLAUDE.md Sonnet fallback exited {result.returncode}", flush=True)
+        return None
+
+    content = result.stdout.strip()
     if content.startswith("```"):
         lines = content.split("\n")
         lines = lines[1:]
@@ -204,9 +245,52 @@ def auto_update_claude_md(project_dir: Path) -> bool:
         content = "\n".join(lines)
 
     if not content or len(content) < 100:
-        print("  CLAUDE.md auto-update: response too short, skipping", flush=True)
-        return False
+        print("  CLAUDE.md Sonnet fallback: response too short", flush=True)
+        return None
+    return content
+
+
+def auto_update_claude_md(project_dir: Path) -> SyncResult:
+    """Auto-update CLAUDE.md using a cheap LLM call with fallback.
+
+    Tries DeepSeek via OpenRouter twice (with 5s sleep between attempts),
+    then falls back to Claude Sonnet via ``claude -p`` subprocess.
+
+    Returns a :class:`SyncResult` indicating the outcome.
+    """
+    claude_md = project_dir / "CLAUDE.md"
+    if not claude_md.exists():
+        return SyncResult.NO_WORK
+
+    config = _load_update_config()
+    if not config:
+        return SyncResult.NO_WORK
+    if not config["base_url"] or not config["model"]:
+        return SyncResult.PERMANENT_FAILED
+
+    diff_text = _get_diff_text(project_dir)
+    if not diff_text:
+        return SyncResult.NO_WORK
+
+    current_content = claude_md.read_text()
+    user_msg = _build_user_message(current_content, diff_text)
+
+    # DeepSeek attempt 1
+    content = _call_deepseek(config, user_msg)
+    if content is None:
+        # DeepSeek attempt 2 after brief pause
+        time.sleep(_DEEPSEEK_RETRY_SLEEP)
+        content = _call_deepseek(config, user_msg)
+
+    if content is None:
+        # Sonnet fallback
+        print("  CLAUDE.md: DeepSeek failed twice, trying Sonnet fallback...", flush=True)
+        content = _call_sonnet_fallback(user_msg)
+
+    if content is None:
+        print("  CLAUDE.md auto-update: all providers failed", flush=True)
+        return SyncResult.TRANSIENT_FAILED
 
     claude_md.write_text(content + "\n")
     print("  CLAUDE.md auto-updated by LLM", flush=True)
-    return True
+    return SyncResult.OK

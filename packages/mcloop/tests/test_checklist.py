@@ -14,6 +14,7 @@ from mcloop.checklist import (
     parse,
     parse_auto_task,
     parse_description,
+    purge_completed_bugs,
     task_label,
     user_task_instructions,
 )
@@ -1445,3 +1446,232 @@ def test_mark_failed_identical_same_stage_shifted(tmp_path):
     verify_tasks = [t for t in result if t.text == "Verify output"]
     assert verify_tasks[0].failed, "First 'Verify output' should be failed"
     assert not verify_tasks[1].failed, "Second 'Verify output' should not be failed"
+
+
+# ── section headers with H1/H2 + Stage/Phase ──
+
+
+def test_parse_h1_phase_header_recognized(tmp_path):
+    """An H1 header containing 'Phase N' is recognized as a section header."""
+    md = "# Duplo - Phase 1: Bootstrapping\n- [ ] First task\n- [ ] Second task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert len(tasks) == 2
+    assert tasks[0].stage == "Duplo - Phase 1: Bootstrapping"
+    assert tasks[1].stage == "Duplo - Phase 1: Bootstrapping"
+
+
+def test_parse_h1_stage_header_recognized(tmp_path):
+    """An H1 header containing 'Stage N' is recognized as a section header."""
+    md = "# Big Project Stage 3: Refactor\n- [ ] Task A\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].stage == "Big Project Stage 3: Refactor"
+
+
+def test_parse_h3_phase_header_recognized(tmp_path):
+    """An H3 header containing 'Phase N' is also recognized (# or more)."""
+    md = "### Subsection Phase 2: Details\n- [ ] A task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].stage == "Subsection Phase 2: Details"
+
+
+def test_parse_header_without_stage_or_phase_not_section(tmp_path):
+    """An H1 without 'Stage' or 'Phase' is NOT treated as a section header."""
+    md = "# My Project\n- [ ] Task A\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].stage == ""
+
+
+def test_parse_phase_without_number_not_section(tmp_path):
+    """An H1 mentioning 'Phase' but without a number is NOT a section header."""
+    md = "# Planning Phase Considerations\n- [ ] Task A\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].stage == ""
+
+
+def test_task_label_with_h1_phase(tmp_path):
+    """task_label extracts the phase number from an H1 'Phase N' header."""
+    md = "# Duplo - Phase 1: Bootstrapping\n- [ ] First task\n- [ ] Second task\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert task_label(tasks, tasks[0]) == "1.1"
+    assert task_label(tasks, tasks[1]) == "1.2"
+
+
+def test_task_label_phase_mid_title(tmp_path):
+    """Phase/Stage number extracted when the word appears mid-title, not at start."""
+    md = "## Frontend Stage 7: Polish\n- [ ] Tweak padding\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert task_label(tasks, tasks[0]) == "7.1"
+
+
+def test_parse_h1_bugs_header_recognized(tmp_path):
+    """An H1 'Bugs' header is recognized (any heading level)."""
+    md = "# Bugs\n- [ ] Fix crash\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert tasks[0].stage == "Bugs"
+
+
+def test_has_unchecked_bugs_with_h1_bugs_header(tmp_path):
+    """has_unchecked_bugs works with an H1 Bugs header."""
+    md = "# Bugs\n- [ ] Fix crash\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+
+    assert has_unchecked_bugs(tasks)
+
+
+# ── purge_completed_bugs ──
+
+
+def test_purge_completed_bugs_basic(tmp_path):
+    """purge_completed_bugs removes checked items from the Bugs section."""
+    md = (
+        "## Bugs\n"
+        "- [x] Fixed crash A\n"
+        "- [x] Fixed crash B\n"
+        "- [ ] Unfixed bug\n"
+        "## Stage 1: Core\n"
+        "- [ ] Feature\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    assert "Fixed crash A" not in result
+    assert "Fixed crash B" not in result
+    assert "Unfixed bug" in result
+    assert "Feature" in result
+    assert "## Stage 1: Core" in result
+
+
+def test_purge_completed_bugs_preserves_h1_phase_section(tmp_path):
+    """Purge must NOT leak into an H1 Phase section following ## Bugs.
+
+    This is the duplo bug: an H1 section header after ## Bugs was not
+    recognized as a section boundary, so completed tasks under the H1
+    were erased.
+    """
+    md = (
+        "## Bugs\n"
+        "- [x] Fixed bug\n"
+        "\n"
+        "# Duplo - Phase 1: Bootstrapping\n"
+        "\n"
+        "- [x] Project scaffolding\n"
+        "  - [x] Create duplo package\n"
+        "  - [x] Add CLI argument parser\n"
+        "- [x] Product scraping\n"
+        "  - [x] Fetch the product URL\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    # The Bugs section's checked item should be gone
+    assert "Fixed bug" not in result
+    # But the H1 section and all its checked tasks must survive
+    assert "# Duplo - Phase 1: Bootstrapping" in result
+    assert "Project scaffolding" in result
+    assert "Create duplo package" in result
+    assert "Add CLI argument parser" in result
+    assert "Product scraping" in result
+    assert "Fetch the product URL" in result
+
+
+def test_purge_completed_bugs_terminates_at_h2_stage(tmp_path):
+    """Purge still terminates at the next H2 Stage header (regression check)."""
+    md = (
+        "## Bugs\n"
+        "- [x] Done bug\n"
+        "## Stage 2: Build\n"
+        "- [x] Done feature\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    assert "Done bug" not in result
+    # Done feature is outside the Bugs section and must survive
+    assert "Done feature" in result
+    assert "## Stage 2: Build" in result
+
+
+def test_purge_completed_bugs_terminates_at_h1_stage(tmp_path):
+    """Purge terminates at an H1 Stage header, not just H2."""
+    md = (
+        "## Bugs\n"
+        "- [x] Done bug\n"
+        "# Project Stage 5: Release\n"
+        "- [x] Done feature\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    assert "Done bug" not in result
+    assert "Done feature" in result
+    assert "# Project Stage 5: Release" in result
+
+
+def test_purge_completed_bugs_no_bugs_section(tmp_path):
+    """purge_completed_bugs is a no-op when there is no ## Bugs section."""
+    md = "# Duplo - Phase 1: Bootstrapping\n- [x] Task A\n- [x] Task B\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    before = f.read_text()
+    purge_completed_bugs(f)
+    after = f.read_text()
+
+    assert before == after
+
+
+def test_purge_completed_bugs_keeps_prose_in_bugs_section(tmp_path):
+    """Non-checkbox lines (prose, blank lines) inside Bugs section are kept."""
+    md = (
+        "## Bugs\n"
+        "\n"
+        "These are notes about bugs.\n"
+        "- [x] Fixed one\n"
+        "- [ ] Open one\n"
+        "# Phase 1: Next\n"
+        "- [ ] Feature\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    assert "These are notes about bugs." in result
+    assert "Fixed one" not in result
+    assert "Open one" in result
+    assert "# Phase 1: Next" in result
+    assert "Feature" in result
+

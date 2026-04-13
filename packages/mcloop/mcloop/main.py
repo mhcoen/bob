@@ -40,9 +40,9 @@ from mcloop.checklist import (
 )
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_autofix, run_checks
 from mcloop.claude_md_check import (
-    auto_update_claude_md,
     check_claude_md_freshness,
 )
+from mcloop.claude_md_sync import handle_sync, reconcile_pending
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.errors import (
     _check_errors_json,
@@ -399,15 +399,6 @@ def _run_batch(
                 flush=True,
             )
             return "failed"
-        if not check_claude_md_freshness(changed_files, project_dir):
-            if auto_update_claude_md(project_dir):
-                changed_files = _changed_files(project_dir)
-            else:
-                print(
-                    formatting.error_msg("Batch: CLAUDE.md not updated alongside source changes"),
-                    flush=True,
-                )
-                return "failed"
         try:
             batch_hash = _commit(
                 project_dir,
@@ -421,6 +412,7 @@ def _run_batch(
             return "failed"
         if batch_hash and commit_hashes is not None:
             commit_hashes.append(batch_hash)
+        handle_sync(project_dir, batch_hash or "", task_label=first_label)
         if reviewer_config:
             _spawn_reviewer(project_dir)
         _maybe_auto_wrap(project_dir)
@@ -563,6 +555,8 @@ def run_loop(
             failure_detail="User quit at interrupt prompt",
         )
         return RunStatus("interrupted", detail="User quit at interrupt prompt")
+
+    reconcile_pending(project_dir)
 
     # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
@@ -1037,18 +1031,6 @@ def run_loop(
                             flush=True,
                         )
                         continue
-                    if not check_claude_md_freshness(changed_files, project_dir):
-                        if auto_update_claude_md(project_dir):
-                            changed_files = _changed_files(project_dir)
-                        else:
-                            last_error = "CLAUDE.md was not updated alongside source file changes"
-                            print(
-                                formatting.error_msg(
-                                    f"CLAUDE.md not updated (attempt {attempt}/{max_retries})"
-                                ),
-                                flush=True,
-                            )
-                            continue
                     try:
                         task_hash = _commit(project_dir, task.text)
                     except RuntimeError as exc:
@@ -1072,6 +1054,7 @@ def run_loop(
                         break
                     if task_hash:
                         commit_hashes.append(task_hash)
+                    handle_sync(project_dir, task_hash or "", task_label=label)
                     if reviewer_config:
                         _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
