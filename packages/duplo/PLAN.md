@@ -594,10 +594,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Orchestration: _fix_mode update
 
-- [ ] [BATCH] Update `_fix_mode` to use the new investigator with counter-examples and behavior contracts
-  - [ ] Per PIPELINE-design.md § `_fix_mode integration with new model`: "No structural change. The new investigator includes counter-examples and behavior contracts; existing `_fix_mode` tests should continue to pass with those added sources."
-  - [ ] Verify that `_fix_mode`'s call to `investigate(...)` passes the spec (or whatever context the investigator now needs to access counter-examples and behavior contracts via the formatters).
-  - [ ] Tests: existing `_fix_mode` tests still pass; new test that confirms counter-example references reach the investigator prompt when called from `_fix_mode`; new test for behavior contracts in `_fix_mode` context.
+- [x] [BATCH] Update `_fix_mode` to use the new investigator with counter-examples and behavior contracts
+  - [x] Per PIPELINE-design.md § `_fix_mode integration with new model`: "No structural change. The new investigator includes counter-examples and behavior contracts; existing `_fix_mode` tests should continue to pass with those added sources."
+  - [x] Verify that `_fix_mode`'s call to `investigate(...)` passes the spec (or whatever context the investigator now needs to access counter-examples and behavior contracts via the formatters).
+  - [x] Tests: existing `_fix_mode` tests still pass; new test that confirms counter-example references reach the investigator prompt when called from `_fix_mode`; new test for behavior contracts in `_fix_mode` context.
 
 ## Multi-source persistence in duplo.json
 
