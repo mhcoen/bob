@@ -200,6 +200,7 @@ import re
 import signal
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
@@ -297,6 +298,7 @@ from duplo.saver import (
     save_raw_content,
     save_reference_urls,
     save_roadmap,
+    save_sources,
     save_screenshot_feature_map,
     save_selections,
     store_accepted_frames,
@@ -484,6 +486,7 @@ class ScrapeResult:
     product_ref_raw_pages: dict = dataclasses.field(default_factory=dict)
     merged_doc_structures: DocStructures = dataclasses.field(default_factory=DocStructures)
     discovered_urls: list = dataclasses.field(default_factory=list)
+    source_records: list = dataclasses.field(default_factory=list)
 
 
 def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
@@ -542,16 +545,30 @@ def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
                 _collect_cross_origin_links(source.url, source_raw_pages)
             )
 
+        # Per-source persistence metadata.
+        content_hash = hashlib.sha256(scraped_text.encode("utf-8")).hexdigest()
+        result.source_records.append(
+            {
+                "url": source.url,
+                "last_scraped": datetime.now(timezone.utc).isoformat(),
+                "content_hash": content_hash,
+                "scrape_depth_used": source.scrape,
+            }
+        )
+
     return result
 
 
 def _persist_scrape_result(result: ScrapeResult) -> None:
     """Save accumulated scrape artifacts to .duplo/.
 
-    Persists code examples, page records, raw page HTML, and doc
-    structures from a :class:`ScrapeResult`.  Appends discovered
-    cross-origin URLs to SPEC.md with ``discovered: true``.
+    Persists code examples, page records, raw page HTML, doc
+    structures, and per-source scraping metadata from a
+    :class:`ScrapeResult`.  Appends discovered cross-origin URLs
+    to SPEC.md with ``discovered: true``.
     """
+    if result.source_records:
+        save_sources(result.source_records)
     if result.all_code_examples:
         save_examples(result.all_code_examples)
     if result.all_page_records:

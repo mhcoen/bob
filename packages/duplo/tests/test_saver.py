@@ -57,6 +57,7 @@ from duplo.saver import (
     save_raw_content,
     save_reference_urls,
     save_roadmap,
+    save_sources,
     save_screenshot_feature_map,
     save_selections,
     store_accepted_frames,
@@ -623,6 +624,79 @@ class TestSaveReferenceUrls:
 
     def test_file_ends_with_newline(self, tmp_path):
         save_reference_urls(self._RECORDS, target_dir=tmp_path)
+        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestSaveSources:
+    _SOURCES = [
+        {
+            "url": "https://example.com",
+            "last_scraped": "2026-04-14T10:00:00+00:00",
+            "content_hash": "abc123",
+            "scrape_depth_used": "deep",
+        },
+        {
+            "url": "https://docs.example.com",
+            "last_scraped": "2026-04-14T10:01:00+00:00",
+            "content_hash": "def456",
+            "scrape_depth_used": "shallow",
+        },
+    ]
+
+    def test_creates_file(self, tmp_path):
+        path = save_sources(self._SOURCES, target_dir=tmp_path)
+        assert path.exists()
+        assert path.name == "duplo.json"
+
+    def test_returns_correct_path(self, tmp_path):
+        path = save_sources(self._SOURCES, target_dir=tmp_path)
+        assert path == tmp_path / DUPLO_JSON
+
+    def test_sources_stored(self, tmp_path):
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["sources"]) == 2
+        assert data["sources"][0]["url"] == "https://example.com"
+        assert data["sources"][0]["last_scraped"] == "2026-04-14T10:00:00+00:00"
+        assert data["sources"][0]["content_hash"] == "abc123"
+        assert data["sources"][0]["scrape_depth_used"] == "deep"
+        assert data["sources"][1]["url"] == "https://docs.example.com"
+        assert data["sources"][1]["scrape_depth_used"] == "shallow"
+
+    def test_preserves_existing_fields(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["source_url"] == "https://example.com"
+        assert len(data["sources"]) == 2
+
+    def test_empty_sources(self, tmp_path):
+        save_sources([], target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["sources"] == []
+
+    def test_overwrites_existing_sources(self, tmp_path):
+        old = [
+            {
+                "url": "https://old.com",
+                "last_scraped": "2026-01-01T00:00:00+00:00",
+                "content_hash": "old",
+                "scrape_depth_used": "deep",
+            }
+        ]
+        save_sources(old, target_dir=tmp_path)
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["sources"]) == 2
+        assert data["sources"][0]["url"] == "https://example.com"
+
+    def test_file_ends_with_newline(self, tmp_path):
+        save_sources(self._SOURCES, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
 
 

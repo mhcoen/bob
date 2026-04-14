@@ -1150,6 +1150,32 @@ def save_reference_urls(
     return path
 
 
+def save_sources(
+    sources: list[dict],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Save per-source scraping metadata to *duplo.json*.
+
+    Writes ``{"sources": [...]}`` into *duplo.json*, preserving all
+    existing keys.  Each entry has ``url``, ``last_scraped``,
+    ``content_hash``, and ``scrape_depth_used`` fields.
+
+    Args:
+        sources: List of source metadata dicts from scraping.
+        target_dir: Directory containing ``duplo.json``.
+
+    Returns:
+        Path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    data["sources"] = sources
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 EXAMPLES_DIR = ".duplo/examples"
 RAW_PAGES_DIR = ".duplo/raw_pages"
 REFERENCES_DIR = ".duplo/references"

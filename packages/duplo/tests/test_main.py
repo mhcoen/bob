@@ -7723,6 +7723,66 @@ class TestScrapeDeclaredSources:
             result = _scrape_declared_sources(spec)
 
         assert "b_text" in result.combined_text
+        # Failed source does NOT produce a source_record.
+        assert len(result.source_records) == 1
+        assert result.source_records[0]["url"] == "https://b.com"
+
+    def test_source_records_populated(self):
+        """Each successfully scraped source produces a source_record."""
+        src_a = self._make_source("https://a.com", scrape="deep")
+        src_b = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_a, src_b])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return (f"text-{url}", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.source_records) == 2
+        rec_a = result.source_records[0]
+        assert rec_a["url"] == "https://a.com"
+        assert rec_a["scrape_depth_used"] == "deep"
+        assert "last_scraped" in rec_a
+        assert "content_hash" in rec_a
+        rec_b = result.source_records[1]
+        assert rec_b["url"] == "https://b.com"
+        assert rec_b["scrape_depth_used"] == "shallow"
+
+    def test_source_record_content_hash(self):
+        """content_hash is SHA-256 of the scraped text."""
+        import hashlib
+
+        src = self._make_source("https://a.com", scrape="deep")
+        spec = self._make_spec([src])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return ("hello world", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        expected = hashlib.sha256(b"hello world").hexdigest()
+        assert result.source_records[0]["content_hash"] == expected
+
+    def test_empty_sources_no_source_records(self):
+        """No scrapeable sources produces no source_records."""
+        spec = self._make_spec([])
+        with patch("duplo.main.scrapeable_sources", return_value=[]):
+            result = _scrape_declared_sources(spec)
+        assert result.source_records == []
 
 
 class TestPersistScrapeResult:
@@ -7875,6 +7935,42 @@ class TestPersistScrapeResult:
             _persist_scrape_result(result)
         # Content unchanged — dedup prevented addition.
         assert spec_path.read_text(encoding="utf-8") == original
+
+    def test_saves_source_records(self, tmp_path, monkeypatch):
+        """source_records persisted via save_sources."""
+        monkeypatch.chdir(tmp_path)
+        records = [
+            {
+                "url": "https://example.com",
+                "last_scraped": "2026-04-14T10:00:00+00:00",
+                "content_hash": "abc",
+                "scrape_depth_used": "deep",
+            }
+        ]
+        result = ScrapeResult(source_records=records)
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+            patch("duplo.main.save_sources") as mock_save,
+        ):
+            _persist_scrape_result(result)
+        mock_save.assert_called_once_with(records)
+
+    def test_skips_save_sources_when_empty(self, tmp_path, monkeypatch):
+        """save_sources not called when source_records is empty."""
+        monkeypatch.chdir(tmp_path)
+        result = ScrapeResult()
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+            patch("duplo.main.save_sources") as mock_save,
+        ):
+            _persist_scrape_result(result)
+        mock_save.assert_not_called()
 
 
 class TestRunVideoFramePipelinePerSourceLookup:
