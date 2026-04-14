@@ -409,7 +409,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Add `scrape_depth` parameter and 5-tuple return to `duplo/fetcher.py:fetch_site`
   - [x] Per PIPELINE-design.md § `fetcher.py`. New signature: `fetch_site(url, *, scrape_depth: Literal["deep", "shallow", "none"] = "deep") -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]`.
   - [x] `scrape_depth="deep"` follows links but ONLY same-origin (same scheme + host + port). Cross-origin links are NOT fetched in the same run — they are extracted later by `_collect_cross_origin_links` for SPEC.md `discovered:` write-back.
-  - [ ] `scrape_depth="shallow"` fetches only the entry URL, no link-following.
+  - [x] `scrape_depth="shallow"` fetches only the entry URL, no link-following.
   - [ ] `scrape_depth="none"` does no fetch, returns empty content tuple plus empty `raw_pages` dict.
   - [ ] The fifth return value `raw_pages: dict[str, str]` maps EVERY successfully fetched canonical URL to its raw HTML. For `deep`, includes entry URL plus same-origin pages followed and successfully fetched. For `shallow`, exactly one entry on success, empty dict on failure. For `none`, empty dict.
   - [ ] All URL keys in `raw_pages` and all `PageRecord.url` values MUST be canonicalized via `url_utils.canonicalize_url`. Apply post-redirect (after the HTTP response, on the final URL the fetcher landed on).
