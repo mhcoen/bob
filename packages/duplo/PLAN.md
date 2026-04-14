@@ -462,7 +462,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per PIPELINE-design.md § `pdf_extractor.py and text/markdown docs`. New function `docs_text_extractor` that takes references with `docs` in `roles` and produces a single text blob per file, routed by extension.
   - [x] Routing: `.pdf` → existing `extract_pdf_text` path; `.txt` → read directly; `.md` → read directly (markdown is text; the LLM handles formatting).
   - [x] Place `docs_text_extractor` in `duplo/pdf_extractor.py` (rename file later if it becomes misleading) OR in a new `duplo/docs_extractor.py` module. The new module is preferred per the "new module over extending long files" preference.
-  - [ ] Combined text feeds into feature extraction the same way today's PDF text does. Update the `extract_features` call site to include doc-references-derived text.
+  - [x] Combined text feeds into feature extraction the same way today's PDF text does. Update the `extract_features` call site to include doc-references-derived text.
   - [ ] Tests: PDF input routes to `extract_pdf_text`; `.txt` input read directly; `.md` input read directly; unknown extension produces diagnostic and is skipped; multiple docs combined into one blob.
 
 - [ ] Refactor `extract_features` callers and add `_matches_excluded` post-extraction filter
