@@ -6,7 +6,7 @@ import json as _json
 from unittest.mock import patch
 
 from duplo.claude_cli import ClaudeCliError
-from duplo.extractor import Feature, _parse_features, extract_features
+from duplo.extractor import Feature, _matches_excluded, _parse_features, extract_features
 
 
 class TestParseFeatures:
@@ -292,6 +292,105 @@ class TestExtractFeaturesWithSpec:
         system = mock_query.call_args.kwargs.get("system", "")
         assert "Build a widget." in system
         assert "Search" in system
+
+
+class TestMatchesExcluded:
+    """Tests for _matches_excluded word-boundary regex filter."""
+
+    def _feat(self, name: str, description: str = "") -> Feature:
+        return Feature(name=name, description=description, category="core")
+
+    def test_exact_name_match(self):
+        feat = self._feat("Plugin API")
+        assert _matches_excluded(feat, ["Plugin API"]) is True
+
+    def test_case_insensitive_match(self):
+        feat = self._feat("Plugin API")
+        assert _matches_excluded(feat, ["plugin api"]) is True
+
+    def test_match_with_trailing_punctuation(self):
+        feat = self._feat("plugin API.", description="")
+        assert _matches_excluded(feat, ["plugin API"]) is True
+
+    def test_no_match_hyphenated(self):
+        """'non-plugin-API' should NOT match excluded term 'plugin API'."""
+        feat = self._feat("non-plugin-API")
+        assert _matches_excluded(feat, ["plugin API"]) is False
+
+    def test_no_match_substring(self):
+        """'plugins' should NOT match excluded term 'plugin'."""
+        feat = self._feat("plugins manager")
+        assert _matches_excluded(feat, ["plugin"]) is False
+
+    def test_match_in_description(self):
+        feat = self._feat("Some Feature", description="Provides a plugin API.")
+        assert _matches_excluded(feat, ["plugin API"]) is True
+
+    def test_no_match_description_substring(self):
+        feat = self._feat(
+            "Some Feature",
+            description="Uses non-plugin-API approach.",
+        )
+        assert _matches_excluded(feat, ["plugin API"]) is False
+
+    def test_empty_scope_exclude(self):
+        feat = self._feat("Anything")
+        assert _matches_excluded(feat, []) is False
+
+    def test_multiple_terms_first_matches(self):
+        feat = self._feat("CLI tool")
+        assert _matches_excluded(feat, ["CLI tool", "REST API"]) is True
+
+    def test_multiple_terms_second_matches(self):
+        feat = self._feat("REST API")
+        assert _matches_excluded(feat, ["CLI tool", "REST API"]) is True
+
+    def test_multiple_terms_none_match(self):
+        feat = self._feat("Calculator")
+        assert _matches_excluded(feat, ["CLI tool", "REST API"]) is False
+
+    def test_word_boundary_at_start_of_string(self):
+        feat = self._feat("API access")
+        assert _matches_excluded(feat, ["API"]) is True
+
+    def test_word_boundary_at_end_of_string(self):
+        feat = self._feat("Custom API")
+        assert _matches_excluded(feat, ["API"]) is True
+
+    def test_single_word_term(self):
+        feat = self._feat("Webhooks support")
+        assert _matches_excluded(feat, ["Webhooks"]) is True
+
+    def test_single_word_no_match_partial(self):
+        feat = self._feat("Webhooks support")
+        assert _matches_excluded(feat, ["Webhook"]) is False
+
+    def test_emits_diagnostic(self):
+        feat = self._feat("Plugin API", description="Extends via plugins.")
+        with patch("duplo.extractor.record_failure") as mock_rf:
+            result = _matches_excluded(feat, ["Plugin API"])
+        assert result is True
+        mock_rf.assert_called_once()
+        args = mock_rf.call_args
+        assert args[0][0] == "extractor:scope_exclude"
+        assert args[0][1] == "io"
+        assert "Plugin API" in args[0][2]
+        assert "dropped" in args[0][2]
+
+    def test_no_diagnostic_when_no_match(self):
+        feat = self._feat("Calculator")
+        with patch("duplo.extractor.record_failure") as mock_rf:
+            _matches_excluded(feat, ["Plugin API"])
+        mock_rf.assert_not_called()
+
+    def test_regex_special_chars_escaped(self):
+        """Terms with regex metacharacters are treated as literals."""
+        feat = self._feat("C++ support")
+        assert _matches_excluded(feat, ["C++"]) is True
+
+    def test_regex_special_chars_no_false_positive(self):
+        feat = self._feat("Cpp support")
+        assert _matches_excluded(feat, ["C++"]) is False
 
 
 # ---------------------------------------------------------------------------

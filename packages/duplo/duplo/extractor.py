@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from duplo.claude_cli import ClaudeCliError, query
+from duplo.diagnostics import record_failure
 from duplo.parsing import strip_fences
 
 _SYSTEM = """\
@@ -127,12 +129,43 @@ def extract_features(
 
     # Apply scope overrides.
     if scope_exclude:
-        exclude_lower = {n.lower() for n in scope_exclude}
-        features = [f for f in features if f.name.lower() not in exclude_lower]
+        features = [f for f in features if not _matches_excluded(f, scope_exclude)]
     # Scope includes are handled by the LLM prompt; no post-filter needed
     # since the user wants them added even if not in scraped text.
 
     return features
+
+
+def _matches_excluded(
+    feature: Feature,
+    scope_exclude: list[str],
+) -> bool:
+    """Return True if *feature* matches any term in *scope_exclude*.
+
+    Matching uses case-insensitive word-boundary regex (``\\b``).
+    Multi-word terms match as a contiguous word sequence.  Checks both
+    ``feature.name`` and ``feature.description``.
+
+    When a match is found, emits a diagnostic via
+    :func:`~duplo.diagnostics.record_failure` so false positives are
+    visible in the run summary.
+    """
+    for term in scope_exclude:
+        escaped = re.escape(term)
+        # Use \b only where the term edge is a word character; otherwise
+        # use a zero-width assertion that the adjacent character is not a
+        # word character (or is start/end of string).
+        left = r"\b" if re.match(r"\w", term) else r"(?<!\w)"
+        right = r"\b" if re.search(r"\w$", term) else r"(?!\w)"
+        pattern = re.compile(left + escaped + right, re.IGNORECASE)
+        if pattern.search(feature.name) or pattern.search(feature.description):
+            record_failure(
+                "extractor:scope_exclude",
+                "io",
+                (f"scope_exclude '{term}' matched feature '{feature.name}'; dropped"),
+            )
+            return True
+    return False
 
 
 def _parse_features(raw: str) -> list[Feature]:
