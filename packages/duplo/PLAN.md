@@ -434,7 +434,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per PIPELINE-design.md § `scanner.py`. `scan_directory(target_dir)` becomes `scan_directory(ref_dir)`; callers that pass `"."` change to pass `target_dir / "ref"`.
   - [x] Drop the relevance scoring (image dimensions, file size). Roles are declared in `## References`, not inferred.
   - [x] Add a diagnostic for files in `ref/` that are not listed in `## References`: `record_failure("scanner", "io", f"file in ref/ has no entry in ## References; will be ignored: {path}")`. Diagnostic only — does not error.
-  - [ ] `scan_files(paths)` (used for analyzing specific changed files in subsequent runs) keeps working but gets a parallel role lookup: each file's path is checked against the parsed `## References` to determine its role.
+  - [x] `scan_files(paths)` (used for analyzing specific changed files in subsequent runs) keeps working but gets a parallel role lookup: each file's path is checked against the parsed `## References` to determine its role.
   - [ ] Update existing callers in `duplo/main.py` to pass `ref/` instead of project root.
   - [ ] Tests: `scan_directory` only enumerates files under `ref/`, ignoring everything else in project root; file in `ref/` listed in `## References` is included with its declared role; file in `ref/` NOT listed in `## References` produces diagnostic and is excluded from the result; relevance heuristics removed (a tiny image is included if declared, a huge irrelevant one is excluded if not declared); `scan_files` role-lookup matches paths against `## References` correctly.
 
