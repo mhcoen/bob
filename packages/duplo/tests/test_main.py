@@ -7666,3 +7666,190 @@ class TestPersistScrapeResult:
             _persist_scrape_result(result)
         # Content unchanged — dedup prevented addition.
         assert spec_path.read_text(encoding="utf-8") == original
+
+
+class TestRunVideoFramePipelinePerSourceLookup:
+    """_run_video_frame_pipeline returns per-source accepted-frame lookup."""
+
+    def test_returns_per_source_lookup(self, tmp_path, monkeypatch):
+        """The second return value maps each source to its accepted frames."""
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        vid_a = tmp_path / "a.mp4"
+        vid_a.write_bytes(b"MP4")
+        vid_b = tmp_path / "b.mp4"
+        vid_b.write_bytes(b"MP4")
+
+        frame_a1 = frames_dir / "a_scene_0001.png"
+        frame_a1.write_bytes(b"PNG1")
+        frame_a2 = frames_dir / "a_scene_0002.png"
+        frame_a2.write_bytes(b"PNG2")
+        frame_b1 = frames_dir / "b_scene_0001.png"
+        frame_b1.write_bytes(b"PNG3")
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=vid_a,
+                        frames=[frame_a1, frame_a2],
+                    ),
+                    ExtractionResult(source=vid_b, frames=[frame_b1]),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[frame_a1, frame_b1],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+        ):
+            from duplo.main import _run_video_frame_pipeline
+
+            frames, lookup = _run_video_frame_pipeline([vid_a, vid_b])
+
+        assert set(frames) == {frame_a1, frame_b1}
+        # Per-source lookup: vid_a kept frame_a1 (not frame_a2),
+        # vid_b kept frame_b1.
+        assert lookup[vid_a] == [frame_a1]
+        assert lookup[vid_b] == [frame_b1]
+
+    def test_empty_videos_returns_empty_lookup(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo" / "video_frames").mkdir(parents=True, exist_ok=True)
+
+        with patch("duplo.main.extract_all_videos", return_value=[]):
+            from duplo.main import _run_video_frame_pipeline
+
+            frames, lookup = _run_video_frame_pipeline([])
+
+        assert frames == []
+        assert lookup == {}
+
+
+class TestDesignInputPerSourceLookup:
+    """_first_run uses accepted_by_source lookup for design input composition."""
+
+    def test_visual_target_frames_via_lookup(self, tmp_path, monkeypatch):
+        """Frames from visual-target videos are selected via per-source lookup."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # A dual-role video: both behavioral-target and visual-target
+        dual_vid = ref_dir / "demo.mp4"
+        dual_vid.write_bytes(b"MP4" * 100)
+
+        # A behavioral-only video
+        beh_vid = ref_dir / "tutorial.mp4"
+        beh_vid.write_bytes(b"MP4" * 100)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        dual_frame = frames_dir / "demo_scene_0001.png"
+        dual_frame.write_bytes(b"DUAL")
+        beh_frame = frames_dir / "tutorial_scene_0001.png"
+        beh_frame.write_bytes(b"BEH")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/tutorial.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=Path("ref/demo.mp4"),
+                        frames=[dual_frame],
+                    ),
+                    ExtractionResult(
+                        source=Path("ref/tutorial.mp4"),
+                        frames=[beh_frame],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[dual_frame, beh_frame],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[dual_vid, beh_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            mock_design.return_value = DesignRequirements()
+            main()
+
+        # collect_design_input should receive only dual-role video's
+        # frames as visual_target_frames (arg index 1), not the
+        # behavioral-only video's frames.
+        mock_cdi.assert_called_once()
+        vt_frames_arg = mock_cdi.call_args[0][1]
+        vt_frame_names = [f.name for f in vt_frames_arg]
+        assert "demo_scene_0001.png" in vt_frame_names
+        assert "tutorial_scene_0001.png" not in vt_frame_names

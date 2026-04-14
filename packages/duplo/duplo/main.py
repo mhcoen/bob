@@ -211,7 +211,11 @@ from duplo.design_extractor import (
     extract_design,
     format_design_section,
 )
-from duplo.orchestrator import _collect_cross_origin_links, collect_design_input
+from duplo.orchestrator import (
+    _accepted_frames_by_source,
+    _collect_cross_origin_links,
+    collect_design_input,
+)
 from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, _matches_excluded, extract_features
@@ -358,10 +362,14 @@ def _run_video_frame_pipeline(
     videos: list[Path],
     *,
     indent: str = "",
-) -> list[Path]:
+) -> tuple[list[Path], dict[Path, list[Path]]]:
     """Extract, filter, describe, and store video frames.
 
-    Returns the list of accepted frame paths after filtering.
+    Returns ``(accepted_frames, accepted_by_source)`` where
+    *accepted_frames* is the flat list of kept frame paths and
+    *accepted_by_source* maps each input video path to its
+    accepted (post-filter) frames via
+    :func:`~duplo.orchestrator._accepted_frames_by_source`.
     """
     frames_dir = Path(".duplo") / "video_frames"
     results = extract_all_videos(videos, frames_dir)
@@ -373,7 +381,7 @@ def _run_video_frame_pipeline(
             print(f"{indent}  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
             video_frames.extend(vr.frames)
     if not video_frames:
-        return []
+        return [], {}
     print(f"{indent}Filtering frames with Vision \u2026")
     decisions = filter_frames(video_frames)
     video_frames = apply_filter(decisions)
@@ -381,8 +389,17 @@ def _run_video_frame_pipeline(
     rejected = len(decisions) - kept
     if rejected:
         print(f"{indent}  Kept {kept}, rejected {rejected} frame(s)")
+
+    # Build per-source lookup from the kept set so callers can
+    # compose design input by source role (visual-target vs scraped).
+    kept_set = set(video_frames)
+    filtered_results = [
+        dataclasses.replace(r, frames=[f for f in r.frames if f in kept_set]) for r in results
+    ]
+    accepted_by_source = _accepted_frames_by_source(filtered_results)
+
     if not video_frames:
-        return []
+        return [], accepted_by_source
     print(f"{indent}Describing UI states \u2026")
     frame_descs = describe_frames(video_frames)
     for fd in frame_descs:
@@ -399,7 +416,7 @@ def _run_video_frame_pipeline(
     stored = store_accepted_frames(frame_entries)
     if stored:
         print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
-    return video_frames
+    return video_frames, accepted_by_source
 
 
 _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
@@ -1080,47 +1097,54 @@ def _first_run(*, url: str | None = None) -> None:
     # demo videos from product-reference pages (site_videos) are
     # first-class behavioral input and are merged into the set.
     if spec:
-        behavioral_videos = [
-            e.path
-            for e in format_behavioral_references(spec)
-            if e.path.suffix.lower() in _VIDEO_EXTS
-        ] + site_videos
+        behavioral_entries = [
+            e for e in format_behavioral_references(spec) if e.path.suffix.lower() in _VIDEO_EXTS
+        ]
+        behavioral_videos = [e.path for e in behavioral_entries] + site_videos
     else:
+        behavioral_entries = []
         behavioral_videos = list(scan.videos) + site_videos
     assert len(behavioral_videos) == len(set(behavioral_videos)), (
         "Duplicate source path across ref-declared and scraped videos"
     )
     video_frames: list[Path] = []
+    accepted_by_source: dict[Path, list[Path]] = {}
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} video(s) \u2026")
-        video_frames = _run_video_frame_pipeline(behavioral_videos)
+        video_frames, accepted_by_source = _run_video_frame_pipeline(
+            behavioral_videos,
+        )
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
 
-    # Identify frames originating from scraped site videos so they
-    # can be passed as design input source (4) separately.
-    site_video_stems = {v.stem for v in site_videos}
-    site_video_frames = (
-        [
-            f
-            for f in video_frames
-            if any(f.name.startswith(stem + "_") for stem in site_video_stems)
-        ]
-        if site_video_stems
-        else []
-    )
-
-    # Compose design input from four sources (see collect_design_input)
-    # when spec is available; fall back to all images + frames otherwise.
+    # Compose design input from four sources using per-source lookup.
+    # Source 2: frames from videos with visual-target role.
+    # Source 3: frames from scraped product-reference videos.
+    # The per-source lookup uses exact path keys from
+    # _accepted_frames_by_source, replacing stem-based matching.
     if spec:
-        vt_frames = _visual_target_video_frames(
+        vt_frames = [
+            frame
+            for entry in behavioral_entries
+            if "visual-target" in entry.roles
+            for frame in accepted_by_source.get(entry.path, [])
+        ]
+        site_video_frames = [
+            frame for vp in site_videos for frame in accepted_by_source.get(vp, [])
+        ]
+        design_input = collect_design_input(
             spec,
-            behavioral_videos,
-            video_frames,
+            vt_frames,
+            site_images,
+            site_video_frames,
         )
-        design_input = collect_design_input(spec, vt_frames, site_images, site_video_frames)
     else:
-        design_input = list(scan.images) + video_frames + site_images + site_video_frames
+        design_input = (
+            list(scan.images)
+            + video_frames
+            + site_images
+            + [frame for vp in site_videos for frame in accepted_by_source.get(vp, [])]
+        )
     design = DesignRequirements()
     if design_input:
         print("\nExtracting visual design from images \u2026")
@@ -1284,18 +1308,21 @@ def _analyze_new_files(
     # When spec is present, only videos declared as behavioral-target are
     # processed; otherwise fall back to all scanned videos.
     if spec:
-        behavioral_set = {
-            e.path.resolve()
-            for e in format_behavioral_references(spec)
-            if e.path.suffix.lower() in _VIDEO_EXTS
-        }
+        behavioral_entries = [
+            e for e in format_behavioral_references(spec) if e.path.suffix.lower() in _VIDEO_EXTS
+        ]
+        behavioral_set = {e.path.resolve() for e in behavioral_entries}
         behavioral_videos = [v for v in scan.videos if v.resolve() in behavioral_set]
     else:
+        behavioral_entries = []
         behavioral_videos = list(scan.videos)
     video_frames: list[Path] = []
+    accepted_by_source: dict[Path, list[Path]] = {}
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} new video(s) \u2026")
-        video_frames = _run_video_frame_pipeline(behavioral_videos)
+        video_frames, accepted_by_source = _run_video_frame_pipeline(
+            behavioral_videos,
+        )
         summary.videos_found = len(behavioral_videos)
         analyzed_anything = True
         summary.video_frames_extracted = len(video_frames)
@@ -1303,11 +1330,12 @@ def _analyze_new_files(
     # Compose design input via four-source model when spec is
     # available; fall back to all images + frames otherwise.
     if spec:
-        vt_frames = _visual_target_video_frames(
-            spec,
-            behavioral_videos,
-            video_frames,
-        )
+        vt_frames = [
+            frame
+            for entry in behavioral_entries
+            if "visual-target" in entry.roles
+            for frame in accepted_by_source.get(entry.path, [])
+        ]
         design_input = collect_design_input(spec, vt_frames)
     else:
         design_input = list(scan.images) + video_frames
@@ -1515,7 +1543,10 @@ def _rescrape_product_url(
         site_video_frames: list[Path] = []
         if site_videos:
             print(f"  {len(site_videos)} video(s) from product site.")
-            site_video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
+            site_video_frames, _ = _run_video_frame_pipeline(
+                site_videos,
+                indent="  ",
+            )
         if spec:
             design_input = collect_design_input(
                 spec,
