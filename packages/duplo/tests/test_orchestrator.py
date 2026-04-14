@@ -362,6 +362,61 @@ class TestCollectDesignInput:
         )
         assert len(result) == 2
 
+    def test_dual_role_behavioral_visual_ref_included(self, tmp_path):
+        """A ref with BOTH behavioral-target and visual-target roles is
+        included because it has visual-target."""
+        img = tmp_path / "ref" / "dual.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_PNG_BYTES)
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/dual.png"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+            ]
+        )
+        result = collect_design_input(spec, target_dir=tmp_path)
+        assert len(result) == 1
+        assert result[0] == tmp_path / "ref" / "dual.png"
+
+    def test_dual_role_video_contributes_accepted_frames(self, tmp_path):
+        """Accepted frames from a dual-role (behavioral + visual) video
+        are included via the visual_target_frames parameter."""
+        frame = tmp_path / "dual_video_frame.png"
+        frame.write_bytes(_PNG_BYTES)
+        result = collect_design_input(None, visual_target_frames=[frame])
+        assert result == [frame]
+
+    def test_behavioral_only_video_not_in_design(self, tmp_path):
+        """Frames from a behavioral-only video are NOT passed as
+        visual_target_frames, so they do not appear in design input.
+        Only site_video_frames (scraped) and visual_target_frames
+        contribute frames."""
+        behavioral_frame = tmp_path / "behavioral_frame.png"
+        behavioral_frame.write_bytes(_unique_bytes("beh"))
+        visual_frame = tmp_path / "visual_frame.png"
+        visual_frame.write_bytes(_unique_bytes("vis"))
+        # behavioral_frame is intentionally NOT passed — the caller
+        # filters it out because its source video lacks visual-target.
+        result = collect_design_input(None, visual_target_frames=[visual_frame])
+        assert len(result) == 1
+        assert result[0] == visual_frame
+
+    def test_non_product_reference_scraped_video_excluded(self, tmp_path):
+        """Frames from non-product-reference scraped videos are NOT
+        passed as site_video_frames. Only product-reference scraped
+        frames contribute to design input."""
+        product_frame = tmp_path / "product_frame.png"
+        product_frame.write_bytes(_unique_bytes("prod"))
+        non_product_frame = tmp_path / "non_product_frame.png"
+        non_product_frame.write_bytes(_unique_bytes("nonp"))
+        # Only product_frame is passed; non_product_frame is filtered
+        # out by the caller because it's not from a product-reference.
+        result = collect_design_input(None, site_video_frames=[product_frame])
+        assert len(result) == 1
+        assert result[0] == product_frame
+
     def test_content_hash_dedup_unreadable_file_still_added(self, tmp_path):
         """If a file can't be read (OSError), it's still added (no hash
         dedup, only path dedup)."""
