@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from duplo.diagnostics import record_failure
+
+if TYPE_CHECKING:
+    from duplo.spec_reader import ReferenceEntry
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
@@ -257,6 +263,50 @@ def _classify_file(
 
     # Any other file: try to extract URLs from it.
     _extract_urls_from_file(path, result, seen_urls)
+
+
+def check_unlisted_ref_files(
+    scan: ScanResult,
+    references: list[ReferenceEntry],
+    *,
+    ref_dir: Path | str = "ref",
+    errors_path: Path | str = ".duplo/errors.jsonl",
+) -> list[Path]:
+    """Emit diagnostics for files in ``ref/`` not listed in ``## References``.
+
+    Compares all files found by :func:`scan_directory` against the paths
+    declared in ``## References``.  Any file present on disk but absent
+    from the reference list gets a non-fatal diagnostic via
+    :func:`~duplo.diagnostics.record_failure`.
+
+    Returns the list of unlisted paths (for testing convenience).
+    """
+    ref_dir = Path(ref_dir)
+    # Build a set of declared paths (as resolved absolute paths).
+    declared: set[Path] = set()
+    for entry in references:
+        declared.add((ref_dir.parent / entry.path).resolve())
+
+    # Collect all scanned file paths.
+    all_files: list[Path] = scan.images + scan.videos + scan.pdfs + scan.text_files
+
+    unlisted: list[Path] = []
+    for file_path in all_files:
+        resolved = file_path.resolve()
+        if resolved not in declared:
+            # Build a relative path for the message.
+            try:
+                rel = file_path.relative_to(ref_dir.parent)
+            except ValueError:
+                rel = file_path
+            record_failure(
+                "scanner",
+                "io",
+                f"file in ref/ has no entry in ## References; will be ignored: {rel}",
+                errors_path=errors_path,
+            )
+            unlisted.append(file_path)
+    return unlisted
 
 
 def _extract_urls_from_file(

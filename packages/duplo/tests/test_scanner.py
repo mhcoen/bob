@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from duplo.scanner import ScanResult, scan_directory, scan_files
+from duplo.scanner import (
+    ScanResult,
+    check_unlisted_ref_files,
+    scan_directory,
+    scan_files,
+)
+from duplo.spec_reader import ReferenceEntry
 
 
 class TestScanDirectory:
@@ -239,3 +246,94 @@ class TestScanFiles:
         result = scan_files([tiny])
         assert not hasattr(result, "relevance")
         assert len(result.images) == 1
+
+
+class TestCheckUnlistedRefFiles:
+    """Tests for check_unlisted_ref_files diagnostic."""
+
+    def test_all_files_listed(self, tmp_path: Path):
+        """No diagnostics when all scanned files are in ## References."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "shot.png").write_bytes(b"PNG")
+        scan = scan_directory(ref)
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+        assert unlisted == []
+        assert not errors.exists()
+
+    def test_unlisted_file_emits_diagnostic(self, tmp_path: Path):
+        """File in ref/ not in ## References gets a diagnostic."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "shot.png").write_bytes(b"PNG")
+        (ref / "extra.jpg").write_bytes(b"JPG")
+        scan = scan_directory(ref)
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+        assert len(unlisted) == 1
+        assert unlisted[0].name == "extra.jpg"
+        # Verify diagnostic was recorded.
+        lines = errors.read_text().strip().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["site"] == "scanner"
+        assert record["category"] == "io"
+        assert "extra.jpg" in record["message"]
+        assert "will be ignored" in record["message"]
+
+    def test_empty_references_all_unlisted(self, tmp_path: Path):
+        """All files are unlisted when ## References is empty."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "a.png").write_bytes(b"PNG")
+        (ref / "b.pdf").write_bytes(b"%PDF")
+        scan = scan_directory(ref)
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, [], ref_dir=ref, errors_path=errors)
+        assert len(unlisted) == 2
+        lines = errors.read_text().strip().splitlines()
+        assert len(lines) == 2
+
+    def test_empty_scan_no_diagnostics(self, tmp_path: Path):
+        """No diagnostics when ref/ has no files."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        scan = scan_directory(ref)
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+        assert unlisted == []
+        assert not errors.exists()
+
+    def test_multiple_file_types_checked(self, tmp_path: Path):
+        """Images, videos, PDFs, and text files are all checked."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "shot.png").write_bytes(b"PNG")
+        (ref / "demo.mp4").write_bytes(b"\x00" * 100)
+        (ref / "spec.pdf").write_bytes(b"%PDF")
+        (ref / "notes.txt").write_text("some notes")
+        scan = scan_directory(ref)
+        # Only list the image.
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+        unlisted_names = {p.name for p in unlisted}
+        assert "demo.mp4" in unlisted_names
+        assert "spec.pdf" in unlisted_names
+        assert "notes.txt" in unlisted_names
+        assert "shot.png" not in unlisted_names
+
+    def test_diagnostic_message_contains_relative_path(self, tmp_path: Path):
+        """Diagnostic message uses ref/filename, not absolute path."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "orphan.png").write_bytes(b"PNG")
+        scan = scan_directory(ref)
+        errors = tmp_path / "errors.jsonl"
+        check_unlisted_ref_files(scan, [], ref_dir=ref, errors_path=errors)
+        record = json.loads(errors.read_text().strip())
+        assert "ref/orphan.png" in record["message"]
