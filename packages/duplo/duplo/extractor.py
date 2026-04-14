@@ -9,10 +9,11 @@ from duplo.claude_cli import ClaudeCliError, query
 from duplo.parsing import strip_fences
 
 _SYSTEM = """\
-You are a product analyst. Given scraped text from a product website, extract a
-structured list of the product's features. Focus on what the product actually
-does\u2014its capabilities, integrations, and notable behaviours\u2014not on marketing
-copy or company information.
+You are a product analyst. Given text from product sources (websites,
+documentation, PDFs, and other reference materials), extract a structured list
+of the product's features. Focus on what the product actually does\u2014its
+capabilities, integrations, and notable behaviours\u2014not on marketing copy or
+company information.
 
 CRITICAL RULES:
 1. Only extract features that the product DEMONSTRABLY OFFERS based on the text.
@@ -68,6 +69,11 @@ def extract_features(
     Uses ``claude -p`` to analyse the content. Truncates input to
     *_MAX_CONTENT_CHARS* characters to stay within context limits.
 
+    *scraped_text* is the concatenation of text from all scrapeable
+    sources (websites, documentation, PDFs, and other reference
+    materials).  The caller is responsible for composing this text
+    from all sources before calling this function.
+
     If *existing_names* is provided, the extraction prompt instructs
     the LLM to reuse those names for features that match existing
     ones rather than inventing new names. This prevents near-duplicate
@@ -80,14 +86,15 @@ def extract_features(
     feature list is post-filtered accordingly.
 
     Args:
-        scraped_text: Raw text scraped from a product website.
+        scraped_text: Combined text from all scrapeable product sources.
         existing_names: Feature names already in duplo.json (optional).
         spec_text: Product specification text (optional).
         scope_include: Feature names the user requires (optional).
         scope_exclude: Feature names the user wants excluded (optional).
 
     Returns:
-        List of :class:`Feature` objects. Empty list if nothing could be extracted.
+        List of :class:`Feature` objects. Empty list if nothing could
+        be extracted.
     """
     content = scraped_text[:_MAX_CONTENT_CHARS]
     system = _SYSTEM
@@ -111,7 +118,7 @@ def extract_features(
             "not covered by any existing entry.\n"
             f"Existing features: [{names_list}]"
         )
-    prompt = f"Extract features from this product website content:\n\n{content}"
+    prompt = f"Extract features from this product content:\n\n{content}"
     try:
         raw = query(prompt, system=system)
     except ClaudeCliError:

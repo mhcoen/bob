@@ -115,6 +115,12 @@ class TestExtractorSystemPrompt:
 
         assert "mentioned in passing" in _SYSTEM
 
+    def test_system_prompt_references_multiple_sources(self):
+        """Prompt must say 'product sources', not 'product website'."""
+        from duplo.extractor import _SYSTEM
+
+        assert "product sources" in _SYSTEM
+
 
 class TestExtractFeatures:
     def test_returns_feature_list(self):
@@ -130,6 +136,14 @@ class TestExtractFeatures:
             extract_features("My product content")
         prompt = mock_query.call_args[0][0]
         assert "My product content" in prompt
+
+    def test_user_prompt_says_product_content(self):
+        """Prompt must say 'product content', not 'product website'."""
+        with patch("duplo.extractor.query", return_value="[]") as mock_query:
+            extract_features("text")
+        prompt = mock_query.call_args[0][0]
+        assert "product content" in prompt
+        assert "product website" not in prompt
 
     def test_truncates_long_input(self):
         long_text = "x" * 100_000
@@ -153,6 +167,73 @@ class TestExtractFeatures:
         ):
             features = extract_features("product text")
         assert features == []
+
+
+class TestExtractFeaturesMultiSource:
+    """Verify extract_features handles concatenated multi-source text."""
+
+    def test_concatenated_sources_all_visible_in_prompt(self):
+        """Text from multiple sources is passed through to the LLM."""
+        source_a = "Source A: Calculator with basic math operations."
+        source_b = "Source B: Unit converter with metric support."
+        combined = source_a + "\n" + source_b
+        with patch("duplo.extractor.query", return_value="[]") as mock_query:
+            extract_features(combined)
+        prompt = mock_query.call_args[0][0]
+        assert "Calculator with basic math" in prompt
+        assert "Unit converter with metric" in prompt
+
+    def test_features_extracted_from_multiple_sources(self):
+        """Features from different sources are all returned."""
+        raw = json_array(
+            [
+                {
+                    "name": "Calculator",
+                    "description": "Basic math.",
+                    "category": "core",
+                },
+                {
+                    "name": "Unit converter",
+                    "description": "Metric conversion.",
+                    "category": "core",
+                },
+            ]
+        )
+        combined = "Website text about calc.\nDocs text about converter."
+        with patch("duplo.extractor.query", return_value=raw):
+            features = extract_features(combined)
+        assert len(features) == 2
+        names = {f.name for f in features}
+        assert "Calculator" in names
+        assert "Unit converter" in names
+
+    def test_spec_text_and_scope_with_multi_source(self):
+        """spec_text and scope params work with concatenated input."""
+        raw = json_array(
+            [
+                {
+                    "name": "Math",
+                    "description": "Basic math.",
+                    "category": "core",
+                },
+                {
+                    "name": "CLI tool",
+                    "description": "Command line.",
+                    "category": "other",
+                },
+            ]
+        )
+        combined = "Site text.\nPDF text.\nDocs text."
+        with patch("duplo.extractor.query", return_value=raw) as mock_q:
+            features = extract_features(
+                combined,
+                spec_text="Build a calculator app.",
+                scope_exclude=["CLI tool"],
+            )
+        system = mock_q.call_args.kwargs.get("system", "")
+        assert "Build a calculator app." in system
+        assert len(features) == 1
+        assert features[0].name == "Math"
 
 
 class TestExtractFeaturesWithSpec:

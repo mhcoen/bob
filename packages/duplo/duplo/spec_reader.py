@@ -824,15 +824,15 @@ def format_scope_override_prompt(spec: ProductSpec) -> str:
         names = ", ".join(f'"{n}"' for n in spec.scope_include)
         parts.append(
             f"The user REQUIRES these features to be included: [{names}]. "
-            "If the scraped text does not mention them, include them anyway "
-            "based on the user's specification."
+            "If the product content does not mention them, include them "
+            "anyway based on the user's specification."
         )
     if spec.scope_exclude:
         names = ", ".join(f'"{n}"' for n in spec.scope_exclude)
         parts.append(
             f"The user has EXCLUDED these features: [{names}]. "
-            "Do NOT include them in the output even if the scraped text "
-            "describes them."
+            "Do NOT include them in the output even if the product "
+            "content describes them."
         )
     if not parts:
         return ""
