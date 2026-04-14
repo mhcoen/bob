@@ -1,14 +1,19 @@
 # Duplo
 
-Duplo duplicates apps. The user creates a project directory and drops
-in whatever reference material they have: screenshots, PDFs, text files,
-URLs. Running `duplo` from that directory analyzes the materials,
-identifies the product to duplicate, extracts features and visual
-design details, generates a build plan, and uses McLoop to build it.
-Running `duplo` again detects new files the user has added, re-scrapes
-the product docs, and appends new tasks for anything that was missed.
-The cycle is: add reference material, run duplo, let McLoop build,
-test, add more reference material if needed, run duplo again.
+Create or clone from whatever you've got — screenshots, a demo video,
+doc pages, a website, a one-line description — no source code required.
+Drives Claude Code or Codex through phased builds via mcloop, turning
+references into working software.
+
+The user creates a project directory and drops in whatever reference
+material they have. Running `duplo` from that directory analyzes the
+materials, identifies the product to build or clone, extracts features
+and visual design details, generates a build plan, and uses mcloop to
+build it. Running `duplo` again detects new files the user has added,
+re-scrapes any product docs, and appends new tasks for anything that
+was missed. The cycle is: add reference material, run duplo, let
+mcloop build, test, add more reference material if needed, run duplo
+again.
 
 Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all
 code generation. Ruff for linting, pytest for tests. Keep modules
@@ -28,10 +33,6 @@ directory scanning.
 <!-- Bugs here have absolute priority and run before any other phase
      work. mcloop's bug-only mode picks these up first. -->
 
-- [ ] Fix `append_to_bugs_section` boundary scan in `duplo/saver.py`
-  - [x] Function at `duplo/saver.py:1308-1321` ends its `## Bugs` section scan only at the next `## ` (H2) heading, walking past `# ` (H1) phase headings. As a result, when duplo writes a new bug entry into PLAN.md, the entry can land deep inside an unrelated phase (typically Phase 2, before its `## Manual verification` subheading) rather than at the end of the `## Bugs` section. This corrupts PLAN.md structure on every duplo run that touches the bugs section.
-  - [x] Fix: widen the boundary regex in the scan loop so it terminates on either H1 (`^# `) or H2 (`^## `) headings, not just H2. The intent is "end of section," which in this PLAN.md format means "any heading at the same or higher level than `## Bugs`."
-  - [ ] Tests: (a) bug entry inserted into a PLAN.md whose `## Bugs` section is followed by a `# Phase 1` heading lands inside `## Bugs` and not inside Phase 1; (b) bug entry inserted into a PLAN.md whose `## Bugs` section is followed by another `## Other` heading still lands inside `## Bugs`; (c) bug entry inserted when `## Bugs` is the last section in the file (no following heading) lands at the end of the file; (d) the existing behavior (correctly inserting at end of `## Bugs` when boundaries are intact) is preserved.
 
 ---
 
@@ -378,13 +379,245 @@ This phase shipped the Phase-2-message-text version ("author a SPEC.md by hand" 
 
 ---
 
-# Phase 5: Pipeline integration (next, no tasks yet)
+# Phase 5: Pipeline integration
 
-The pipeline integration phase wires the new SPEC-driven inputs through the actual orchestration code in `main.py`. This is the largest phase in the redesign.
+Wires the new SPEC-driven inputs through the actual orchestration code in `main.py`. The largest phase in the redesign.
 
-Design reference: `PIPELINE-design.md` (authoritative).
+Design reference: `PIPELINE-design.md` (authoritative). All tasks in this phase reference design sections by name; the design doc is the source of truth for contracts and edge cases. When a task description and the design doc disagree, the design doc wins; flag the discrepancy for resolution rather than silently picking one interpretation.
 
-PLAN.md tasks for this phase have not yet been written. Authoring them is the next step before the next mcloop run.
+The principle: every pipeline stage takes role-filtered input from the parser instead of running heuristics on raw directory contents. Implementation order respects dependencies — foundation (URL canonicalization, fetcher, helper) before pipeline-stage updates, helpers before orchestration.
+
+Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code generation. Ruff for linting, pytest for tests. All AI calls go through `claude -p` (no direct API calls).
+
+## Pre-work: missing per-stage formatter
+
+- [ ] Add `format_counter_example_sources(spec) -> list[SourceEntry]` to `duplo/spec_reader.py`
+  - [ ] Returns source entries where `role` is `counter-example`, excluding `proposed: true` AND `discovered: true`. Per PIPELINE-design.md § `format_counter_example_sources`.
+  - [ ] This is the missing per-stage formatter from Phase 3 — Phase 3 added the four reference formatters and `format_scrapeable_sources` but not this one. Required by the investigator changes in 5.11.
+  - [ ] Tests: returns counter-example sources only; excludes proposed/discovered; empty input handled; counter-example sources with other flags (e.g. `scrape: deep`, which the user almost certainly didn't mean) still returned by this filter (separate concern from the scrape-depth diagnostic emitted by `format_scrapeable_sources`).
+
+## Foundation: URL canonicalization
+
+- [ ] Create new module `duplo/url_utils.py` with `canonicalize_url(url: str) -> str`
+  - [ ] New module per design (the existing files are too long). Imports stdlib only (`urllib.parse`).
+  - [ ] Implement the four canonicalization rules per PIPELINE-design.md § "URL canonicalization": (1) lowercase scheme and host; (2) strip default ports (80 on http, 443 on https); (3) strip fragment (#section); (4) strip trailing slash from ALL paths INCLUDING the root path `/`. Preserve query strings.
+  - [ ] The trailing-slash rule MUST apply to the root path: `https://a.com/` → `https://a.com`. Do not special-case the root. Per PIPELINE-design.md § "Why strip all trailing slashes, including root" — root-path slash treatment is what makes user-authored host-only URLs and fetcher post-redirect URLs compare equal.
+  - [ ] Tests: each rule exercised individually; combined rules; root-path slash stripped (`https://a.com/` → `https://a.com`); non-root path slash stripped (`https://a.com/docs/` → `https://a.com/docs`); already-canonical URL unchanged; query string preserved (`https://a.com/?q=1` → `https://a.com?q=1` — root slash gone, query kept); fragment stripped; uppercase scheme/host lowercased; default port stripped on http (80) and https (443); non-default ports preserved (`https://a.com:8443/` → `https://a.com:8443`).
+
+## Foundation: fetch_site signature changes
+
+- [ ] Add `scrape_depth` parameter and 5-tuple return to `duplo/fetcher.py:fetch_site`
+  - [ ] Per PIPELINE-design.md § `fetcher.py`. New signature: `fetch_site(url, *, scrape_depth: Literal["deep", "shallow", "none"] = "deep") -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]`.
+  - [ ] `scrape_depth="deep"` follows links but ONLY same-origin (same scheme + host + port). Cross-origin links are NOT fetched in the same run — they are extracted later by `_collect_cross_origin_links` for SPEC.md `discovered:` write-back.
+  - [ ] `scrape_depth="shallow"` fetches only the entry URL, no link-following.
+  - [ ] `scrape_depth="none"` does no fetch, returns empty content tuple plus empty `raw_pages` dict.
+  - [ ] The fifth return value `raw_pages: dict[str, str]` maps EVERY successfully fetched canonical URL to its raw HTML. For `deep`, includes entry URL plus same-origin pages followed and successfully fetched. For `shallow`, exactly one entry on success, empty dict on failure. For `none`, empty dict.
+  - [ ] All URL keys in `raw_pages` and all `PageRecord.url` values MUST be canonicalized via `url_utils.canonicalize_url`. Apply post-redirect (after the HTTP response, on the final URL the fetcher landed on).
+  - [ ] Failed fetches (404, timeout, non-HTML content-type, decode failure) are NOT included in `raw_pages` and NOT included in `page_records`. Both structures stay in sync by construction. Failure surfaces via `record_failure("fetch_site", "fetch", ...)`.
+  - [ ] HTML decode: UTF-8 with `errors="replace"` per the design.
+  - [ ] Update existing callers of `fetch_site` in `duplo/main.py` to handle the new 5-tuple. Existing call sites that don't yet need `raw_pages` should still unpack it (assign to `_` if unused) so they don't crash on the tuple-length change.
+  - [ ] Tests: 5-tuple return shape; `scrape_depth="shallow"` fetches only entry URL and returns one `raw_pages` entry; `scrape_depth="deep"` follows same-origin links and returns multiple entries; `scrape_depth="deep"` does NOT fetch cross-origin links (cross-origin URL not in `raw_pages`, no PageRecord for it); `scrape_depth="none"` does no HTTP and returns empty `raw_pages`; failed fetch (mock 404) omits the URL from BOTH `raw_pages` AND `page_records`; canonical URL keys (post-redirect URL canonicalized); decode error doesn't crash, omits the URL with diagnostic.
+
+## Foundation: cross-origin link collection helper
+
+- [ ] Implement `_collect_cross_origin_links(raw_pages, source_url) -> list[str]` in `duplo/orchestrator.py` (new module)
+  - [ ] Per PIPELINE-design.md § `_collect_cross_origin_links`. Place in a new `duplo/orchestrator.py` module since `main.py` is already long; helper functions used by orchestration go here.
+  - [ ] Parse each HTML page in `raw_pages.values()`, extract every `<a href="...">` target, resolve to absolute URL, canonicalize via `url_utils.canonicalize_url`.
+  - [ ] Compare canonical form's (scheme, host, port) against the canonical `source_url`'s. Different = cross-origin = include in result.
+  - [ ] Only `<a href>` is considered. NOT `<link>`, `<script src>`, `<img src>`, `<video src>`, `<source src>`, etc. Per design § "Decisions".
+  - [ ] Return deduplicated list of canonical URLs. Per design: dedup happens here (per-run) and again in `append_sources` (against existing SPEC.md). Belt and braces; both use `canonicalize_url` so divergence is impossible by construction.
+  - [ ] Tests: same-origin links excluded; cross-origin links included; subdomain treated as cross-origin (`https://numi.app` vs `https://docs.numi.app` are different hosts); only `<a href>` collected (`<img src>` to cross-origin CDN is NOT collected); duplicates within a single page collapsed; duplicates across pages collapsed; canonicalization applied (uppercase or trailing-slash variants of the same URL collapse to one); empty `raw_pages` returns `[]`; relative href resolved against the page URL it appeared on (not against `source_url`) — a relative `href="docs"` on `https://example.com/foo/page.html` resolves to `https://example.com/foo/docs`, not `https://example.com/docs`.
+
+## Pipeline stage updates
+
+- [ ] Refactor `duplo/scanner.py:scan_directory` to point at `ref/` and drop relevance heuristics
+  - [ ] Per PIPELINE-design.md § `scanner.py`. `scan_directory(target_dir)` becomes `scan_directory(ref_dir)`; callers that pass `"."` change to pass `target_dir / "ref"`.
+  - [ ] Drop the relevance scoring (image dimensions, file size). Roles are declared in `## References`, not inferred.
+  - [ ] Add a diagnostic for files in `ref/` that are not listed in `## References`: `record_failure("scanner", "io", f"file in ref/ has no entry in ## References; will be ignored: {path}")`. Diagnostic only — does not error.
+  - [ ] `scan_files(paths)` (used for analyzing specific changed files in subsequent runs) keeps working but gets a parallel role lookup: each file's path is checked against the parsed `## References` to determine its role.
+  - [ ] Update existing callers in `duplo/main.py` to pass `ref/` instead of project root.
+  - [ ] Tests: `scan_directory` only enumerates files under `ref/`, ignoring everything else in project root; file in `ref/` listed in `## References` is included with its declared role; file in `ref/` NOT listed in `## References` produces diagnostic and is excluded from the result; relevance heuristics removed (a tiny image is included if declared, a huge irrelevant one is excluded if not declared); `scan_files` role-lookup matches paths against `## References` correctly.
+
+- [ ] Refactor `duplo/extract_design` callers to use `format_visual_references` and the four-source design input set
+  - [ ] Per PIPELINE-design.md § `design_extractor.py`. The design input is the union of: (1) `format_visual_references(spec)` paths; (2) accepted frames from videos with `visual-target` in their roles; (3) accepted frames from scraped product-reference videos; (4) images downloaded from product-reference sources via `_download_site_media`.
+  - [ ] All four sources MUST exclude `proposed: true` references and frames derived from them. Filter via the existing per-stage formatters which already enforce this.
+  - [ ] Implement frame-content-hash dedup per design § "Compose the design extraction input set from FOUR sources". A user with both a ref/-declared local copy of a demo video AND the same video appearing on a scraped product page should not have its frames counted twice. Use `hashlib.sha256(frame.read_bytes()).hexdigest()` as the dedup key. ref-declared frames win on collision (added to seen set first).
+  - [ ] Update `extract_design`'s call site in `duplo/main.py` to pass `design_input` composed per the rules above instead of the current project-root scan.
+  - [ ] Implementation lives in the orchestrator (composition of input set), not in `design_extractor.py` itself. `extract_design` continues to take `list[Path]`.
+  - [ ] Tests: visual-target ref files included; non-visual ref files excluded; `proposed: true` visual ref excluded; dual-role behavioral+visual video contributes its accepted frames; behavioral-only video does NOT contribute frames to design; scraped product-reference video frames included; non-product-reference scraped videos do NOT contribute; site media images included; frame-content-hash dedup: same-content frame from ref/ and scraped path counted once; ref-declared frame wins on hash collision.
+
+- [ ] Refactor video pipeline to use `format_behavioral_references`
+  - [ ] Per PIPELINE-design.md § `video_extractor.py and friends`. Callers of `extract_all_videos` pass paths from `format_behavioral_references(spec)` instead of all videos.
+  - [ ] EXTEND the behavioral input set with `site_videos` (the second element of `_download_site_media`'s return tuple) per the orchestration sketch. Scraped demo videos from product-reference pages are first-class behavioral input.
+  - [ ] Pin the source-path-preservation contract for `extract_all_videos` per PIPELINE-design.md § `_accepted_frames_by_source` "Source-path preservation contract": `ExtractionResult.source` MUST equal the input path byte-for-byte — no `Path.resolve()`, no symlink following, no normalization. Enforce in code (no transformation in `extract_all_videos`) and pin with a test that passes a relative path and asserts `result.source` equals that same relative path.
+  - [ ] Add an assertion at the orchestrator's behavioral-paths construction point per the orchestration sketch: `assert len(behavioral_paths) == len(set(behavioral_paths))`. ref/ and `.duplo/site_media/` live under different roots so collisions require user error; the assert surfaces that error visibly.
+  - [ ] Tests: `format_behavioral_references` paths are passed to `extract_all_videos`; site_videos are added; ref/ video and scraped video both present in input; source-path-preservation: relative input path round-trips through `ExtractionResult.source` unchanged; collision assertion fires when same path appears in both lists.
+
+- [ ] Implement `_accepted_frames_by_source(filtered_results) -> dict[Path, list[Path]]` helper in `duplo/orchestrator.py`
+  - [ ] Per PIPELINE-design.md § `_accepted_frames_by_source`. One-line implementation (`{r.source: r.frames for r in filtered_results}`) but must live as a named helper so the post-filter contract has a named place in tests.
+  - [ ] **Critical**: the input must be POST-FILTER. Callers MUST run `frame_filter.apply_filter` on `ExtractionResult.frames` before passing to this helper. The orchestration sketch uses `dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))` to preserve `source` and `error` while replacing `frames`.
+  - [ ] Tests: (a) lookup returns correct frames per source; (b) if called with unfiltered results (rejected frames present), rejected frames appear in output — demonstrating the contract violation is detectable; (c) source-path preservation: keys equal the input `ExtractionResult.source` values byte-for-byte (no path transformation).
+
+- [ ] Refactor PDF/text/markdown doc extraction with `docs_text_extractor`
+  - [ ] Per PIPELINE-design.md § `pdf_extractor.py and text/markdown docs`. New function `docs_text_extractor` that takes references with `docs` in `roles` and produces a single text blob per file, routed by extension.
+  - [ ] Routing: `.pdf` → existing `extract_pdf_text` path; `.txt` → read directly; `.md` → read directly (markdown is text; the LLM handles formatting).
+  - [ ] Place `docs_text_extractor` in `duplo/pdf_extractor.py` (rename file later if it becomes misleading) OR in a new `duplo/docs_extractor.py` module. The new module is preferred per the "new module over extending long files" preference.
+  - [ ] Combined text feeds into feature extraction the same way today's PDF text does. Update the `extract_features` call site to include doc-references-derived text.
+  - [ ] Tests: PDF input routes to `extract_pdf_text`; `.txt` input read directly; `.md` input read directly; unknown extension produces diagnostic and is skipped; multiple docs combined into one blob.
+
+- [ ] Refactor `extract_features` callers and add `_matches_excluded` post-extraction filter
+  - [ ] Per PIPELINE-design.md § `extractor.py (feature extraction)`. `scraped_text` becomes the concatenation of text from all scrapeable sources. `spec_text` continues to use `format_spec_for_prompt(spec)` (which already excludes unreviewed entries per Phase 3). `scope_include`/`scope_exclude` come from `spec.scope_include`/`spec.scope_exclude`.
+  - [ ] Implement `_matches_excluded(feature, scope_exclude) -> bool` per design § `_matches_excluded`. Place in `duplo/orchestrator.py` (new module from earlier task) or `duplo/extractor.py` if it fits naturally there.
+  - [ ] Matching rule: case-insensitive WORD-BOUNDARY regex (`\b...\b`), NOT substring. Multi-word excluded terms must match as contiguous word sequence. Per design: `"plugin API"` matches `"Plugin API"` and `"plugin API."` but not `"non-plugin-API"` or a description that mentions `"plugin API"` only as contrast.
+  - [ ] Compare against BOTH `feature.name` and `feature.description`.
+  - [ ] When a feature is dropped, emit diagnostic via `record_failure("extractor:scope_exclude", "...", f"scope_exclude '<term>' matched feature '<name>'; dropped")`. Use whichever of the existing diagnostics categories fits best (likely `"io"` since `extractor` doesn't have a dedicated category); flag in code review if a new category is warranted.
+  - [ ] Apply the post-extraction filter at the orchestrator level: `features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]` after `extract_features` returns, before `save_features`.
+  - [ ] Tests: word-boundary match (positive cases for exact phrase, with trailing punctuation, with leading whitespace); word-boundary non-match (negative cases for substring-only matches like `"non-plugin-API"`, `"plugins-API"`); case-insensitive; multi-word excluded term must match as contiguous sequence (`"plugin API"` excluded does NOT match a description that mentions `"plugin"` and `"API"` separately); feature dropped produces diagnostic naming term and feature; empty `scope_exclude` is no-op; multiple matches emit one diagnostic per (term, feature) pair.
+
+- [ ] Refactor `_download_site_media` per the new signature
+  - [ ] Per PIPELINE-design.md § `_download_site_media signature under the new model`. New signature: `_download_site_media(raw_pages: dict[str, str]) -> tuple[list[Path], list[Path]]` returning `(image_paths, video_paths)`.
+  - [ ] Parameter is the dict of product-reference raw pages (NOT all raw pages). Caller passes `product_ref_raw_pages` per the orchestration sketch.
+  - [ ] Returns paths for EVERY embedded media resource that exists locally — BOTH newly-downloaded files AND files already present in cache. Per design § "Cached-vs-new rule": a URL-only project's second run finds all media cached; if the function returned only new paths, design extraction would silently get zero inputs on regeneration.
+  - [ ] Storage: `.duplo/site_media/<url-hash>/<filename>`. URL hash is the hash of the page URL the media was embedded in; filename is derived from the resource URL.
+  - [ ] Embedded-media origin handling per design § "Same-origin and embedded media": media is downloaded REGARDLESS of origin. The user authorized loading the page; the page's content includes its embedded media. This differs from cross-origin link behavior (which is recorded as discovered, not fetched).
+  - [ ] Parse `<img src>`, `<video src>`, AND `<source src>` tags. Resolve to absolute URLs against the embedding page URL (not against any `source_url`).
+  - [ ] Tests: image URL embedded in a page is downloaded and path returned; video URL same; cross-origin CDN image is downloaded (not skipped); cached file returns its existing path without re-downloading; mix of cached and new files all returned; zero embedded media returns `([], [])`; multiple pages each contributing media yields combined lists; HTTP failure on a single embed records diagnostic and skips that file but doesn't abort the function.
+
+- [ ] Refactor `gap_detector` callers to pre-filter through `scope_exclude`
+  - [ ] Per PIPELINE-design.md § `gap_detector.py`. No change to `detect_gaps` itself. The features list passed in is filtered through `scope_exclude` at the orchestrator level (handled by the previous `_matches_excluded` task) before `detect_gaps` is called.
+  - [ ] Verify no existing call site of `detect_gaps` bypasses the filter. If any do, route them through the same filter.
+  - [ ] `detect_design_gaps` operates on the AUTO-GENERATED block in SPEC.md's `## Design` section AS WELL AS on `duplo.json`'s `design_requirements` (redundant during transition; can simplify in Phase 7).
+  - [ ] Tests: feature list passed to `detect_gaps` excludes scope_exclude'd entries; `detect_design_gaps` reads from both AUTO-GENERATED block and `duplo.json` (verify both code paths exist).
+
+## Investigator
+
+- [ ] Update investigator to include counter-examples, counter-example sources, docs references, and behavior contracts
+  - [ ] Per PIPELINE-design.md § `investigator.py`. `investigate(bugs, ...)` gains role-filtered context inputs.
+  - [ ] Counter-example references via `format_counter_examples(spec)` get included in the prompt with an explicit "AVOID this pattern" label.
+  - [ ] Counter-example SOURCES via `format_counter_example_sources(spec)` (the new formatter from the pre-work task) get included as URL+notes context with the same "AVOID" framing. **The URL is NOT fetched** — declarative context only. Pin this with a test.
+  - [ ] Docs references via `format_doc_references(spec)` get included as supplementary context (PDF text via `extract_pdf_text`, .txt/.md via direct read — reuse the `docs_text_extractor` from the earlier task).
+  - [ ] `## Behavior` contracts via `spec.behavior_contracts` get included as ground-truth expectations.
+  - [ ] Update the investigator's structured-output prompt so that diagnoses can reference these new context types: e.g. `Diagnosis(... contradicts: "behavior contract X")` or `Diagnosis(... avoids_pattern: "counter-example Y")`. The exact prompt rewording is at Claude Code's discretion as long as the structure supports referencing the new context.
+  - [ ] Tests: counter-example refs included with AVOID label; counter-example source URLs included with AVOID label and NOT fetched (mock the fetcher and assert it was not called for counter-example URLs); docs refs included as supplementary; behavior contracts included as ground-truth; investigator output structure supports referencing all new context types.
+
+## Drafter write helpers (minimal subset)
+
+- [ ] Create `duplo/spec_drafter.py` with `append_sources(spec_text, new_entries) -> str`
+  - [ ] New module per the design (text-layer module independent of pipeline stages — must NOT import from `duplo/extractor.py`, `duplo/design_extractor.py`, etc.).
+  - [ ] `append_sources(existing_spec_text: str, new_entries: list[SourceEntry]) -> str` returns modified spec text with new entries appended to `## Sources`.
+  - [ ] Dedup-by-canonical: skip entries whose canonical URL already exists in the spec's `## Sources` (regardless of whether the existing entry has `proposed:` or `discovered:` flags). Use `url_utils.canonicalize_url` for comparison; the parser stores canonical URLs in `SourceEntry.url` already (per Phase 3) so existing entries are already canonical.
+  - [ ] Idempotent: calling `append_sources(s, [])` returns `s` unchanged. Calling `append_sources(append_sources(s, [e]), [e])` returns the same string as `append_sources(s, [e])` (the second call's `e` is dedup'd).
+  - [ ] Format new entries with their flags: `discovered: true` and/or `proposed: true` lines appear as field lines under the entry per PARSER-design.md § `## Sources` parser format.
+  - [ ] If `## Sources` section does not exist in `existing_spec_text`, create it (heading + entries) appended to the spec. Place it after `## Architecture` if present, else at end of file. Maintain the same blank-line conventions as the rest of SPEC.md.
+  - [ ] Tests: append single new entry; append multiple; dedup against existing canonical URL (entry not added); dedup against existing URL with different trailing slash (canonicalization in action); dedup is case-insensitive on host; idempotent (double-call returns same result); empty new_entries returns input unchanged; missing `## Sources` section is created; flags `discovered: true` and `proposed: true` written correctly.
+
+- [ ] Add `update_design_autogen(spec_text, body) -> str` to `duplo/spec_drafter.py`
+  - [ ] `update_design_autogen(existing_spec_text: str, body: str) -> str` returns modified spec text with the AUTO-GENERATED block in `## Design` populated.
+  - [ ] Write-once-never-replace semantics per PIPELINE-design.md § "Note on the autogen-cache divergence": if a well-formed AUTO-GENERATED block already exists with non-empty body, return `existing_spec_text` unchanged. The orchestrator is responsible for checking and skipping the Vision call when an autogen block already exists; this function is a defense-in-depth no-op in that case rather than an overwrite.
+  - [ ] If `## Design` section exists with no AUTO-GENERATED block: append the block (with BEGIN/END comment markers per PARSER-design.md § `## Design` parser) at the end of the section, after any existing user prose.
+  - [ ] If `## Design` section does not exist: create it with the AUTO-GENERATED block. Place after `## Architecture` (or after `## Sources` if both present). Maintain blank-line conventions.
+  - [ ] BEGIN/END markers: use the EXACT same comment-marker form that the parser's `_AUTOGEN_RE` matches (per PARSER-design.md). Pin with a test that round-trips through the parser.
+  - [ ] Tests: empty `## Design` gets autogen block appended; existing user prose in `## Design` preserved with autogen appended after it; existing autogen block with non-empty body NOT replaced (write-once); existing autogen block with empty body is replaced (allows regeneration after user clears the block); missing `## Design` section is created; round-trip: `update_design_autogen` output parses back to a spec where `spec.design.auto_generated` equals the body.
+
+## Save_raw_content update
+
+- [ ] Update `duplo/saver.py:save_raw_content` per the new signature
+  - [ ] Per PIPELINE-design.md § `save_raw_content` signature. New signature: `save_raw_content(raw_pages: dict[str, str], page_records: list[PageRecord], *, target_dir: Path = Path.cwd()) -> None`.
+  - [ ] For each `PageRecord`, look up `raw_pages[record.url]` and write the HTML to `.duplo/raw_pages/<sha256(record.url)>.html`.
+  - [ ] Cache filename is the SHA-256 of the canonical URL. NOT the content hash. `PageRecord.content_hash` continues to be stored inside the record for change detection but is NOT used for the cache filename.
+  - [ ] **Behavior on missing key**: if `record.url` has no entry in `raw_pages`, this indicates a construction-invariant violation. Log via `record_failure("save_raw_content", "io", f"no raw_pages entry for {record.url}; record skipped")` and SKIP that record. Do NOT raise. Per design § "Behavior on missing keys: log and skip, do not raise."
+  - [ ] Tests: each record's HTML written to URL-hashed filename; URL-hash filename matches `sha256(record.url).hexdigest()`; existing file at the same hash overwritten (one file per URL); missing key for a record skipped with diagnostic; remaining records still persisted when one is skipped; empty `raw_pages` and empty `page_records` no-op without error.
+
+## BuildPreferences and app_name
+
+- [ ] Implement `parse_build_preferences(architecture_prose) -> BuildPreferences` in `duplo/build_prefs.py` (new module)
+  - [ ] Per PIPELINE-design.md § BuildPreferences. New module per the "new module over extending long files" preference. NOT in `spec_reader.py` (PARSER-design.md forbids LLM calls there) and NOT in `questioner.py` (which is being replaced).
+  - [ ] Calls `claude -p` with structured-output prompt asking for `{platform, language, framework, dependencies: list[str], other_constraints: list[str]}` extracted from the prose. Returns `BuildPreferences` with whatever fields the LLM populated; missing fields stay at default.
+  - [ ] Section-scoped hash invalidation per design: the bytes hashed are `spec.architecture` (the parsed, comment-stripped content of `## Architecture`), NOT the whole SPEC.md file. Stored in `.duplo/duplo.json` under `architecture_hash`. Re-parse only when the hash changes.
+  - [ ] When the LLM returns no usable fields, return `BuildPreferences()` (all defaults). Surface as a WARNING via `validate_for_run`, not an error — plan generation handles all-defaults gracefully.
+  - [ ] Tests: parse with a typical architecture prose (Swift macOS app etc.); fields populated correctly; missing fields default; hash invalidation works (changing architecture re-triggers parse); commented-out content in `## Architecture` does NOT change hash (per PARSER-design.md `_strip_comments` runs before storage); cache hit avoids the LLM call; all-defaults BuildPreferences emits warning via `validate_for_run`.
+
+- [ ] Implement app_name derivation logic in `duplo/orchestrator.py`
+  - [ ] Per PIPELINE-design.md § app_name. New function `derive_app_name(spec, target_dir) -> str`.
+  - [ ] If `## Sources` includes a product-reference URL, derive a candidate app_name from the scraped product identity using existing `validator.validate_product_url` behavior (or whatever produces the product name today).
+  - [ ] If no URL, derive from project directory name as fallback (`numi-clone/` → `numi-clone`).
+  - [ ] Stored in `.duplo/product.json` under `app_name`. The user can edit this file directly if the auto-derived name is wrong.
+  - [ ] Tests: URL-based derivation produces expected name; no-URL fallback uses directory name; `product.json` written; user-edited `product.json` is NOT overwritten on subsequent runs (load and preserve existing `app_name` if present).
+
+## Orchestration: source iteration with first-source-wins dedup
+
+- [ ] Implement multi-source iteration loop in `_subsequent_run`
+  - [ ] Per PIPELINE-design.md § `main.py orchestration` orchestration sketch. Iterate `format_scrapeable_sources(spec)` and call `fetch_site` for each.
+  - [ ] Maintain `seen_canonical_urls: set[str]` for first-source-wins dedup of `PageRecord` entries.
+  - [ ] Maintain `all_raw_pages: dict[str, str]` and `product_ref_raw_pages: dict[str, str]` using `setdefault` (NOT `update` — dict.update would silently let later sources overwrite earlier; setdefault preserves first-source-wins).
+  - [ ] Accumulate `combined_text`, `all_code_examples`, `merged_doc_structures` across sources.
+  - [ ] `discovered_urls` collected from `_collect_cross_origin_links(source_raw_pages, source.url)` ONLY when `source.scrape == "deep"`. Per design: shallow sources fetched only the entry URL; collecting cross-origin links and recording them as `discovered: true` would silently append URLs the user never asked duplo to explore. Pin with a test.
+  - [ ] After the loop, if `all_code_examples`, call `save_examples(all_code_examples)`. If `all_page_records`, call `save_reference_urls(all_page_records)` and `save_raw_content(all_raw_pages, all_page_records)`. If `merged_doc_structures`, call `save_doc_structures(merged_doc_structures)`.
+  - [ ] Tests: multi-source iteration calls `fetch_site` once per scrapeable source; first-source-wins dedup of page_records (URL appearing in source A and source B is recorded once with source A's record); first-source-wins for raw_pages (HTML from source A preserved over source B for the same canonical URL); discovered_urls collected only from `deep` sources, NOT from `shallow`; non-product-reference sources do not contribute to product_ref_raw_pages; doc_structures merged across sources.
+
+- [ ] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
+  - [ ] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
+  - [ ] Default `role="docs"` and `scrape="deep"` for discovered entries per the design.
+  - [ ] Tests: discovered URLs trigger SPEC.md write; SPEC.md unchanged when all discovered URLs are already in `## Sources` (idempotency through `append_sources` dedup); `discovered: true` flag and `role: docs` written; SPEC.md NOT modified when `discovered_urls` is empty.
+
+## Orchestration: design extraction with autogen-skip
+
+- [ ] Compose design input set from four sources in `_subsequent_run`
+  - [ ] Per PIPELINE-design.md orchestration sketch "Compose the design extraction input set from FOUR sources".
+  - [ ] Sources: (1) `format_visual_references(spec)` paths; (2) accepted frames from videos with `visual-target` in roles via `accepted_frames_by_path.get(entry.path, [])`; (3) accepted frames from scraped `site_videos`; (4) `site_images` from `_download_site_media`.
+  - [ ] Apply frame-content-hash dedup per the design sketch: ref-declared frames (source 2) added to `seen_frame_hashes` first; scraped frames (source 3) added only if their content-hash is not already seen.
+  - [ ] `accepted_frames_by_path = _accepted_frames_by_source(filtered_results)` where `filtered_results` is the post-`apply_filter` list (use `dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))` per the sketch).
+  - [ ] Tests: design_input contains all four sources when present; missing source gracefully omitted; frame-content-hash dedup verified with two videos containing identical frames at different paths; behavioral-only video does NOT contribute frames; `proposed: true` visual ref does NOT contribute.
+
+- [ ] Wire SPEC.md write-back for autogen design with skip-when-present in `_subsequent_run`
+  - [ ] Per PIPELINE-design.md orchestration sketch "Check autogen block FIRST via the in-memory dataclass".
+  - [ ] Check `autogen_present = bool(spec.design.auto_generated.strip())` from the in-memory `spec` (NOT a re-read of SPEC.md, NOT a second regex pass). Per the design § "in-memory spec is source of truth within a single run" invariant.
+  - [ ] If `design_input` AND NOT `autogen_present`: call `extract_design(design_input)`, then read SPEC.md from disk, call `update_design_autogen(existing, format_design_block(design))`, write back if changed, then `save_design_requirements(dataclasses.asdict(design))` for the cache.
+  - [ ] If `design_input` AND `autogen_present`: skip extraction. Emit diagnostic via `record_failure("orchestrator:design_extraction", "io", f"Autogen design block exists in SPEC.md; skipped Vision extraction. Delete the BEGIN/END AUTO-GENERATED block to regenerate from {len(design_input)} input image(s).")`.
+  - [ ] Cache invariant per design § "Note on the autogen-cache divergence": when autogen is skipped, `save_design_requirements` is ALSO skipped — the cache stays consistent with SPEC.md autogen.
+  - [ ] Tests: autogen-absent triggers Vision call and write-back; autogen-present skips Vision call AND skips cache write; skip emits diagnostic naming the input count; SPEC.md write only happens when content differs (idempotency); in-memory `spec.design.auto_generated` consulted, not a re-read of SPEC.md from disk.
+
+- [ ] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
+  - [ ] Per PIPELINE-design.md § `format_design_block`. Wraps the existing `format_design_section(design)` in the same module, MINUS the section heading.
+  - [ ] **Lives in `design_extractor.py`, NOT `spec_drafter.py`** per the layering rationale (drafter must not depend on pipeline stages).
+  - [ ] The orchestrator imports `format_design_block` from `design_extractor` and passes the resulting string into `spec_drafter.update_design_autogen`. The drafter sees only a string.
+  - [ ] Tests: output equals `format_design_section(design)` minus the heading line; round-trip: `update_design_autogen(spec, format_design_block(design))` produces a spec where the parsed `spec.design.auto_generated` content reflects `design`'s fields.
+
+## Orchestration: full _subsequent_run restructure
+
+- [ ] Restructure `_subsequent_run` to consume role-filtered inputs end-to-end
+  - [ ] This is the integration task that wires together everything from previous Phase 5 tasks. Follow the orchestration sketch in PIPELINE-design.md § `main.py orchestration` step by step.
+  - [ ] Order within the function: (1) `read_spec()`; (2) `validate_for_run(spec)` and exit on errors; (3) file-change detection (unchanged from today); (4) multi-source iteration loop with first-source-wins dedup; (5) save_examples / save_reference_urls / save_raw_content / save_doc_structures; (6) discovered-URLs SPEC.md write-back; (7) `extract_features` with merged scraped text and `_matches_excluded` post-filter; (8) `save_features`; (9) `_download_site_media(product_ref_raw_pages)` for site_images and site_videos; (10) behavioral-paths construction with collision assert; (11) `extract_all_videos` + filter + `_accepted_frames_by_source`; (12) compose design_input from four sources with frame-content-hash dedup; (13) check `autogen_present`, run Vision and write-back OR skip with diagnostic; (14) phase planning (unchanged from today).
+  - [ ] The in-memory `spec` from step 1 is the source of truth for ALL decisions in steps 2–13. SPEC.md is re-read ONLY in step 6 and step 13 (to stage writes), NOT to drive extraction. Per design § "in-memory spec is source of truth within a single run".
+  - [ ] `_first_run` is NOT touched in this phase per design § "`_first_run` removal is NOT part of Phase 3." That's Phase 7.
+  - [ ] Tests (integration-style, per design § "Test plan"): URL-only spec produces correct PLAN.md without consulting `ref/`; ref/-only spec produces correct PLAN.md without making any HTTP requests; both contribute to the plan; subsequent run with new files added to `ref/` produces `proposed: true` entries in SPEC.md and pipeline does NOT act on them; after user removes `proposed: true`, next run includes the files in pipeline stages.
+
+## Orchestration: _fix_mode update
+
+- [ ] Update `_fix_mode` to use the new investigator with counter-examples and behavior contracts
+  - [ ] Per PIPELINE-design.md § `_fix_mode integration with new model`: "No structural change. The new investigator includes counter-examples and behavior contracts; existing `_fix_mode` tests should continue to pass with those added sources."
+  - [ ] Verify that `_fix_mode`'s call to `investigate(...)` passes the spec (or whatever context the investigator now needs to access counter-examples and behavior contracts via the formatters).
+  - [ ] Tests: existing `_fix_mode` tests still pass; new test that confirms counter-example references reach the investigator prompt when called from `_fix_mode`; new test for behavior contracts in `_fix_mode` context.
+
+## Multi-source persistence in duplo.json
+
+- [ ] Add `sources` field to `.duplo/duplo.json` and update saver functions
+  - [ ] Per PIPELINE-design.md § "Multi-source persistence". `.duplo/duplo.json` gains a `sources` field: list of `{url, last_scraped, content_hash, scrape_depth_used}` entries, one per scrapeable source.
+  - [ ] Add `save_sources(sources_metadata)` and `load_sources()` functions to `duplo/saver.py`. Sources metadata accumulated during the iteration loop and persisted after.
+  - [ ] Backward compatibility per design: `.duplo/product.json` keeps the single `source_url` field, populated from the FIRST product-reference entry in `## Sources`. New code reads from the spec, not from `product.json`. The field is preserved only so old tooling and migration detection keep working.
+  - [ ] When user removes a URL from `## Sources`, the entry STAYS in `duplo.json` (idempotent state) but the pipeline doesn't re-scrape and doesn't include cached content in subsequent extractions. Per design.
+  - [ ] Tests: sources field populated correctly; existing `product.json:source_url` populated from first product-reference entry; removed source stays in `duplo.json` but is not re-scraped; `save_sources` is idempotent; multiple sources tracked independently.
+
+## Manual verification (user must test)
+
+- [ ] [USER] Run `duplo` on a project with URL-only SPEC.md (one product-reference URL, no `ref/` files). Confirm PLAN.md is produced, design is extracted from scraped product pages, no errors about missing `ref/`. Confirm cache populated under `.duplo/raw_pages/` and `.duplo/site_media/`.
+- [ ] [USER] Run `duplo` on a project with ref/-only SPEC.md (no `## Sources` URLs, only ref/ files declared in `## References`). Confirm PLAN.md is produced, design is extracted from ref/ visual targets, no HTTP requests made (verify with network monitoring or by running offline).
+- [ ] [USER] Run `duplo` on a project with both URL and ref/. Confirm both contribute to the plan. Confirm scope_exclude items in `## Scope` are dropped from features (check the diagnostic log for `scope_exclude '<term>' matched feature '<name>'; dropped` lines).
+- [ ] [USER] Run `duplo` on a project where deep crawling discovers cross-origin links. After the run, inspect SPEC.md and confirm `## Sources` has new entries with `discovered: true` flag. Run `duplo` AGAIN and confirm those discovered URLs are NOT re-scraped (they are still flagged). Remove the `discovered:` flag from one entry and run again; that URL should now be scraped.
+- [ ] [USER] Run `duplo` on a project with an existing AUTO-GENERATED design block in SPEC.md. Confirm the run does NOT call Vision (check the diagnostic log for the "Autogen design block exists" message and verify `extract_design` was not called by checking whether `.duplo/duplo.json` design_requirements changed). Delete the AUTO-GENERATED block manually and run again; Vision should now be called.
+- [ ] [USER] Run `duplo` on a project with `proposed: true` references. Confirm those references are NOT used by the pipeline (no Vision on proposed visual targets, no frames extracted from proposed behavioral targets). Remove `proposed: true` from one and run again; that reference should now be used.
+- [ ] [USER] Run `duplo` on a project with a `counter-example` reference. Confirm it does NOT appear in design extraction or feature extraction. Run `duplo fix` on a bug; confirm the counter-example reference appears in the investigator's context with an "AVOID" framing.
+- [ ] [USER] Run the full test suite: `pytest -x`. Confirm all pre-existing tests still pass and all new Phase 5 tests pass.
 
 ---
 

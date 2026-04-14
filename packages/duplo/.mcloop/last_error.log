@@ -1,0 +1,26 @@
+PlanCorruptionError
+
+Structural corruption detected in /Users/mhcoen/proj/duplo/PLAN.md:
+  - duplicate Phase/Stage 3 at lines 208, 392
+  - duplicate Phase/Stage 6 at lines 503, 624
+Fix the file manually. mcloop will not modify a corrupted PLAN.md because doing so risks compounding the corruption. If the apparent corruption is intentional, pass check_structure=False to parse().
+
+Traceback:
+Traceback (most recent call last):
+  File "/Users/mhcoen/proj/mcloop/mcloop/main.py", line 171, in main
+    _main()
+    ~~~~~^^
+  File "/Users/mhcoen/proj/mcloop/mcloop/main.py", line 240, in _main
+    _dry_run(parse(checklist_path))
+             ~~~~~^^^^^^^^^^^^^^^^
+  File "/Users/mhcoen/proj/mcloop/mcloop/checklist.py", line 174, in parse
+    _check_structural_sanity(lines, path)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/mhcoen/proj/mcloop/mcloop/checklist.py", line 146, in _check_structural_sanity
+    raise PlanCorruptionError(
+    ...<5 lines>...
+    )
+mcloop.checklist.PlanCorruptionError: Structural corruption detected in /Users/mhcoen/proj/duplo/PLAN.md:
+  - duplicate Phase/Stage 3 at lines 208, 392
+  - duplicate Phase/Stage 6 at lines 503, 624
+Fix the file manually. mcloop will not modify a corrupted PLAN.md because doing so risks compounding the corruption. If the apparent corruption is intentional, pass check_structure=False to parse().
