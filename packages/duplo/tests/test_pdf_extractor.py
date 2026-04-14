@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from duplo.pdf_extractor import extract_pdf_text
+from duplo.pdf_extractor import docs_text_extractor, extract_pdf_text
+from duplo.spec_reader import ReferenceEntry
 
 
 def _make_pdf(text: str = "Hello World") -> bytes:
@@ -75,3 +76,77 @@ class TestExtractPdfText:
         )
         result = extract_pdf_text([blank])
         assert result == ""
+
+
+def _ref(path: Path, roles: list[str] | None = None) -> ReferenceEntry:
+    return ReferenceEntry(path=path, roles=roles or ["docs"])
+
+
+class TestDocsTextExtractor:
+    def test_txt_file_read_directly(self, tmp_path: Path):
+        txt = tmp_path / "notes.txt"
+        txt.write_text("Some notes here", encoding="utf-8")
+        result = docs_text_extractor([_ref(txt)])
+        assert "notes.txt" in result
+        assert "Some notes here" in result
+
+    def test_md_file_read_directly(self, tmp_path: Path):
+        md = tmp_path / "readme.md"
+        md.write_text("# Title\nContent", encoding="utf-8")
+        result = docs_text_extractor([_ref(md)])
+        assert "readme.md" in result
+        assert "# Title\nContent" in result
+
+    def test_pdf_routed_to_extract_pdf_text(self, tmp_path: Path):
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(_make_pdf("PDF content here"))
+        result = docs_text_extractor([_ref(pdf)])
+        assert "doc.pdf" in result
+        assert "PDF content here" in result
+
+    def test_mixed_extensions(self, tmp_path: Path):
+        pdf = tmp_path / "spec.pdf"
+        pdf.write_bytes(_make_pdf("From PDF"))
+        txt = tmp_path / "notes.txt"
+        txt.write_text("From TXT", encoding="utf-8")
+        md = tmp_path / "guide.md"
+        md.write_text("From MD", encoding="utf-8")
+        entries = [_ref(pdf), _ref(txt), _ref(md)]
+        result = docs_text_extractor(entries)
+        assert "From PDF" in result
+        assert "From TXT" in result
+        assert "From MD" in result
+        assert "spec.pdf" in result
+        assert "notes.txt" in result
+        assert "guide.md" in result
+
+    def test_empty_list(self):
+        assert docs_text_extractor([]) == ""
+
+    def test_unknown_extension_skipped(self, tmp_path: Path):
+        img = tmp_path / "photo.png"
+        img.write_bytes(b"\x89PNG fake")
+        result = docs_text_extractor([_ref(img)])
+        assert result == ""
+
+    def test_missing_file_skipped(self, tmp_path: Path):
+        missing = tmp_path / "gone.txt"
+        result = docs_text_extractor([_ref(missing)])
+        assert result == ""
+
+    def test_unreadable_pdf_skipped(self, tmp_path: Path):
+        bad = tmp_path / "bad.pdf"
+        bad.write_bytes(b"not a pdf")
+        good = tmp_path / "good.txt"
+        good.write_text("Good text", encoding="utf-8")
+        result = docs_text_extractor([_ref(bad), _ref(good)])
+        assert "Good text" in result
+
+    def test_header_per_file(self, tmp_path: Path):
+        a = tmp_path / "a.txt"
+        b = tmp_path / "b.txt"
+        a.write_text("AAA", encoding="utf-8")
+        b.write_text("BBB", encoding="utf-8")
+        result = docs_text_extractor([_ref(a), _ref(b)])
+        assert "=== a.txt ===" in result
+        assert "=== b.txt ===" in result
