@@ -557,7 +557,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] [BATCH] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
   - [x] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
-  - [ ] Default `role="docs"` and `scrape="deep"` for discovered entries per the design.
+  - [x] Default `role="docs"` and `scrape="deep"` for discovered entries per the design.
   - [ ] Tests: discovered URLs trigger SPEC.md write; SPEC.md unchanged when all discovered URLs are already in `## Sources` (idempotency through `append_sources` dedup); `discovered: true` flag and `role: docs` written; SPEC.md NOT modified when `discovered_urls` is empty.
 
 ## Orchestration: design extraction with autogen-skip
