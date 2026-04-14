@@ -405,6 +405,34 @@ class TestMatchesExcluded:
         mock_rf.assert_called_once()
         assert "Data export" in mock_rf.call_args[0][2]
 
+    def test_match_with_leading_whitespace(self):
+        """Term at start of string after whitespace still matches."""
+        feat = self._feat("  Plugin API")
+        assert _matches_excluded(feat, ["Plugin API"]) is True
+
+    def test_no_match_suffix_hyphenated(self):
+        """'plugins-API' should NOT match excluded term 'plugin'."""
+        feat = self._feat("plugins-API")
+        assert _matches_excluded(feat, ["plugin"]) is False
+
+    def test_no_match_separate_words(self):
+        """'plugin' and 'API' mentioned separately should NOT match 'plugin API'."""
+        feat = self._feat(
+            "Plugin system",
+            description="The plugin system exposes a public API.",
+        )
+        assert _matches_excluded(feat, ["plugin API"]) is False
+
+    def test_multiple_terms_each_emits_own_diagnostic(self):
+        """Each (term, feature) pair that matches emits its own diagnostic."""
+        feat = self._feat("CLI REST API tool")
+        with patch("duplo.extractor.record_failure") as mock_rf:
+            result = _matches_excluded(feat, ["CLI", "REST API"])
+        assert result is True
+        # First matching term causes early return; one diagnostic emitted.
+        mock_rf.assert_called_once()
+        assert "CLI" in mock_rf.call_args[0][2]
+
 
 # ---------------------------------------------------------------------------
 # helpers
