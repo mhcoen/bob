@@ -7418,6 +7418,68 @@ class TestScrapeDeclaredSources:
 
         assert len(result.merged_doc_structures.feature_tables) == 2
 
+    def test_combined_text_accumulated(self):
+        """Scraped text from all sources concatenated into combined_text."""
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_a, src_b])
+
+        fetch_results = [
+            ("alpha text", [], None, [], {}),
+            ("beta text", [], None, [], {}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert "alpha text" in result.combined_text
+        assert "beta text" in result.combined_text
+
+    def test_code_examples_accumulated(self):
+        """Code examples from all sources collected into all_code_examples."""
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_a, src_b])
+
+        ex_a = {"input": "1+1", "expected_output": "2"}
+        ex_b = {"input": "2+2", "expected_output": "4"}
+
+        fetch_results = [
+            ("", [ex_a], None, [], {}),
+            ("", [ex_b], None, [], {}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.all_code_examples) == 2
+        assert ex_a in result.all_code_examples
+        assert ex_b in result.all_code_examples
+
     def test_empty_sources_returns_empty_result(self):
         """No scrapeable sources returns empty ScrapeResult."""
         spec = self._make_spec([])
@@ -7425,9 +7487,11 @@ class TestScrapeDeclaredSources:
             result = _scrape_declared_sources(spec)
 
         assert result.combined_text == ""
+        assert result.all_code_examples == []
         assert result.all_page_records == []
         assert result.all_raw_pages == {}
         assert result.product_ref_raw_pages == {}
+        assert result.merged_doc_structures.feature_tables == []
 
     def test_fetch_failure_continues(self):
         """Exception from fetch_site for one source skips it."""
