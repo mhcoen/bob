@@ -27,6 +27,7 @@ from duplo.main import (
     _print_summary,
     _rescrape_product_url,
     _unimplemented_features,
+    _visual_target_video_frames,
     main,
 )
 from duplo.questioner import BuildPreferences
@@ -1701,6 +1702,156 @@ class TestAnalyzeNewFilesReturnsSummary:
         assert call_args[0] == frame
         assert result.images_analyzed == 1
         assert result.videos_found == 1
+
+
+class TestVisualTargetVideoFrames:
+    """Tests for _visual_target_video_frames helper."""
+
+    def test_returns_empty_when_no_spec(self, tmp_path):
+        video = tmp_path / "ref" / "demo.mp4"
+        frame = tmp_path / ".duplo" / "video_frames" / "demo_scene_0001.png"
+        assert _visual_target_video_frames(None, [video], [frame]) == []
+
+    def test_returns_empty_when_no_frames(self, tmp_path):
+        from duplo.spec_reader import ProductSpec
+
+        spec = ProductSpec(raw="")
+        assert _visual_target_video_frames(spec, [], []) == []
+
+    def test_returns_frames_from_visual_target_videos(self, tmp_path, monkeypatch):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        vt_video = ref_dir / "demo.mp4"
+        vt_video.write_bytes(b"MP4")
+        other_video = ref_dir / "intro.mp4"
+        other_video.write_bytes(b"MP4")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(path=Path("ref/demo.mp4"), roles=["visual-target"]),
+                ReferenceEntry(path=Path("ref/intro.mp4"), roles=["behavioral-target"]),
+            ],
+        )
+
+        vt_frame = tmp_path / ".duplo" / "video_frames" / "demo_scene_0001.png"
+        other_frame = tmp_path / ".duplo" / "video_frames" / "intro_scene_0001.png"
+        vt_frame.parent.mkdir(parents=True, exist_ok=True)
+        vt_frame.write_bytes(b"PNG")
+        other_frame.write_bytes(b"PNG")
+
+        result = _visual_target_video_frames(
+            spec, [vt_video, other_video], [vt_frame, other_frame]
+        )
+        assert result == [vt_frame]
+
+    def test_excludes_proposed_visual_target(self, tmp_path, monkeypatch):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        vid = ref_dir / "proposed.mp4"
+        vid.write_bytes(b"MP4")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.mp4"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ],
+        )
+
+        frame = tmp_path / ".duplo" / "video_frames" / "proposed_scene_0001.png"
+        frame.parent.mkdir(parents=True, exist_ok=True)
+        frame.write_bytes(b"PNG")
+
+        result = _visual_target_video_frames(spec, [vid], [frame])
+        assert result == []
+
+    def test_non_video_visual_target_ignored(self, tmp_path, monkeypatch):
+        """Non-video files (images) with visual-target role are not matched."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "shot.png"
+        img.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"]),
+            ],
+        )
+
+        frame = tmp_path / ".duplo" / "video_frames" / "other_scene_0001.png"
+        frame.parent.mkdir(parents=True, exist_ok=True)
+        frame.write_bytes(b"PNG")
+
+        result = _visual_target_video_frames(spec, [img], [frame])
+        assert result == []
+
+
+class TestAnalyzeNewFilesWithSpec:
+    """Tests for _analyze_new_files with spec-based design input."""
+
+    def test_uses_collect_design_input_when_spec_provided(self, tmp_path, monkeypatch):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "design.png"
+        img.write_bytes(b"PNG" * 500)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(path=Path("ref/design.png"), roles=["visual-target"]),
+            ],
+        )
+
+        design = DesignRequirements(
+            colors={"primary": "#abc"},
+            source_images=["design.png"],
+        )
+        with (
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[img],
+            ) as mock_cdi,
+            patch("duplo.main.extract_design", return_value=design),
+        ):
+            _analyze_new_files(["ref/design.png"], spec=spec)
+
+        mock_cdi.assert_called_once()
+
+    def test_falls_back_to_legacy_without_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG" * 500)
+
+        design = DesignRequirements(
+            colors={"primary": "#fff"},
+            source_images=["shot.png"],
+        )
+        with patch("duplo.main.extract_design", return_value=design) as mock_design:
+            _analyze_new_files(["shot.png"])
+
+        mock_design.assert_called_once()
+        call_args = mock_design.call_args[0][0]
+        assert any(p.name == "shot.png" for p in call_args)
 
 
 class TestRescrapeReturnsCounts:
@@ -4771,6 +4922,7 @@ class TestValidateForRunWiring:
                 "behavior_contracts": [],
                 "scope_include": None,
                 "scope_exclude": None,
+                "references": [],
             },
         )()
         vr = ValidationResult(

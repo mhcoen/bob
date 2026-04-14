@@ -207,6 +207,7 @@ from duplo.comparator import compare_screenshots
 from duplo.diagnostics import print_summary as diagnostics_print_summary
 from duplo.design_extractor import (
     DesignRequirements,
+    collect_design_input,
     extract_design,
     format_design_section,
 )
@@ -244,6 +245,7 @@ from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
 from duplo.migration import _check_migration
 from duplo.spec_reader import (
+    ProductSpec,
     format_contracts_as_verification,
     format_spec_for_prompt,
     read_spec,
@@ -337,6 +339,36 @@ def _run_video_frame_pipeline(
     if stored:
         print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
     return video_frames
+
+
+_VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
+
+
+def _visual_target_video_frames(
+    spec: ProductSpec | None,
+    videos: list[Path],
+    frames: list[Path],
+) -> list[Path]:
+    """Return *frames* that came from videos with ``visual-target`` role.
+
+    Matches frames to their source videos using filename stems (ffmpeg
+    names frames ``{stem}_scene_NNNN.png``).
+    """
+    if not spec or not frames or not videos:
+        return []
+    from duplo.spec_reader import format_visual_references
+
+    root = Path.cwd()
+    vt_resolved = set()
+    for entry in format_visual_references(spec):
+        if entry.path.suffix.lower() in _VIDEO_EXTS:
+            vt_resolved.add((root / entry.path).resolve())
+
+    vt_stems = {v.stem for v in videos if v.resolve() in vt_resolved}
+    if not vt_stems:
+        return []
+
+    return [f for f in frames if any(f.name.startswith(stem + "_") for stem in vt_stems)]
 
 
 @dataclasses.dataclass
@@ -754,6 +786,8 @@ def _first_run(*, url: str | None = None) -> None:
     doc_structures = None
     page_records: list = []
     raw_pages: dict[str, str] = {}
+    site_images: list[Path] = []
+    site_videos: list[Path] = []
 
     product_name = ""
 
@@ -780,13 +814,13 @@ def _first_run(*, url: str | None = None) -> None:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
         # Download embedded images and videos from fetched pages.
-        # Only genuinely new files are returned.
+        # Only genuinely new files are returned.  Kept separate from
+        # scan so move_references does not try to relocate files that
+        # are already under .duplo/site_media/.
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
-            scan.images.extend(site_images)
             print(f"  Downloaded {len(site_images)} image(s) from product site.")
         if site_videos:
-            scan.videos.extend(site_videos)
             print(f"  Downloaded {len(site_videos)} video(s) from product site.")
 
     if not saved_product:
@@ -796,7 +830,7 @@ def _first_run(*, url: str | None = None) -> None:
         save_product(product_name, source_url)
         print("Product identity saved to .duplo/product.json.")
 
-    # Extract frames from video files at scene change points.
+    # Extract frames from ref/ video files at scene change points.
     video_frames: list[Path] = []
     if scan.videos:
         print(f"\nExtracting frames from {len(scan.videos)} video(s) \u2026")
@@ -804,12 +838,25 @@ def _first_run(*, url: str | None = None) -> None:
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
 
-    # Extract visual design from reference images (including video frames).
+    # Extract frames from site videos.
+    site_video_frames: list[Path] = []
+    if site_videos:
+        print(f"\nExtracting frames from {len(site_videos)} site video(s) \u2026")
+        site_video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
+        if site_video_frames:
+            print(f"  Total: {len(site_video_frames)} frame(s) from site video(s)")
+
+    # Compose design input from four sources (see collect_design_input)
+    # when spec is available; fall back to all images + frames otherwise.
+    if spec:
+        vt_frames = _visual_target_video_frames(spec, scan.videos, video_frames)
+        design_input = collect_design_input(spec, vt_frames, site_images, site_video_frames)
+    else:
+        design_input = list(scan.images) + video_frames + site_images + site_video_frames
     design = DesignRequirements()
-    all_images = list(scan.images) + video_frames
-    if all_images:
+    if design_input:
         print("\nExtracting visual design from images \u2026")
-        design = extract_design(all_images)
+        design = extract_design(design_input)
         if design.colors or design.fonts or design.layout:
             print(f"Extracted design details from {len(design.source_images)} image(s).")
         else:
@@ -920,12 +967,18 @@ def _first_run(*, url: str | None = None) -> None:
         print("Failed to generate roadmap.")
 
 
-def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
+def _analyze_new_files(
+    file_names: list[str],
+    spec: ProductSpec | None = None,
+) -> UpdateSummary:
     """Analyze new or changed files the same way as first run.
 
     Images are sent to Vision for design extraction, PDFs are
     converted to text, and URLs found in text files are scraped.
     Results are saved to duplo.json.
+
+    When *spec* is provided, design extraction input is composed via
+    :func:`collect_design_input` (four-source model with dedup).
 
     Returns an :class:`UpdateSummary` with counts of what was analyzed.
     """
@@ -938,7 +991,6 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     scan = scan_files(paths)
     analyzed_anything = False
 
-    # Collect user-provided images.
     # Extract frames from new video files at scene change points.
     video_frames: list[Path] = []
     if scan.videos:
@@ -948,11 +1000,16 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
         analyzed_anything = True
         summary.video_frames_extracted = len(video_frames)
 
-    # Combine user images and accepted video frames for design extraction.
-    all_images = list(scan.images) + video_frames
-    if all_images:
-        print(f"\nAnalyzing {len(all_images)} image(s) with Vision \u2026")
-        design = extract_design(all_images)
+    # Compose design input via four-source model when spec is
+    # available; fall back to all images + frames otherwise.
+    if spec:
+        vt_frames = _visual_target_video_frames(spec, scan.videos, video_frames)
+        design_input = collect_design_input(spec, vt_frames)
+    else:
+        design_input = list(scan.images) + video_frames
+    if design_input:
+        print(f"\nAnalyzing {len(design_input)} image(s) with Vision \u2026")
+        design = extract_design(design_input)
         if design.colors or design.fonts or design.layout:
             save_design_requirements(dataclasses.asdict(design))
             print(f"  Updated design requirements from {len(design.source_images)} image(s).")
@@ -1055,12 +1112,17 @@ def _load_existing_urls() -> set[str]:
     return {r["url"] for r in records if "url" in r}
 
 
-def _rescrape_product_url() -> tuple[int, int, str]:
+def _rescrape_product_url(
+    spec: ProductSpec | None = None,
+) -> tuple[int, int, str]:
     """Re-scrape the product URL stored in duplo.json with the deep extractor.
 
     If ``source_url`` is set, fetches it again via :func:`fetch_site` and
     updates the reference URLs and raw page content in duplo.json.  This
     picks up any changes on the product site since the last run.
+
+    When *spec* is provided, design extraction input is composed via
+    :func:`collect_design_input` (four-source model with dedup).
 
     Returns ``(pages_updated, examples_updated, scraped_text)`` counts
     and the scraped text content for downstream feature re-extraction.
@@ -1140,14 +1202,23 @@ def _rescrape_product_url() -> tuple[int, int, str]:
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
             print(f"  Downloaded {len(site_images)} new image(s) from product site.")
+        site_video_frames: list[Path] = []
         if site_videos:
             print(f"  Downloaded {len(site_videos)} new video(s) from product site.")
-            video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
-            if video_frames:
-                design = extract_design(video_frames)
-                if design.colors or design.fonts or design.layout:
-                    save_design_requirements(dataclasses.asdict(design))
-                    print(f"  Updated design from {len(design.source_images)} frame(s).")
+            site_video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
+        if spec:
+            design_input = collect_design_input(
+                spec,
+                site_images=site_images,
+                site_video_frames=site_video_frames,
+            )
+        else:
+            design_input = site_images + site_video_frames
+        if design_input:
+            design = extract_design(design_input)
+            if design.colors or design.fonts or design.layout:
+                save_design_requirements(dataclasses.asdict(design))
+                print(f"  Updated design from {len(design.source_images)} image(s).")
 
     # Re-read duplo.json to pick up writes from save_reference_urls,
     # save_doc_structures, etc. that happened since our initial read.
@@ -1334,7 +1405,7 @@ def _subsequent_run() -> None:
         # Analyze new/changed files under ref/ (matching scan_directory).
         changed_files = [f for f in diff.added + diff.changed if f.startswith("ref/")]
         if changed_files:
-            analysis = _analyze_new_files(changed_files)
+            analysis = _analyze_new_files(changed_files, spec=spec)
             summary.images_analyzed = analysis.images_analyzed
             summary.videos_found = analysis.videos_found
             summary.pdfs_extracted = analysis.pdfs_extracted
@@ -1344,7 +1415,7 @@ def _subsequent_run() -> None:
             summary.collected_text = analysis.collected_text
 
     # Re-scrape the product URL to pick up site changes.
-    pages, examples, scraped_text = _rescrape_product_url()
+    pages, examples, scraped_text = _rescrape_product_url(spec=spec)
     summary.pages_rescraped = pages
     summary.examples_rescraped = examples
 
