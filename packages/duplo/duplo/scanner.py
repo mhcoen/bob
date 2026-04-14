@@ -5,12 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
-
 from duplo.diagnostics import record_failure
-
-if TYPE_CHECKING:
-    from duplo.spec_reader import ReferenceEntry
+from duplo.spec_reader import ReferenceEntry
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
@@ -180,21 +176,34 @@ class ScanResult:
     pdfs: list[Path] = field(default_factory=list)
     text_files: list[Path] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
+    roles: dict[Path, list[str]] = field(default_factory=dict)
 
 
-def scan_files(paths: list[Path]) -> ScanResult:
+def scan_files(
+    paths: list[Path],
+    references: list[ReferenceEntry] | None = None,
+) -> ScanResult:
     """Classify specific files into a :class:`ScanResult`.
 
     Works like :func:`scan_directory` but operates on an explicit list
     of file paths instead of walking a directory.  Used by subsequent
     runs to analyze only new or changed files.
+
+    When *references* is provided, each file's path is checked against
+    the parsed ``## References`` entries to determine its declared
+    roles.  Matched roles are stored in ``result.roles`` keyed by the
+    original path.
     """
     result = ScanResult()
     seen_urls: set[str] = set()
+    ref_index = _build_reference_index(references) if references else {}
     for path in paths:
         if not path.is_file():
             continue
         _classify_file(path, result, seen_urls)
+        roles = _lookup_roles(path, ref_index)
+        if roles:
+            result.roles[path] = roles
     return result
 
 
@@ -307,6 +316,45 @@ def check_unlisted_ref_files(
             )
             unlisted.append(file_path)
     return unlisted
+
+
+def _build_reference_index(
+    references: list[ReferenceEntry],
+) -> dict[str, list[str]]:
+    """Build a lookup from normalised path strings to declared roles.
+
+    Keys are the ``str(entry.path)`` values from ``## References``
+    (e.g. ``"ref/shot.png"``).  This allows fast matching against
+    file paths encountered during scanning.
+    """
+    index: dict[str, list[str]] = {}
+    for entry in references:
+        index[str(entry.path)] = list(entry.roles)
+    return index
+
+
+def _lookup_roles(
+    path: Path,
+    ref_index: dict[str, list[str]],
+) -> list[str]:
+    """Return declared roles for *path*, or an empty list if unlisted.
+
+    Tries matching by the full ``str(path)`` first (covers paths
+    already relative, e.g. ``ref/shot.png``).  Then falls back to
+    matching by filename alone against entries whose parent is
+    ``ref`` — this handles the case where *path* is absolute or
+    differently anchored but names the same file.
+    """
+    key = str(path)
+    if key in ref_index:
+        return ref_index[key]
+    # Fallback: match by filename within ref/ entries.
+    name = path.name
+    for ref_path, roles in ref_index.items():
+        parts = ref_path.split("/")
+        if len(parts) >= 2 and parts[0] == "ref" and parts[-1] == name:
+            return roles
+    return []
 
 
 def _extract_urls_from_file(

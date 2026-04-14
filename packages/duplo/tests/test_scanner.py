@@ -248,6 +248,109 @@ class TestScanFiles:
         assert len(result.images) == 1
 
 
+class TestScanFilesRoleLookup:
+    """Tests for role lookup in scan_files via ## References."""
+
+    def test_matching_path_gets_roles(self, tmp_path: Path):
+        """File whose path matches a ReferenceEntry gets its roles."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "shot.png"
+        img.write_bytes(b"PNG")
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        result = scan_files([img], references=refs)
+        assert result.roles[img] == ["visual-target"]
+
+    def test_no_references_empty_roles(self, tmp_path: Path):
+        """No references parameter means empty roles dict."""
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG")
+        result = scan_files([img])
+        assert result.roles == {}
+
+    def test_empty_references_no_roles(self, tmp_path: Path):
+        """Empty references list means no roles assigned."""
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"PNG")
+        result = scan_files([img], references=[])
+        assert result.roles == {}
+
+    def test_unlisted_file_no_roles(self, tmp_path: Path):
+        """File not in ## References gets no roles entry."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "orphan.png"
+        img.write_bytes(b"PNG")
+        refs = [ReferenceEntry(path=Path("ref/other.png"), roles=["visual-target"])]
+        result = scan_files([img], references=refs)
+        assert img not in result.roles
+
+    def test_multiple_roles(self, tmp_path: Path):
+        """File with multiple roles gets all of them."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "combo.png"
+        img.write_bytes(b"PNG")
+        refs = [
+            ReferenceEntry(
+                path=Path("ref/combo.png"),
+                roles=["visual-target", "behavioral-target"],
+            )
+        ]
+        result = scan_files([img], references=refs)
+        assert result.roles[img] == ["visual-target", "behavioral-target"]
+
+    def test_mixed_listed_and_unlisted(self, tmp_path: Path):
+        """Only listed files get roles; unlisted files are absent from roles dict."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        listed = ref / "listed.png"
+        listed.write_bytes(b"PNG")
+        unlisted = ref / "unlisted.jpg"
+        unlisted.write_bytes(b"JPG")
+        refs = [ReferenceEntry(path=Path("ref/listed.png"), roles=["docs"])]
+        result = scan_files([listed, unlisted], references=refs)
+        assert listed in result.roles
+        assert unlisted not in result.roles
+
+    def test_fallback_matches_by_filename(self, tmp_path: Path):
+        """Absolute path matches a ref/ entry by filename fallback."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "shot.png"
+        img.write_bytes(b"PNG")
+        # The reference path is ref/shot.png but the scanned path is absolute.
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"])]
+        # Pass the absolute path — str won't match "ref/shot.png" directly.
+        result = scan_files([img], references=refs)
+        assert result.roles[img] == ["visual-target"]
+
+    def test_nonexistent_file_skipped(self, tmp_path: Path):
+        """Nonexistent files are skipped, no roles assigned."""
+        gone = tmp_path / "ref" / "gone.png"
+        refs = [ReferenceEntry(path=Path("ref/gone.png"), roles=["visual-target"])]
+        result = scan_files([gone], references=refs)
+        assert gone not in result.roles
+
+    def test_classification_still_works_with_references(self, tmp_path: Path):
+        """Role lookup doesn't interfere with normal classification."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "shot.png"
+        img.write_bytes(b"PNG")
+        pdf = ref / "spec.pdf"
+        pdf.write_bytes(b"%PDF")
+        refs = [
+            ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"]),
+            ReferenceEntry(path=Path("ref/spec.pdf"), roles=["docs"]),
+        ]
+        result = scan_files([img, pdf], references=refs)
+        assert len(result.images) == 1
+        assert len(result.pdfs) == 1
+        assert result.roles[img] == ["visual-target"]
+        assert result.roles[pdf] == ["docs"]
+
+
 class TestCheckUnlistedRefFiles:
     """Tests for check_unlisted_ref_files diagnostic."""
 
