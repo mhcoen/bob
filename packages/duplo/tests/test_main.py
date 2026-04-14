@@ -7732,9 +7732,44 @@ class TestRunVideoFramePipelinePerSourceLookup:
         assert frames == []
         assert lookup == {}
 
+    def test_all_frames_rejected_source_has_empty_list(self, tmp_path, monkeypatch):
+        """Source whose frames are all rejected maps to empty list."""
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        vid = tmp_path / "a.mp4"
+        vid.write_bytes(b"MP4")
+        frame1 = frames_dir / "a_scene_0001.png"
+        frame1.write_bytes(b"PNG1")
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(source=vid, frames=[frame1]),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[],  # all rejected
+            ),
+        ):
+            from duplo.main import _run_video_frame_pipeline
+
+            frames, lookup = _run_video_frame_pipeline([vid])
+
+        assert frames == []
+        # Source present in lookup with empty frame list.
+        assert vid in lookup
+        assert lookup[vid] == []
+
 
 class TestDesignInputPerSourceLookup:
-    """_first_run uses accepted_by_source lookup for design input composition."""
+    """_first_run uses accepted_frames_by_path lookup for design input composition."""
 
     def test_visual_target_frames_via_lookup(self, tmp_path, monkeypatch):
         """Frames from visual-target videos are selected via per-source lookup."""

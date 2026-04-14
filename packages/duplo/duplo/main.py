@@ -365,9 +365,9 @@ def _run_video_frame_pipeline(
 ) -> tuple[list[Path], dict[Path, list[Path]]]:
     """Extract, filter, describe, and store video frames.
 
-    Returns ``(accepted_frames, accepted_by_source)`` where
+    Returns ``(accepted_frames, accepted_frames_by_path)`` where
     *accepted_frames* is the flat list of kept frame paths and
-    *accepted_by_source* maps each input video path to its
+    *accepted_frames_by_path* maps each input video path to its
     accepted (post-filter) frames via
     :func:`~duplo.orchestrator._accepted_frames_by_source`.
     """
@@ -396,10 +396,10 @@ def _run_video_frame_pipeline(
     filtered_results = [
         dataclasses.replace(r, frames=[f for f in r.frames if f in kept_set]) for r in results
     ]
-    accepted_by_source = _accepted_frames_by_source(filtered_results)
+    accepted_frames_by_path = _accepted_frames_by_source(filtered_results)
 
     if not video_frames:
-        return [], accepted_by_source
+        return [], accepted_frames_by_path
     print(f"{indent}Describing UI states \u2026")
     frame_descs = describe_frames(video_frames)
     for fd in frame_descs:
@@ -416,7 +416,7 @@ def _run_video_frame_pipeline(
     stored = store_accepted_frames(frame_entries)
     if stored:
         print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
-    return video_frames, accepted_by_source
+    return video_frames, accepted_frames_by_path
 
 
 _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
@@ -1108,10 +1108,10 @@ def _first_run(*, url: str | None = None) -> None:
         "Duplicate source path across ref-declared and scraped videos"
     )
     video_frames: list[Path] = []
-    accepted_by_source: dict[Path, list[Path]] = {}
+    accepted_frames_by_path: dict[Path, list[Path]] = {}
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} video(s) \u2026")
-        video_frames, accepted_by_source = _run_video_frame_pipeline(
+        video_frames, accepted_frames_by_path = _run_video_frame_pipeline(
             behavioral_videos,
         )
         if video_frames:
@@ -1134,10 +1134,10 @@ def _first_run(*, url: str | None = None) -> None:
             frame
             for entry in behavioral_entries
             if "visual-target" in entry.roles
-            for frame in accepted_by_source.get(entry.path, [])
+            for frame in accepted_frames_by_path.get(entry.path, [])
         ]
         scraped_frames_raw = [
-            frame for vp in site_videos for frame in accepted_by_source.get(vp, [])
+            frame for vp in site_videos for frame in accepted_frames_by_path.get(vp, [])
         ]
         seen_frame_hashes: set[str] = set()
         vt_frames: list[Path] = []
@@ -1170,7 +1170,7 @@ def _first_run(*, url: str | None = None) -> None:
                 seen_frame_hashes_ns.add(h)
         deduped_scraped_frames: list[Path] = []
         for frame_path in (
-            frame for vp in site_videos for frame in accepted_by_source.get(vp, [])
+            frame for vp in site_videos for frame in accepted_frames_by_path.get(vp, [])
         ):
             h = hashlib.sha256(frame_path.read_bytes()).hexdigest()
             if h not in seen_frame_hashes_ns:
@@ -1351,10 +1351,10 @@ def _analyze_new_files(
         behavioral_entries = []
         behavioral_videos = list(scan.videos)
     video_frames: list[Path] = []
-    accepted_by_source: dict[Path, list[Path]] = {}
+    accepted_frames_by_path: dict[Path, list[Path]] = {}
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} new video(s) \u2026")
-        video_frames, accepted_by_source = _run_video_frame_pipeline(
+        video_frames, accepted_frames_by_path = _run_video_frame_pipeline(
             behavioral_videos,
         )
         summary.videos_found = len(behavioral_videos)
@@ -1368,7 +1368,7 @@ def _analyze_new_files(
             frame
             for entry in behavioral_entries
             if "visual-target" in entry.roles
-            for frame in accepted_by_source.get(entry.path, [])
+            for frame in accepted_frames_by_path.get(entry.path, [])
         ]
         design_input = collect_design_input(spec, vt_frames)
     else:
