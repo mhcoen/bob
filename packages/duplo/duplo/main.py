@@ -207,10 +207,10 @@ from duplo.comparator import compare_screenshots
 from duplo.diagnostics import print_summary as diagnostics_print_summary
 from duplo.design_extractor import (
     DesignRequirements,
-    collect_design_input,
     extract_design,
     format_design_section,
 )
+from duplo.orchestrator import collect_design_input
 from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, extract_features

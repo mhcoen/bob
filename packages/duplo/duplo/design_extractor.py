@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
 from duplo.parsing import strip_fences
-
-if TYPE_CHECKING:
-    from duplo.spec_reader import ProductSpec
 
 _SYSTEM = """\
 You are a visual design analyst. Given screenshot(s) of a product, extract
@@ -114,71 +109,6 @@ def _parse_design(raw: str) -> DesignRequirements:
         layout=layout if isinstance(layout, dict) else {},
         components=comps if isinstance((comps := data.get("components", [])), list) else [],
     )
-
-
-def collect_design_input(
-    spec: ProductSpec | None,
-    visual_target_frames: list[Path] | None = None,
-    site_images: list[Path] | None = None,
-    site_video_frames: list[Path] | None = None,
-    *,
-    target_dir: Path | None = None,
-) -> list[Path]:
-    """Build the combined image list for design extraction.
-
-    The design input is the union of:
-
-    1. ``format_visual_references(spec)`` paths — user-declared
-       ``visual-target`` files in ``ref/``, excluding ``proposed: true``.
-    2. Accepted frames from videos with ``visual-target`` in their roles.
-    3. Images downloaded from product-reference sources via
-       ``_download_site_media``.
-    4. Accepted frames from scraped product-reference videos.
-
-    Deduplicates by resolved path.  Order is deterministic: sources
-    (1)–(4) are appended in order, with duplicates dropped on second
-    occurrence.
-    """
-    from duplo.spec_reader import format_visual_references
-
-    result: list[Path] = []
-    seen_paths: set[Path] = set()
-    seen_hashes: set[str] = set()
-
-    def _add(path: Path) -> None:
-        resolved = path.resolve()
-        if resolved in seen_paths:
-            return
-        try:
-            content_hash = hashlib.sha256(resolved.read_bytes()).hexdigest()
-        except OSError:
-            content_hash = None
-        if content_hash is not None and content_hash in seen_hashes:
-            return
-        seen_paths.add(resolved)
-        if content_hash is not None:
-            seen_hashes.add(content_hash)
-        result.append(path)
-
-    # (1) visual-target reference files from SPEC.md ## References.
-    if spec is not None:
-        root = target_dir or Path.cwd()
-        for entry in format_visual_references(spec):
-            _add(root / entry.path)
-
-    # (2) accepted frames from visual-target videos.
-    for frame in visual_target_frames or []:
-        _add(frame)
-
-    # (3) images from product-reference site media.
-    for img in site_images or []:
-        _add(img)
-
-    # (4) frames from scraped product-reference videos.
-    for frame in site_video_frames or []:
-        _add(frame)
-
-    return result
 
 
 def format_design_section(design: DesignRequirements) -> str:
