@@ -35,6 +35,7 @@ from duplo.spec_reader import (
     _validate_source_entries,
     format_behavioral_references,
     format_contracts_as_verification,
+    format_counter_example_sources,
     format_counter_examples,
     format_design_for_prompt,
     format_doc_references,
@@ -3115,6 +3116,69 @@ class TestScrapeable:
             discovered=False,
         )
         assert scrapeable_sources(self._spec([e])) == []
+
+
+class TestFormatCounterExampleSources:
+    """Tests for format_counter_example_sources."""
+
+    def _entry(
+        self,
+        url: str = "https://bad-example.com",
+        role: str = "counter-example",
+        scrape: str = "none",
+        proposed: bool = False,
+        discovered: bool = False,
+        notes: str = "",
+    ) -> SourceEntry:
+        return SourceEntry(
+            url=url,
+            role=role,
+            scrape=scrape,
+            proposed=proposed,
+            discovered=discovered,
+            notes=notes,
+        )
+
+    def _spec(self, sources: list[SourceEntry]) -> ProductSpec:
+        return ProductSpec(sources=sources)
+
+    def test_returns_counter_example(self):
+        e = self._entry()
+        assert format_counter_example_sources(self._spec([e])) == [e]
+
+    def test_excludes_proposed(self):
+        e = self._entry(proposed=True)
+        assert format_counter_example_sources(self._spec([e])) == []
+
+    def test_excludes_discovered(self):
+        e = self._entry(discovered=True)
+        assert format_counter_example_sources(self._spec([e])) == []
+
+    def test_excludes_proposed_and_discovered(self):
+        e = self._entry(proposed=True, discovered=True)
+        assert format_counter_example_sources(self._spec([e])) == []
+
+    def test_excludes_non_counter_example_roles(self):
+        docs = self._entry(role="docs")
+        prod = self._entry(role="product-reference")
+        assert format_counter_example_sources(self._spec([docs, prod])) == []
+
+    def test_empty_sources(self):
+        assert format_counter_example_sources(self._spec([])) == []
+
+    def test_preserves_notes(self):
+        e = self._entry(notes="Avoid this UI pattern")
+        result = format_counter_example_sources(self._spec([e]))
+        assert len(result) == 1
+        assert result[0].notes == "Avoid this UI pattern"
+
+    def test_mixed_entries(self):
+        keep = self._entry(url="https://avoid.com")
+        skip_proposed = self._entry(url="https://proposed.com", proposed=True)
+        skip_discovered = self._entry(url="https://disc.com", discovered=True)
+        skip_docs = self._entry(url="https://docs.com", role="docs")
+        spec = self._spec([keep, skip_proposed, skip_discovered, skip_docs])
+        assert format_counter_example_sources(spec) == [keep]
 
 
 class TestFormatDesignForPrompt:

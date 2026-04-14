@@ -391,14 +391,14 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Pre-work: missing per-stage formatter
 
-- [ ] Add `format_counter_example_sources(spec) -> list[SourceEntry]` to `duplo/spec_reader.py`
+- [ ] [BATCH] Add `format_counter_example_sources(spec) -> list[SourceEntry]` to `duplo/spec_reader.py`
   - [ ] Returns source entries where `role` is `counter-example`, excluding `proposed: true` AND `discovered: true`. Per PIPELINE-design.md § `format_counter_example_sources`.
   - [ ] This is the missing per-stage formatter from Phase 3 — Phase 3 added the four reference formatters and `format_scrapeable_sources` but not this one. Required by the investigator changes in 5.11.
   - [ ] Tests: returns counter-example sources only; excludes proposed/discovered; empty input handled; counter-example sources with other flags (e.g. `scrape: deep`, which the user almost certainly didn't mean) still returned by this filter (separate concern from the scrape-depth diagnostic emitted by `format_scrapeable_sources`).
 
 ## Foundation: URL canonicalization
 
-- [ ] Create new module `duplo/url_utils.py` with `canonicalize_url(url: str) -> str`
+- [ ] [BATCH] Create new module `duplo/url_utils.py` with `canonicalize_url(url: str) -> str`
   - [ ] New module per design (the existing files are too long). Imports stdlib only (`urllib.parse`).
   - [ ] Implement the four canonicalization rules per PIPELINE-design.md § "URL canonicalization": (1) lowercase scheme and host; (2) strip default ports (80 on http, 443 on https); (3) strip fragment (#section); (4) strip trailing slash from ALL paths INCLUDING the root path `/`. Preserve query strings.
   - [ ] The trailing-slash rule MUST apply to the root path: `https://a.com/` → `https://a.com`. Do not special-case the root. Per PIPELINE-design.md § "Why strip all trailing slashes, including root" — root-path slash treatment is what makes user-authored host-only URLs and fetcher post-redirect URLs compare equal.
@@ -420,7 +420,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Foundation: cross-origin link collection helper
 
-- [ ] Implement `_collect_cross_origin_links(raw_pages, source_url) -> list[str]` in `duplo/orchestrator.py` (new module)
+- [ ] [BATCH] Implement `_collect_cross_origin_links(raw_pages, source_url) -> list[str]` in `duplo/orchestrator.py` (new module)
   - [ ] Per PIPELINE-design.md § `_collect_cross_origin_links`. Place in a new `duplo/orchestrator.py` module since `main.py` is already long; helper functions used by orchestration go here.
   - [ ] Parse each HTML page in `raw_pages.values()`, extract every `<a href="...">` target, resolve to absolute URL, canonicalize via `url_utils.canonicalize_url`.
   - [ ] Compare canonical form's (scheme, host, port) against the canonical `source_url`'s. Different = cross-origin = include in result.
@@ -453,7 +453,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] Add an assertion at the orchestrator's behavioral-paths construction point per the orchestration sketch: `assert len(behavioral_paths) == len(set(behavioral_paths))`. ref/ and `.duplo/site_media/` live under different roots so collisions require user error; the assert surfaces that error visibly.
   - [ ] Tests: `format_behavioral_references` paths are passed to `extract_all_videos`; site_videos are added; ref/ video and scraped video both present in input; source-path-preservation: relative input path round-trips through `ExtractionResult.source` unchanged; collision assertion fires when same path appears in both lists.
 
-- [ ] Implement `_accepted_frames_by_source(filtered_results) -> dict[Path, list[Path]]` helper in `duplo/orchestrator.py`
+- [ ] [BATCH] Implement `_accepted_frames_by_source(filtered_results) -> dict[Path, list[Path]]` helper in `duplo/orchestrator.py`
   - [ ] Per PIPELINE-design.md § `_accepted_frames_by_source`. One-line implementation (`{r.source: r.frames for r in filtered_results}`) but must live as a named helper so the post-filter contract has a named place in tests.
   - [ ] **Critical**: the input must be POST-FILTER. Callers MUST run `frame_filter.apply_filter` on `ExtractionResult.frames` before passing to this helper. The orchestration sketch uses `dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))` to preserve `source` and `error` while replacing `frames`.
   - [ ] Tests: (a) lookup returns correct frames per source; (b) if called with unfiltered results (rejected frames present), rejected frames appear in output — demonstrating the contract violation is detectable; (c) source-path preservation: keys equal the input `ExtractionResult.source` values byte-for-byte (no path transformation).
@@ -502,7 +502,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter write helpers (minimal subset)
 
-- [ ] Create `duplo/spec_drafter.py` with `append_sources(spec_text, new_entries) -> str`
+- [ ] [BATCH] Create `duplo/spec_drafter.py` with `append_sources(spec_text, new_entries) -> str`
   - [ ] New module per the design (text-layer module independent of pipeline stages — must NOT import from `duplo/extractor.py`, `duplo/design_extractor.py`, etc.).
   - [ ] `append_sources(existing_spec_text: str, new_entries: list[SourceEntry]) -> str` returns modified spec text with new entries appended to `## Sources`.
   - [ ] Dedup-by-canonical: skip entries whose canonical URL already exists in the spec's `## Sources` (regardless of whether the existing entry has `proposed:` or `discovered:` flags). Use `url_utils.canonicalize_url` for comparison; the parser stores canonical URLs in `SourceEntry.url` already (per Phase 3) so existing entries are already canonical.
@@ -511,7 +511,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] If `## Sources` section does not exist in `existing_spec_text`, create it (heading + entries) appended to the spec. Place it after `## Architecture` if present, else at end of file. Maintain the same blank-line conventions as the rest of SPEC.md.
   - [ ] Tests: append single new entry; append multiple; dedup against existing canonical URL (entry not added); dedup against existing URL with different trailing slash (canonicalization in action); dedup is case-insensitive on host; idempotent (double-call returns same result); empty new_entries returns input unchanged; missing `## Sources` section is created; flags `discovered: true` and `proposed: true` written correctly.
 
-- [ ] Add `update_design_autogen(spec_text, body) -> str` to `duplo/spec_drafter.py`
+- [ ] [BATCH] Add `update_design_autogen(spec_text, body) -> str` to `duplo/spec_drafter.py`
   - [ ] `update_design_autogen(existing_spec_text: str, body: str) -> str` returns modified spec text with the AUTO-GENERATED block in `## Design` populated.
   - [ ] Write-once-never-replace semantics per PIPELINE-design.md § "Note on the autogen-cache divergence": if a well-formed AUTO-GENERATED block already exists with non-empty body, return `existing_spec_text` unchanged. The orchestrator is responsible for checking and skipping the Vision call when an autogen block already exists; this function is a defense-in-depth no-op in that case rather than an overwrite.
   - [ ] If `## Design` section exists with no AUTO-GENERATED block: append the block (with BEGIN/END comment markers per PARSER-design.md § `## Design` parser) at the end of the section, after any existing user prose.
@@ -521,7 +521,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Save_raw_content update
 
-- [ ] Update `duplo/saver.py:save_raw_content` per the new signature
+- [ ] [BATCH] Update `duplo/saver.py:save_raw_content` per the new signature
   - [ ] Per PIPELINE-design.md § `save_raw_content` signature. New signature: `save_raw_content(raw_pages: dict[str, str], page_records: list[PageRecord], *, target_dir: Path = Path.cwd()) -> None`.
   - [ ] For each `PageRecord`, look up `raw_pages[record.url]` and write the HTML to `.duplo/raw_pages/<sha256(record.url)>.html`.
   - [ ] Cache filename is the SHA-256 of the canonical URL. NOT the content hash. `PageRecord.content_hash` continues to be stored inside the record for change detection but is NOT used for the cache filename.
@@ -537,7 +537,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] When the LLM returns no usable fields, return `BuildPreferences()` (all defaults). Surface as a WARNING via `validate_for_run`, not an error — plan generation handles all-defaults gracefully.
   - [ ] Tests: parse with a typical architecture prose (Swift macOS app etc.); fields populated correctly; missing fields default; hash invalidation works (changing architecture re-triggers parse); commented-out content in `## Architecture` does NOT change hash (per PARSER-design.md `_strip_comments` runs before storage); cache hit avoids the LLM call; all-defaults BuildPreferences emits warning via `validate_for_run`.
 
-- [ ] Implement app_name derivation logic in `duplo/orchestrator.py`
+- [ ] [BATCH] Implement app_name derivation logic in `duplo/orchestrator.py`
   - [ ] Per PIPELINE-design.md § app_name. New function `derive_app_name(spec, target_dir) -> str`.
   - [ ] If `## Sources` includes a product-reference URL, derive a candidate app_name from the scraped product identity using existing `validator.validate_product_url` behavior (or whatever produces the product name today).
   - [ ] If no URL, derive from project directory name as fallback (`numi-clone/` → `numi-clone`).
@@ -555,7 +555,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] After the loop, if `all_code_examples`, call `save_examples(all_code_examples)`. If `all_page_records`, call `save_reference_urls(all_page_records)` and `save_raw_content(all_raw_pages, all_page_records)`. If `merged_doc_structures`, call `save_doc_structures(merged_doc_structures)`.
   - [ ] Tests: multi-source iteration calls `fetch_site` once per scrapeable source; first-source-wins dedup of page_records (URL appearing in source A and source B is recorded once with source A's record); first-source-wins for raw_pages (HTML from source A preserved over source B for the same canonical URL); discovered_urls collected only from `deep` sources, NOT from `shallow`; non-product-reference sources do not contribute to product_ref_raw_pages; doc_structures merged across sources.
 
-- [ ] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
+- [ ] [BATCH] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
   - [ ] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
   - [ ] Default `role="docs"` and `scrape="deep"` for discovered entries per the design.
   - [ ] Tests: discovered URLs trigger SPEC.md write; SPEC.md unchanged when all discovered URLs are already in `## Sources` (idempotency through `append_sources` dedup); `discovered: true` flag and `role: docs` written; SPEC.md NOT modified when `discovered_urls` is empty.
@@ -577,7 +577,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [ ] Cache invariant per design § "Note on the autogen-cache divergence": when autogen is skipped, `save_design_requirements` is ALSO skipped — the cache stays consistent with SPEC.md autogen.
   - [ ] Tests: autogen-absent triggers Vision call and write-back; autogen-present skips Vision call AND skips cache write; skip emits diagnostic naming the input count; SPEC.md write only happens when content differs (idempotency); in-memory `spec.design.auto_generated` consulted, not a re-read of SPEC.md from disk.
 
-- [ ] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
+- [ ] [BATCH] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
   - [ ] Per PIPELINE-design.md § `format_design_block`. Wraps the existing `format_design_section(design)` in the same module, MINUS the section heading.
   - [ ] **Lives in `design_extractor.py`, NOT `spec_drafter.py`** per the layering rationale (drafter must not depend on pipeline stages).
   - [ ] The orchestrator imports `format_design_block` from `design_extractor` and passes the resulting string into `spec_drafter.update_design_autogen`. The drafter sees only a string.
@@ -594,7 +594,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Orchestration: _fix_mode update
 
-- [ ] Update `_fix_mode` to use the new investigator with counter-examples and behavior contracts
+- [ ] [BATCH] Update `_fix_mode` to use the new investigator with counter-examples and behavior contracts
   - [ ] Per PIPELINE-design.md § `_fix_mode integration with new model`: "No structural change. The new investigator includes counter-examples and behavior contracts; existing `_fix_mode` tests should continue to pass with those added sources."
   - [ ] Verify that `_fix_mode`'s call to `investigate(...)` passes the spec (or whatever context the investigator now needs to access counter-examples and behavior contracts via the formatters).
   - [ ] Tests: existing `_fix_mode` tests still pass; new test that confirms counter-example references reach the investigator prompt when called from `_fix_mode`; new test for behavior contracts in `_fix_mode` context.

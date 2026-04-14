@@ -690,6 +690,20 @@ def format_counter_examples(spec: ProductSpec) -> list[ReferenceEntry]:
     return [e for e in spec.references if "counter-example" in e.roles and not e.proposed]
 
 
+def format_counter_example_sources(spec: ProductSpec) -> list[SourceEntry]:
+    """Return source entries with ``counter-example`` role.
+
+    Excludes entries where ``proposed`` is true or ``discovered`` is true.
+    Used by the investigator to include counter-example URLs as declarative
+    context ("these URLs are anti-patterns; do not emulate").
+    """
+    return [
+        e
+        for e in spec.sources
+        if e.role == "counter-example" and not e.proposed and not e.discovered
+    ]
+
+
 def scrapeable_sources(spec: ProductSpec) -> list[SourceEntry]:
     """Return source entries eligible for scraping.
 
