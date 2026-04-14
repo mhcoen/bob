@@ -2,8 +2,13 @@
 
 from pathlib import Path
 
-from duplo.orchestrator import _collect_cross_origin_links, collect_design_input
+from duplo.orchestrator import (
+    _accepted_frames_by_source,
+    _collect_cross_origin_links,
+    collect_design_input,
+)
 from duplo.spec_reader import ProductSpec, ReferenceEntry
+from duplo.video_extractor import ExtractionResult
 
 
 # Minimal valid 1x1 PNG bytes for test images.
@@ -458,3 +463,59 @@ class TestCollectDesignInput:
         )
         names = [p.name for p in result]
         assert names == ["a.png", "b.png", "c.png", "d.png"]
+
+
+class TestAcceptedFramesBySource:
+    """Tests for _accepted_frames_by_source."""
+
+    def test_lookup_returns_correct_frames_per_source(self, tmp_path):
+        """Each source maps to its own list of frames."""
+        v1 = tmp_path / "video1.mp4"
+        v2 = tmp_path / "video2.mp4"
+        f1a = tmp_path / "v1_frame_a.png"
+        f1b = tmp_path / "v1_frame_b.png"
+        f2a = tmp_path / "v2_frame_a.png"
+        results = [
+            ExtractionResult(source=v1, frames=[f1a, f1b]),
+            ExtractionResult(source=v2, frames=[f2a]),
+        ]
+        lookup = _accepted_frames_by_source(results)
+        assert lookup[v1] == [f1a, f1b]
+        assert lookup[v2] == [f2a]
+        assert len(lookup) == 2
+
+    def test_unfiltered_results_expose_rejected_frames(self, tmp_path):
+        """If called with unfiltered results, rejected frames appear
+        in output — demonstrating the contract violation is detectable."""
+        vid = tmp_path / "demo.mp4"
+        kept = tmp_path / "good.png"
+        rejected = tmp_path / "blurry.png"
+        # Unfiltered: both frames still present.
+        results = [
+            ExtractionResult(source=vid, frames=[kept, rejected]),
+        ]
+        lookup = _accepted_frames_by_source(results)
+        assert rejected in lookup[vid]
+
+    def test_source_path_preservation(self):
+        """Keys equal the input ExtractionResult.source values
+        byte-for-byte — no path transformation."""
+        # Use a relative path string to verify no resolve() happens.
+        relative = Path("some/relative/path/video.mp4")
+        frame = Path("some/relative/path/frame_001.png")
+        results = [ExtractionResult(source=relative, frames=[frame])]
+        lookup = _accepted_frames_by_source(results)
+        # Key must be the exact same Path object, not a resolved variant.
+        assert relative in lookup
+        assert lookup[relative] == [frame]
+
+    def test_empty_input_returns_empty_dict(self):
+        lookup = _accepted_frames_by_source([])
+        assert lookup == {}
+
+    def test_source_with_empty_frames(self, tmp_path):
+        """A source whose frames were all filtered out maps to []."""
+        vid = tmp_path / "all_rejected.mp4"
+        results = [ExtractionResult(source=vid, frames=[])]
+        lookup = _accepted_frames_by_source(results)
+        assert lookup[vid] == []

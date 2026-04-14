@@ -17,6 +17,7 @@ from duplo.url_canon import canonicalize_url
 
 if TYPE_CHECKING:
     from duplo.spec_reader import ProductSpec
+    from duplo.video_extractor import ExtractionResult
 
 
 def _collect_cross_origin_links(
@@ -72,6 +73,18 @@ def _collect_cross_origin_links(
                 result.append(canon)
 
     return result
+
+
+def _accepted_frames_by_source(
+    filtered_results: list[ExtractionResult],
+) -> dict[Path, list[Path]]:
+    """Map each video source to its accepted (post-filter) frames.
+
+    Input MUST be post-filter: callers run ``frame_filter.apply_filter``
+    on each result's frames before passing to this helper.  The helper
+    does not filter — it trusts the caller.
+    """
+    return {r.source: r.frames for r in filtered_results}
 
 
 def collect_design_input(
