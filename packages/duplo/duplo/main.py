@@ -844,6 +844,9 @@ def _first_run(*, url: str | None = None) -> None:
         ] + site_videos
     else:
         behavioral_videos = list(scan.videos) + site_videos
+    assert len(behavioral_videos) == len(set(behavioral_videos)), (
+        "Duplicate source path across ref-declared and scraped videos"
+    )
     video_frames: list[Path] = []
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} video(s) \u2026")

@@ -5826,3 +5826,155 @@ class TestMigrationDispatchOrder:
         assert migration_called == []
         assert len(fix_mode_called) == 1
         assert fix_mode_called[0].command == "investigate"
+
+
+class TestBehavioralPathsDuplicateAssertion:
+    """Assert that duplicate paths in the behavioral video set are rejected."""
+
+    def test_duplicate_path_raises_with_spec(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Same video path in both ref/ entries and site_videos triggers assertion."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        vid = ref_dir / "demo.mp4"
+        vid.write_bytes(b"MP4" * 100)
+
+        # Use the same relative path that format_behavioral_references returns
+        dup_path = Path("ref/demo.mp4")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=dup_path,
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [dup_path]),
+            ),
+            patch("duplo.main.extract_all_videos", return_value=[]),
+            patch("duplo.main.extract_design"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+            pytest.raises(AssertionError, match="Duplicate source path"),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type("V", (), {"warnings": [], "errors": []})()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+    def test_no_assertion_when_paths_distinct(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Distinct ref/ and site_media/ paths pass the assertion."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        beh_vid = ref_dir / "demo.mp4"
+        beh_vid.write_bytes(b"MP4" * 100)
+
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch("duplo.main.extract_all_videos", return_value=[]) as mock_ev,
+            patch("duplo.main.extract_design"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type("V", (), {"warnings": [], "errors": []})()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[beh_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_ev.assert_called_once()
+        paths = mock_ev.call_args[0][0]
+        assert len(paths) == 2
