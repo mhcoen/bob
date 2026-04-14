@@ -5978,3 +5978,190 @@ class TestBehavioralPathsDuplicateAssertion:
         mock_ev.assert_called_once()
         paths = mock_ev.call_args[0][0]
         assert len(paths) == 2
+
+
+class TestDocsTextInFeatureExtraction:
+    """Docs-role text feeds into extract_features via docs_text_extractor."""
+
+    def test_first_run_includes_docs_text(self, tmp_path, monkeypatch, capsys):
+        """First run: docs-role text is combined into extract_features input."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        doc_file = ref_dir / "guide.txt"
+        doc_file.write_text("Guide content here")
+        monkeypatch.chdir(tmp_path)
+
+        spec = ProductSpec(
+            raw="test spec",
+            references=[
+                ReferenceEntry(path=Path("ref/guide.txt"), roles=["docs"]),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=type("V", (), {"warnings": [], "errors": []})(),
+            ),
+            patch(
+                "duplo.main.scan_directory",
+                return_value=type(
+                    "S",
+                    (),
+                    {
+                        "images": [],
+                        "videos": [],
+                        "pdfs": [],
+                        "text_files": [],
+                        "urls": ["https://example.com"],
+                        "roles": {},
+                    },
+                )(),
+            ),
+            patch(
+                "duplo.main._validate_url",
+                return_value=("https://example.com", "Example"),
+            ),
+            patch("duplo.main._confirm_product", return_value="Example"),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("scraped text", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value="docs extracted text",
+            ) as mock_docs,
+            patch("duplo.main.extract_features", return_value=[]) as mock_ef,
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        mock_docs.assert_called_once()
+        entries = mock_docs.call_args[0][0]
+        assert len(entries) == 1
+        assert entries[0].path == Path("ref/guide.txt")
+
+        mock_ef.assert_called_once()
+        combined = mock_ef.call_args[0][0]
+        assert "docs extracted text" in combined
+        assert "scraped text" in combined
+
+    def test_first_run_no_docs_without_spec(self, tmp_path, monkeypatch):
+        """Without spec, docs_text_extractor is not called."""
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "links.txt").write_text("https://example.com")
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch(
+                "duplo.main._validate_url",
+                return_value=("https://example.com", "Example"),
+            ),
+            patch("duplo.main._confirm_product", return_value="Ex"),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("text", [], None, [], {}),
+            ),
+            patch("duplo.main.docs_text_extractor") as mock_docs,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        mock_docs.assert_not_called()
+
+    def test_subsequent_run_includes_docs_text(self, tmp_path, monkeypatch, capsys):
+        """Subsequent run: docs text feeds into re-extraction."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "features": [{"name": "F1", "description": "d", "category": "c"}],
+                "source_url": "",
+            },
+        )
+        (tmp_path / "SPEC.md").write_text("spec")
+        monkeypatch.chdir(tmp_path)
+
+        spec = ProductSpec(
+            raw="spec",
+            references=[
+                ReferenceEntry(path=Path("ref/notes.md"), roles=["docs"]),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=type("V", (), {"warnings": [], "errors": []})(),
+            ),
+            patch(
+                "duplo.main.compute_hashes",
+                return_value={"a.txt": "abc"},
+            ),
+            patch("duplo.main.load_hashes", return_value={"a.txt": "abc"}),
+            patch(
+                "duplo.main.diff_hashes",
+                return_value=type(
+                    "D",
+                    (),
+                    {"added": [], "changed": [], "removed": []},
+                )(),
+            ),
+            patch("duplo.main.save_hashes"),
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(0, [], "rescraped"),
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value="docs text from md",
+            ) as mock_docs,
+            patch(
+                "duplo.main.extract_features",
+                return_value=[Feature(name="F1", description="d", category="c")],
+            ) as mock_ef,
+            patch("duplo.main.save_features"),
+            patch("duplo.main._detect_and_append_gaps"),
+            patch("duplo.main._print_summary"),
+        ):
+            # PLAN.md with unchecked tasks -> state 2 (tells user
+            # to run mcloop).
+            (tmp_path / "PLAN.md").write_text("- [ ] task\n")
+            main()
+
+        mock_docs.assert_called_once()
+        entries = mock_docs.call_args[0][0]
+        assert len(entries) == 1
+        assert entries[0].roles == ["docs"]
+
+        mock_ef.assert_called_once()
+        combined = mock_ef.call_args[0][0]
+        assert "docs text from md" in combined

@@ -217,6 +217,7 @@ from duplo.extractor import Feature, extract_features
 from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import download_media, extract_media_urls, fetch_site
+from duplo.docs_extractor import docs_text_extractor
 from duplo.pdf_extractor import extract_pdf_text
 from duplo.planner import (
     generate_phase_plan,
@@ -248,6 +249,7 @@ from duplo.spec_reader import (
     ProductSpec,
     format_behavioral_references,
     format_contracts_as_verification,
+    format_doc_references,
     format_spec_for_prompt,
     read_spec,
     validate_for_run,
@@ -887,6 +889,16 @@ def _first_run(*, url: str | None = None) -> None:
         else:
             print("Could not extract design details from images.")
 
+    # Extract text from docs-role references (PDFs, text, markdown).
+    if spec:
+        doc_refs = format_doc_references(spec)
+        if doc_refs:
+            print("Extracting text from docs references \u2026")
+            docs_text = docs_text_extractor(doc_refs)
+            if docs_text:
+                text_content = text_content + docs_text + "\n"
+                print(f"  Extracted text from {len(doc_refs)} docs reference(s).")
+
     combined_text = scraped_text
     if text_content:
         combined_text = text_content + "\n" + combined_text
@@ -1458,6 +1470,16 @@ def _subsequent_run() -> None:
     pages, examples, scraped_text = _rescrape_product_url(spec=spec)
     summary.pages_rescraped = pages
     summary.examples_rescraped = examples
+
+    # Extract text from docs-role references.
+    if spec:
+        doc_refs = format_doc_references(spec)
+        if doc_refs:
+            print("Extracting text from docs references \u2026")
+            docs_text = docs_text_extractor(doc_refs)
+            if docs_text:
+                summary.collected_text += docs_text + "\n"
+                print(f"  Extracted text from {len(doc_refs)} docs reference(s).")
 
     # Combine text from new files with re-scraped content for feature extraction.
     combined_text = scraped_text
