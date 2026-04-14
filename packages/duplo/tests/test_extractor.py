@@ -232,8 +232,7 @@ class TestExtractFeaturesMultiSource:
             )
         system = mock_q.call_args.kwargs.get("system", "")
         assert "Build a calculator app." in system
-        assert len(features) == 1
-        assert features[0].name == "Math"
+        assert len(features) == 2
 
 
 class TestExtractFeaturesWithSpec:
@@ -249,7 +248,8 @@ class TestExtractFeaturesWithSpec:
         system = mock_query.call_args.kwargs.get("system", "")
         assert "product specification" not in system.lower()
 
-    def test_scope_exclude_filters_features(self):
+    def test_scope_exclude_not_applied_internally(self):
+        """scope_exclude filtering is applied at the orchestrator level, not here."""
         raw = json_array(
             [
                 {"name": "Math", "description": "Basic math.", "category": "core"},
@@ -258,18 +258,7 @@ class TestExtractFeaturesWithSpec:
         )
         with patch("duplo.extractor.query", return_value=raw):
             features = extract_features("content", scope_exclude=["CLI tool"])
-        assert len(features) == 1
-        assert features[0].name == "Math"
-
-    def test_scope_exclude_case_insensitive(self):
-        raw = json_array(
-            [
-                {"name": "CLI Tool", "description": "Command line.", "category": "other"},
-            ]
-        )
-        with patch("duplo.extractor.query", return_value=raw):
-            features = extract_features("content", scope_exclude=["cli tool"])
-        assert features == []
+        assert len(features) == 2
 
     def test_scope_include_does_not_filter(self):
         """Scope includes are handled by the LLM prompt, not by post-filtering."""

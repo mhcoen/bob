@@ -213,7 +213,7 @@ from duplo.design_extractor import (
 from duplo.orchestrator import collect_design_input
 from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
-from duplo.extractor import Feature, extract_features
+from duplo.extractor import Feature, _matches_excluded, extract_features
 from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import download_media, extract_media_urls, fetch_site
@@ -910,6 +910,8 @@ def _first_run(*, url: str | None = None) -> None:
         scope_include=spec.scope_include if spec else None,
         scope_exclude=spec.scope_exclude if spec else None,
     )
+    if features and spec and spec.scope_exclude:
+        features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]
     if features:
         print(f"Found {len(features)} feature(s).")
         features = select_features(features)
@@ -1502,6 +1504,10 @@ def _subsequent_run() -> None:
             scope_include=spec.scope_include if spec else None,
             scope_exclude=spec.scope_exclude if spec else None,
         )
+        if new_features and spec and spec.scope_exclude:
+            new_features = [
+                f for f in new_features if not _matches_excluded(f, spec.scope_exclude)
+            ]
         if new_features:
             try:
                 old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))

@@ -127,11 +127,10 @@ def extract_features(
         return []
     features = _parse_features(raw)
 
-    # Apply scope overrides.
-    if scope_exclude:
-        features = [f for f in features if not _matches_excluded(f, scope_exclude)]
     # Scope includes are handled by the LLM prompt; no post-filter needed
     # since the user wants them added even if not in scraped text.
+    # scope_exclude filtering is applied at the orchestrator level
+    # (main.py) after this function returns.
 
     return features
 

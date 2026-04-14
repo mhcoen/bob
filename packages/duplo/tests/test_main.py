@@ -6165,3 +6165,131 @@ class TestDocsTextInFeatureExtraction:
         mock_ef.assert_called_once()
         combined = mock_ef.call_args[0][0]
         assert "docs text from md" in combined
+
+
+class TestScopeExcludeAtOrchestratorLevel:
+    """scope_exclude filtering happens in main.py, not inside extract_features."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [
+            {"name": "Auth", "description": "Login.", "category": "core"},
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core",
+                "features": ["Auth"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 0,
+    }
+
+    def test_subsequent_run_filters_excluded_features(self, tmp_path, monkeypatch):
+        """Features matching scope_exclude are dropped before save_features."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        spec_md = (
+            "## Purpose\n"
+            "A full-featured scientific calculator application "
+            "for desktop platforms.\n"
+            "## Scope\n- exclude: CLI tool\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_md, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        kept = Feature(name="Math", description="Basic math.", category="core")
+        excluded = Feature(name="CLI tool", description="Command line.", category="other")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[kept, excluded]),
+            patch("duplo.main.save_features") as mock_save,
+            patch(
+                "duplo.main._detect_and_append_gaps",
+                return_value=(0, 0, 0, 0),
+            ),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_save.assert_called_once_with([kept])
+
+    def test_subsequent_run_no_spec_skips_filter(self, tmp_path, monkeypatch):
+        """Without a spec, all extracted features pass through."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        feat_a = Feature(name="Math", description="Basic.", category="core")
+        feat_b = Feature(name="CLI tool", description="Command line.", category="other")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[feat_a, feat_b]),
+            patch("duplo.main.save_features") as mock_save,
+            patch(
+                "duplo.main._detect_and_append_gaps",
+                return_value=(0, 0, 0, 0),
+            ),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_save.assert_called_once_with([feat_a, feat_b])
+
+    def test_subsequent_run_all_excluded_skips_save(self, tmp_path, monkeypatch, capsys):
+        """When all features are excluded, save_features is not called."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        spec_md = (
+            "## Purpose\n"
+            "A full-featured scientific calculator application "
+            "for desktop platforms.\n"
+            "## Scope\n- exclude: CLI tool\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_md, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        excluded = Feature(name="CLI tool", description="Command line.", category="other")
+        with (
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(1, 0, "product text"),
+            ),
+            patch("duplo.main.extract_features", return_value=[excluded]),
+            patch("duplo.main.save_features") as mock_save,
+            patch(
+                "duplo.main._detect_and_append_gaps",
+                return_value=(0, 0, 0, 0),
+            ),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        mock_save.assert_not_called()
+        out = capsys.readouterr().out
+        assert "No features extracted" in out or "No new features" in out
