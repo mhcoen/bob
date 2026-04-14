@@ -816,6 +816,86 @@ class TestFetchSiteScrapeDepth:
         for rec in records:
             assert canonicalize_url(rec.url) in raw
 
+    def test_deep_raw_pages_values_are_raw_html(self):
+        """raw_pages values are the full raw HTML, not extracted text."""
+        seed_html = "<html><body><script>var x = 1;</script><p>Visible</p></body></html>"
+        resp = self._make_response(seed_html)
+        resp.url = "https://example.com"
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", scrape_depth="deep")
+        # Value is the full HTML including script tags (not extracted text)
+        assert raw["https://example.com"] == seed_html
+        assert "<script>" in raw["https://example.com"]
+
+    def test_shallow_raw_pages_value_is_raw_html(self):
+        """shallow mode raw_pages value is full raw HTML."""
+        html = "<html><body><nav>Menu</nav><p>Content</p></body></html>"
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", scrape_depth="shallow")
+        assert raw["https://example.com"] == html
+        assert "<nav>" in raw["https://example.com"]
+
+    def test_deep_redirect_keyed_by_original_canonical_url(self):
+        """Deep mode stores raw HTML under the original request URL, not redirect target."""
+        seed_html = '<html><body><p>Home</p><a href="/old-page">Link</a></body></html>'
+        redirected_html = "<html><body><p>Redirected</p></body></html>"
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            if "/old-page" in url:
+                resp.text = redirected_html
+                resp.url = "https://example.com/new-page"
+            else:
+                resp.text = seed_html
+                resp.url = url
+            return resp
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+
+        from duplo.url_canon import canonicalize_url
+
+        # Original URL is key, not redirect target
+        assert canonicalize_url("https://example.com/old-page") in raw
+        assert raw[canonicalize_url("https://example.com/old-page")] == redirected_html
+        # Redirect target is NOT a separate key (no fetch was made for it)
+        assert canonicalize_url("https://example.com/new-page") not in raw
+        # Both pages have records
+        assert len(records) == 2
+        assert len(raw) == 2
+
+    def test_deep_redirect_prevents_revisit_of_target(self):
+        """If a page redirects, the redirect target is not re-fetched later."""
+        # Seed links to /redir only. /redir redirects to /final.
+        # /redir's HTML links to /final — but /final should not be
+        # fetched because the redirect already marked it visited.
+        seed_html = '<html><body><p>Home</p><a href="/redir">Redir</a></body></html>'
+        redir_html = '<html><body><p>Redirected</p><a href="/final">Final</a></body></html>'
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            if "/redir" in url:
+                resp.text = redir_html
+                resp.url = "https://example.com/final"
+            else:
+                resp.text = seed_html
+                resp.url = url
+            return resp
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", scrape_depth="deep")
+
+        # /final should NOT be fetched — the redirect marked it visited
+        final_fetches = [u for u in fetch_calls if "/final" in u]
+        assert final_fetches == []
+
 
 class TestFetchText:
     def _mock_response(self, html: str, status_code: int = 200) -> MagicMock:
