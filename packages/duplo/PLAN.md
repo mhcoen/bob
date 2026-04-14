@@ -458,12 +458,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] **Critical**: the input must be POST-FILTER. Callers MUST run `frame_filter.apply_filter` on `ExtractionResult.frames` before passing to this helper. The orchestration sketch uses `dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))` to preserve `source` and `error` while replacing `frames`.
   - [x] Tests: (a) lookup returns correct frames per source; (b) if called with unfiltered results (rejected frames present), rejected frames appear in output — demonstrating the contract violation is detectable; (c) source-path preservation: keys equal the input `ExtractionResult.source` values byte-for-byte (no path transformation).
 
-- [ ] Refactor PDF/text/markdown doc extraction with `docs_text_extractor`
+- [x] Refactor PDF/text/markdown doc extraction with `docs_text_extractor`
   - [x] Per PIPELINE-design.md § `pdf_extractor.py and text/markdown docs`. New function `docs_text_extractor` that takes references with `docs` in `roles` and produces a single text blob per file, routed by extension.
   - [x] Routing: `.pdf` → existing `extract_pdf_text` path; `.txt` → read directly; `.md` → read directly (markdown is text; the LLM handles formatting).
   - [x] Place `docs_text_extractor` in `duplo/pdf_extractor.py` (rename file later if it becomes misleading) OR in a new `duplo/docs_extractor.py` module. The new module is preferred per the "new module over extending long files" preference.
   - [x] Combined text feeds into feature extraction the same way today's PDF text does. Update the `extract_features` call site to include doc-references-derived text.
-  - [ ] Tests: PDF input routes to `extract_pdf_text`; `.txt` input read directly; `.md` input read directly; unknown extension produces diagnostic and is skipped; multiple docs combined into one blob.
+  - [x] Tests: PDF input routes to `extract_pdf_text`; `.txt` input read directly; `.md` input read directly; unknown extension produces diagnostic and is skipped; multiple docs combined into one blob.
 
 - [ ] Refactor `extract_features` callers and add `_matches_excluded` post-extraction filter
   - [ ] Per PIPELINE-design.md § `extractor.py (feature extraction)`. `scraped_text` becomes the concatenation of text from all scrapeable sources. `spec_text` continues to use `format_spec_for_prompt(spec)` (which already excludes unreviewed entries per Phase 3). `scope_include`/`scope_exclude` come from `spec.scope_include`/`spec.scope_exclude`.
