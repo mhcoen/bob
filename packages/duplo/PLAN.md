@@ -547,7 +547,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Orchestration: source iteration with first-source-wins dedup
 
 - [ ] Implement multi-source iteration loop in `_subsequent_run`
-  - [ ] Per PIPELINE-design.md § `main.py orchestration` orchestration sketch. Iterate `format_scrapeable_sources(spec)` and call `fetch_site` for each.
+  - [x] Per PIPELINE-design.md § `main.py orchestration` orchestration sketch. Iterate `format_scrapeable_sources(spec)` and call `fetch_site` for each.
   - [ ] Maintain `seen_canonical_urls: set[str]` for first-source-wins dedup of `PageRecord` entries.
   - [ ] Maintain `all_raw_pages: dict[str, str]` and `product_ref_raw_pages: dict[str, str]` using `setdefault` (NOT `update` — dict.update would silently let later sources overwrite earlier; setdefault preserves first-source-wins).
   - [ ] Accumulate `combined_text`, `all_code_examples`, `merged_doc_structures` across sources.
