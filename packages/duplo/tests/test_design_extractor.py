@@ -28,6 +28,11 @@ _PNG_BYTES = (
 )
 
 
+def _unique_bytes(tag: str) -> bytes:
+    """Return bytes unique to *tag* for content-hash dedup testing."""
+    return _PNG_BYTES + tag.encode()
+
+
 def _make_image(tmp_path: Path, name: str) -> Path:
     path = tmp_path / name
     path.write_bytes(_PNG_BYTES)
@@ -238,13 +243,13 @@ class TestCollectDesignInput:
     def test_union_of_all_four_sources(self, tmp_path):
         ref_img = tmp_path / "ref" / "target.png"
         ref_img.parent.mkdir(parents=True)
-        ref_img.write_bytes(_PNG_BYTES)
+        ref_img.write_bytes(_unique_bytes("target"))
         vt_frame = tmp_path / "vt_frame.png"
-        vt_frame.write_bytes(_PNG_BYTES)
+        vt_frame.write_bytes(_unique_bytes("vt"))
         site_img = tmp_path / "site.png"
-        site_img.write_bytes(_PNG_BYTES)
+        site_img.write_bytes(_unique_bytes("site"))
         sv_frame = tmp_path / "sv_frame.png"
-        sv_frame.write_bytes(_PNG_BYTES)
+        sv_frame.write_bytes(_unique_bytes("sv"))
 
         spec = ProductSpec(
             references=[
@@ -296,15 +301,15 @@ class TestCollectDesignInput:
         (non-ref) sources are present — only source (1) is filtered."""
         proposed_img = tmp_path / "ref" / "proposed.png"
         proposed_img.parent.mkdir(parents=True)
-        proposed_img.write_bytes(_PNG_BYTES)
+        proposed_img.write_bytes(_unique_bytes("proposed"))
         real_img = tmp_path / "ref" / "real.png"
-        real_img.write_bytes(_PNG_BYTES)
+        real_img.write_bytes(_unique_bytes("real"))
         vt_frame = tmp_path / "vt_frame.png"
-        vt_frame.write_bytes(_PNG_BYTES)
+        vt_frame.write_bytes(_unique_bytes("vt"))
         site_img = tmp_path / "site.png"
-        site_img.write_bytes(_PNG_BYTES)
+        site_img.write_bytes(_unique_bytes("site"))
         sv_frame = tmp_path / "sv_frame.png"
-        sv_frame.write_bytes(_PNG_BYTES)
+        sv_frame.write_bytes(_unique_bytes("sv"))
 
         spec = ProductSpec(
             references=[
@@ -376,18 +381,88 @@ class TestCollectDesignInput:
         result = collect_design_input(spec, target_dir=tmp_path)
         assert result == []
 
+    def test_content_hash_dedup_ref_wins(self, tmp_path):
+        """When a ref-declared frame and a site video frame have identical
+        content but different paths, the ref-declared frame wins (added
+        first)."""
+        ref_img = tmp_path / "ref" / "demo.png"
+        ref_img.parent.mkdir(parents=True)
+        ref_img.write_bytes(_PNG_BYTES)
+        # Same content at a different path (scraped copy).
+        scraped_frame = tmp_path / "scraped_frame.png"
+        scraped_frame.write_bytes(_PNG_BYTES)
+
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/demo.png"), roles=["visual-target"]),
+            ]
+        )
+        result = collect_design_input(
+            spec,
+            site_video_frames=[scraped_frame],
+            target_dir=tmp_path,
+        )
+        assert len(result) == 1
+        assert result[0] == tmp_path / "ref" / "demo.png"
+
+    def test_content_hash_dedup_across_sources(self, tmp_path):
+        """Identical content across sources (2) and (4) is deduplicated."""
+        frame_a = tmp_path / "vt_frame.png"
+        frame_a.write_bytes(_PNG_BYTES)
+        frame_b = tmp_path / "sv_frame.png"
+        frame_b.write_bytes(_PNG_BYTES)
+
+        result = collect_design_input(
+            None,
+            visual_target_frames=[frame_a],
+            site_video_frames=[frame_b],
+        )
+        assert len(result) == 1
+        assert result[0] == frame_a
+
+    def test_content_hash_dedup_different_content_kept(self, tmp_path):
+        """Frames with different content at different paths are all kept."""
+        frame_a = tmp_path / "a.png"
+        frame_a.write_bytes(_PNG_BYTES)
+        frame_b = tmp_path / "b.png"
+        # Different content.
+        frame_b.write_bytes(_PNG_BYTES + b"\x00")
+
+        result = collect_design_input(
+            None,
+            visual_target_frames=[frame_a],
+            site_video_frames=[frame_b],
+        )
+        assert len(result) == 2
+
+    def test_content_hash_dedup_unreadable_file_still_added(self, tmp_path):
+        """If a file can't be read (OSError), it's still added (no hash
+        dedup, only path dedup)."""
+        frame = tmp_path / "ghost.png"
+        frame.write_bytes(_PNG_BYTES)
+        # A second file that doesn't exist on disk.
+        missing = tmp_path / "missing.png"
+
+        result = collect_design_input(
+            None,
+            visual_target_frames=[frame],
+            site_video_frames=[missing],
+        )
+        # frame is added; missing is added too (OSError skips hash check).
+        assert len(result) == 2
+
     def test_order_is_deterministic(self, tmp_path):
         """Sources are appended in order: (1) refs, (2) vt frames,
         (3) site images, (4) site video frames."""
         ref_img = tmp_path / "ref" / "a.png"
         ref_img.parent.mkdir(parents=True)
-        ref_img.write_bytes(_PNG_BYTES)
+        ref_img.write_bytes(_unique_bytes("a"))
         vt = tmp_path / "b.png"
-        vt.write_bytes(_PNG_BYTES)
+        vt.write_bytes(_unique_bytes("b"))
         si = tmp_path / "c.png"
-        si.write_bytes(_PNG_BYTES)
+        si.write_bytes(_unique_bytes("c"))
         sv = tmp_path / "d.png"
-        sv.write_bytes(_PNG_BYTES)
+        sv.write_bytes(_unique_bytes("d"))
 
         spec = ProductSpec(
             references=[

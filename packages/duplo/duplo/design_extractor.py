@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -141,13 +142,23 @@ def collect_design_input(
     from duplo.spec_reader import format_visual_references
 
     result: list[Path] = []
-    seen: set[Path] = set()
+    seen_paths: set[Path] = set()
+    seen_hashes: set[str] = set()
 
     def _add(path: Path) -> None:
         resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            result.append(path)
+        if resolved in seen_paths:
+            return
+        try:
+            content_hash = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        except OSError:
+            content_hash = None
+        if content_hash is not None and content_hash in seen_hashes:
+            return
+        seen_paths.add(resolved)
+        if content_hash is not None:
+            seen_hashes.add(content_hash)
+        result.append(path)
 
     # (1) visual-target reference files from SPEC.md ## References.
     if spec is not None:
