@@ -18,6 +18,7 @@ from duplo.main import (
     _complete_phase,
     _current_phase_content,
     _detect_and_append_gaps,
+    _download_site_media,
     _init_project,
     _partition_features,
     _plan_has_unchecked_tasks,
@@ -3244,6 +3245,129 @@ class TestRescrapeDownloadsSiteMedia:
                 _rescrape_product_url()
 
         mock_dl.assert_not_called()
+
+
+class TestDownloadSiteMediaCachedVsNew:
+    """_download_site_media returns ALL local paths — cached and new."""
+
+    _HTML = (
+        "<html><body>"
+        '<img src="https://cdn.example.com/hero.png"/>'
+        '<video src="https://cdn.example.com/demo.mp4"></video>'
+        "</body></html>"
+    )
+
+    def test_returns_newly_downloaded_paths(self, tmp_path, monkeypatch):
+        """First call downloads and returns new paths."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        def fake_stream(method, url, **kw):
+            from unittest.mock import MagicMock
+
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        raw_pages = {"https://example.com": self._HTML}
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, vids = _download_site_media(raw_pages)
+
+        assert len(imgs) == 1
+        assert len(vids) == 1
+        assert all(p.exists() for p in imgs + vids)
+
+    def test_returns_cached_paths_on_second_call(self, tmp_path, monkeypatch):
+        """Second call returns cached paths without HTTP requests."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        # Pre-populate the cache directory with files matching the
+        # URL-derived filenames that _download_file would create.
+        media_dir = tmp_path / ".duplo" / "site_media"
+        media_dir.mkdir(parents=True)
+        cached_img = media_dir / "cdn_example_com_hero.png"
+        cached_img.write_bytes(b"x" * 20_000)
+        cached_vid = media_dir / "cdn_example_com_demo.mp4"
+        cached_vid.write_bytes(b"video-data")
+
+        raw_pages = {"https://example.com": self._HTML}
+        with patch("duplo.fetcher.httpx.stream") as mock_stream:
+            imgs, vids = _download_site_media(raw_pages)
+
+        mock_stream.assert_not_called()
+        assert len(imgs) == 1
+        assert imgs[0].resolve() == cached_img.resolve()
+        assert len(vids) == 1
+        assert vids[0].resolve() == cached_vid.resolve()
+
+    def test_mixed_cached_and_new(self, tmp_path, monkeypatch):
+        """Cached files and new downloads both appear in results."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        media_dir = tmp_path / ".duplo" / "site_media"
+        media_dir.mkdir(parents=True)
+        # Cache only the image, not the video.
+        cached_img = media_dir / "cdn_example_com_hero.png"
+        cached_img.write_bytes(b"x" * 20_000)
+
+        def fake_stream(method, url, **kw):
+            from unittest.mock import MagicMock
+
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"video-bytes"])
+            return cm
+
+        raw_pages = {"https://example.com": self._HTML}
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, vids = _download_site_media(raw_pages)
+
+        assert len(imgs) == 1
+        assert imgs[0].resolve() == cached_img.resolve()
+        assert len(vids) == 1
+        assert vids[0].exists()
+
+    def test_empty_raw_pages(self, tmp_path, monkeypatch):
+        """Empty raw_pages returns empty lists."""
+        monkeypatch.chdir(tmp_path)
+        imgs, vids = _download_site_media({})
+        assert imgs == []
+        assert vids == []
+
+    def test_multiple_pages_all_media_returned(self, tmp_path, monkeypatch):
+        """Media from multiple pages is aggregated."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        page_a = '<html><img src="https://a.com/1.png"/></html>'
+        page_b = '<html><img src="https://b.com/2.png"/></html>'
+
+        def fake_stream(method, url, **kw):
+            from unittest.mock import MagicMock
+
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        raw_pages = {
+            "https://a.com/page": page_a,
+            "https://b.com/page": page_b,
+        }
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, vids = _download_site_media(raw_pages)
+
+        assert len(imgs) == 2
+        assert vids == []
 
 
 class TestSubsequentRunFeatureCountingIntegration:
