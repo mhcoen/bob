@@ -9366,3 +9366,261 @@ class TestAutogenBlockSkipsVision:
         ]
         assert len(design_calls) == 1
         assert "1 input image(s)" in design_calls[0][0][2]
+
+    def test_first_run_spec_write_idempotent(self, tmp_path, monkeypatch):
+        """SPEC.md write only happens when content actually changes."""
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+        # Pre-populate SPEC.md with the exact content that
+        # update_design_autogen would produce (already has autogen
+        # markers with matching body).
+        spec_content = (
+            "## Purpose\nTest\n\n## Design\nUser prose.\n\n"
+            "<!-- BEGIN AUTO-GENERATED -->\ncolors:\n"
+            "  primary: #ff0000\n<!-- END AUTO-GENERATED -->\n"
+        )
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(spec_content, encoding="utf-8")
+        original_mtime = spec_path.stat().st_mtime
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(
+                user_prose="User prose.",
+                auto_generated="",
+            ),
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screen.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        design_result = DesignRequirements(
+            colors={"primary": "#ff0000"},
+            fonts=[],
+            spacing={},
+            layout={},
+            components=[],
+            source_images=["screen.png"],
+        )
+
+        # Mock update_design_autogen to return UNCHANGED text (simulates
+        # the case where the existing autogen block already matches).
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=design_result,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.update_design_autogen",
+                return_value=spec_content,
+            ) as mock_autogen,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_autogen.assert_called_once()
+        # Since update_design_autogen returned unchanged text, SPEC.md
+        # should NOT have been rewritten — mtime stays the same.
+        assert spec_path.stat().st_mtime == original_mtime
+
+    def test_in_memory_spec_consulted_not_disk(self, tmp_path, monkeypatch):
+        """The autogen check uses spec.design.auto_generated (in-memory),
+        NOT a re-read of SPEC.md from disk. Prove by having SPEC.md on
+        disk contain an autogen block while the in-memory spec has an
+        empty auto_generated field — Vision should proceed."""
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+        spec_path = tmp_path / "SPEC.md"
+        # SPEC.md on disk has an autogen block
+        spec_path.write_text(
+            "## Design\n\n<!-- BEGIN AUTO-GENERATED -->\n"
+            "colors:\n  primary: #000\n"
+            "<!-- END AUTO-GENERATED -->\n",
+            encoding="utf-8",
+        )
+
+        # But the in-memory spec has EMPTY auto_generated
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(
+                user_prose="",
+                auto_generated="",
+            ),
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screen.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        design_result = DesignRequirements(
+            colors={"primary": "#ff0000"},
+            fonts=[],
+            spacing={},
+            layout={},
+            components=[],
+            source_images=["screen.png"],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=design_result,
+            ) as mock_design,
+            patch("duplo.main.save_design_requirements"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        # In-memory spec had empty auto_generated, so Vision should
+        # proceed even though SPEC.md on disk has autogen content.
+        mock_design.assert_called_once()
+
+    def test_in_memory_autogen_present_overrides_disk(self, tmp_path, monkeypatch):
+        """When in-memory spec.design.auto_generated has content but
+        SPEC.md on disk does NOT have an autogen block, Vision is
+        still skipped — proving the in-memory dataclass is the
+        source of truth."""
+        from duplo.spec_reader import DesignBlock, ProductSpec
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "new_shot.png"
+        img.write_bytes(b"PNG")
+        spec_path = tmp_path / "SPEC.md"
+        # SPEC.md on disk has NO autogen block
+        spec_path.write_text("## Design\nJust prose.\n", encoding="utf-8")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  bg: #123"),
+        )
+
+        with (
+            patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
+        ):
+            _analyze_new_files(["ref/new_shot.png"], spec=spec)
+
+        # In-memory spec says autogen exists, so Vision is skipped
+        # even though disk SPEC.md has no autogen block.
+        mock_design.assert_not_called()
+        mock_save_dr.assert_not_called()
