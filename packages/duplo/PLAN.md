@@ -574,7 +574,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Check `autogen_present = bool(spec.design.auto_generated.strip())` from the in-memory `spec` (NOT a re-read of SPEC.md, NOT a second regex pass). Per the design § "in-memory spec is source of truth within a single run" invariant.
   - [x] If `design_input` AND NOT `autogen_present`: call `extract_design(design_input)`, then read SPEC.md from disk, call `update_design_autogen(existing, format_design_block(design))`, write back if changed, then `save_design_requirements(dataclasses.asdict(design))` for the cache.
   - [x] If `design_input` AND `autogen_present`: skip extraction. Emit diagnostic via `record_failure("orchestrator:design_extraction", "io", f"Autogen design block exists in SPEC.md; skipped Vision extraction. Delete the BEGIN/END AUTO-GENERATED block to regenerate from {len(design_input)} input image(s).")`.
-  - [ ] Cache invariant per design § "Note on the autogen-cache divergence": when autogen is skipped, `save_design_requirements` is ALSO skipped — the cache stays consistent with SPEC.md autogen.
+  - [x] Cache invariant per design § "Note on the autogen-cache divergence": when autogen is skipped, `save_design_requirements` is ALSO skipped — the cache stays consistent with SPEC.md autogen.
   - [ ] Tests: autogen-absent triggers Vision call and write-back; autogen-present skips Vision call AND skips cache write; skip emits diagnostic naming the input count; SPEC.md write only happens when content differs (idempotency); in-memory `spec.design.auto_generated` consulted, not a re-read of SPEC.md from disk.
 
 - [ ] [BATCH] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
