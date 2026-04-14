@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
 from duplo.parsing import strip_fences
+
+if TYPE_CHECKING:
+    from duplo.spec_reader import ProductSpec
 
 _SYSTEM = """\
 You are a visual design analyst. Given screenshot(s) of a product, extract
@@ -111,6 +115,61 @@ def _parse_design(raw: str) -> DesignRequirements:
     )
 
 
+def collect_design_input(
+    spec: ProductSpec | None,
+    visual_target_frames: list[Path] | None = None,
+    site_images: list[Path] | None = None,
+    site_video_frames: list[Path] | None = None,
+    *,
+    target_dir: Path | None = None,
+) -> list[Path]:
+    """Build the combined image list for design extraction.
+
+    The design input is the union of:
+
+    1. ``format_visual_references(spec)`` paths — user-declared
+       ``visual-target`` files in ``ref/``, excluding ``proposed: true``.
+    2. Accepted frames from videos with ``visual-target`` in their roles.
+    3. Images downloaded from product-reference sources via
+       ``_download_site_media``.
+    4. Accepted frames from scraped product-reference videos.
+
+    Deduplicates by resolved path.  Order is deterministic: sources
+    (1)–(4) are appended in order, with duplicates dropped on second
+    occurrence.
+    """
+    from duplo.spec_reader import format_visual_references
+
+    result: list[Path] = []
+    seen: set[Path] = set()
+
+    def _add(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            result.append(path)
+
+    # (1) visual-target reference files from SPEC.md ## References.
+    if spec is not None:
+        root = target_dir or Path.cwd()
+        for entry in format_visual_references(spec):
+            _add(root / entry.path)
+
+    # (2) accepted frames from visual-target videos.
+    for frame in visual_target_frames or []:
+        _add(frame)
+
+    # (3) images from product-reference site media.
+    for img in site_images or []:
+        _add(img)
+
+    # (4) frames from scraped product-reference videos.
+    for frame in site_video_frames or []:
+        _add(frame)
+
+    return result
+
+
 def format_design_section(design: DesignRequirements) -> str:
     """Format design requirements as a Markdown section for PLAN.md.
 
@@ -156,3 +215,29 @@ def format_design_section(design: DesignRequirements) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def format_design_block(design: DesignRequirements) -> str:
+    """Produce the markdown body for the AUTO-GENERATED block in SPEC.md.
+
+    Same content as :func:`format_design_section` but without the
+    ``## Visual Design Requirements`` heading, so the caller can wrap
+    it in ``<!-- BEGIN AUTO-GENERATED --> ... <!-- END AUTO-GENERATED -->``.
+
+    Returns an empty string when the design has no extracted data.
+    """
+    section = format_design_section(design)
+    if not section:
+        return ""
+    # Strip the "## Visual Design Requirements" heading and the blank
+    # line that follows it.
+    lines = section.splitlines()
+    body_start = 0
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            body_start = i + 1
+            break
+    # Skip any leading blank lines after the heading.
+    while body_start < len(lines) and not lines[body_start].strip():
+        body_start += 1
+    return "\n".join(lines[body_start:])

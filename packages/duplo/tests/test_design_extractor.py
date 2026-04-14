@@ -10,9 +10,12 @@ from duplo.claude_cli import ClaudeCliError
 from duplo.design_extractor import (
     DesignRequirements,
     _parse_design,
+    collect_design_input,
     extract_design,
+    format_design_block,
     format_design_section,
 )
+from duplo.spec_reader import ProductSpec, ReferenceEntry
 
 
 # Minimal valid 1x1 PNG bytes for test images.
@@ -182,3 +185,185 @@ class TestFormatDesignSection:
         result = format_design_section(design)
         assert "**card**" in result
         assert "**input**" in result
+
+
+class TestCollectDesignInput:
+    def test_visual_references_from_spec(self, tmp_path):
+        img = tmp_path / "ref" / "screenshot.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_PNG_BYTES)
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/screenshot.png"), roles=["visual-target"]),
+            ]
+        )
+        result = collect_design_input(spec, target_dir=tmp_path)
+        assert len(result) == 1
+        assert result[0] == tmp_path / "ref" / "screenshot.png"
+
+    def test_excludes_proposed_visual_references(self, tmp_path):
+        img = tmp_path / "ref" / "proposed.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_PNG_BYTES)
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ]
+        )
+        result = collect_design_input(spec, target_dir=tmp_path)
+        assert result == []
+
+    def test_visual_target_frames_included(self, tmp_path):
+        frame = tmp_path / "frame1.png"
+        frame.write_bytes(_PNG_BYTES)
+        result = collect_design_input(None, visual_target_frames=[frame])
+        assert result == [frame]
+
+    def test_site_images_included(self, tmp_path):
+        img = tmp_path / "site_img.png"
+        img.write_bytes(_PNG_BYTES)
+        result = collect_design_input(None, site_images=[img])
+        assert result == [img]
+
+    def test_site_video_frames_included(self, tmp_path):
+        frame = tmp_path / "site_frame.png"
+        frame.write_bytes(_PNG_BYTES)
+        result = collect_design_input(None, site_video_frames=[frame])
+        assert result == [frame]
+
+    def test_union_of_all_four_sources(self, tmp_path):
+        ref_img = tmp_path / "ref" / "target.png"
+        ref_img.parent.mkdir(parents=True)
+        ref_img.write_bytes(_PNG_BYTES)
+        vt_frame = tmp_path / "vt_frame.png"
+        vt_frame.write_bytes(_PNG_BYTES)
+        site_img = tmp_path / "site.png"
+        site_img.write_bytes(_PNG_BYTES)
+        sv_frame = tmp_path / "sv_frame.png"
+        sv_frame.write_bytes(_PNG_BYTES)
+
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/target.png"), roles=["visual-target"]),
+            ]
+        )
+        result = collect_design_input(
+            spec,
+            visual_target_frames=[vt_frame],
+            site_images=[site_img],
+            site_video_frames=[sv_frame],
+            target_dir=tmp_path,
+        )
+        assert len(result) == 4
+        assert result[0] == tmp_path / "ref" / "target.png"
+        assert result[1] == vt_frame
+        assert result[2] == site_img
+        assert result[3] == sv_frame
+
+    def test_deduplicates_by_resolved_path(self, tmp_path):
+        img = tmp_path / "ref" / "same.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_PNG_BYTES)
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/same.png"), roles=["visual-target"]),
+            ]
+        )
+        # Pass the same image as both a visual reference and a site image.
+        result = collect_design_input(
+            spec,
+            site_images=[tmp_path / "ref" / "same.png"],
+            target_dir=tmp_path,
+        )
+        assert len(result) == 1
+
+    def test_no_spec_returns_other_sources(self, tmp_path):
+        frame = tmp_path / "frame.png"
+        frame.write_bytes(_PNG_BYTES)
+        result = collect_design_input(None, visual_target_frames=[frame])
+        assert result == [frame]
+
+    def test_empty_inputs_returns_empty(self):
+        result = collect_design_input(None)
+        assert result == []
+
+    def test_non_visual_target_refs_excluded(self, tmp_path):
+        img = tmp_path / "ref" / "behavioral.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_PNG_BYTES)
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/behavioral.png"),
+                    roles=["behavioral-target"],
+                ),
+            ]
+        )
+        result = collect_design_input(spec, target_dir=tmp_path)
+        assert result == []
+
+    def test_order_is_deterministic(self, tmp_path):
+        """Sources are appended in order: (1) refs, (2) vt frames,
+        (3) site images, (4) site video frames."""
+        ref_img = tmp_path / "ref" / "a.png"
+        ref_img.parent.mkdir(parents=True)
+        ref_img.write_bytes(_PNG_BYTES)
+        vt = tmp_path / "b.png"
+        vt.write_bytes(_PNG_BYTES)
+        si = tmp_path / "c.png"
+        si.write_bytes(_PNG_BYTES)
+        sv = tmp_path / "d.png"
+        sv.write_bytes(_PNG_BYTES)
+
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"]),
+            ]
+        )
+        result = collect_design_input(
+            spec,
+            visual_target_frames=[vt],
+            site_images=[si],
+            site_video_frames=[sv],
+            target_dir=tmp_path,
+        )
+        names = [p.name for p in result]
+        assert names == ["a.png", "b.png", "c.png", "d.png"]
+
+
+class TestFormatDesignBlock:
+    def test_returns_body_without_heading(self):
+        design = DesignRequirements(
+            colors={"primary": "#1a73e8"},
+            fonts={"body": "Inter, ~16px"},
+        )
+        result = format_design_block(design)
+        assert "## Visual Design Requirements" not in result
+        assert "### Colors" in result
+        assert "`#1a73e8`" in result
+        assert "### Typography" in result
+
+    def test_returns_empty_for_empty_design(self):
+        design = DesignRequirements()
+        assert format_design_block(design) == ""
+
+    def test_matches_format_design_section_content(self):
+        design = DesignRequirements(
+            colors={"primary": "#000", "bg": "#fff"},
+            layout={"navigation": "top"},
+            components=[{"name": "btn", "style": "rounded"}],
+        )
+        section = format_design_section(design)
+        block = format_design_block(design)
+        # Block should contain all section content except the heading.
+        for line in block.splitlines():
+            assert line in section
+
+    def test_no_leading_blank_lines(self):
+        design = DesignRequirements(colors={"primary": "#000"})
+        result = format_design_block(design)
+        assert not result.startswith("\n")
