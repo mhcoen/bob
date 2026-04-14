@@ -556,7 +556,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: multi-source iteration calls `fetch_site` once per scrapeable source; first-source-wins dedup of page_records (URL appearing in source A and source B is recorded once with source A's record); first-source-wins for raw_pages (HTML from source A preserved over source B for the same canonical URL); discovered_urls collected only from `deep` sources, NOT from `shallow`; non-product-reference sources do not contribute to product_ref_raw_pages; doc_structures merged across sources.
 
 - [ ] [BATCH] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
-  - [ ] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
+  - [x] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
   - [ ] Default `role="docs"` and `scrape="deep"` for discovered entries per the design.
   - [ ] Tests: discovered URLs trigger SPEC.md write; SPEC.md unchanged when all discovered URLs are already in `## Sources` (idempotency through `append_sources` dedup); `discovered: true` flag and `role: docs` written; SPEC.md NOT modified when `discovered_urls` is empty.
 
