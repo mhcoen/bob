@@ -595,3 +595,63 @@ class TestMergeDesignDicts:
         result = _merge_design_dicts(a, b)
         assert len(result["components"]) == 1
         assert result["components"][0]["name"] == "card"
+
+
+# ---------------------------------------------------------------------------
+# Pipeline: _parse_design_markdown + _merge_design_dicts + detect_design_gaps
+# ---------------------------------------------------------------------------
+
+
+class TestDesignGapsDualSource:
+    """Verify detect_design_gaps finds gaps from both AUTO-GENERATED and duplo.json."""
+
+    def test_gaps_from_both_sources(self):
+        """Items from both spec markdown and duplo.json dict produce gaps."""
+        spec_markdown = "### Colors\n- **accent**: `#0000ff`\n\n### Typography\n- **body**: Roboto"
+        duplo_json_design = {
+            "colors": {"primary": "#ff0000"},
+            "components": [{"name": "card", "style": "rounded"}],
+        }
+        spec_design = _parse_design_markdown(spec_markdown)
+        merged = _merge_design_dicts(duplo_json_design, spec_design)
+        plan = "# Phase 0\n- [ ] Build basic UI\n"
+        gaps = detect_design_gaps(plan, merged)
+        categories = {g.category for g in gaps}
+        details = {g.detail for g in gaps}
+        # duplo.json contributed primary color and card component.
+        assert "color" in categories
+        assert any("#ff0000" in d for d in details)
+        assert "component" in categories
+        assert any("card" in d for d in details)
+        # spec contributed accent color and Roboto font.
+        assert any("#0000ff" in d for d in details)
+        assert "font" in categories
+        assert any("Roboto" in d for d in details)
+
+    def test_no_gaps_when_plan_covers_both_sources(self):
+        """No gaps reported when the plan mentions items from both sources."""
+        spec_markdown = "### Colors\n- **accent**: `#0000ff`"
+        duplo_json_design = {"colors": {"primary": "#ff0000"}}
+        spec_design = _parse_design_markdown(spec_markdown)
+        merged = _merge_design_dicts(duplo_json_design, spec_design)
+        plan = "Use #ff0000 for primary and #0000ff for accent."
+        gaps = detect_design_gaps(plan, merged)
+        assert gaps == []
+
+    def test_duplo_json_only_when_spec_empty(self):
+        """Empty spec markdown means only duplo.json items produce gaps."""
+        spec_design = _parse_design_markdown("")
+        duplo_json_design = {"fonts": {"heading": "Montserrat"}}
+        merged = _merge_design_dicts(duplo_json_design, spec_design)
+        gaps = detect_design_gaps("# Plan", merged)
+        assert len(gaps) == 1
+        assert "Montserrat" in gaps[0].detail
+
+    def test_spec_only_when_duplo_json_empty(self):
+        """Empty duplo.json design means only spec items produce gaps."""
+        spec_markdown = "### Colors\n- **bg**: `#fafafa`"
+        spec_design = _parse_design_markdown(spec_markdown)
+        merged = _merge_design_dicts({}, spec_design)
+        gaps = detect_design_gaps("# Plan", merged)
+        assert len(gaps) == 1
+        assert "#fafafa" in gaps[0].detail

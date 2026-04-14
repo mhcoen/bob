@@ -1560,6 +1560,42 @@ class TestDetectAndAppendGaps:
         call_features = mock_detect.call_args[0][1]
         assert len(call_features) == 2
 
+    def test_scope_exclude_filters_by_description(self, tmp_path, monkeypatch):
+        """scope_exclude matches against description, not just name."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {
+                        "name": "Core Editing",
+                        "description": "Rich text editing with plugin API support.",
+                        "category": "core",
+                    },
+                    {
+                        "name": "Export",
+                        "description": "CSV export.",
+                        "category": "core",
+                    },
+                ],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Build UI\n", encoding="utf-8")
+
+        from duplo.gap_detector import GapResult
+
+        gap_result = GapResult(missing_features=[], missing_examples=[])
+        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+            _detect_and_append_gaps(scope_exclude=["plugin API"])
+
+        # "Core Editing" has "plugin API" in its description so it
+        # should be excluded even though the name doesn't match.
+        call_features = mock_detect.call_args[0][1]
+        names = [f.name for f in call_features]
+        assert "Export" in names
+        assert "Core Editing" not in names
+
     def test_scope_exclude_all_features_skips_detect(self, tmp_path, monkeypatch):
         """When scope_exclude removes all features, detect_gaps is not called."""
         monkeypatch.chdir(tmp_path)
