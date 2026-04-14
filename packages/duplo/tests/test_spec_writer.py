@@ -1,7 +1,7 @@
 """Tests for duplo.spec_writer."""
 
-from duplo.spec_reader import SourceEntry
-from duplo.spec_writer import append_sources
+from duplo.spec_reader import SourceEntry, _parse_spec
+from duplo.spec_writer import append_sources, update_design_autogen
 
 
 class TestAppendSources:
@@ -202,3 +202,96 @@ class TestAppendSources:
         sources_pos = result.index("## Sources")
         design_pos = result.index("## Design")
         assert arch_pos < sources_pos < design_pos
+
+
+class TestUpdateDesignAutogen:
+    """Tests for update_design_autogen."""
+
+    def test_empty_design_gets_autogen_block(self):
+        spec = "## Purpose\n\nCalc.\n\n## Design\n\n"
+        result = update_design_autogen(spec, "Colors: blue")
+        assert "<!-- BEGIN AUTO-GENERATED" in result
+        assert "Colors: blue" in result
+        assert "<!-- END AUTO-GENERATED -->" in result
+
+    def test_existing_user_prose_preserved(self):
+        spec = "## Design\n\nKeep it minimal and clean.\n"
+        result = update_design_autogen(spec, "Colors: red")
+        assert "Keep it minimal and clean." in result
+        assert "Colors: red" in result
+        # User prose should come before the autogen block.
+        prose_pos = result.index("Keep it minimal")
+        auto_pos = result.index("BEGIN AUTO-GENERATED")
+        assert prose_pos < auto_pos
+
+    def test_existing_autogen_nonempty_not_replaced(self):
+        """Write-once: non-empty autogen block is preserved."""
+        spec = (
+            "## Design\n\n"
+            "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+            "Old content\n"
+            "<!-- END AUTO-GENERATED -->\n"
+        )
+        result = update_design_autogen(spec, "New content")
+        assert "Old content" in result
+        assert "New content" not in result
+
+    def test_existing_autogen_empty_is_replaced(self):
+        """Empty autogen block allows regeneration."""
+        spec = "## Design\n\n<!-- BEGIN AUTO-GENERATED -->\n\n<!-- END AUTO-GENERATED -->\n"
+        result = update_design_autogen(spec, "Fresh content")
+        assert "Fresh content" in result
+
+    def test_missing_design_section_created(self):
+        spec = "## Purpose\n\nBuild a calculator.\n"
+        result = update_design_autogen(spec, "Fonts: sans-serif")
+        assert "## Design" in result
+        assert "Fonts: sans-serif" in result
+
+    def test_round_trip_through_parser(self):
+        """Output parses back to spec.design.auto_generated == body."""
+        spec = "## Purpose\n\nCalc.\n\n## Design\n\nUser notes.\n"
+        body = "Colors: blue\nFonts: monospace"
+        result = update_design_autogen(spec, body)
+        parsed = _parse_spec(result)
+        assert parsed.design.auto_generated == body
+
+    def test_missing_design_placed_after_sources(self):
+        spec = (
+            "## Architecture\n\nSwift.\n\n"
+            "## Sources\n\n"
+            "- https://example.com\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n"
+        )
+        result = update_design_autogen(spec, "Layout: grid")
+        sources_pos = result.index("## Sources")
+        design_pos = result.index("## Design")
+        assert design_pos > sources_pos
+
+    def test_missing_design_placed_after_architecture_no_sources(self):
+        spec = "## Architecture\n\nSwift.\n"
+        result = update_design_autogen(spec, "Layout: grid")
+        arch_pos = result.index("## Architecture")
+        design_pos = result.index("## Design")
+        assert design_pos > arch_pos
+
+    def test_missing_design_at_end_without_arch_or_sources(self):
+        spec = "## Purpose\n\nCalc.\n"
+        result = update_design_autogen(spec, "Layout: grid")
+        purpose_pos = result.index("## Purpose")
+        design_pos = result.index("## Design")
+        assert design_pos > purpose_pos
+
+    def test_autogen_block_with_whitespace_only_is_replaced(self):
+        """Block containing only whitespace counts as empty."""
+        spec = "## Design\n\n<!-- BEGIN AUTO-GENERATED -->\n   \n<!-- END AUTO-GENERATED -->\n"
+        result = update_design_autogen(spec, "New stuff")
+        assert "New stuff" in result
+
+    def test_preserves_content_after_design_section(self):
+        spec = "## Design\n\nProse.\n\n## References\n\n- ref/img.png\n  role: visual-target\n"
+        result = update_design_autogen(spec, "Colors: green")
+        assert "## References" in result
+        assert "ref/img.png" in result
+        assert "Colors: green" in result
