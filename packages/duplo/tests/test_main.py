@@ -8366,3 +8366,445 @@ class TestDesignInputPerSourceLookup:
         assert "scraped_scene_0001.png" not in design_names
         # Unique scraped frame kept
         assert "scraped_scene_0002.png" in design_names
+
+    def test_missing_source_gracefully_omitted(self, tmp_path, monkeypatch):
+        """Design input works when some sources are absent (no videos, no site media)."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # Only source 1: visual-target reference image
+        vt_img = ref_dir / "screenshot.png"
+        vt_img.write_bytes(b"VT_IMG")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screenshot.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),  # no site media at all
+            ),
+            # No videos scanned — pipeline skipped
+            patch(
+                "duplo.main.extract_design",
+                side_effect=_capture_design,
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[vt_img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_cdi.assert_called_once()
+        # Sources 2, 3, 4 absent — only source 1 contributes
+        captured_names = [p.name for p in design_input_captured]
+        assert "screenshot.png" in captured_names
+        assert len(design_input_captured) == 1
+
+    def test_frame_content_hash_dedup_two_videos_identical_frames(self, tmp_path, monkeypatch):
+        """Two separate videos at different paths producing identical frames dedup."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # Two visual-target videos in ref/
+        vid_a = ref_dir / "demo_a.mp4"
+        vid_a.write_bytes(b"MP4A" * 100)
+        vid_b = ref_dir / "demo_b.mp4"
+        vid_b.write_bytes(b"MP4B" * 100)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        # Both videos produce frames with identical content at different paths
+        identical_content = b"SAME_FRAME_BYTES_HERE"
+        frame_a = frames_dir / "demo_a_scene_0001.png"
+        frame_a.write_bytes(identical_content)
+        frame_b = frames_dir / "demo_b_scene_0001.png"
+        frame_b.write_bytes(identical_content)
+
+        # vid_a also has a unique frame
+        unique_a = frames_dir / "demo_a_scene_0002.png"
+        unique_a.write_bytes(b"UNIQUE_A")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo_a.mp4"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/demo_b.mp4"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=Path("ref/demo_a.mp4"),
+                        frames=[frame_a, unique_a],
+                    ),
+                    ExtractionResult(
+                        source=Path("ref/demo_b.mp4"),
+                        frames=[frame_b],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[frame_a, unique_a, frame_b],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch(
+                "duplo.main.extract_design",
+                side_effect=_capture_design,
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vid_a, vid_b],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_cdi.assert_called_once()
+        captured_names = [p.name for p in design_input_captured]
+        # frame_a kept (first video processed first)
+        assert "demo_a_scene_0001.png" in captured_names
+        # frame_b dropped (identical content hash as frame_a)
+        assert "demo_b_scene_0001.png" not in captured_names
+        # unique_a kept (different content)
+        assert "demo_a_scene_0002.png" in captured_names
+
+    def test_behavioral_only_video_excluded_from_design(self, tmp_path, monkeypatch):
+        """Frames from behavioral-only video do NOT appear in design input."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        beh_vid = ref_dir / "tutorial.mp4"
+        beh_vid.write_bytes(b"MP4" * 100)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        beh_frame = frames_dir / "tutorial_scene_0001.png"
+        beh_frame.write_bytes(b"BEHFRAME")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/tutorial.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=Path("ref/tutorial.mp4"),
+                        frames=[beh_frame],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[beh_frame],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch(
+                "duplo.main.extract_design",
+                side_effect=_capture_design,
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[beh_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_cdi.assert_called_once()
+        vt_frames_arg = mock_cdi.call_args[0][1]
+        # Behavioral-only video's frames NOT passed as visual-target frames
+        assert beh_frame not in vt_frames_arg
+        assert len(vt_frames_arg) == 0
+        # No design input at all (only behavioral video, no visual sources)
+        assert len(design_input_captured) == 0
+
+    def test_proposed_visual_ref_excluded_from_design(self, tmp_path, monkeypatch):
+        """proposed: true visual-target ref does NOT appear in design input."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # A proposed visual-target (should be excluded)
+        proposed_img = ref_dir / "proposed.png"
+        proposed_img.write_bytes(b"PROPOSED_IMG")
+
+        # A confirmed visual-target (should be included)
+        confirmed_img = ref_dir / "confirmed.png"
+        confirmed_img.write_bytes(b"CONFIRMED_IMG")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+                ReferenceEntry(
+                    path=Path("ref/confirmed.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                side_effect=_capture_design,
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[confirmed_img, proposed_img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_cdi.assert_called_once()
+        captured_names = [p.name for p in design_input_captured]
+        # Confirmed visual-target included
+        assert "confirmed.png" in captured_names
+        # Proposed visual-target excluded
+        assert "proposed.png" not in captured_names
