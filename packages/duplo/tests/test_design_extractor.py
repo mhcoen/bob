@@ -217,3 +217,38 @@ class TestFormatDesignBlock:
         design = DesignRequirements(colors={"primary": "#000"})
         result = format_design_block(design)
         assert not result.startswith("\n")
+
+    def test_roundtrip_through_update_design_autogen(self):
+        """update_design_autogen + spec parser recovers design fields."""
+        from duplo.spec_reader import _parse_design_block
+        from duplo.spec_writer import update_design_autogen
+
+        design = DesignRequirements(
+            colors={"primary": "#1a73e8", "bg": "#ffffff"},
+            fonts={"body": "Inter, ~16px"},
+            spacing={"gap": "16px"},
+            layout={"navigation": "top"},
+            components=[{"name": "card", "style": "rounded"}],
+        )
+        spec_text = "# My App\n\n## Purpose\n\nDo stuff.\n"
+        block = format_design_block(design)
+        modified = update_design_autogen(spec_text, block)
+        # Parse just the ## Design body out of the modified text.
+        # Find section between ## Design and next ## heading (or EOF).
+        import re
+
+        m = re.search(
+            r"^## Design\n(.*?)(?=^## |\Z)",
+            modified,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert m, "## Design section not found in modified spec"
+        parsed = _parse_design_block(m.group(1))
+        assert "### Colors" in parsed.auto_generated
+        assert "`#1a73e8`" in parsed.auto_generated
+        assert "### Typography" in parsed.auto_generated
+        assert "Inter, ~16px" in parsed.auto_generated
+        assert "### Spacing" in parsed.auto_generated
+        assert "### Layout" in parsed.auto_generated
+        assert "### Component Styles" in parsed.auto_generated
+        assert "card" in parsed.auto_generated
