@@ -9162,3 +9162,181 @@ class TestAutogenBlockSkipsVision:
 
         # Empty/whitespace autogen should NOT block Vision
         mock_design.assert_called_once()
+
+    def test_first_run_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
+        """_first_run emits record_failure when skipping Vision due to
+        existing autogen block."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  primary: #fff"),
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.collect_design_input", return_value=[img]),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+            patch("duplo.main.record_failure") as mock_rf,
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_design.assert_not_called()
+        mock_rf.assert_called_once()
+        args = mock_rf.call_args
+        assert args[0][0] == "orchestrator:design_extraction"
+        assert args[0][1] == "io"
+        assert "Autogen design block exists" in args[0][2]
+        assert "1 input image(s)" in args[0][2]
+
+    def test_analyze_new_files_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
+        """_analyze_new_files emits record_failure when skipping Vision."""
+        from duplo.spec_reader import DesignBlock, ProductSpec
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "new_shot.png"
+        img.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  bg: #000"),
+        )
+
+        with (
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.save_design_requirements"),
+            patch("duplo.main.collect_design_input", return_value=[img]),
+            patch("duplo.main.record_failure") as mock_rf,
+        ):
+            _analyze_new_files(
+                ["ref/new_shot.png"],
+                spec=spec,
+            )
+
+        mock_design.assert_not_called()
+        mock_rf.assert_called_once()
+        args = mock_rf.call_args
+        assert args[0][0] == "orchestrator:design_extraction"
+        assert args[0][1] == "io"
+        assert "1 input image(s)" in args[0][2]
+
+    def test_rescrape_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
+        """_rescrape_product_url emits record_failure when skipping Vision."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        data = {
+            "source_url": "https://a.com",
+            "features": [],
+            "last_scrape_timestamp": 0,
+        }
+        (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+        site_media_dir = duplo_dir / "site_media"
+        site_media_dir.mkdir()
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="fonts:\n  body: Inter"),
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+
+        raw_html = "<html><body><img src='https://a.com/img.png'></body></html>"
+        with (
+            patch(
+                "duplo.main.fetch_site",
+                return_value=(
+                    "text",
+                    [],
+                    None,
+                    [PageRecord("https://a.com", "2024-01-01", "abc")],
+                    {"https://a.com": raw_html},
+                ),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([tmp_path / "img.png"], []),
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[
+                    tmp_path / "img.png",
+                ],
+            ),
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.save_design_requirements"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.record_failure") as mock_rf,
+        ):
+            _rescrape_product_url(spec=spec)
+
+        mock_design.assert_not_called()
+        # May have multiple record_failure calls; find the design one.
+        design_calls = [
+            c for c in mock_rf.call_args_list if c[0][0] == "orchestrator:design_extraction"
+        ]
+        assert len(design_calls) == 1
+        assert "1 input image(s)" in design_calls[0][0][2]

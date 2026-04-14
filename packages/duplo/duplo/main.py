@@ -205,7 +205,7 @@ from pathlib import Path
 from duplo.appshot import capture_appshot
 from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
-from duplo.diagnostics import print_summary as diagnostics_print_summary
+from duplo.diagnostics import print_summary as diagnostics_print_summary, record_failure
 from duplo.design_extractor import (
     DesignRequirements,
     extract_design,
@@ -1200,6 +1200,13 @@ def _first_run(*, url: str | None = None) -> None:
         else:
             print("Could not extract design details from images.")
     elif design_input:
+        record_failure(
+            "orchestrator:design_extraction",
+            "io",
+            f"Autogen design block exists in SPEC.md; skipped Vision extraction."
+            f" Delete the BEGIN/END AUTO-GENERATED block to regenerate"
+            f" from {len(design_input)} input image(s).",
+        )
         print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
     # Extract text from docs-role references (PDFs, text, markdown).
@@ -1407,6 +1414,13 @@ def _analyze_new_files(
         else:
             print("  Could not extract design details from images.")
     elif design_input:
+        record_failure(
+            "orchestrator:design_extraction",
+            "io",
+            f"Autogen design block exists in SPEC.md; skipped Vision extraction."
+            f" Delete the BEGIN/END AUTO-GENERATED block to regenerate"
+            f" from {len(design_input)} input image(s).",
+        )
         print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
     # Extract text from new PDFs.
@@ -1629,6 +1643,13 @@ def _rescrape_product_url(
                 save_design_requirements(dataclasses.asdict(design))
                 print(f"  Updated design from {len(design.source_images)} image(s).")
         elif design_input:
+            record_failure(
+                "orchestrator:design_extraction",
+                "io",
+                f"Autogen design block exists in SPEC.md; skipped Vision"
+                f" extraction. Delete the BEGIN/END AUTO-GENERATED block"
+                f" to regenerate from {len(design_input)} input image(s).",
+            )
             print("  Design autogen block already exists; skipping Vision.")
 
     # Re-read duplo.json to pick up writes from save_reference_urls,
