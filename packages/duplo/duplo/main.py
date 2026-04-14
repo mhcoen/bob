@@ -699,7 +699,7 @@ def _first_run(*, url: str | None = None) -> None:
             sys.exit(1)
     spec_prompt = format_spec_for_prompt(spec) if spec else ""
 
-    scan = scan_directory(".")
+    scan = scan_directory(Path(".") / "ref")
     if url:
         # URL provided on command line takes priority.
         if url not in scan.urls:

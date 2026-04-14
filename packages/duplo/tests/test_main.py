@@ -63,7 +63,9 @@ class TestMainFirstRun:
         assert exc_info.value.code == 1
 
     def test_scans_and_fetches_url(self, tmp_path, monkeypatch):
-        (tmp_path / "links.txt").write_text("https://example.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "links.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main._validate_url", return_value=("https://example.com", "Example")):
@@ -90,7 +92,9 @@ class TestMainFirstRun:
                                             main()
 
     def test_uses_first_url_as_source(self, tmp_path, monkeypatch, capsys):
-        (tmp_path / "urls.txt").write_text("https://first.com\nhttps://second.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "urls.txt").write_text("https://first.com\nhttps://second.com")
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main._validate_url", return_value=("https://first.com", "First")):
@@ -120,7 +124,9 @@ class TestMainFirstRun:
         mock_fetch.assert_called_once_with("https://first.com")
 
     def test_first_run_with_images_only(self, tmp_path, monkeypatch):
-        (tmp_path / "screenshot.png").write_bytes(b"PNG")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "screenshot.png").write_bytes(b"PNG")
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main._confirm_product", return_value="SomeApp"):
@@ -142,7 +148,9 @@ class TestMainFirstRun:
                                     main()
 
     def test_generates_roadmap_and_executes_phase(self, tmp_path, monkeypatch):
-        (tmp_path / "notes.txt").write_text("https://example.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "notes.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
         roadmap = [
@@ -193,7 +201,9 @@ class TestMainFirstRun:
 
     def test_skips_validation_when_product_json_exists(self, tmp_path, monkeypatch):
         """When .duplo/product.json exists, skip URL validation and product confirmation."""
-        (tmp_path / "links.txt").write_text("https://example.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "links.txt").write_text("https://example.com")
         (tmp_path / ".duplo").mkdir()
         (tmp_path / ".duplo" / "product.json").write_text(
             json.dumps({"product_name": "Saved Product", "source_url": "https://saved.com"})
@@ -228,7 +238,9 @@ class TestMainFirstRun:
 
     def test_saves_product_json_after_confirmation(self, tmp_path, monkeypatch):
         """First run without product.json saves it after confirmation."""
-        (tmp_path / "links.txt").write_text("https://example.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "links.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
         with patch(
@@ -4716,7 +4728,9 @@ class TestValidateForRunWiring:
 
     def test_first_run_continues_on_warnings_only(self, tmp_path, monkeypatch, capsys):
         """_first_run prints warnings but does not exit when no errors."""
-        (tmp_path / "links.txt").write_text("https://example.com")
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "links.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
         from duplo.spec_reader import ValidationResult

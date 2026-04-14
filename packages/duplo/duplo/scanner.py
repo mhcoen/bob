@@ -206,8 +206,8 @@ def scan_files(paths: list[Path]) -> ScanResult:
     return result
 
 
-def scan_directory(directory: Path | str = ".") -> ScanResult:
-    """Scan *directory* for reference materials.
+def scan_directory(ref_dir: Path | str = ".") -> ScanResult:
+    """Scan *ref_dir* for reference materials.
 
     Finds images, PDFs, and text/markdown files.  Extracts URLs from
     any file that can be read as text.  Skips ``.duplo/``, ``.git/``,
@@ -220,8 +220,10 @@ def scan_directory(directory: Path | str = ".") -> ScanResult:
     extracted URLs (deduplicated, order-preserved), and per-file
     relevance assessments.
     """
-    root = Path(directory).resolve()
+    root = Path(ref_dir).resolve()
     result = ScanResult()
+    if not root.is_dir():
+        return result
     seen_urls: set[str] = set()
 
     for path in sorted(root.iterdir()):
