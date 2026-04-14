@@ -483,11 +483,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Parse `<img src>`, `<video src>`, AND `<source src>` tags. Resolve to absolute URLs against the embedding page URL (not against any `source_url`).
   - [x] Tests: image URL embedded in a page is downloaded and path returned; video URL same; cross-origin CDN image is downloaded (not skipped); cached file returns its existing path without re-downloading; mix of cached and new files all returned; zero embedded media returns `([], [])`; multiple pages each contributing media yields combined lists; HTTP failure on a single embed records diagnostic and skips that file but doesn't abort the function.
 
-- [ ] Refactor `gap_detector` callers to pre-filter through `scope_exclude`
+- [x] Refactor `gap_detector` callers to pre-filter through `scope_exclude`
   - [x] Per PIPELINE-design.md § `gap_detector.py`. No change to `detect_gaps` itself. The features list passed in is filtered through `scope_exclude` at the orchestrator level (handled by the previous `_matches_excluded` task) before `detect_gaps` is called.
   - [x] Verify no existing call site of `detect_gaps` bypasses the filter. If any do, route them through the same filter.
   - [x] `detect_design_gaps` operates on the AUTO-GENERATED block in SPEC.md's `## Design` section AS WELL AS on `duplo.json`'s `design_requirements` (redundant during transition; can simplify in Phase 7).
-  - [ ] Tests: feature list passed to `detect_gaps` excludes scope_exclude'd entries; `detect_design_gaps` reads from both AUTO-GENERATED block and `duplo.json` (verify both code paths exist).
+  - [x] Tests: feature list passed to `detect_gaps` excludes scope_exclude'd entries; `detect_design_gaps` reads from both AUTO-GENERATED block and `duplo.json` (verify both code paths exist).
 
 ## Investigator
 
