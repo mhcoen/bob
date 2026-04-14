@@ -407,7 +407,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Foundation: fetch_site signature changes
 
 - [ ] Add `scrape_depth` parameter and 5-tuple return to `duplo/fetcher.py:fetch_site`
-  - [ ] Per PIPELINE-design.md § `fetcher.py`. New signature: `fetch_site(url, *, scrape_depth: Literal["deep", "shallow", "none"] = "deep") -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]`.
+  - [x] Per PIPELINE-design.md § `fetcher.py`. New signature: `fetch_site(url, *, scrape_depth: Literal["deep", "shallow", "none"] = "deep") -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]`.
   - [ ] `scrape_depth="deep"` follows links but ONLY same-origin (same scheme + host + port). Cross-origin links are NOT fetched in the same run — they are extracted later by `_collect_cross_origin_links` for SPEC.md `discovered:` write-back.
   - [ ] `scrape_depth="shallow"` fetches only the entry URL, no link-following.
   - [ ] `scrape_depth="none"` does no fetch, returns empty content tuple plus empty `raw_pages` dict.
