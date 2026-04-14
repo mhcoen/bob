@@ -564,7 +564,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Compose design input set from four sources in `_subsequent_run`
   - [x] Per PIPELINE-design.md orchestration sketch "Compose the design extraction input set from FOUR sources".
-  - [ ] Sources: (1) `format_visual_references(spec)` paths; (2) accepted frames from videos with `visual-target` in roles via `accepted_frames_by_path.get(entry.path, [])`; (3) accepted frames from scraped `site_videos`; (4) `site_images` from `_download_site_media`.
+  - [x] Sources: (1) `format_visual_references(spec)` paths; (2) accepted frames from videos with `visual-target` in roles via `accepted_frames_by_path.get(entry.path, [])`; (3) accepted frames from scraped `site_videos`; (4) `site_images` from `_download_site_media`.
   - [ ] Apply frame-content-hash dedup per the design sketch: ref-declared frames (source 2) added to `seen_frame_hashes` first; scraped frames (source 3) added only if their content-hash is not already seen.
   - [ ] `accepted_frames_by_path = _accepted_frames_by_source(filtered_results)` where `filtered_results` is the post-`apply_filter` list (use `dataclasses.replace(r, frames=apply_filter(filter_frames(r.frames)))` per the sketch).
   - [ ] Tests: design_input contains all four sources when present; missing source gracefully omitted; frame-content-hash dedup verified with two videos containing identical frames at different paths; behavioral-only video does NOT contribute frames; `proposed: true` visual ref does NOT contribute.
