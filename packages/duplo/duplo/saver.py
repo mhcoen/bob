@@ -86,6 +86,60 @@ def load_product(
     return data.get("product_name", ""), data.get("source_url", "")
 
 
+def derive_app_name(
+    spec: object | None,
+    target_dir: Path | str = ".",
+) -> str:
+    """Derive the application name for appshot and plan headings.
+
+    Resolution order:
+
+    1. If ``.duplo/product.json`` already contains an ``app_name`` key
+       with a non-empty value, return it unchanged (preserves user edits).
+    2. If *spec* has ``## Sources`` with a ``product-reference`` URL,
+       use the ``product_name`` stored in ``product.json`` (set by the
+       validator during the first run).
+    3. Fall back to the project directory name.
+
+    The result is saved back to ``product.json`` under ``app_name`` so
+    subsequent runs reuse it.
+    """
+    from duplo.spec_reader import ProductSpec
+
+    td = Path(target_dir)
+    path = (td / PRODUCT_JSON).resolve()
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            data = {}
+
+    # 1. Existing app_name in product.json — user may have edited it.
+    existing = data.get("app_name", "")
+    if existing:
+        return existing
+
+    app_name = ""
+
+    # 2. Product-reference URL → use validated product_name.
+    if isinstance(spec, ProductSpec) and spec.sources:
+        has_product_ref = any(s.role == "product-reference" for s in spec.sources)
+        if has_product_ref:
+            app_name = data.get("product_name", "")
+
+    # 3. Fallback: directory name.
+    if not app_name:
+        app_name = td.resolve().name
+
+    # Persist so subsequent runs find it.
+    data["app_name"] = app_name
+    _ensure_duplo_dir(target_dir)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    return app_name
+
+
 _CLAUDE_MD_CONTENT = """\
 # Visual verification
 

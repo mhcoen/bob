@@ -52,6 +52,7 @@ from duplo.saver import (
     save_feedback,
     save_frame_descriptions,
     save_issues,
+    derive_app_name,
     save_product,
     save_raw_content,
     save_reference_urls,
@@ -1073,6 +1074,126 @@ class TestLoadProduct:
         save_product("", "", target_dir=tmp_path)
         result = load_product(target_dir=tmp_path)
         assert result == ("", "")
+
+
+class TestDeriveAppName:
+    """Tests for derive_app_name()."""
+
+    def test_url_based_derivation(self, tmp_path):
+        """Product-reference URL uses product_name from product.json."""
+        from duplo.spec_reader import ProductSpec, SourceEntry
+
+        # Pre-populate product.json with a validated product name.
+        save_product("Numi Calculator", "https://numi.app", target_dir=tmp_path)
+
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://numi.app",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = derive_app_name(spec, tmp_path)
+        assert result == "Numi Calculator"
+
+    def test_no_url_fallback_uses_directory_name(self, tmp_path):
+        """No product-reference URL falls back to directory name."""
+        from duplo.spec_reader import ProductSpec
+
+        spec = ProductSpec()
+        result = derive_app_name(spec, tmp_path)
+        assert result == tmp_path.resolve().name
+
+    def test_product_json_written(self, tmp_path):
+        """app_name is persisted to product.json."""
+        from duplo.spec_reader import ProductSpec
+
+        spec = ProductSpec()
+        derive_app_name(spec, tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["app_name"] == tmp_path.resolve().name
+
+    def test_user_edited_product_json_not_overwritten(self, tmp_path):
+        """Existing app_name in product.json is preserved."""
+        from duplo.spec_reader import ProductSpec, SourceEntry
+
+        # Simulate user editing product.json.
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps(
+                {
+                    "product_name": "Numi Calculator",
+                    "source_url": "https://numi.app",
+                    "app_name": "My Custom Name",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://numi.app",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = derive_app_name(spec, tmp_path)
+        assert result == "My Custom Name"
+        # Verify product.json was NOT rewritten.
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["app_name"] == "My Custom Name"
+
+    def test_no_spec_falls_back_to_directory(self, tmp_path):
+        """None spec uses directory name."""
+        result = derive_app_name(None, tmp_path)
+        assert result == tmp_path.resolve().name
+
+    def test_non_product_reference_sources_ignored(self, tmp_path):
+        """Sources with roles other than product-reference don't count."""
+        from duplo.spec_reader import ProductSpec, SourceEntry
+
+        save_product("Some Product", "https://example.com", target_dir=tmp_path)
+
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://example.com",
+                    role="docs",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = derive_app_name(spec, tmp_path)
+        # No product-reference source → falls back to dir name.
+        assert result == tmp_path.resolve().name
+
+    def test_product_ref_but_no_product_name_falls_back(self, tmp_path):
+        """Product-reference URL but empty product_name → dir name."""
+        from duplo.spec_reader import ProductSpec, SourceEntry
+
+        # product.json exists but product_name is empty.
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps({"product_name": "", "source_url": "https://numi.app"}) + "\n",
+            encoding="utf-8",
+        )
+
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://numi.app",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        result = derive_app_name(spec, tmp_path)
+        assert result == tmp_path.resolve().name
 
 
 class TestSaveFeatures:
