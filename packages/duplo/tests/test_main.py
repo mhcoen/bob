@@ -9624,3 +9624,275 @@ class TestAutogenBlockSkipsVision:
         # even though disk SPEC.md has no autogen block.
         mock_design.assert_not_called()
         mock_save_dr.assert_not_called()
+
+
+class TestSubsequentRunSpecSourcesIntegration:
+    """Integration: _subsequent_run with spec sources downloads
+    site media and processes behavioral videos / design input."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: duplo.json, file hashes, SPEC.md."""
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+    def test_downloads_site_media_from_spec_sources(self, tmp_path, monkeypatch):
+        """When spec declares sources, site media is downloaded
+        from product_ref_raw_pages."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://prod.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="text",
+            product_ref_raw_pages={"https://prod.com": "<html></html>"},
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch(
+                "duplo.main._persist_scrape_result",
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=(
+                    [Path("img.png")],
+                    [Path("vid.mp4")],
+                ),
+            ) as mock_dl,
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        mock_dl.assert_called_once_with({"https://prod.com": "<html></html>"})
+
+    def test_processes_behavioral_videos_with_spec_sources(self, tmp_path, monkeypatch):
+        """Behavioral video pipeline runs when spec sources
+        provide site_videos."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://prod.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="text",
+            product_ref_raw_pages={"https://prod.com": "<html></html>"},
+        )
+        site_vid = Path(".duplo/site_media/abc/demo.mp4")
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch(
+                "duplo.main._persist_scrape_result",
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main._run_video_frame_pipeline",
+                return_value=([], {}),
+            ) as mock_pipeline,
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        mock_pipeline.assert_called_once_with([site_vid])
+
+    def test_skips_design_when_autogen_present(self, tmp_path, monkeypatch):
+        """Design extraction is skipped when autogen block
+        already has content."""
+        self._setup(tmp_path, monkeypatch)
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://prod.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[src],
+            design=DesignBlock(auto_generated="colors:\n  bg: #fff"),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="text",
+            product_ref_raw_pages={},
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch(
+                "duplo.main._persist_scrape_result",
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[Path("img.png")],
+            ),
+            patch(
+                "duplo.main.extract_design",
+            ) as mock_extract,
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        mock_extract.assert_not_called()
+        mock_save_dr.assert_not_called()
+
+    def test_no_media_pipeline_without_spec_sources(self, tmp_path, monkeypatch):
+        """Without spec sources, _rescrape_product_url is used
+        instead and the spec-sources media pipeline does not
+        run."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main._rescrape_product_url",
+                return_value=(0, 0, ""),
+            ) as mock_rescrape,
+            patch(
+                "duplo.main._download_site_media",
+            ) as mock_dl,
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        mock_rescrape.assert_called_once()
+        # _download_site_media is NOT called directly in
+        # _subsequent_run for the non-spec path (it's called
+        # inside _rescrape_product_url).
+        mock_dl.assert_not_called()

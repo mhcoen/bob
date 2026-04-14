@@ -1868,6 +1868,8 @@ def _subsequent_run() -> None:
     # Scrape declared sources (when SPEC.md has scrapeable entries) or
     # fall back to single-URL re-scrape from duplo.json.
     scraped_text = ""
+    site_images: list[Path] = []
+    site_videos: list[Path] = []
     spec_sources = scrapeable_sources(spec) if spec else []
     if spec_sources:
         scrape_result = _scrape_declared_sources(spec)
@@ -1875,6 +1877,13 @@ def _subsequent_run() -> None:
         _persist_scrape_result(scrape_result)
         summary.pages_rescraped = len(scrape_result.all_page_records)
         summary.examples_rescraped = len(scrape_result.all_code_examples)
+        # Download embedded media from product-reference pages.
+        if scrape_result.product_ref_raw_pages:
+            site_images, site_videos = _download_site_media(scrape_result.product_ref_raw_pages)
+            if site_images:
+                print(f"  {len(site_images)} image(s) from product site.")
+            if site_videos:
+                print(f"  {len(site_videos)} video(s) from product site.")
     else:
         pages, examples, scraped_text = _rescrape_product_url(spec=spec)
         summary.pages_rescraped = pages
@@ -1935,6 +1944,84 @@ def _subsequent_run() -> None:
             print("  No features extracted.")
 
     save_hashes(compute_hashes("."))
+
+    # Behavioral references -> frame extraction -> design input.
+    # When spec declares scrapeable sources, process behavioral
+    # videos (ref/ + site_videos) and compose design input from
+    # four sources.  The non-spec path handles this inside
+    # _rescrape_product_url.
+    if spec and spec_sources:
+        behavioral_entries = [
+            e for e in format_behavioral_references(spec) if e.path.suffix.lower() in _VIDEO_EXTS
+        ]
+        behavioral_paths = [e.path for e in behavioral_entries] + site_videos
+        assert len(behavioral_paths) == len(set(behavioral_paths)), (
+            "Duplicate source path across ref-declared and scraped videos"
+        )
+        accepted_by_path: dict[Path, list[Path]] = {}
+        if behavioral_paths:
+            print(f"\nProcessing {len(behavioral_paths)} behavioral video(s) \u2026")
+            _, accepted_by_path = _run_video_frame_pipeline(
+                behavioral_paths,
+            )
+
+        # Compose design input from four sources with
+        # content-hash dedup.
+        vt_frames_raw = [
+            frame
+            for entry in behavioral_entries
+            if "visual-target" in entry.roles
+            for frame in accepted_by_path.get(entry.path, [])
+        ]
+        scraped_frames_raw = [
+            frame for vp in site_videos for frame in accepted_by_path.get(vp, [])
+        ]
+        seen_fh: set[str] = set()
+        vt_frames: list[Path] = []
+        for frame in vt_frames_raw:
+            h = hashlib.sha256(frame.read_bytes()).hexdigest()
+            if h not in seen_fh:
+                vt_frames.append(frame)
+                seen_fh.add(h)
+        site_vf: list[Path] = []
+        for frame in scraped_frames_raw:
+            h = hashlib.sha256(frame.read_bytes()).hexdigest()
+            if h not in seen_fh:
+                site_vf.append(frame)
+                seen_fh.add(h)
+        design_input = collect_design_input(
+            spec,
+            vt_frames,
+            site_images,
+            site_vf,
+        )
+
+        autogen_present = bool(spec.design.auto_generated.strip())
+        if design_input and not autogen_present:
+            print("\nExtracting visual design from images \u2026")
+            design = extract_design(design_input)
+            if design.colors or design.fonts or design.layout:
+                spec_path = Path.cwd() / "SPEC.md"
+                if spec_path.exists():
+                    existing = spec_path.read_text(encoding="utf-8")
+                    body = format_design_block(design)
+                    if body:
+                        modified = update_design_autogen(existing, body)
+                        if modified != existing:
+                            spec_path.write_text(modified, encoding="utf-8")
+                save_design_requirements(dataclasses.asdict(design))
+                print(f"  Updated design from {len(design.source_images)} image(s).")
+        elif design_input:
+            record_failure(
+                "orchestrator:design_extraction",
+                "io",
+                "Autogen design block exists in SPEC.md;"
+                " skipped Vision extraction. Delete the"
+                " BEGIN/END AUTO-GENERATED block to"
+                f" regenerate from {len(design_input)}"
+                " input image(s).",
+            )
+            print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
     # Compare features/examples against current plan and append gap tasks.
     # Skip gap detection if the plan is fully complete (all tasks checked)
