@@ -502,14 +502,14 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter write helpers (minimal subset)
 
-- [ ] [BATCH] Create `duplo/spec_drafter.py` with `append_sources(spec_text, new_entries) -> str`
-  - [ ] New module per the design (text-layer module independent of pipeline stages — must NOT import from `duplo/extractor.py`, `duplo/design_extractor.py`, etc.).
-  - [ ] `append_sources(existing_spec_text: str, new_entries: list[SourceEntry]) -> str` returns modified spec text with new entries appended to `## Sources`.
-  - [ ] Dedup-by-canonical: skip entries whose canonical URL already exists in the spec's `## Sources` (regardless of whether the existing entry has `proposed:` or `discovered:` flags). Use `url_utils.canonicalize_url` for comparison; the parser stores canonical URLs in `SourceEntry.url` already (per Phase 3) so existing entries are already canonical.
-  - [ ] Idempotent: calling `append_sources(s, [])` returns `s` unchanged. Calling `append_sources(append_sources(s, [e]), [e])` returns the same string as `append_sources(s, [e])` (the second call's `e` is dedup'd).
-  - [ ] Format new entries with their flags: `discovered: true` and/or `proposed: true` lines appear as field lines under the entry per PARSER-design.md § `## Sources` parser format.
-  - [ ] If `## Sources` section does not exist in `existing_spec_text`, create it (heading + entries) appended to the spec. Place it after `## Architecture` if present, else at end of file. Maintain the same blank-line conventions as the rest of SPEC.md.
-  - [ ] Tests: append single new entry; append multiple; dedup against existing canonical URL (entry not added); dedup against existing URL with different trailing slash (canonicalization in action); dedup is case-insensitive on host; idempotent (double-call returns same result); empty new_entries returns input unchanged; missing `## Sources` section is created; flags `discovered: true` and `proposed: true` written correctly.
+- [x] [BATCH] Create `duplo/spec_drafter.py` with `append_sources(spec_text, new_entries) -> str`
+  - [x] New module per the design (text-layer module independent of pipeline stages — must NOT import from `duplo/extractor.py`, `duplo/design_extractor.py`, etc.).
+  - [x] `append_sources(existing_spec_text: str, new_entries: list[SourceEntry]) -> str` returns modified spec text with new entries appended to `## Sources`.
+  - [x] Dedup-by-canonical: skip entries whose canonical URL already exists in the spec's `## Sources` (regardless of whether the existing entry has `proposed:` or `discovered:` flags). Use `url_utils.canonicalize_url` for comparison; the parser stores canonical URLs in `SourceEntry.url` already (per Phase 3) so existing entries are already canonical.
+  - [x] Idempotent: calling `append_sources(s, [])` returns `s` unchanged. Calling `append_sources(append_sources(s, [e]), [e])` returns the same string as `append_sources(s, [e])` (the second call's `e` is dedup'd).
+  - [x] Format new entries with their flags: `discovered: true` and/or `proposed: true` lines appear as field lines under the entry per PARSER-design.md § `## Sources` parser format.
+  - [x] If `## Sources` section does not exist in `existing_spec_text`, create it (heading + entries) appended to the spec. Place it after `## Architecture` if present, else at end of file. Maintain the same blank-line conventions as the rest of SPEC.md.
+  - [x] Tests: append single new entry; append multiple; dedup against existing canonical URL (entry not added); dedup against existing URL with different trailing slash (canonicalization in action); dedup is case-insensitive on host; idempotent (double-call returns same result); empty new_entries returns input unchanged; missing `## Sources` section is created; flags `discovered: true` and `proposed: true` written correctly.
 
 - [ ] [BATCH] Add `update_design_autogen(spec_text, body) -> str` to `duplo/spec_drafter.py`
   - [ ] `update_design_autogen(existing_spec_text: str, body: str) -> str` returns modified spec text with the AUTO-GENERATED block in `## Design` populated.
