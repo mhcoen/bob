@@ -415,7 +415,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] All URL keys in `raw_pages` and all `PageRecord.url` values MUST be canonicalized via `url_utils.canonicalize_url`. Apply post-redirect (after the HTTP response, on the final URL the fetcher landed on).
   - [x] Failed fetches (404, timeout, non-HTML content-type, decode failure) are NOT included in `raw_pages` and NOT included in `page_records`. Both structures stay in sync by construction. Failure surfaces via `record_failure("fetch_site", "fetch", ...)`.
   - [x] HTML decode: UTF-8 with `errors="replace"` per the design.
-  - [ ] Update existing callers of `fetch_site` in `duplo/main.py` to handle the new 5-tuple. Existing call sites that don't yet need `raw_pages` should still unpack it (assign to `_` if unused) so they don't crash on the tuple-length change.
+  - [x] Update existing callers of `fetch_site` in `duplo/main.py` to handle the new 5-tuple. Existing call sites that don't yet need `raw_pages` should still unpack it (assign to `_` if unused) so they don't crash on the tuple-length change.
   - [ ] Tests: 5-tuple return shape; `scrape_depth="shallow"` fetches only entry URL and returns one `raw_pages` entry; `scrape_depth="deep"` follows same-origin links and returns multiple entries; `scrape_depth="deep"` does NOT fetch cross-origin links (cross-origin URL not in `raw_pages`, no PageRecord for it); `scrape_depth="none"` does no HTTP and returns empty `raw_pages`; failed fetch (mock 404) omits the URL from BOTH `raw_pages` AND `page_records`; canonical URL keys (post-redirect URL canonicalized); decode error doesn't crash, omits the URL with diagnostic.
 
 ## Foundation: cross-origin link collection helper
