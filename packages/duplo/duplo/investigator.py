@@ -15,9 +15,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+
 from duplo.claude_cli import ClaudeCliError, query, query_with_images
 from duplo.diagnostics import record_failure
 from duplo.parsing import strip_fences
+
+if TYPE_CHECKING:
+    from duplo.spec_reader import BehaviorContract, ReferenceEntry, SourceEntry
 
 _SYSTEM = """\
 You are a product-level QA analyst. You have deep knowledge of the target
@@ -33,15 +38,21 @@ You will receive:
 - Design requirements extracted from the original product
 - Feature list with implementation status
 - Code examples from the product documentation
+- Counter-example references: files the user flagged as patterns to AVOID
+- Counter-example source URLs: URLs the user flagged as patterns to AVOID
+- Documentation references: supplementary text from docs-role files
+- Behavior contracts: ground-truth input → expected output pairs
 - The user's bug report or complaint
 
 For each bug you identify, you must:
 1. State what is wrong (the symptom)
 2. State what it SHOULD look like or do, citing specific evidence
-   (reference frame filename, design requirement, feature spec, or
-   code example)
-3. Classify severity as critical/major/minor
-4. Suggest the likely area of the codebase to investigate
+   (reference frame filename, design requirement, feature spec,
+   code example, or behavior contract)
+3. Note if the bug contradicts a behavior contract or emulates a
+   counter-example pattern
+4. Classify severity as critical/major/minor
+5. Suggest the likely area of the codebase to investigate
 
 Respond ONLY with a JSON object:
 {
@@ -51,7 +62,9 @@ Respond ONLY with a JSON object:
       "expected": "Should display '$28' on the right (ref: numi_app_demo_interval_0003.png, frame description: 'Price: $7 × 4 with the result $28')",
       "severity": "critical",
       "area": "Expression parser — label/colon prefix handling",
-      "evidence_sources": ["numi_app_demo_interval_0003.png", "frame_descriptions"]
+      "evidence_sources": ["numi_app_demo_interval_0003.png", "frame_descriptions"],
+      "contradicts": "behavior contract: `Price: $7 × 4` → `$28`",
+      "avoids_pattern": null
     }
   ],
   "summary": "One-paragraph overall assessment of the app's current state relative to the target product."
@@ -72,6 +85,8 @@ class Diagnosis:
     severity: str  # "critical" | "major" | "minor"
     area: str
     evidence_sources: list[str] = field(default_factory=list)
+    contradicts: str = ""
+    avoids_pattern: str = ""
 
 
 @dataclass
@@ -88,6 +103,10 @@ def investigate(
     *,
     user_screenshots: list[Path] | None = None,
     spec_text: str = "",
+    counter_examples: list[ReferenceEntry] | None = None,
+    counter_example_sources: list[SourceEntry] | None = None,
+    docs_text: str = "",
+    behavior_contracts: list[BehaviorContract] | None = None,
     model: str = "opus",
 ) -> InvestigationResult:
     """Run an intelligent product-level investigation.
@@ -99,6 +118,11 @@ def investigate(
     Args:
         complaints: User-provided bug descriptions.
         user_screenshots: Optional paths to user-supplied screenshot files.
+        spec_text: Formatted spec text for the prompt.
+        counter_examples: Reference entries with counter-example role.
+        counter_example_sources: Source entries with counter-example role.
+        docs_text: Combined text from docs-role reference files.
+        behavior_contracts: Ground-truth input/output pairs from the spec.
         model: Claude model alias (default ``"opus"``).
 
     Returns:
@@ -106,6 +130,10 @@ def investigate(
     """
     context = _gather_context()
     context["spec_text"] = spec_text
+    context["counter_examples"] = counter_examples or []
+    context["counter_example_sources"] = counter_example_sources or []
+    context["docs_text"] = docs_text
+    context["behavior_contracts"] = behavior_contracts or []
     prompt = _build_prompt(complaints, context, user_screenshots=user_screenshots)
 
     # Collect all image paths for the vision call.
@@ -306,6 +334,45 @@ def _build_prompt(
             iss_lines.append(f"  - {iss.get('description', '?')}")
         sections.append("\n".join(iss_lines))
 
+    # Counter-example references (files the user flagged as anti-patterns).
+    counter_examples = context.get("counter_examples", [])
+    if counter_examples:
+        ce_lines = [
+            "COUNTER-EXAMPLES — AVOID these patterns "
+            "(the user has flagged these as anti-patterns):"
+        ]
+        for entry in counter_examples:
+            notes_part = f" — {entry.notes}" if entry.notes else ""
+            ce_lines.append(f"  {entry.path.name}{notes_part}")
+        sections.append("\n".join(ce_lines))
+
+    # Counter-example source URLs (declarative context only, NOT fetched).
+    counter_example_sources = context.get("counter_example_sources", [])
+    if counter_example_sources:
+        ces_lines = [
+            "COUNTER-EXAMPLE URLS — AVOID these patterns "
+            "(the user has flagged these URLs as anti-patterns):"
+        ]
+        for entry in counter_example_sources:
+            notes_part = f" — {entry.notes}" if entry.notes else ""
+            ces_lines.append(f"  {entry.url}{notes_part}")
+        sections.append("\n".join(ces_lines))
+
+    # Documentation references (supplementary text from docs-role files).
+    docs_text = context.get("docs_text", "")
+    if docs_text:
+        sections.append(
+            "SUPPLEMENTARY DOCUMENTATION (from docs-role reference files):\n" + docs_text
+        )
+
+    # Behavior contracts (ground-truth input → expected output pairs).
+    behavior_contracts = context.get("behavior_contracts", [])
+    if behavior_contracts:
+        bc_lines = ["BEHAVIOR CONTRACTS (ground-truth — if the app violates these, it is a bug):"]
+        for contract in behavior_contracts:
+            bc_lines.append(f"  `{contract.input}` → `{contract.expected}`")
+        sections.append("\n".join(bc_lines))
+
     # Product spec.
     spec_text = context.get("spec_text", "")
     if spec_text:
@@ -384,6 +451,8 @@ def _parse_result(raw: str) -> InvestigationResult:
                 severity=str(item.get("severity", "major")),
                 area=str(item.get("area", "")),
                 evidence_sources=_ensure_list(item.get("evidence_sources", [])),
+                contradicts=str(item.get("contradicts", "") or ""),
+                avoids_pattern=str(item.get("avoids_pattern", "") or ""),
             )
         )
 
@@ -415,6 +484,10 @@ def format_investigation(result: InvestigationResult) -> str:
         lines.append(f"  [{severity_tag}] Bug {i}: {diag.symptom}")
         lines.append(f"    Expected: {diag.expected}")
         lines.append(f"    Area: {diag.area}")
+        if diag.contradicts:
+            lines.append(f"    Contradicts: {diag.contradicts}")
+        if diag.avoids_pattern:
+            lines.append(f"    Avoids pattern: {diag.avoids_pattern}")
         if diag.evidence_sources:
             lines.append(f"    Evidence: {', '.join(diag.evidence_sources)}")
         lines.append("")

@@ -22,6 +22,7 @@ from duplo.main import (
     _detect_and_append_gaps,
     _download_site_media,
     _init_project,
+    _investigation_context,
     _partition_features,
     _plan_has_unchecked_tasks,
     _plan_is_complete,
@@ -6757,3 +6758,237 @@ class TestScopeExcludeAtOrchestratorLevel:
         mock_save.assert_not_called()
         out = capsys.readouterr().out
         assert "No features extracted" in out or "No new features" in out
+
+
+class TestInvestigationContext:
+    """Tests for _investigation_context role-filtered kwarg builder."""
+
+    def test_none_spec_returns_empty(self):
+        result = _investigation_context(None)
+        assert result == {}
+
+    def test_counter_examples_included(self):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        ce = ReferenceEntry(
+            path=Path("ref/bad.png"),
+            roles=["counter-example"],
+            notes="Avoid",
+        )
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[],
+            architecture="",
+            references=[ce],
+        )
+        result = _investigation_context(spec)
+        assert "counter_examples" in result
+        assert len(result["counter_examples"]) == 1
+        assert result["counter_examples"][0].path == Path("ref/bad.png")
+
+    def test_counter_example_sources_included(self):
+        from duplo.spec_reader import ProductSpec, SourceEntry
+
+        ces = SourceEntry(
+            url="https://bad.com",
+            role="counter-example",
+            scrape="none",
+            notes="Don't do this",
+        )
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[],
+            architecture="",
+            references=[],
+            sources=[ces],
+        )
+        result = _investigation_context(spec)
+        assert "counter_example_sources" in result
+        assert result["counter_example_sources"][0].url == "https://bad.com"
+
+    def test_behavior_contracts_included(self):
+        from duplo.spec_reader import BehaviorContract, ProductSpec
+
+        bc = BehaviorContract(input="2+3", expected="5")
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[bc],
+            architecture="",
+            references=[],
+            sources=[],
+        )
+        result = _investigation_context(spec)
+        assert "behavior_contracts" in result
+        assert len(result["behavior_contracts"]) == 1
+        assert result["behavior_contracts"][0].input == "2+3"
+
+    def test_docs_text_included(self, tmp_path):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        doc_file = tmp_path / "ref" / "guide.txt"
+        doc_file.parent.mkdir(parents=True, exist_ok=True)
+        doc_file.write_text("API usage guide", encoding="utf-8")
+
+        doc_ref = ReferenceEntry(
+            path=doc_file,
+            roles=["docs"],
+        )
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[],
+            architecture="",
+            references=[doc_ref],
+            sources=[],
+        )
+        result = _investigation_context(spec)
+        assert "docs_text" in result
+        assert "API usage guide" in result["docs_text"]
+
+    def test_empty_spec_returns_empty(self):
+        from duplo.spec_reader import ProductSpec
+
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[],
+            architecture="",
+            references=[],
+            sources=[],
+        )
+        result = _investigation_context(spec)
+        assert result == {}
+
+    def test_proposed_counter_examples_excluded(self):
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        ce = ReferenceEntry(
+            path=Path("ref/bad.png"),
+            roles=["counter-example"],
+            proposed=True,
+        )
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[],
+            architecture="",
+            references=[ce],
+            sources=[],
+        )
+        result = _investigation_context(spec)
+        assert "counter_examples" not in result
+
+    def test_fix_mode_passes_context_to_investigate(self, capsys, tmp_path, monkeypatch):
+        """duplo fix passes role-filtered context through to investigate()."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+        from duplo.spec_reader import (
+            BehaviorContract,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "app_name": "TestApp",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {
+                        "phase": 0,
+                        "title": "Core",
+                        "goal": "Core",
+                        "features": [],
+                        "test": "ok",
+                    },
+                ],
+                "current_phase": 0,
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "broken"])
+
+        ce = ReferenceEntry(
+            path=Path("ref/avoid.png"),
+            roles=["counter-example"],
+        )
+        ces = SourceEntry(
+            url="https://bad.com",
+            role="counter-example",
+            scrape="none",
+        )
+        bc = BehaviorContract(input="2+3", expected="5")
+        spec = ProductSpec(
+            raw="",
+            purpose="",
+            scope="",
+            scope_include=[],
+            scope_exclude=[],
+            behavior="",
+            behavior_contracts=[bc],
+            architecture="",
+            references=[ce],
+            sources=[ces],
+        )
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="broken thing",
+                    expected="should work",
+                    severity="major",
+                    area="core",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.investigate", return_value=result) as mock_inv,
+        ):
+            main()
+
+        # Verify the call included role-filtered context.
+        call_kwargs = mock_inv.call_args[1]
+        assert "counter_examples" in call_kwargs
+        assert len(call_kwargs["counter_examples"]) == 1
+        assert "counter_example_sources" in call_kwargs
+        assert len(call_kwargs["counter_example_sources"]) == 1
+        assert "behavior_contracts" in call_kwargs
+        assert len(call_kwargs["behavior_contracts"]) == 1

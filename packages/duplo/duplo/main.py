@@ -256,6 +256,8 @@ from duplo.spec_reader import (
     ProductSpec,
     format_behavioral_references,
     format_contracts_as_verification,
+    format_counter_example_sources,
+    format_counter_examples,
     format_doc_references,
     format_spec_for_prompt,
     read_spec,
@@ -546,6 +548,29 @@ def main() -> None:
     diagnostics_print_summary()
 
 
+def _investigation_context(spec: ProductSpec | None) -> dict:
+    """Build role-filtered keyword arguments for ``investigate()``.
+
+    Returns a dict suitable for ``**kwargs`` expansion into
+    :func:`duplo.investigator.investigate`.
+    """
+    if spec is None:
+        return {}
+    kwargs: dict = {}
+    ce = format_counter_examples(spec)
+    if ce:
+        kwargs["counter_examples"] = ce
+    ces = format_counter_example_sources(spec)
+    if ces:
+        kwargs["counter_example_sources"] = ces
+    doc_refs = format_doc_references(spec)
+    if doc_refs:
+        kwargs["docs_text"] = docs_text_extractor(doc_refs)
+    if spec.behavior_contracts:
+        kwargs["behavior_contracts"] = spec.behavior_contracts
+    return kwargs
+
+
 def _fix_mode(args: argparse.Namespace) -> None:
     """Report bugs and append fix tasks to PLAN.md without phase changes.
 
@@ -676,8 +701,14 @@ def _fix_mode(args: argparse.Namespace) -> None:
     if getattr(args, "investigate", False):
         spec = read_spec()
         spec_prompt = format_spec_for_prompt(spec) if spec else ""
+        inv_kwargs = _investigation_context(spec)
         print("\nRunning product-level investigation \u2026")
-        result = investigate(bugs, user_screenshots=user_screenshots, spec_text=spec_prompt)
+        result = investigate(
+            bugs,
+            user_screenshots=user_screenshots,
+            spec_text=spec_prompt,
+            **inv_kwargs,
+        )
         print(format_investigation(result))
 
         if not result.diagnoses:
@@ -701,8 +732,14 @@ def _fix_mode(args: argparse.Namespace) -> None:
     # Diagnose bugs via investigator before appending fix tasks.
     spec = read_spec()
     spec_prompt = format_spec_for_prompt(spec) if spec else ""
+    inv_kwargs = _investigation_context(spec)
     print("\nDiagnosing reported bug(s) \u2026")
-    result = investigate(bugs, user_screenshots=user_screenshots, spec_text=spec_prompt)
+    result = investigate(
+        bugs,
+        user_screenshots=user_screenshots,
+        spec_text=spec_prompt,
+        **inv_kwargs,
+    )
 
     plan_path = Path("PLAN.md")
 

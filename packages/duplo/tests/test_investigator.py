@@ -17,6 +17,7 @@ from duplo.investigator import (
     investigate,
     investigation_to_fix_tasks,
 )
+from duplo.spec_reader import BehaviorContract, ReferenceEntry, SourceEntry
 
 
 class TestParseResult:
@@ -429,3 +430,322 @@ class TestInvestigate:
             investigate(["bug"], spec_text="")
         prompt = mock_text_query.call_args[0][0]
         assert "PRODUCT SPECIFICATION" not in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_examples_in_prompt(self, mock_gather):
+        mock_gather.return_value = _base_gather_context()
+        ce = ReferenceEntry(
+            path=Path("ref/bad_design.png"),
+            roles=["counter-example"],
+            notes="Cluttered layout to avoid",
+        )
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], counter_examples=[ce])
+        prompt = mock_text_query.call_args[0][0]
+        assert "COUNTER-EXAMPLES" in prompt
+        assert "AVOID" in prompt
+        assert "bad_design.png" in prompt
+        assert "Cluttered layout to avoid" in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_example_sources_in_prompt(self, mock_gather):
+        mock_gather.return_value = _base_gather_context()
+        ces = SourceEntry(
+            url="https://bad-example.com",
+            role="counter-example",
+            scrape="none",
+            notes="Avoid this UI pattern",
+        )
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], counter_example_sources=[ces])
+        prompt = mock_text_query.call_args[0][0]
+        assert "COUNTER-EXAMPLE URLS" in prompt
+        assert "AVOID" in prompt
+        assert "https://bad-example.com" in prompt
+        assert "Avoid this UI pattern" in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_example_sources_not_fetched(self, mock_gather):
+        """Counter-example source URLs are declarative — never fetched."""
+        mock_gather.return_value = _base_gather_context()
+        ces = SourceEntry(
+            url="https://bad-example.com",
+            role="counter-example",
+            scrape="none",
+        )
+        with (
+            patch("duplo.investigator.query") as mock_text_query,
+            patch("duplo.investigator.query_with_images") as mock_img,
+        ):
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            mock_img.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], counter_example_sources=[ces])
+        # The URL should appear in the prompt text, not be fetched.
+        prompt = mock_text_query.call_args[0][0]
+        assert "https://bad-example.com" in prompt
+        # No fetch calls should have been made for the URL.
+        # (investigate never fetches — it delegates to query/query_with_images)
+
+    @patch("duplo.investigator._gather_context")
+    def test_docs_text_in_prompt(self, mock_gather):
+        mock_gather.return_value = _base_gather_context()
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(
+                ["bug"],
+                docs_text="=== api_guide.md ===\nUse POST /api/v1/data",
+            )
+        prompt = mock_text_query.call_args[0][0]
+        assert "SUPPLEMENTARY DOCUMENTATION" in prompt
+        assert "api_guide.md" in prompt
+        assert "POST /api/v1/data" in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_behavior_contracts_in_prompt(self, mock_gather):
+        mock_gather.return_value = _base_gather_context()
+        contracts = [
+            BehaviorContract(input="2+3", expected="5"),
+            BehaviorContract(input="Price: $7 × 4", expected="$28"),
+        ]
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], behavior_contracts=contracts)
+        prompt = mock_text_query.call_args[0][0]
+        assert "BEHAVIOR CONTRACTS" in prompt
+        assert "ground-truth" in prompt
+        assert "`2+3`" in prompt
+        assert "`5`" in prompt
+        assert "`Price: $7 × 4`" in prompt
+        assert "`$28`" in prompt
+
+    @patch("duplo.investigator._gather_context")
+    def test_empty_new_context_not_in_prompt(self, mock_gather):
+        """Empty lists/strings for new context types are not in prompt."""
+        mock_gather.return_value = _base_gather_context()
+        with patch("duplo.investigator.query") as mock_text_query:
+            mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(
+                ["bug"],
+                counter_examples=[],
+                counter_example_sources=[],
+                docs_text="",
+                behavior_contracts=[],
+            )
+        prompt = mock_text_query.call_args[0][0]
+        assert "COUNTER-EXAMPLES" not in prompt
+        assert "COUNTER-EXAMPLE URLS" not in prompt
+        assert "SUPPLEMENTARY DOCUMENTATION" not in prompt
+        assert "BEHAVIOR CONTRACTS" not in prompt
+
+
+class TestBuildPromptRoleFilteredContext:
+    """Tests for new role-filtered context sections in _build_prompt."""
+
+    def test_counter_examples_with_notes(self):
+        ce = ReferenceEntry(
+            path=Path("ref/avoid.png"),
+            roles=["counter-example"],
+            notes="Too cluttered",
+        )
+        context = _base_context(counter_examples=[ce])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLES" in prompt
+        assert "avoid.png" in prompt
+        assert "Too cluttered" in prompt
+
+    def test_counter_examples_without_notes(self):
+        ce = ReferenceEntry(
+            path=Path("ref/avoid.png"),
+            roles=["counter-example"],
+        )
+        context = _base_context(counter_examples=[ce])
+        prompt = _build_prompt(["bug"], context)
+        assert "avoid.png" in prompt
+        assert " — " not in prompt.split("avoid.png")[1].split("\n")[0]
+
+    def test_counter_example_sources_with_notes(self):
+        ces = SourceEntry(
+            url="https://bad.com",
+            role="counter-example",
+            scrape="none",
+            notes="Bloated UI",
+        )
+        context = _base_context(counter_example_sources=[ces])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLE URLS" in prompt
+        assert "https://bad.com" in prompt
+        assert "Bloated UI" in prompt
+
+    def test_counter_example_sources_without_notes(self):
+        ces = SourceEntry(
+            url="https://bad.com",
+            role="counter-example",
+            scrape="none",
+        )
+        context = _base_context(counter_example_sources=[ces])
+        prompt = _build_prompt(["bug"], context)
+        assert "https://bad.com" in prompt
+
+    def test_docs_text(self):
+        context = _base_context(docs_text="Full API reference here.")
+        prompt = _build_prompt(["bug"], context)
+        assert "SUPPLEMENTARY DOCUMENTATION" in prompt
+        assert "Full API reference here." in prompt
+
+    def test_behavior_contracts(self):
+        bc = BehaviorContract(input="2+3", expected="5")
+        context = _base_context(behavior_contracts=[bc])
+        prompt = _build_prompt(["bug"], context)
+        assert "BEHAVIOR CONTRACTS" in prompt
+        assert "`2+3`" in prompt
+        assert "`5`" in prompt
+
+    def test_empty_counter_examples_not_in_prompt(self):
+        context = _base_context(counter_examples=[])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLES" not in prompt
+
+    def test_empty_counter_example_sources_not_in_prompt(self):
+        context = _base_context(counter_example_sources=[])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLE URLS" not in prompt
+
+    def test_empty_docs_text_not_in_prompt(self):
+        context = _base_context(docs_text="")
+        prompt = _build_prompt(["bug"], context)
+        assert "SUPPLEMENTARY DOCUMENTATION" not in prompt
+
+    def test_empty_behavior_contracts_not_in_prompt(self):
+        context = _base_context(behavior_contracts=[])
+        prompt = _build_prompt(["bug"], context)
+        assert "BEHAVIOR CONTRACTS" not in prompt
+
+
+class TestParseResultNewFields:
+    """Tests for parsing contradicts and avoids_pattern fields."""
+
+    def test_parses_contradicts(self):
+        raw = json.dumps(
+            {
+                "diagnosis": [
+                    {
+                        "symptom": "Wrong result",
+                        "expected": "5",
+                        "severity": "critical",
+                        "area": "parser",
+                        "contradicts": "behavior contract: `2+3` → `5`",
+                    }
+                ],
+                "summary": "Contract violation.",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.diagnoses[0].contradicts == ("behavior contract: `2+3` → `5`")
+
+    def test_parses_avoids_pattern(self):
+        raw = json.dumps(
+            {
+                "diagnosis": [
+                    {
+                        "symptom": "Cluttered layout",
+                        "expected": "Clean layout",
+                        "severity": "major",
+                        "area": "UI",
+                        "avoids_pattern": "counter-example: bad_design.png",
+                    }
+                ],
+                "summary": "Pattern issue.",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.diagnoses[0].avoids_pattern == ("counter-example: bad_design.png")
+
+    def test_missing_new_fields_default_empty(self):
+        raw = json.dumps(
+            {
+                "diagnosis": [
+                    {
+                        "symptom": "Bug",
+                        "severity": "major",
+                    }
+                ],
+                "summary": "ok",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.diagnoses[0].contradicts == ""
+        assert result.diagnoses[0].avoids_pattern == ""
+
+    def test_null_new_fields_default_empty(self):
+        raw = json.dumps(
+            {
+                "diagnosis": [
+                    {
+                        "symptom": "Bug",
+                        "severity": "major",
+                        "contradicts": None,
+                        "avoids_pattern": None,
+                    }
+                ],
+                "summary": "ok",
+            }
+        )
+        result = _parse_result(raw)
+        assert result.diagnoses[0].contradicts == ""
+        assert result.diagnoses[0].avoids_pattern == ""
+
+
+class TestFormatInvestigationNewFields:
+    """Tests for formatting contradicts and avoids_pattern."""
+
+    def test_shows_contradicts(self):
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Wrong result",
+                    expected="5",
+                    severity="critical",
+                    area="parser",
+                    contradicts="behavior contract: `2+3` → `5`",
+                ),
+            ],
+            summary="Contract violation.",
+        )
+        text = format_investigation(result)
+        assert "Contradicts:" in text
+        assert "behavior contract" in text
+
+    def test_shows_avoids_pattern(self):
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Cluttered",
+                    expected="Clean",
+                    severity="minor",
+                    area="UI",
+                    avoids_pattern="counter-example: bad.png",
+                ),
+            ],
+            summary="Pattern issue.",
+        )
+        text = format_investigation(result)
+        assert "Avoids pattern:" in text
+        assert "bad.png" in text
+
+    def test_omits_empty_new_fields(self):
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="Bug",
+                    expected="Fix",
+                    severity="major",
+                    area="core",
+                ),
+            ],
+            summary="One bug.",
+        )
+        text = format_investigation(result)
+        assert "Contradicts:" not in text
+        assert "Avoids pattern:" not in text
