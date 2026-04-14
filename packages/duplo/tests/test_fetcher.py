@@ -1324,6 +1324,21 @@ class TestExtractMediaUrls:
         assert "https://example.com/local.mp4" in vids
         assert "https://videos.other.com/ext.mp4" in vids
 
+    def test_relative_urls_resolved_against_page_url(self):
+        """Relative hrefs resolve against the embedding page URL."""
+        html = (
+            "<html><body>"
+            '<img src="images/hero.png">'
+            '<video src="media/demo.mp4"></video>'
+            '<video><source src="media/clip.webm" type="video/webm"></video>'
+            "</body></html>"
+        )
+        imgs, vids = extract_media_urls(html, "https://example.com/docs/page.html")
+        # Relative paths resolve against /docs/page.html, not root.
+        assert "https://example.com/docs/images/hero.png" in imgs
+        assert "https://example.com/docs/media/demo.mp4" in vids
+        assert "https://example.com/docs/media/clip.webm" in vids
+
 
 class TestDownloadMedia:
     """Tests for download_media — cached-vs-new behavior."""
