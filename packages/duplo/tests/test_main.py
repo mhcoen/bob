@@ -5793,7 +5793,7 @@ class TestValidateForRunWiring:
         (ref / "links.txt").write_text("https://example.com")
         monkeypatch.chdir(tmp_path)
 
-        from duplo.spec_reader import ValidationResult
+        from duplo.spec_reader import DesignBlock, ValidationResult
 
         mock_spec = type(
             "Spec",
@@ -5806,6 +5806,7 @@ class TestValidateForRunWiring:
                 "scope_exclude": None,
                 "references": [],
                 "sources": [],
+                "design": DesignBlock(),
             },
         )()
         vr = ValidationResult(

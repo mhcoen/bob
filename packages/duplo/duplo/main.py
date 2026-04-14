@@ -1181,8 +1181,7 @@ def _first_run(*, url: str | None = None) -> None:
             list(scan.images) + deduped_video_frames + site_images + deduped_scraped_frames
         )
     design = DesignRequirements()
-    _design_block = getattr(spec, "design", None) if spec else None
-    autogen_present = bool(_design_block and _design_block.auto_generated.strip())
+    autogen_present = bool(spec and spec.design.auto_generated.strip())
     if design_input and not autogen_present:
         print("\nExtracting visual design from images \u2026")
         design = extract_design(design_input)
@@ -1388,8 +1387,7 @@ def _analyze_new_files(
         design_input = collect_design_input(spec, vt_frames)
     else:
         design_input = list(scan.images) + video_frames
-    _design_block_anf = getattr(spec, "design", None) if spec else None
-    autogen_present = bool(_design_block_anf and _design_block_anf.auto_generated.strip())
+    autogen_present = bool(spec and spec.design.auto_generated.strip())
     if design_input and not autogen_present:
         print(f"\nAnalyzing {len(design_input)} image(s) with Vision \u2026")
         design = extract_design(design_input)
@@ -1616,8 +1614,7 @@ def _rescrape_product_url(
             )
         else:
             design_input = site_images + site_video_frames
-        _design_block_rsp = getattr(spec, "design", None) if spec else None
-        autogen_present = bool(_design_block_rsp and _design_block_rsp.auto_generated.strip())
+        autogen_present = bool(spec and spec.design.auto_generated.strip())
         if design_input and not autogen_present:
             design = extract_design(design_input)
             if design.colors or design.fonts or design.layout:
