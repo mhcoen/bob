@@ -3390,6 +3390,51 @@ class TestDownloadSiteMediaCachedVsNew:
         parent_names = {p.parent.name for p in imgs}
         assert parent_names == {hash_a, hash_b}
 
+    def test_cross_origin_media_downloaded(self, tmp_path, monkeypatch):
+        """Embedded media is downloaded regardless of origin.
+
+        Per design § 'Same-origin and embedded media': the user
+        authorized the page; its embedded media (CDN images, third-party
+        video hosts) is page content, not a navigation target.  Origin
+        does not restrict download.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        html = (
+            "<html><body>"
+            '<img src="https://cdn.other.com/hero.png"/>'
+            '<img src="https://static.third-party.io/banner.jpg"/>'
+            '<video src="https://media.vimeo.com/demo.mp4"></video>'
+            "</body></html>"
+        )
+        raw_pages = {"https://example.com": html}
+
+        def fake_stream(method, url, **kw):
+            from unittest.mock import MagicMock
+
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, vids = _download_site_media(raw_pages)
+
+        # All three cross-origin resources downloaded.
+        assert len(imgs) == 2
+        assert len(vids) == 1
+        assert all(p.exists() for p in imgs + vids)
+
+        # Filenames include the cross-origin domain prefix.
+        img_names = {p.name for p in imgs}
+        assert "cdn_other_com_hero.png" in img_names
+        assert "static_third-party_io_banner.jpg" in img_names
+        vid_names = {p.name for p in vids}
+        assert "media_vimeo_com_demo.mp4" in vid_names
+
 
 class TestSubsequentRunFeatureCountingIntegration:
     """Tests the old_count/new_count diff logic during feature re-extraction."""

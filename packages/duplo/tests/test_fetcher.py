@@ -1284,6 +1284,46 @@ class TestExtractMediaUrls:
         imgs, _ = extract_media_urls(html, "https://example.com/")
         assert "https://example.com/wide.jpg" in imgs
 
+    def test_cross_origin_img_included(self):
+        """Cross-origin media is extracted regardless of origin."""
+        html = (
+            "<html><body>"
+            '<img src="https://cdn.other.com/hero.png">'
+            '<img src="https://static.third-party.io/banner.jpg">'
+            "</body></html>"
+        )
+        imgs, _ = extract_media_urls(html, "https://example.com/page")
+        assert "https://cdn.other.com/hero.png" in imgs
+        assert "https://static.third-party.io/banner.jpg" in imgs
+
+    def test_cross_origin_video_included(self):
+        """Cross-origin video sources are extracted regardless of origin."""
+        html = (
+            "<html><body>"
+            '<video src="https://media.vimeo.com/demo.mp4"'
+            ' poster="https://thumbs.cdn.net/poster.png"></video>'
+            "</body></html>"
+        )
+        imgs, vids = extract_media_urls(html, "https://example.com/")
+        assert "https://media.vimeo.com/demo.mp4" in vids
+        assert "https://thumbs.cdn.net/poster.png" in imgs
+
+    def test_mixed_origin_media(self):
+        """Same-origin and cross-origin media coexist in results."""
+        html = (
+            "<html><body>"
+            '<img src="/local.png">'
+            '<img src="https://cdn.example.net/remote.png">'
+            '<video src="https://example.com/local.mp4"></video>'
+            '<video src="https://videos.other.com/ext.mp4"></video>'
+            "</body></html>"
+        )
+        imgs, vids = extract_media_urls(html, "https://example.com/page")
+        assert "https://example.com/local.png" in imgs
+        assert "https://cdn.example.net/remote.png" in imgs
+        assert "https://example.com/local.mp4" in vids
+        assert "https://videos.other.com/ext.mp4" in vids
+
 
 class TestDownloadMedia:
     """Tests for download_media — cached-vs-new behavior."""
