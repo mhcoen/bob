@@ -868,3 +868,52 @@ class TestFormatInvestigationNewFields:
         text = format_investigation(result)
         assert "Contradicts:" not in text
         assert "Avoids pattern:" not in text
+
+
+class TestSystemPromptContextTypeGuidance:
+    """Tests that the system prompt guides the LLM to reference new context types."""
+
+    def test_prompt_mentions_contradicts_for_behavior_contracts(self):
+        """System prompt tells the LLM to set contradicts for contract violations."""
+        from duplo.investigator import _SYSTEM
+
+        assert "contradicts" in _SYSTEM
+        assert "behavior contract" in _SYSTEM
+
+    def test_prompt_mentions_avoids_pattern_for_counter_examples(self):
+        """System prompt tells the LLM to set avoids_pattern for counter-examples."""
+        from duplo.investigator import _SYSTEM
+
+        assert "avoids_pattern" in _SYSTEM
+        assert "counter-example" in _SYSTEM
+
+    def test_prompt_evidence_sources_includes_documentation(self):
+        """System prompt lists documentation as a valid evidence source."""
+        from duplo.investigator import _SYSTEM
+
+        assert "documentation" in _SYSTEM.lower()
+
+    def test_prompt_evidence_sources_includes_counter_examples(self):
+        """System prompt lists counter-examples as a valid evidence source."""
+        from duplo.investigator import _SYSTEM
+
+        assert "counter-example" in _SYSTEM
+
+    def test_prompt_json_example_has_both_fields(self):
+        """JSON example in the system prompt shows both contradicts and avoids_pattern."""
+        from duplo.investigator import _SYSTEM
+
+        assert '"contradicts":' in _SYSTEM
+        assert '"avoids_pattern":' in _SYSTEM
+
+    def test_prompt_json_example_shows_avoids_pattern_usage(self):
+        """JSON example demonstrates a non-null avoids_pattern value."""
+        from duplo.investigator import _SYSTEM
+
+        # The second example diagnosis should have a non-null avoids_pattern.
+        assert "counter-example:" in _SYSTEM
+        # Ensure there's a concrete avoids_pattern example, not just null.
+        lines = _SYSTEM.splitlines()
+        avoids_lines = [line for line in lines if '"avoids_pattern":' in line]
+        non_null = [line for line in avoids_lines if "null" not in line]
+        assert len(non_null) >= 1

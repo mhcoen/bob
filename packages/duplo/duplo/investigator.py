@@ -48,23 +48,41 @@ For each bug you identify, you must:
 1. State what is wrong (the symptom)
 2. State what it SHOULD look like or do, citing specific evidence
    (reference frame filename, design requirement, feature spec,
-   code example, or behavior contract)
-3. Note if the bug contradicts a behavior contract or emulates a
-   counter-example pattern
-4. Classify severity as critical/major/minor
-5. Suggest the likely area of the codebase to investigate
+   code example, behavior contract, documentation reference, or
+   counter-example)
+3. If the bug violates a behavior contract, set "contradicts" to
+   identify which contract (e.g. "behavior contract: `input` → `expected`")
+4. If the app's behavior resembles a counter-example pattern the user
+   flagged to avoid, set "avoids_pattern" to identify which
+   counter-example (e.g. "counter-example: filename.png — notes" or
+   "counter-example URL: https://... — notes")
+5. Classify severity as critical/major/minor
+6. Suggest the likely area of the codebase to investigate
+7. List all evidence sources used in "evidence_sources" — include
+   frame filenames, "frame_descriptions", "design_requirements",
+   "documentation", "behavior_contracts", "counter-examples",
+   "code_examples", or "counter-example_sources" as appropriate
 
 Respond ONLY with a JSON object:
 {
   "diagnosis": [
     {
       "symptom": "Labeled expressions like 'Price: $7 × 4' show no result",
-      "expected": "Should display '$28' on the right (ref: numi_app_demo_interval_0003.png, frame description: 'Price: $7 × 4 with the result $28')",
+      "expected": "Should display '$28' on the right (ref: frame_0003.png, docs: API guide § expressions)",
       "severity": "critical",
       "area": "Expression parser — label/colon prefix handling",
-      "evidence_sources": ["numi_app_demo_interval_0003.png", "frame_descriptions"],
+      "evidence_sources": ["frame_0003.png", "frame_descriptions", "behavior_contracts", "documentation"],
       "contradicts": "behavior contract: `Price: $7 × 4` → `$28`",
       "avoids_pattern": null
+    },
+    {
+      "symptom": "Layout uses a cluttered sidebar instead of clean inline results",
+      "expected": "Results should appear inline next to the expression (ref: frame_0001.png)",
+      "severity": "major",
+      "area": "UI layout — result display component",
+      "evidence_sources": ["frame_0001.png", "design_requirements", "counter-examples"],
+      "contradicts": null,
+      "avoids_pattern": "counter-example: bad_layout.png — cluttered sidebar"
     }
   ],
   "summary": "One-paragraph overall assessment of the app's current state relative to the target product."
