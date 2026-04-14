@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -23,9 +23,11 @@ from duplo.main import (
     _download_site_media,
     _init_project,
     _investigation_context,
+    _load_preferences,
     _partition_features,
     _plan_has_unchecked_tasks,
     _plan_is_complete,
+    _prefs_from_dict,
     _print_feature_status,
     _print_status,
     _print_summary,
@@ -5795,6 +5797,7 @@ class TestValidateForRunWiring:
             (),
             {
                 "raw": "x" * 100,
+                "architecture": "",
                 "behavior_contracts": [],
                 "scope_include": None,
                 "scope_exclude": None,
@@ -6992,3 +6995,170 @@ class TestInvestigationContext:
         assert len(call_kwargs["counter_example_sources"]) == 1
         assert "behavior_contracts" in call_kwargs
         assert len(call_kwargs["behavior_contracts"]) == 1
+
+
+class TestPrefsFromDict:
+    """Tests for _prefs_from_dict helper."""
+
+    def test_full_dict(self):
+        d = {
+            "platform": "web",
+            "language": "Python",
+            "constraints": ["pg"],
+            "preferences": ["pytest"],
+        }
+        p = _prefs_from_dict(d)
+        assert p.platform == "web"
+        assert p.language == "Python"
+        assert p.constraints == ["pg"]
+        assert p.preferences == ["pytest"]
+
+    def test_empty_dict(self):
+        p = _prefs_from_dict({})
+        assert p.platform == ""
+        assert p.language == ""
+        assert p.constraints == []
+        assert p.preferences == []
+
+
+class TestLoadPreferences:
+    """Tests for _load_preferences with architecture-hash invalidation."""
+
+    def test_returns_cached_when_no_spec(self):
+        data = {
+            "preferences": {
+                "platform": "web",
+                "language": "Go",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        result = _load_preferences(data, None)
+        assert result.platform == "web"
+        assert result.language == "Go"
+
+    def test_returns_cached_when_spec_has_no_architecture(self):
+        spec = MagicMock()
+        spec.architecture = ""
+        data = {
+            "preferences": {
+                "platform": "cli",
+                "language": "Rust",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        result = _load_preferences(data, spec)
+        assert result.platform == "cli"
+
+    def test_returns_cached_when_hash_matches(self):
+        from duplo.build_prefs import architecture_hash
+
+        arch = "Web app in Python"
+        h = architecture_hash(arch)
+        spec = MagicMock()
+        spec.architecture = arch
+        data = {
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": h,
+        }
+        with patch("duplo.main.parse_build_preferences") as mock_parse:
+            result = _load_preferences(data, spec)
+            mock_parse.assert_not_called()
+        assert result.platform == "web"
+
+    def test_reparses_when_hash_differs(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        spec = MagicMock()
+        spec.architecture = "CLI tool in Rust"
+        data = {
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": "stale_hash",
+        }
+        new_prefs = BuildPreferences(
+            platform="cli",
+            language="Rust",
+            constraints=[],
+            preferences=[],
+        )
+        with (
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=new_prefs,
+            ) as mock_parse,
+            patch("duplo.main.save_build_preferences") as mock_save,
+        ):
+            result = _load_preferences(data, spec)
+            mock_parse.assert_called_once_with("CLI tool in Rust")
+            mock_save.assert_called_once()
+        assert result.platform == "cli"
+        assert result.language == "Rust"
+
+    def test_reparses_when_no_stored_hash(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        spec = MagicMock()
+        spec.architecture = "Desktop app in Swift"
+        data = {
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        new_prefs = BuildPreferences(
+            platform="desktop",
+            language="Swift",
+            constraints=[],
+            preferences=[],
+        )
+        with (
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=new_prefs,
+            ) as mock_parse,
+            patch("duplo.main.save_build_preferences"),
+        ):
+            result = _load_preferences(data, spec)
+            mock_parse.assert_called_once()
+        assert result.platform == "desktop"
+
+    def test_updates_in_memory_data(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        spec = MagicMock()
+        spec.architecture = "API in Go"
+        data = {
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": "old",
+        }
+        new_prefs = BuildPreferences(
+            platform="api",
+            language="Go",
+            constraints=[],
+            preferences=[],
+        )
+        with (
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=new_prefs,
+            ),
+            patch("duplo.main.save_build_preferences"),
+        ):
+            _load_preferences(data, spec)
+        assert data["preferences"]["platform"] == "api"
+        assert data["architecture_hash"] != "old"

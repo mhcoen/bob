@@ -145,6 +145,7 @@ def save_selections(
     app_name: str = "",
     code_examples: list[CodeExample] | None = None,
     doc_structures: DocStructures | None = None,
+    arch_hash: str = "",
     target_dir: Path | str = ".",
 ) -> Path:
     """Write selected features and build preferences to *duplo.json*.
@@ -159,6 +160,8 @@ def save_selections(
         app_name: macOS process name used by appshot for screenshot capture.
         code_examples: Optional extracted code examples to persist.
         doc_structures: Optional extracted doc structures to persist.
+        arch_hash: SHA-256 of the ``## Architecture`` section content
+            for cache invalidation.  Empty string if not available.
         target_dir: Directory in which to write ``duplo.json``.
     """
     _ensure_duplo_dir(target_dir)
@@ -169,10 +172,33 @@ def save_selections(
         "features": [dataclasses.asdict(f) for f in features],
         "preferences": dataclasses.asdict(preferences),
     }
+    if arch_hash:
+        data["architecture_hash"] = arch_hash
     if code_examples is not None:
         data["code_examples"] = [dataclasses.asdict(ex) for ex in code_examples]
     if doc_structures is not None:
         data["doc_structures"] = _serialize_doc_structures(doc_structures)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def save_build_preferences(
+    preferences: BuildPreferences,
+    arch_hash: str,
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Update ``preferences`` and ``architecture_hash`` in *duplo.json*.
+
+    Read-modify-write: preserves all other keys in the file.
+    Returns the path to the updated file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data: dict = _safe_read_json(path)
+    data["preferences"] = dataclasses.asdict(preferences)
+    if arch_hash:
+        data["architecture_hash"] = arch_hash
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

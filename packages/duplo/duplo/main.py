@@ -231,6 +231,7 @@ from duplo.planner import (
     parse_completed_tasks,
     save_plan,
 )
+from duplo.build_prefs import architecture_hash, parse_build_preferences
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
@@ -273,6 +274,7 @@ from duplo.saver import (
     mark_implemented_features,
     move_references,
     resolve_completed_fixes,
+    save_build_preferences,
     save_design_requirements,
     save_doc_structures,
     save_examples,
@@ -303,6 +305,44 @@ _FEATURE_FIELDS = {fld.name for fld in dataclasses.fields(Feature)}
 def _feature_from_dict(d: dict) -> Feature:
     """Build a :class:`Feature` from a raw dict, ignoring unknown keys."""
     return Feature(**{k: v for k, v in d.items() if k in _FEATURE_FIELDS})
+
+
+def _prefs_from_dict(prefs_data: dict) -> BuildPreferences:
+    """Build :class:`BuildPreferences` from a raw duplo.json dict."""
+    return BuildPreferences(
+        platform=prefs_data.get("platform", ""),
+        language=prefs_data.get("language", ""),
+        constraints=prefs_data.get("constraints", []),
+        preferences=prefs_data.get("preferences", []),
+    )
+
+
+def _load_preferences(data: dict, spec) -> BuildPreferences:
+    """Load build preferences with architecture-hash invalidation.
+
+    If ``spec.architecture`` is present and its hash differs from the
+    stored ``architecture_hash`` in *data*, re-parses preferences via
+    LLM and persists the result.  Otherwise returns cached preferences.
+    """
+    prefs_data = data.get("preferences", {})
+    cached = _prefs_from_dict(prefs_data)
+
+    if not spec or not spec.architecture:
+        return cached
+
+    current_hash = architecture_hash(spec.architecture)
+    stored_hash = data.get("architecture_hash", "")
+
+    if current_hash == stored_hash:
+        return cached
+
+    # Hash changed — re-parse from the updated architecture prose.
+    prefs = parse_build_preferences(spec.architecture)
+    save_build_preferences(prefs, current_hash)
+    # Update in-memory data so later accesses in the same run see it.
+    data["preferences"] = dataclasses.asdict(prefs)
+    data["architecture_hash"] = current_hash
+    return prefs
 
 
 def _run_video_frame_pipeline(
@@ -979,7 +1019,13 @@ def _first_run(*, url: str | None = None) -> None:
     else:
         print("No features extracted.")
 
-    prefs = ask_preferences()
+    # Parse build preferences from ## Architecture (LLM) or ask interactively.
+    arch_hash = ""
+    if spec and spec.architecture:
+        prefs = parse_build_preferences(spec.architecture)
+        arch_hash = architecture_hash(spec.architecture)
+    else:
+        prefs = ask_preferences()
 
     project_name = Path.cwd().name
     default_app_name = project_name.replace("-", " ").replace("_", " ").title()
@@ -1006,6 +1052,7 @@ def _first_run(*, url: str | None = None) -> None:
         raw_pages=product_ref_raw_pages,
         design=design,
         spec_text=spec_prompt,
+        arch_hash=arch_hash,
     )
 
     # Move processed reference files into .duplo/references/.
@@ -1680,13 +1727,7 @@ def _subsequent_run() -> None:
             print("All features implemented. Nothing to do.")
             return
         source_url = data.get("source_url", "")
-        prefs_data = data.get("preferences", {})
-        preferences = BuildPreferences(
-            platform=prefs_data.get("platform", ""),
-            language=prefs_data.get("language", ""),
-            constraints=prefs_data.get("constraints", []),
-            preferences=prefs_data.get("preferences", []),
-        )
+        preferences = _load_preferences(data, spec)
         history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
@@ -1746,13 +1787,7 @@ def _subsequent_run() -> None:
     # Generate plan for current phase.
     source_url = data.get("source_url", "")
     features = [_feature_from_dict(f) for f in data.get("features", [])]
-    prefs_data = data.get("preferences", {})
-    preferences = BuildPreferences(
-        platform=prefs_data.get("platform", ""),
-        language=prefs_data.get("language", ""),
-        constraints=prefs_data.get("constraints", []),
-        preferences=prefs_data.get("preferences", []),
-    )
+    preferences = _load_preferences(data, spec)
 
     print(f"Generating {phase_label} PLAN.md \u2026")
     design_data = data.get("design_requirements", {})
@@ -2000,6 +2035,7 @@ def _init_project(
     raw_pages: dict[str, str] | None = None,
     design: DesignRequirements | None = None,
     spec_text: str = "",
+    arch_hash: str = "",
 ) -> list | None:
     """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
 
@@ -2010,6 +2046,7 @@ def _init_project(
         features,
         prefs,
         app_name=app_name,
+        arch_hash=arch_hash,
         code_examples=code_examples or None,
         doc_structures=doc_structures or None,
         target_dir=project_dir,

@@ -37,6 +37,7 @@ from duplo.saver import (
     add_issue,
     append_phase_to_history,
     resolve_issue,
+    save_build_preferences,
     save_issue,
     clear_issues,
     load_examples,
@@ -246,6 +247,79 @@ class TestSaveSelections:
         assert "doc_structures" in data
         assert len(data["code_examples"]) == 1
         assert len(data["doc_structures"]["unit_lists"]) == 1
+
+
+class TestSaveSelectionsArchHash:
+    """Tests for architecture_hash in save_selections."""
+
+    def test_arch_hash_stored(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            arch_hash="abc123",
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["architecture_hash"] == "abc123"
+
+    def test_arch_hash_omitted_when_empty(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert "architecture_hash" not in data
+
+
+class TestSaveBuildPreferences:
+    """Tests for save_build_preferences."""
+
+    def test_updates_preferences(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        new_prefs = BuildPreferences(
+            platform="cli",
+            language="Rust",
+            constraints=[],
+            preferences=[],
+        )
+        save_build_preferences(new_prefs, "newhash", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["preferences"]["platform"] == "cli"
+        assert data["preferences"]["language"] == "Rust"
+        assert data["architecture_hash"] == "newhash"
+
+    def test_preserves_other_keys(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        new_prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        save_build_preferences(new_prefs, "hash2", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert data["source_url"] == "https://example.com"
+        assert len(data["features"]) == 2
+
+    def test_empty_hash_omitted(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        new_prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        save_build_preferences(new_prefs, "", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert "architecture_hash" not in data
 
 
 class TestAppendPhaseToHistory:
