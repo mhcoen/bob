@@ -8,6 +8,7 @@ import pytest
 
 from duplo.fetcher import (
     PageRecord,
+    _same_origin,
     detect_docs_links,
     extract_links,
     extract_text,
@@ -242,6 +243,41 @@ class TestExtractLinks:
         urls = [url for url, _ in links]
         assert "https://example.com/docs" in urls
         assert "https://example.com/blog" in urls
+
+
+class TestSameOrigin:
+    """Tests for the _same_origin helper."""
+
+    def test_same_origin_identical(self):
+        assert _same_origin("https://example.com", "https://example.com") is True
+
+    def test_same_origin_different_path(self):
+        assert _same_origin("https://example.com/a", "https://example.com/b") is True
+
+    def test_different_scheme(self):
+        assert _same_origin("https://example.com", "http://example.com") is False
+
+    def test_different_host(self):
+        assert _same_origin("https://a.com", "https://b.com") is False
+
+    def test_subdomain_is_cross_origin(self):
+        assert _same_origin("https://example.com", "https://www.example.com") is False
+
+    def test_different_port(self):
+        assert _same_origin("https://example.com:8443", "https://example.com:9443") is False
+
+    def test_same_explicit_port(self):
+        assert _same_origin("https://example.com:8443", "https://example.com:8443") is True
+
+    def test_no_port_vs_explicit_port(self):
+        """No port (None) vs explicit port are different origins."""
+        assert _same_origin("https://example.com", "https://example.com:443") is False
+
+    def test_case_insensitive_scheme(self):
+        assert _same_origin("HTTPS://example.com", "https://example.com") is True
+
+    def test_case_insensitive_host(self):
+        assert _same_origin("https://Example.COM", "https://example.com") is True
 
 
 class TestFetchSite:
@@ -582,6 +618,63 @@ class TestFetchSiteScrapeDepth:
 
         assert "Internal docs" in text
         assert not any("other.com" in u for u in fetch_calls)
+
+    def test_deep_rejects_different_scheme(self):
+        """Deep mode treats http vs https as cross-origin."""
+        seed_html = (
+            '<html><body><p>Home</p><a href="http://example.com/docs">HTTP Docs</a></body></html>'
+        )
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site("https://example.com", scrape_depth="deep")
+
+        # Only the seed URL should be fetched; http:// link is cross-origin
+        assert len(fetch_calls) == 1
+
+    def test_deep_rejects_subdomain(self):
+        """Deep mode treats subdomains as cross-origin."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="https://docs.example.com/guide">Subdomain Docs</a>'
+            "</body></html>"
+        )
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site("https://example.com", scrape_depth="deep")
+
+        assert len(fetch_calls) == 1
+        assert not any("docs.example.com" in u for u in fetch_calls)
+
+    def test_deep_rejects_different_port(self):
+        """Deep mode treats different ports as cross-origin."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="https://example.com:9443/api">API on other port</a>'
+            "</body></html>"
+        )
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site("https://example.com", scrape_depth="deep")
+
+        assert len(fetch_calls) == 1
 
     def test_deep_is_default(self):
         """Default scrape_depth is 'deep' (follows same-origin links)."""
