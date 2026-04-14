@@ -225,7 +225,7 @@ from duplo.planner import (
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
-from duplo.scanner import FileRelevance, scan_directory, scan_files
+from duplo.scanner import scan_directory, scan_files
 from duplo.test_generator import (
     detect_target_language,
     generate_test_source,
@@ -740,13 +740,12 @@ def _first_run(*, url: str | None = None) -> None:
             pass
 
     # Extract text from PDFs.
-    relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
-    if relevant_pdfs:
+    if scan.pdfs:
         print("Extracting text from PDFs \u2026")
-        pdf_text = extract_pdf_text(relevant_pdfs)
+        pdf_text = extract_pdf_text(scan.pdfs)
         if pdf_text:
             text_content = text_content + pdf_text + "\n"
-            print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
+            print(f"  Extracted text from {len(scan.pdfs)} PDF(s).")
 
     # Fetch the first URL found (primary product URL).
     source_url = ""
@@ -785,27 +784,9 @@ def _first_run(*, url: str | None = None) -> None:
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
             scan.images.extend(site_images)
-            for img in site_images:
-                scan.relevance.append(
-                    FileRelevance(
-                        path=img,
-                        category="image",
-                        relevant=True,
-                        reason="downloaded from product site",
-                    )
-                )
             print(f"  Downloaded {len(site_images)} image(s) from product site.")
         if site_videos:
             scan.videos.extend(site_videos)
-            for v in site_videos:
-                scan.relevance.append(
-                    FileRelevance(
-                        path=v,
-                        category="video",
-                        relevant=True,
-                        reason="downloaded from product site",
-                    )
-                )
             print(f"  Downloaded {len(site_videos)} video(s) from product site.")
 
     if not saved_product:
@@ -817,20 +798,18 @@ def _first_run(*, url: str | None = None) -> None:
 
     # Extract frames from video files at scene change points.
     video_frames: list[Path] = []
-    relevant_videos = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
-    if relevant_videos:
-        print(f"\nExtracting frames from {len(relevant_videos)} video(s) \u2026")
-        video_frames = _run_video_frame_pipeline(relevant_videos)
+    if scan.videos:
+        print(f"\nExtracting frames from {len(scan.videos)} video(s) \u2026")
+        video_frames = _run_video_frame_pipeline(scan.videos)
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
 
     # Extract visual design from reference images (including video frames).
     design = DesignRequirements()
-    relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
-    relevant_images.extend(video_frames)
-    if relevant_images:
+    all_images = list(scan.images) + video_frames
+    if all_images:
         print("\nExtracting visual design from images \u2026")
-        design = extract_design(relevant_images)
+        design = extract_design(all_images)
         if design.colors or design.fonts or design.layout:
             print(f"Extracted design details from {len(design.source_images)} image(s).")
         else:
@@ -960,23 +939,17 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
     analyzed_anything = False
 
     # Collect user-provided images.
-    relevant_images = [r.path for r in scan.relevance if r.category == "image" and r.relevant]
-
     # Extract frames from new video files at scene change points.
     video_frames: list[Path] = []
     if scan.videos:
-        relevant_vids = [r.path for r in scan.relevance if r.category == "video" and r.relevant]
-        if relevant_vids:
-            print(f"\nExtracting frames from {len(relevant_vids)} new video(s) \u2026")
-            video_frames = _run_video_frame_pipeline(relevant_vids)
-            summary.videos_found = len(relevant_vids)
-            analyzed_anything = True
-            summary.video_frames_extracted = len(video_frames)
-        else:
-            summary.videos_found = len(scan.videos)
+        print(f"\nExtracting frames from {len(scan.videos)} new video(s) \u2026")
+        video_frames = _run_video_frame_pipeline(scan.videos)
+        summary.videos_found = len(scan.videos)
+        analyzed_anything = True
+        summary.video_frames_extracted = len(video_frames)
 
     # Combine user images and accepted video frames for design extraction.
-    all_images = relevant_images + video_frames
+    all_images = list(scan.images) + video_frames
     if all_images:
         print(f"\nAnalyzing {len(all_images)} image(s) with Vision \u2026")
         design = extract_design(all_images)
@@ -989,14 +962,13 @@ def _analyze_new_files(file_names: list[str]) -> UpdateSummary:
             print("  Could not extract design details from images.")
 
     # Extract text from new PDFs.
-    relevant_pdfs = [r.path for r in scan.relevance if r.category == "pdf" and r.relevant]
-    if relevant_pdfs:
-        print(f"\nExtracting text from {len(relevant_pdfs)} new PDF(s) \u2026")
-        pdf_text = extract_pdf_text(relevant_pdfs)
+    if scan.pdfs:
+        print(f"\nExtracting text from {len(scan.pdfs)} new PDF(s) \u2026")
+        pdf_text = extract_pdf_text(scan.pdfs)
         if pdf_text:
             summary.collected_text += pdf_text + "\n"
-            print(f"  Extracted text from {len(relevant_pdfs)} PDF(s).")
-            summary.pdfs_extracted = len(relevant_pdfs)
+            print(f"  Extracted text from {len(scan.pdfs)} PDF(s).")
+            summary.pdfs_extracted = len(scan.pdfs)
             analyzed_anything = True
 
     # Collect text from new text files.

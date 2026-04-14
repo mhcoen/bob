@@ -4821,7 +4821,6 @@ class TestValidateForRunWiring:
                     "pdfs": [],
                     "text_files": [],
                     "urls": [],
-                    "relevance": [],
                 },
             )()
             with pytest.raises(SystemExit):

@@ -117,81 +117,50 @@ class TestScanDirectory:
         assert len(result.urls) == 0
 
 
-class TestRelevance:
-    def test_small_image_flagged_irrelevant(self, tmp_path: Path):
-        (tmp_path / "tiny.png").write_bytes(b"P" * 100)
-        result = scan_directory(tmp_path)
-        assert len(result.relevance) == 1
-        assert not result.relevance[0].relevant
-        assert "small" in result.relevance[0].reason
+class TestNoRelevanceScoring:
+    """Verify that scanner no longer filters files by size or content."""
 
-    def test_large_image_is_relevant(self, tmp_path: Path):
-        (tmp_path / "screenshot.png").write_bytes(b"P" * 2000)
+    def test_tiny_image_still_included(self, tmp_path: Path):
+        """Images are included regardless of file size."""
+        (tmp_path / "tiny.png").write_bytes(b"P" * 10)
         result = scan_directory(tmp_path)
-        assert len(result.relevance) == 1
-        assert result.relevance[0].relevant
+        assert len(result.images) == 1
 
-    def test_empty_pdf_flagged_irrelevant(self, tmp_path: Path):
+    def test_empty_pdf_still_included(self, tmp_path: Path):
+        """PDFs are included regardless of file size."""
         (tmp_path / "empty.pdf").write_bytes(b"")
         result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "pdf"]
-        assert len(rel) == 1
-        assert not rel[0].relevant
+        assert len(result.pdfs) == 1
 
-    def test_nonempty_pdf_is_relevant(self, tmp_path: Path):
-        (tmp_path / "spec.pdf").write_bytes(b"%PDF" * 100)
-        result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "pdf"]
-        assert len(rel) == 1
-        assert rel[0].relevant
-
-    def test_empty_text_file_flagged_irrelevant(self, tmp_path: Path):
+    def test_empty_text_file_still_included(self, tmp_path: Path):
+        """Text files are included regardless of content length."""
         (tmp_path / "empty.txt").write_text("   \n  ")
         result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "text"]
-        assert len(rel) == 1
-        assert not rel[0].relevant
-        assert "empty" in rel[0].reason
+        assert len(result.text_files) == 1
 
-    def test_short_text_file_flagged_irrelevant(self, tmp_path: Path):
+    def test_short_text_file_still_included(self, tmp_path: Path):
+        """Short text files are included without relevance filtering."""
         (tmp_path / "short.txt").write_text("hi")
         result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "text"]
-        assert len(rel) == 1
-        assert not rel[0].relevant
-        assert "short" in rel[0].reason
+        assert len(result.text_files) == 1
 
-    def test_substantive_text_is_relevant(self, tmp_path: Path):
-        (tmp_path / "notes.txt").write_text(
-            "This is a product spec with enough detail to be useful."
-        )
+    def test_empty_video_still_included(self, tmp_path: Path):
+        """Videos are included regardless of file size."""
+        (tmp_path / "empty.mp4").write_bytes(b"")
         result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "text"]
-        assert len(rel) == 1
-        assert rel[0].relevant
+        assert len(result.videos) == 1
+
+    def test_no_relevance_field_on_scan_result(self, tmp_path: Path):
+        """ScanResult no longer has a relevance field."""
+        (tmp_path / "shot.png").write_bytes(b"PNG" * 500)
+        result = scan_directory(tmp_path)
+        assert not hasattr(result, "relevance")
 
     def test_yaml_files_skipped_as_source(self, tmp_path: Path):
-        """YAML files are in _SOURCE_EXTS — no URL extraction or relevance."""
+        """YAML files are in _SOURCE_EXTS — no URL extraction."""
         (tmp_path / "links.yaml").write_text("url: https://example.com/product")
         result = scan_directory(tmp_path)
         assert "https://example.com/product" not in result.urls
-        rel = [r for r in result.relevance if r.category == "url_source"]
-        assert len(rel) == 0
-
-    def test_empty_video_flagged_irrelevant(self, tmp_path: Path):
-        (tmp_path / "empty.mp4").write_bytes(b"")
-        result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "video"]
-        assert len(rel) == 1
-        assert not rel[0].relevant
-        assert "empty" in rel[0].reason
-
-    def test_nonempty_video_is_relevant(self, tmp_path: Path):
-        (tmp_path / "demo.mp4").write_bytes(b"\x00" * 5000)
-        result = scan_directory(tmp_path)
-        rel = [r for r in result.relevance if r.category == "video"]
-        assert len(rel) == 1
-        assert rel[0].relevant
 
     def test_dedup_urls_across_text_and_non_text(self, tmp_path: Path):
         (tmp_path / "notes.txt").write_text("Visit https://example.com for more info")
@@ -264,9 +233,9 @@ class TestScanFiles:
         assert result.text_files == []
         assert result.urls == []
 
-    def test_assesses_relevance(self, tmp_path: Path):
+    def test_no_relevance_field(self, tmp_path: Path):
         tiny = tmp_path / "tiny.png"
         tiny.write_bytes(b"P" * 100)
         result = scan_files([tiny])
-        assert len(result.relevance) == 1
-        assert not result.relevance[0].relevant
+        assert not hasattr(result, "relevance")
+        assert len(result.images) == 1
