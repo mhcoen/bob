@@ -546,14 +546,14 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Orchestration: source iteration with first-source-wins dedup
 
-- [ ] Implement multi-source iteration loop in `_subsequent_run`
+- [x] Implement multi-source iteration loop in `_subsequent_run`
   - [x] Per PIPELINE-design.md § `main.py orchestration` orchestration sketch. Iterate `format_scrapeable_sources(spec)` and call `fetch_site` for each.
   - [x] Maintain `seen_canonical_urls: set[str]` for first-source-wins dedup of `PageRecord` entries.
   - [x] Maintain `all_raw_pages: dict[str, str]` and `product_ref_raw_pages: dict[str, str]` using `setdefault` (NOT `update` — dict.update would silently let later sources overwrite earlier; setdefault preserves first-source-wins).
   - [x] Accumulate `combined_text`, `all_code_examples`, `merged_doc_structures` across sources.
   - [x] `discovered_urls` collected from `_collect_cross_origin_links(source_raw_pages, source.url)` ONLY when `source.scrape == "deep"`. Per design: shallow sources fetched only the entry URL; collecting cross-origin links and recording them as `discovered: true` would silently append URLs the user never asked duplo to explore. Pin with a test.
   - [x] After the loop, if `all_code_examples`, call `save_examples(all_code_examples)`. If `all_page_records`, call `save_reference_urls(all_page_records)` and `save_raw_content(all_raw_pages, all_page_records)`. If `merged_doc_structures`, call `save_doc_structures(merged_doc_structures)`.
-  - [ ] Tests: multi-source iteration calls `fetch_site` once per scrapeable source; first-source-wins dedup of page_records (URL appearing in source A and source B is recorded once with source A's record); first-source-wins for raw_pages (HTML from source A preserved over source B for the same canonical URL); discovered_urls collected only from `deep` sources, NOT from `shallow`; non-product-reference sources do not contribute to product_ref_raw_pages; doc_structures merged across sources.
+  - [x] Tests: multi-source iteration calls `fetch_site` once per scrapeable source; first-source-wins dedup of page_records (URL appearing in source A and source B is recorded once with source A's record); first-source-wins for raw_pages (HTML from source A preserved over source B for the same canonical URL); discovered_urls collected only from `deep` sources, NOT from `shallow`; non-product-reference sources do not contribute to product_ref_raw_pages; doc_structures merged across sources.
 
 - [ ] [BATCH] Wire SPEC.md write-back for discovered URLs in `_subsequent_run`
   - [ ] After the source iteration loop, if `discovered_urls` is non-empty: read SPEC.md from disk, call `spec_drafter.append_sources(existing, [SourceEntry(url=u, role="docs", scrape="deep", discovered=True) for u in discovered_urls])`, and write back ONLY if the result differs from the input. Per PIPELINE-design.md orchestration sketch.
