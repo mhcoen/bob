@@ -486,7 +486,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Refactor `gap_detector` callers to pre-filter through `scope_exclude`
   - [x] Per PIPELINE-design.md § `gap_detector.py`. No change to `detect_gaps` itself. The features list passed in is filtered through `scope_exclude` at the orchestrator level (handled by the previous `_matches_excluded` task) before `detect_gaps` is called.
   - [x] Verify no existing call site of `detect_gaps` bypasses the filter. If any do, route them through the same filter.
-  - [ ] `detect_design_gaps` operates on the AUTO-GENERATED block in SPEC.md's `## Design` section AS WELL AS on `duplo.json`'s `design_requirements` (redundant during transition; can simplify in Phase 7).
+  - [x] `detect_design_gaps` operates on the AUTO-GENERATED block in SPEC.md's `## Design` section AS WELL AS on `duplo.json`'s `design_requirements` (redundant during transition; can simplify in Phase 7).
   - [ ] Tests: feature list passed to `detect_gaps` excludes scope_exclude'd entries; `detect_design_gaps` reads from both AUTO-GENERATED block and `duplo.json` (verify both code paths exist).
 
 ## Investigator
