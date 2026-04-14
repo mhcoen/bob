@@ -537,12 +537,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] When the LLM returns no usable fields, return `BuildPreferences()` (all defaults). Surface as a WARNING via `validate_for_run`, not an error — plan generation handles all-defaults gracefully.
   - [x] Tests: parse with a typical architecture prose (Swift macOS app etc.); fields populated correctly; missing fields default; hash invalidation works (changing architecture re-triggers parse); commented-out content in `## Architecture` does NOT change hash (per PARSER-design.md `_strip_comments` runs before storage); cache hit avoids the LLM call; all-defaults BuildPreferences emits warning via `validate_for_run`.
 
-- [ ] [BATCH] Implement app_name derivation logic in `duplo/orchestrator.py`
-  - [ ] Per PIPELINE-design.md § app_name. New function `derive_app_name(spec, target_dir) -> str`.
-  - [ ] If `## Sources` includes a product-reference URL, derive a candidate app_name from the scraped product identity using existing `validator.validate_product_url` behavior (or whatever produces the product name today).
-  - [ ] If no URL, derive from project directory name as fallback (`numi-clone/` → `numi-clone`).
-  - [ ] Stored in `.duplo/product.json` under `app_name`. The user can edit this file directly if the auto-derived name is wrong.
-  - [ ] Tests: URL-based derivation produces expected name; no-URL fallback uses directory name; `product.json` written; user-edited `product.json` is NOT overwritten on subsequent runs (load and preserve existing `app_name` if present).
+- [x] [BATCH] Implement app_name derivation logic in `duplo/orchestrator.py`
+  - [x] Per PIPELINE-design.md § app_name. New function `derive_app_name(spec, target_dir) -> str`.
+  - [x] If `## Sources` includes a product-reference URL, derive a candidate app_name from the scraped product identity using existing `validator.validate_product_url` behavior (or whatever produces the product name today).
+  - [x] If no URL, derive from project directory name as fallback (`numi-clone/` → `numi-clone`).
+  - [x] Stored in `.duplo/product.json` under `app_name`. The user can edit this file directly if the auto-derived name is wrong.
+  - [x] Tests: URL-based derivation produces expected name; no-URL fallback uses directory name; `product.json` written; user-edited `product.json` is NOT overwritten on subsequent runs (load and preserve existing `app_name` if present).
 
 ## Orchestration: source iteration with first-source-wins dedup
 
