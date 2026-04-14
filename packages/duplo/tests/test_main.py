@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from duplo.design_extractor import DesignRequirements
@@ -3434,6 +3435,56 @@ class TestDownloadSiteMediaCachedVsNew:
         assert "static_third-party_io_banner.jpg" in img_names
         vid_names = {p.name for p in vids}
         assert "media_vimeo_com_demo.mp4" in vid_names
+
+    def test_http_failure_records_diagnostic_and_continues(self, tmp_path, monkeypatch):
+        """HTTP failure on one embed skips it but returns the rest."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".duplo").mkdir()
+
+        html = (
+            "<html><body>"
+            '<img src="https://cdn.example.com/good.png"/>'
+            '<img src="https://cdn.example.com/broken.png"/>'
+            '<video src="https://cdn.example.com/ok.mp4"></video>'
+            "</body></html>"
+        )
+        raw_pages = {"https://example.com": html}
+
+        call_count = 0
+
+        def fake_stream(method, url, **kw):
+            from unittest.mock import MagicMock
+
+            nonlocal call_count
+            call_count += 1
+            if "broken.png" in url:
+                raise httpx.HTTPStatusError(
+                    "404",
+                    request=httpx.Request("GET", url),
+                    response=httpx.Response(404),
+                )
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        with (
+            patch("duplo.fetcher.httpx.stream", side_effect=fake_stream),
+            patch("duplo.fetcher.record_failure") as mock_rf,
+        ):
+            imgs, vids = _download_site_media(raw_pages)
+
+        # The good image and video are returned; the broken one is skipped.
+        assert len(imgs) == 1
+        assert len(vids) == 1
+        assert imgs[0].name == "cdn_example_com_good.png"
+        assert vids[0].name == "cdn_example_com_ok.mp4"
+
+        # Diagnostic recorded for the failed download.
+        mock_rf.assert_called_once()
+        assert "broken.png" in mock_rf.call_args[0][2]
 
 
 class TestSubsequentRunFeatureCountingIntegration:
