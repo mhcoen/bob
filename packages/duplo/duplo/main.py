@@ -1074,6 +1074,54 @@ def _first_run(*, url: str | None = None) -> None:
             if code_examples:
                 print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
+    # Save scrape artifacts before feature extraction (step 5).
+    # For the spec path, _persist_scrape_result already handled this.
+    if not spec_sources:
+        if code_examples:
+            save_examples(code_examples)
+        if page_records:
+            save_reference_urls(page_records)
+            if product_ref_raw_pages:
+                save_raw_content(product_ref_raw_pages, page_records)
+        if doc_structures:
+            save_doc_structures(doc_structures)
+
+    if not saved_product:
+        product_name = _confirm_product(product_name, source_url)
+        if not product_name:
+            return
+        save_product(product_name, source_url)
+        print("Product identity saved to .duplo/product.json.")
+
+    # Extract text from docs-role references (PDFs, text, markdown).
+    if spec:
+        doc_refs = format_doc_references(spec)
+        if doc_refs:
+            print("Extracting text from docs references \u2026")
+            docs_text = docs_text_extractor(doc_refs)
+            if docs_text:
+                text_content = text_content + docs_text + "\n"
+                print(f"  Extracted text from {len(doc_refs)} docs reference(s).")
+
+    combined_text = scraped_text
+    if text_content:
+        combined_text = text_content + "\n" + combined_text
+
+    print("\nExtracting features \u2026")
+    features = extract_features(
+        combined_text,
+        spec_text=spec_prompt,
+        scope_include=spec.scope_include if spec else None,
+        scope_exclude=spec.scope_exclude if spec else None,
+    )
+    if features and spec and spec.scope_exclude:
+        features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]
+    if features:
+        print(f"Found {len(features)} feature(s).")
+        features = select_features(features)
+    else:
+        print("No features extracted.")
+
     # Download embedded images and videos from product-reference pages.
     # Returns all media (cached + new).  Kept separate from scan
     # so move_references does not try to relocate files that are
@@ -1084,13 +1132,6 @@ def _first_run(*, url: str | None = None) -> None:
             print(f"  {len(site_images)} image(s) from product site.")
         if site_videos:
             print(f"  {len(site_videos)} video(s) from product site.")
-
-    if not saved_product:
-        product_name = _confirm_product(product_name, source_url)
-        if not product_name:
-            return
-        save_product(product_name, source_url)
-        print("Product identity saved to .duplo/product.json.")
 
     # Extract frames from behavioral-target videos at scene change points.
     # When a spec is present, only videos declared as behavioral-target
@@ -1208,35 +1249,6 @@ def _first_run(*, url: str | None = None) -> None:
             f" from {len(design_input)} input image(s).",
         )
         print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
-
-    # Extract text from docs-role references (PDFs, text, markdown).
-    if spec:
-        doc_refs = format_doc_references(spec)
-        if doc_refs:
-            print("Extracting text from docs references \u2026")
-            docs_text = docs_text_extractor(doc_refs)
-            if docs_text:
-                text_content = text_content + docs_text + "\n"
-                print(f"  Extracted text from {len(doc_refs)} docs reference(s).")
-
-    combined_text = scraped_text
-    if text_content:
-        combined_text = text_content + "\n" + combined_text
-
-    print("\nExtracting features \u2026")
-    features = extract_features(
-        combined_text,
-        spec_text=spec_prompt,
-        scope_include=spec.scope_include if spec else None,
-        scope_exclude=spec.scope_exclude if spec else None,
-    )
-    if features and spec and spec.scope_exclude:
-        features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]
-    if features:
-        print(f"Found {len(features)} feature(s).")
-        features = select_features(features)
-    else:
-        print("No features extracted.")
 
     # Parse build preferences from ## Architecture (LLM) or ask interactively.
     arch_hash = ""
@@ -1870,6 +1882,7 @@ def _subsequent_run() -> None:
     scraped_text = ""
     site_images: list[Path] = []
     site_videos: list[Path] = []
+    product_ref_raw_pages: dict[str, str] = {}
     spec_sources = scrapeable_sources(spec) if spec else []
     if spec_sources:
         scrape_result = _scrape_declared_sources(spec)
@@ -1877,13 +1890,7 @@ def _subsequent_run() -> None:
         _persist_scrape_result(scrape_result)
         summary.pages_rescraped = len(scrape_result.all_page_records)
         summary.examples_rescraped = len(scrape_result.all_code_examples)
-        # Download embedded media from product-reference pages.
-        if scrape_result.product_ref_raw_pages:
-            site_images, site_videos = _download_site_media(scrape_result.product_ref_raw_pages)
-            if site_images:
-                print(f"  {len(site_images)} image(s) from product site.")
-            if site_videos:
-                print(f"  {len(site_videos)} video(s) from product site.")
+        product_ref_raw_pages = scrape_result.product_ref_raw_pages
     else:
         pages, examples, scraped_text = _rescrape_product_url(spec=spec)
         summary.pages_rescraped = pages
@@ -1944,6 +1951,15 @@ def _subsequent_run() -> None:
             print("  No features extracted.")
 
     save_hashes(compute_hashes("."))
+
+    # Download embedded media from product-reference pages (step 9).
+    # Returns all media (cached + new).
+    if product_ref_raw_pages:
+        site_images, site_videos = _download_site_media(product_ref_raw_pages)
+        if site_images:
+            print(f"  {len(site_images)} image(s) from product site.")
+        if site_videos:
+            print(f"  {len(site_videos)} video(s) from product site.")
 
     # Behavioral references -> frame extraction -> design input.
     # When spec declares scrapeable sources, process behavioral
