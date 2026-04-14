@@ -7853,3 +7853,236 @@ class TestDesignInputPerSourceLookup:
         vt_frame_names = [f.name for f in vt_frames_arg]
         assert "demo_scene_0001.png" in vt_frame_names
         assert "tutorial_scene_0001.png" not in vt_frame_names
+
+    def test_site_images_passed_as_source_4(self, tmp_path, monkeypatch):
+        """Site images from _download_site_media passed as source 4."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        site_img = tmp_path / ".duplo" / "site_media" / "hero.png"
+        site_img.parent.mkdir(parents=True, exist_ok=True)
+        site_img.write_bytes(b"SITEIMG")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/placeholder.txt"),
+                    roles=["docs"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([site_img], []),
+            ),
+            patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            mock_design.return_value = DesignRequirements()
+            main()
+
+        mock_cdi.assert_called_once()
+        si_arg = mock_cdi.call_args[0][2]
+        assert site_img in si_arg
+
+    def test_all_four_sources_combined(self, tmp_path, monkeypatch):
+        """All four design input sources flow through collect_design_input."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # Source 1: visual-target reference image in ref/
+        vt_img = ref_dir / "screenshot.png"
+        vt_img.write_bytes(b"VT_IMG")
+
+        # Source 2: video with visual-target role
+        vt_vid = ref_dir / "demo.mp4"
+        vt_vid.write_bytes(b"MP4" * 100)
+
+        # Source 3: scraped site video
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        # Source 4: site image
+        site_img = tmp_path / ".duplo" / "site_media" / "hero.png"
+        site_img.write_bytes(b"SITEIMG")
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        vt_frame = frames_dir / "demo_scene_0001.png"
+        vt_frame.write_bytes(b"VTFRAME")
+        site_frame = frames_dir / "promo_scene_0001.png"
+        site_frame.write_bytes(b"SITEFRAME")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screenshot.png"),
+                    roles=["visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([site_img], [site_vid]),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=Path("ref/demo.mp4"),
+                        frames=[vt_frame],
+                    ),
+                    ExtractionResult(
+                        source=site_vid,
+                        frames=[site_frame],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[vt_frame, site_frame],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch(
+                "duplo.main.extract_design",
+                side_effect=_capture_design,
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vt_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_cdi.assert_called_once()
+        args = mock_cdi.call_args[0]
+        # arg 0: spec, arg 1: vt_frames, arg 2: site_images, arg 3: svf
+        vt_frames_arg = args[1]
+        site_images_arg = args[2]
+        site_video_frames_arg = args[3]
+
+        # Source 1 is handled inside collect_design_input (visual refs)
+        # Source 2: visual-target video frame
+        assert vt_frame in vt_frames_arg
+        # Source 3: site video frames
+        assert site_frame in site_video_frames_arg
+        # Source 4: site images
+        assert site_img in site_images_arg
+
+        # All four sources appear in the final design input
+        captured_names = [p.name for p in design_input_captured]
+        assert "screenshot.png" in captured_names  # source 1
+        assert "demo_scene_0001.png" in captured_names  # source 2
+        assert "promo_scene_0001.png" in captured_names  # source 3
+        assert "hero.png" in captured_names  # source 4
