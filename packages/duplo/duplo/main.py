@@ -209,6 +209,7 @@ from duplo.diagnostics import print_summary as diagnostics_print_summary
 from duplo.design_extractor import (
     DesignRequirements,
     extract_design,
+    format_design_block,
     format_design_section,
 )
 from duplo.orchestrator import (
@@ -274,7 +275,7 @@ from duplo.spec_reader import (
     scrapeable_sources,
     validate_for_run,
 )
-from duplo.spec_writer import append_sources
+from duplo.spec_writer import append_sources, update_design_autogen
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -1180,13 +1181,27 @@ def _first_run(*, url: str | None = None) -> None:
             list(scan.images) + deduped_video_frames + site_images + deduped_scraped_frames
         )
     design = DesignRequirements()
-    if design_input:
+    _design_block = getattr(spec, "design", None) if spec else None
+    autogen_present = bool(_design_block and _design_block.auto_generated.strip())
+    if design_input and not autogen_present:
         print("\nExtracting visual design from images \u2026")
         design = extract_design(design_input)
         if design.colors or design.fonts or design.layout:
             print(f"Extracted design details from {len(design.source_images)} image(s).")
+            # Write autogen block to SPEC.md if present.
+            spec_path = Path.cwd() / "SPEC.md"
+            if spec_path.exists():
+                existing = spec_path.read_text(encoding="utf-8")
+                body = format_design_block(design)
+                if body:
+                    modified = update_design_autogen(existing, body)
+                    if modified != existing:
+                        spec_path.write_text(modified, encoding="utf-8")
+            save_design_requirements(dataclasses.asdict(design))
         else:
             print("Could not extract design details from images.")
+    elif design_input:
+        print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
     # Extract text from docs-role references (PDFs, text, markdown).
     if spec:
@@ -1373,16 +1388,28 @@ def _analyze_new_files(
         design_input = collect_design_input(spec, vt_frames)
     else:
         design_input = list(scan.images) + video_frames
-    if design_input:
+    _design_block_anf = getattr(spec, "design", None) if spec else None
+    autogen_present = bool(_design_block_anf and _design_block_anf.auto_generated.strip())
+    if design_input and not autogen_present:
         print(f"\nAnalyzing {len(design_input)} image(s) with Vision \u2026")
         design = extract_design(design_input)
         if design.colors or design.fonts or design.layout:
+            spec_path = Path.cwd() / "SPEC.md"
+            if spec_path.exists():
+                existing = spec_path.read_text(encoding="utf-8")
+                body = format_design_block(design)
+                if body:
+                    modified = update_design_autogen(existing, body)
+                    if modified != existing:
+                        spec_path.write_text(modified, encoding="utf-8")
             save_design_requirements(dataclasses.asdict(design))
             print(f"  Updated design requirements from {len(design.source_images)} image(s).")
             summary.images_analyzed = len(design.source_images)
             analyzed_anything = True
         else:
             print("  Could not extract design details from images.")
+    elif design_input:
+        print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
     # Extract text from new PDFs.
     if scan.pdfs:
@@ -1589,11 +1616,23 @@ def _rescrape_product_url(
             )
         else:
             design_input = site_images + site_video_frames
-        if design_input:
+        _design_block_rsp = getattr(spec, "design", None) if spec else None
+        autogen_present = bool(_design_block_rsp and _design_block_rsp.auto_generated.strip())
+        if design_input and not autogen_present:
             design = extract_design(design_input)
             if design.colors or design.fonts or design.layout:
+                spec_path = Path.cwd() / "SPEC.md"
+                if spec_path.exists():
+                    existing = spec_path.read_text(encoding="utf-8")
+                    body = format_design_block(design)
+                    if body:
+                        modified = update_design_autogen(existing, body)
+                        if modified != existing:
+                            spec_path.write_text(modified, encoding="utf-8")
                 save_design_requirements(dataclasses.asdict(design))
                 print(f"  Updated design from {len(design.source_images)} image(s).")
+        elif design_input:
+            print("  Design autogen block already exists; skipping Vision.")
 
     # Re-read duplo.json to pick up writes from save_reference_urls,
     # save_doc_structures, etc. that happened since our initial read.

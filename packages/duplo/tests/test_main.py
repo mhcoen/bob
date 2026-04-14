@@ -8808,3 +8808,356 @@ class TestDesignInputPerSourceLookup:
         assert "confirmed.png" in captured_names
         # Proposed visual-target excluded
         assert "proposed.png" not in captured_names
+
+
+class TestAutogenBlockSkipsVision:
+    """Check autogen block FIRST via the in-memory dataclass."""
+
+    def test_first_run_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
+        """_first_run skips extract_design when spec.design.auto_generated
+        has content."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  primary: #fff"),
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        # Vision should NOT be called since autogen block already exists
+        mock_design.assert_not_called()
+
+    def test_first_run_writes_autogen_block(self, tmp_path, monkeypatch):
+        """_first_run writes autogen block to SPEC.md when absent."""
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(
+            "## Purpose\nTest\n\n## Design\nUser prose here.\n",
+            encoding="utf-8",
+        )
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(
+                user_prose="User prose here.",
+                auto_generated="",
+            ),
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/screen.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+        design_result = DesignRequirements(
+            colors={"primary": "#ff0000"},
+            fonts=[],
+            spacing={},
+            layout="",
+            components=[],
+            source_images=["screen.png"],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=design_result,
+            ) as mock_design,
+            patch("duplo.main.save_design_requirements"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_design.assert_called_once()
+        # SPEC.md should now contain AUTO-GENERATED markers
+        updated = spec_path.read_text(encoding="utf-8")
+        assert "AUTO-GENERATED" in updated
+
+    def test_analyze_new_files_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
+        """_analyze_new_files skips extract_design when autogen exists."""
+        from duplo.spec_reader import DesignBlock, ProductSpec
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "new_shot.png"
+        img.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  bg: #000"),
+        )
+
+        with (
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.save_design_requirements"),
+        ):
+            _analyze_new_files(
+                ["ref/new_shot.png"],
+                spec=spec,
+            )
+
+        mock_design.assert_not_called()
+
+    def test_rescrape_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
+        """_rescrape_product_url skips extract_design when autogen exists."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        data = {
+            "source_url": "https://a.com",
+            "features": [],
+            "last_scrape_timestamp": 0,
+        }
+        (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+        site_media_dir = duplo_dir / "site_media"
+        site_media_dir.mkdir()
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="fonts:\n  body: Inter"),
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+        )
+
+        raw_html = "<html><body><img src='https://a.com/img.png'></body></html>"
+        with (
+            patch(
+                "duplo.main.fetch_site",
+                return_value=(
+                    "text",
+                    [],
+                    None,
+                    [PageRecord("https://a.com", "2024-01-01", "abc")],
+                    {"https://a.com": raw_html},
+                ),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([tmp_path / "img.png"], []),
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[
+                    tmp_path / "img.png",
+                ],
+            ),
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.save_design_requirements"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+        ):
+            _rescrape_product_url(spec=spec)
+
+        mock_design.assert_not_called()
+
+    def test_no_spec_does_not_skip_vision(self, tmp_path, monkeypatch):
+        """When spec is None, autogen check is False and Vision proceeds."""
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "screen.png"
+        img.write_bytes(b"PNG")
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {}),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=DesignRequirements(),
+            ) as mock_design,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_scan.return_value = ScanResult(
+                images=[img],
+                videos=[],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        # Without spec, Vision should proceed
+        mock_design.assert_called_once()
+
+    def test_empty_autogen_does_not_skip_vision(self, tmp_path, monkeypatch):
+        """An empty autogen block (whitespace only) does not skip Vision."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        img = ref_dir / "new_shot.png"
+        img.write_bytes(b"PNG")
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text("## Design\n", encoding="utf-8")
+
+        spec = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="   \n  "),
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/new_shot.png"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch(
+                "duplo.main.extract_design",
+                return_value=DesignRequirements(),
+            ) as mock_design,
+            patch("duplo.main.save_design_requirements"),
+        ):
+            _analyze_new_files(["ref/new_shot.png"], spec=spec)
+
+        # Empty/whitespace autogen should NOT block Vision
+        mock_design.assert_called_once()
