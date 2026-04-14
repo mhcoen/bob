@@ -490,8 +490,10 @@ class TestSubsequentRunFileChanges:
         # Save initial hashes with no files.
         duplo_dir = tmp_path / ".duplo"
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
-        # Add a new file that will be detected.
-        (tmp_path / "new_ref.png").write_bytes(b"PNG image data")
+        # Add a new file under ref/ that will be detected.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "new_ref.png").write_bytes(b"PNG image data")
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
@@ -500,7 +502,7 @@ class TestSubsequentRunFileChanges:
 
         out = capsys.readouterr().out
         assert "File changes detected" in out
-        assert "+ new_ref.png" in out
+        assert "+ ref/new_ref.png" in out
 
     def test_detects_changed_file(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
@@ -546,6 +548,28 @@ class TestSubsequentRunFileChanges:
         assert "File changes detected" in out
         assert "- old.txt" in out
 
+    def test_top_level_file_not_analyzed(self, capsys, tmp_path, monkeypatch):
+        """Top-level files outside ref/ are detected but not analyzed."""
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        # Add a new image at project root (NOT in ref/).
+        (tmp_path / "stray.png").write_bytes(b"PNG image data")
+        monkeypatch.chdir(tmp_path)
+
+        with patch("duplo.main._analyze_new_files") as mock_analyze:
+            mock_analyze.return_value = UpdateSummary()
+            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                    main()
+
+        # File change detected and printed.
+        out = capsys.readouterr().out
+        assert "File changes detected" in out
+        assert "+ stray.png" in out
+        # But _analyze_new_files NOT called (file is outside ref/).
+        mock_analyze.assert_not_called()
+
     def test_no_changes_no_message(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
         monkeypatch.chdir(tmp_path)
@@ -566,7 +590,9 @@ class TestSubsequentRunFileChanges:
         _write_duplo_json(tmp_path, self._BASE_DATA)
         duplo_dir = tmp_path / ".duplo"
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
-        (tmp_path / "new.txt").write_text("hello")
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "new.txt").write_text("hello")
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
@@ -574,11 +600,11 @@ class TestSubsequentRunFileChanges:
                 with patch("duplo.main.extract_features", return_value=[]):
                     main()
 
-        # Verify hashes reflect post-move state (new.txt moved to .duplo/references/).
+        # Verify hashes reflect post-move state (ref/new.txt moved to .duplo/references/).
         from duplo.hasher import load_hashes
 
         saved = load_hashes(tmp_path)
-        assert "new.txt" not in saved
+        assert "ref/new.txt" not in saved
 
 
 class TestInitProject:
@@ -873,11 +899,13 @@ class TestAnalyzeNewFiles:
         # Save empty hash manifest.
         duplo_dir = tmp_path / ".duplo"
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
-        # Add a new image.
-        (tmp_path / "new.png").write_bytes(b"PNG" * 500)
+        # Add a new image under ref/.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "new.png").write_bytes(b"PNG" * 500)
         monkeypatch.chdir(tmp_path)
 
-        design = DesignRequirements(colors={"primary": "#abc"}, source_images=["new.png"])
+        design = DesignRequirements(colors={"primary": "#abc"}, source_images=["ref/new.png"])
         with patch("duplo.main.extract_design", return_value=design):
             with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
                 with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):

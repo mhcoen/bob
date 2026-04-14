@@ -1331,12 +1331,8 @@ def _subsequent_run() -> None:
         for name in diff.removed:
             print(f"  - {name}")
 
-        # Analyze new/changed top-level files like first run.
-        # Only top-level files are reference materials (matching scan_directory).
-        # Exclude known project artifacts.
-        changed_files = [
-            f for f in diff.added + diff.changed if "/" not in f and f not in _PROJECT_FILES
-        ]
+        # Analyze new/changed files under ref/ (matching scan_directory).
+        changed_files = [f for f in diff.added + diff.changed if f.startswith("ref/")]
         if changed_files:
             analysis = _analyze_new_files(changed_files)
             summary.images_analyzed = analysis.images_analyzed
