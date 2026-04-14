@@ -27,19 +27,24 @@ describing a project's architecture, extract structured build
 preferences.
 
 Return ONLY a JSON object with these fields:
-  "platform"          – target platform (e.g. "web", "cli",
-                        "desktop", "mobile-ios", "api"). Use a
-                        short lowercase label. If unclear, use "".
-  "language"          – primary language or stack (e.g. "Python",
-                        "TypeScript/React", "Swift/SwiftUI"). If
-                        unclear, use "".
-  "constraints"       – array of strings: hard constraints
-                        mentioned (e.g. "must use PostgreSQL",
-                        "macOS only"). Empty array if none.
-  "preferences"       – array of strings: softer preferences or
-                        style guidance (e.g. "prefer functional
-                        style", "minimal dependencies"). Empty
-                        array if none.
+  "platform"            – target platform (e.g. "web", "cli",
+                          "desktop", "mobile-ios", "api"). Use a
+                          short lowercase label. If unclear, use "".
+  "language"            – primary programming language (e.g.
+                          "Python", "TypeScript", "Swift"). If
+                          unclear, use "".
+  "framework"           – framework or toolkit if mentioned (e.g.
+                          "React", "FastAPI", "SwiftUI"). If
+                          unclear, use "".
+  "dependencies"        – array of strings: explicit library or
+                          service dependencies mentioned (e.g.
+                          "PostgreSQL", "Redis", "Tailwind CSS").
+                          Empty array if none.
+  "other_constraints"   – array of strings: any other hard
+                          constraints or preferences (e.g.
+                          "macOS only", "prefer functional style",
+                          "minimal dependencies"). Empty array if
+                          none.
 
 Rules:
 1. Only extract what is EXPLICITLY stated or clearly implied by
@@ -110,11 +115,26 @@ def _parse_response(raw: str) -> BuildPreferences:
     if not isinstance(data, dict):
         return BuildPreferences(platform="", language="", constraints=[], preferences=[])
 
+    platform = str(data.get("platform", "") or "")
+    language = str(data.get("language", "") or "")
+    framework = str(data.get("framework", "") or "")
+
+    # Combine language and framework into one string when both present.
+    if language and framework:
+        combined_language = f"{language}/{framework}"
+    elif framework:
+        combined_language = framework
+    else:
+        combined_language = language
+
+    dependencies = _str_list(data.get("dependencies", []))
+    other_constraints = _str_list(data.get("other_constraints", []))
+
     return BuildPreferences(
-        platform=str(data.get("platform", "") or ""),
-        language=str(data.get("language", "") or ""),
-        constraints=_str_list(data.get("constraints", [])),
-        preferences=_str_list(data.get("preferences", [])),
+        platform=platform,
+        language=combined_language,
+        constraints=dependencies,
+        preferences=other_constraints,
     )
 
 

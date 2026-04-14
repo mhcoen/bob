@@ -31,15 +31,16 @@ class TestParseBuildPreferences:
         mock_query.return_value = json.dumps(  # type: ignore[union-attr]
             {
                 "platform": "web",
-                "language": "TypeScript/React",
-                "constraints": ["must use PostgreSQL"],
-                "preferences": ["prefer functional style"],
+                "language": "TypeScript",
+                "framework": "React",
+                "dependencies": ["PostgreSQL"],
+                "other_constraints": ["prefer functional style"],
             }
         )
         result = parse_build_preferences("Web app using React and PostgreSQL")
         assert result.platform == "web"
         assert result.language == "TypeScript/React"
-        assert result.constraints == ["must use PostgreSQL"]
+        assert result.constraints == ["PostgreSQL"]
         assert result.preferences == ["prefer functional style"]
 
     @patch("duplo.build_prefs.query")
@@ -76,8 +77,9 @@ class TestParseResponse:
             {
                 "platform": "cli",
                 "language": "Rust",
-                "constraints": ["no network"],
-                "preferences": [],
+                "framework": "",
+                "dependencies": ["no network"],
+                "other_constraints": [],
             }
         )
         result = _parse_response(raw)
@@ -119,11 +121,43 @@ class TestParseResponse:
         assert result.preferences == []
 
     def test_null_fields_coerced(self) -> None:
-        raw = json.dumps({"platform": None, "language": None, "constraints": None})
+        raw = json.dumps(
+            {
+                "platform": None,
+                "language": None,
+                "framework": None,
+                "dependencies": None,
+            }
+        )
         result = _parse_response(raw)
         assert result.platform == ""
         assert result.language == ""
         assert result.constraints == []
+
+    def test_language_and_framework_combined(self) -> None:
+        raw = json.dumps({"language": "TypeScript", "framework": "React"})
+        result = _parse_response(raw)
+        assert result.language == "TypeScript/React"
+
+    def test_framework_only_becomes_language(self) -> None:
+        raw = json.dumps({"framework": "SwiftUI"})
+        result = _parse_response(raw)
+        assert result.language == "SwiftUI"
+
+    def test_language_only_no_framework(self) -> None:
+        raw = json.dumps({"language": "Go", "framework": ""})
+        result = _parse_response(raw)
+        assert result.language == "Go"
+
+    def test_dependencies_map_to_constraints(self) -> None:
+        raw = json.dumps({"dependencies": ["PostgreSQL", "Redis"]})
+        result = _parse_response(raw)
+        assert result.constraints == ["PostgreSQL", "Redis"]
+
+    def test_other_constraints_map_to_preferences(self) -> None:
+        raw = json.dumps({"other_constraints": ["macOS only", "minimal deps"]})
+        result = _parse_response(raw)
+        assert result.preferences == ["macOS only", "minimal deps"]
 
 
 class TestArchitectureHash:
