@@ -250,14 +250,14 @@ def fetch_site(
             )
             return empty
 
-        canon = canonicalize_url(url)
+        canon = canonicalize_url(str(resp.url))
         record = PageRecord(
-            url=url,
+            url=canon,
             fetched_at=datetime.now(tz=timezone.utc).isoformat(),
             content_hash=hashlib.sha256(html.encode()).hexdigest(),
         )
         text = extract_text(html)
-        text_out = f"=== {url} ===\n{text}" if text else ""
+        text_out = f"=== {canon} ===\n{text}" if text else ""
         examples = extract_code_examples(html, url)
         structures = extract_doc_structures(html, url)
         return text_out, examples, structures, [record], {canon: html}
@@ -308,12 +308,12 @@ def fetch_site(
             visited.add(final_norm)
 
         record = PageRecord(
-            url=current_url,
+            url=final_norm,
             fetched_at=datetime.now(tz=timezone.utc).isoformat(),
             content_hash=hashlib.sha256(html.encode()).hexdigest(),
         )
         all_records.append(record)
-        raw_pages[norm] = html
+        raw_pages[final_norm] = html
 
         text = extract_text(html)
         if text:
