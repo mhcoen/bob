@@ -1311,11 +1311,17 @@ def _rescrape_product_url(
     return pages_updated, examples_updated, scraped_text
 
 
-def _detect_and_append_gaps() -> tuple[int, int, int, int]:
+def _detect_and_append_gaps(
+    scope_exclude: list[str] | None = None,
+) -> tuple[int, int, int, int]:
     """Compare features and examples from duplo.json against PLAN.md.
 
     If gaps are found, appends new checklist tasks to PLAN.md for
     features or examples not yet covered by the current plan.
+
+    Args:
+        scope_exclude: Terms from SPEC.md ``scope_exclude``. Features
+            matching any term are filtered out before gap detection.
 
     Returns ``(missing_features, missing_examples, design_refinements,
     tasks_appended)`` counts.
@@ -1332,6 +1338,8 @@ def _detect_and_append_gaps() -> tuple[int, int, int, int]:
         return 0, 0, 0, 0
 
     features = [_feature_from_dict(f) for f in data.get("features", [])]
+    if scope_exclude:
+        features = [f for f in features if not _matches_excluded(f, scope_exclude)]
     if not features:
         return 0, 0, 0, 0
 
@@ -1561,7 +1569,9 @@ def _subsequent_run() -> None:
     plan_complete = plan_path_check.exists() and _plan_is_complete()
     plan_has_unchecked = plan_path_check.exists() and _plan_has_unchecked_tasks()
     if not plan_complete and not plan_has_unchecked:
-        mf, me, dr, ta = _detect_and_append_gaps()
+        mf, me, dr, ta = _detect_and_append_gaps(
+            scope_exclude=spec.scope_exclude if spec else None,
+        )
         summary.missing_features = mf
         summary.missing_examples = me
         summary.design_refinements = dr

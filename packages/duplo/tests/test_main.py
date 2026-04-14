@@ -1501,6 +1501,83 @@ class TestDetectAndAppendGaps:
         # The original content (stripped) must be a prefix of the updated file.
         assert updated.startswith(plan.rstrip("\n"))
 
+    def test_scope_exclude_filters_features_before_detect(self, tmp_path, monkeypatch, capsys):
+        """Features matching scope_exclude are removed before detect_gaps."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Search", "description": "Full-text search.", "category": "core"},
+                    {
+                        "name": "Plugin API",
+                        "description": "Extension system.",
+                        "category": "advanced",
+                    },
+                    {"name": "Export", "description": "CSV export.", "category": "core"},
+                ],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Build UI\n", encoding="utf-8")
+
+        from duplo.gap_detector import GapResult
+
+        gap_result = GapResult(missing_features=[], missing_examples=[])
+        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+            _detect_and_append_gaps(scope_exclude=["Plugin API"])
+
+        # detect_gaps should have been called with only 2 features
+        # (Plugin API excluded).
+        call_features = mock_detect.call_args[0][1]
+        names = [f.name for f in call_features]
+        assert "Search" in names
+        assert "Export" in names
+        assert "Plugin API" not in names
+
+    def test_scope_exclude_none_passes_all_features(self, tmp_path, monkeypatch):
+        """When scope_exclude is None, all features reach detect_gaps."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Search", "description": "search", "category": "core"},
+                    {"name": "Export", "description": "export", "category": "core"},
+                ],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n", encoding="utf-8")
+
+        from duplo.gap_detector import GapResult
+
+        gap_result = GapResult(missing_features=[], missing_examples=[])
+        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+            _detect_and_append_gaps(scope_exclude=None)
+
+        call_features = mock_detect.call_args[0][1]
+        assert len(call_features) == 2
+
+    def test_scope_exclude_all_features_skips_detect(self, tmp_path, monkeypatch):
+        """When scope_exclude removes all features, detect_gaps is not called."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {"name": "Plugin API", "description": "Extensions.", "category": "core"},
+                ],
+            },
+        )
+        (tmp_path / "PLAN.md").write_text("# Phase 0\n", encoding="utf-8")
+
+        with patch("duplo.main.detect_gaps") as mock_detect:
+            _detect_and_append_gaps(scope_exclude=["Plugin API"])
+
+        mock_detect.assert_not_called()
+
     def test_subsequent_run_calls_detect_gaps(self, tmp_path, monkeypatch):
         """Integration: _subsequent_run calls _detect_and_append_gaps."""
         _write_duplo_json(
