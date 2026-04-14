@@ -521,12 +521,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Save_raw_content update
 
-- [ ] [BATCH] Update `duplo/saver.py:save_raw_content` per the new signature
-  - [ ] Per PIPELINE-design.md § `save_raw_content` signature. New signature: `save_raw_content(raw_pages: dict[str, str], page_records: list[PageRecord], *, target_dir: Path = Path.cwd()) -> None`.
-  - [ ] For each `PageRecord`, look up `raw_pages[record.url]` and write the HTML to `.duplo/raw_pages/<sha256(record.url)>.html`.
-  - [ ] Cache filename is the SHA-256 of the canonical URL. NOT the content hash. `PageRecord.content_hash` continues to be stored inside the record for change detection but is NOT used for the cache filename.
-  - [ ] **Behavior on missing key**: if `record.url` has no entry in `raw_pages`, this indicates a construction-invariant violation. Log via `record_failure("save_raw_content", "io", f"no raw_pages entry for {record.url}; record skipped")` and SKIP that record. Do NOT raise. Per design § "Behavior on missing keys: log and skip, do not raise."
-  - [ ] Tests: each record's HTML written to URL-hashed filename; URL-hash filename matches `sha256(record.url).hexdigest()`; existing file at the same hash overwritten (one file per URL); missing key for a record skipped with diagnostic; remaining records still persisted when one is skipped; empty `raw_pages` and empty `page_records` no-op without error.
+- [x] [BATCH] Update `duplo/saver.py:save_raw_content` per the new signature
+  - [x] Per PIPELINE-design.md § `save_raw_content` signature. New signature: `save_raw_content(raw_pages: dict[str, str], page_records: list[PageRecord], *, target_dir: Path = Path.cwd()) -> None`.
+  - [x] For each `PageRecord`, look up `raw_pages[record.url]` and write the HTML to `.duplo/raw_pages/<sha256(record.url)>.html`.
+  - [x] Cache filename is the SHA-256 of the canonical URL. NOT the content hash. `PageRecord.content_hash` continues to be stored inside the record for change detection but is NOT used for the cache filename.
+  - [x] **Behavior on missing key**: if `record.url` has no entry in `raw_pages`, this indicates a construction-invariant violation. Log via `record_failure("save_raw_content", "io", f"no raw_pages entry for {record.url}; record skipped")` and SKIP that record. Do NOT raise. Per design § "Behavior on missing keys: log and skip, do not raise."
+  - [x] Tests: each record's HTML written to URL-hashed filename; URL-hash filename matches `sha256(record.url).hexdigest()`; existing file at the same hash overwritten (one file per URL); missing key for a record skipped with diagnostic; remaining records still persisted when one is skipped; empty `raw_pages` and empty `page_records` no-op without error.
 
 ## BuildPreferences and app_name
 
