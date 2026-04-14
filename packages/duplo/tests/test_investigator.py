@@ -622,6 +622,125 @@ class TestBuildPromptRoleFilteredContext:
         prompt = _build_prompt(["bug"], context)
         assert "BEHAVIOR CONTRACTS" not in prompt
 
+    def test_counter_example_images_in_legend(self, tmp_path):
+        img = tmp_path / "avoid.png"
+        img.write_bytes(b"\x89PNG")
+        ce = ReferenceEntry(
+            path=img,
+            roles=["counter-example"],
+            notes="Too cluttered",
+        )
+        context = _base_context(counter_examples=[ce])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLE IMAGES" in prompt
+        assert "AVOID this pattern" in prompt
+        assert "Image 1: avoid.png" in prompt
+        assert "Too cluttered" in prompt
+
+    def test_counter_example_images_legend_without_notes(self, tmp_path):
+        img = tmp_path / "bad.png"
+        img.write_bytes(b"\x89PNG")
+        ce = ReferenceEntry(
+            path=img,
+            roles=["counter-example"],
+        )
+        context = _base_context(counter_examples=[ce])
+        prompt = _build_prompt(["bug"], context)
+        assert "bad.png" in prompt
+        # No notes separator after filename.
+        legend_line = [
+            line for line in prompt.splitlines() if "bad.png" in line and "Image" in line
+        ][0]
+        assert " — " not in legend_line
+
+    def test_counter_example_images_nonexistent_excluded_from_legend(self):
+        ce = ReferenceEntry(
+            path=Path("/nonexistent/avoid.png"),
+            roles=["counter-example"],
+        )
+        context = _base_context(counter_examples=[ce])
+        prompt = _build_prompt(["bug"], context)
+        assert "COUNTER-EXAMPLE IMAGES" not in prompt
+
+    def test_counter_example_image_index_follows_other_images(self, tmp_path):
+        """Counter-example image indices continue after reference/user images."""
+        ref_img = tmp_path / "ref.png"
+        ref_img.write_bytes(b"\x89PNG")
+        ce_img = tmp_path / "avoid.png"
+        ce_img.write_bytes(b"\x89PNG")
+        ce = ReferenceEntry(
+            path=ce_img,
+            roles=["counter-example"],
+        )
+        context = _base_context(
+            reference_images=[ref_img],
+            counter_examples=[ce],
+        )
+        prompt = _build_prompt(["bug"], context)
+        assert "Image 1: ref.png" in prompt
+        assert "Image 2: avoid.png" in prompt
+
+
+class TestInvestigateCounterExampleImages:
+    """Tests that counter-example image files are passed to the vision call."""
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_example_images_passed_to_vision(self, mock_gather, tmp_path):
+        img = tmp_path / "avoid.png"
+        img.write_bytes(b"\x89PNG")
+        mock_gather.return_value = _base_gather_context()
+        ce = ReferenceEntry(
+            path=img,
+            roles=["counter-example"],
+            notes="Bad pattern",
+        )
+        with patch("duplo.investigator.query_with_images") as mock_img:
+            mock_img.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], counter_examples=[ce])
+        image_paths = mock_img.call_args[0][1]
+        assert img in image_paths
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_example_nonexistent_not_passed(self, mock_gather):
+        mock_gather.return_value = _base_gather_context()
+        ce = ReferenceEntry(
+            path=Path("/nonexistent/avoid.png"),
+            roles=["counter-example"],
+        )
+        with patch("duplo.investigator.query") as mock_text:
+            mock_text.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(["bug"], counter_examples=[ce])
+        # Falls back to text-only since no images exist.
+        mock_text.assert_called_once()
+
+    @patch("duplo.investigator._gather_context")
+    def test_counter_example_images_after_other_images(self, mock_gather, tmp_path):
+        """Counter-example images appear after reference/user images."""
+        ref_img = tmp_path / "ref.png"
+        ref_img.write_bytes(b"\x89PNG")
+        ce_img = tmp_path / "avoid.png"
+        ce_img.write_bytes(b"\x89PNG")
+        user_img = tmp_path / "user.png"
+        user_img.write_bytes(b"\x89PNG")
+        mock_gather.return_value = _base_gather_context(
+            reference_images=[ref_img],
+        )
+        ce = ReferenceEntry(
+            path=ce_img,
+            roles=["counter-example"],
+        )
+        with patch("duplo.investigator.query_with_images") as mock_img:
+            mock_img.return_value = '{"diagnosis": [], "summary": "ok"}'
+            investigate(
+                ["bug"],
+                counter_examples=[ce],
+                user_screenshots=[user_img],
+            )
+        image_paths = mock_img.call_args[0][1]
+        # Order: reference, user, counter-example.
+        assert image_paths.index(ref_img) < image_paths.index(ce_img)
+        assert image_paths.index(user_img) < image_paths.index(ce_img)
+
 
 class TestParseResultNewFields:
     """Tests for parsing contradicts and avoids_pattern fields."""

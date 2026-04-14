@@ -153,6 +153,11 @@ def investigate(
             if p.exists():
                 image_paths.append(p)
 
+    # Counter-example images (patterns to AVOID).
+    for entry in context.get("counter_examples", []):
+        if entry.path.exists():
+            image_paths.append(entry.path)
+
     if not image_paths:
         # No images — fall back to text-only query.
         try:
@@ -285,6 +290,20 @@ def _build_prompt(
                 image_index += 1
                 legend_lines.append(f"  Image {image_index}: {img.name}")
             sections.append("\n".join(legend_lines))
+
+    # Counter-example images (patterns to AVOID).
+    counter_examples = context.get("counter_examples", [])
+    ce_images = [e for e in counter_examples if e.path.exists()]
+    if ce_images:
+        legend_lines = [
+            "COUNTER-EXAMPLE IMAGES — AVOID this pattern "
+            "(the user flagged these as anti-patterns):"
+        ]
+        for entry in ce_images:
+            image_index += 1
+            notes_part = f" — {entry.notes}" if entry.notes else ""
+            legend_lines.append(f"  Image {image_index}: {entry.path.name}{notes_part}")
+        sections.append("\n".join(legend_lines))
 
     # Frame descriptions.
     frame_descs = context.get("frame_descriptions", [])
