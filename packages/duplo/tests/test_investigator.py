@@ -478,6 +478,8 @@ class TestInvestigate:
         with (
             patch("duplo.investigator.query") as mock_text_query,
             patch("duplo.investigator.query_with_images") as mock_img,
+            patch("duplo.fetcher.fetch_text") as mock_fetch_text,
+            patch("duplo.fetcher.fetch_site") as mock_fetch_site,
         ):
             mock_text_query.return_value = '{"diagnosis": [], "summary": "ok"}'
             mock_img.return_value = '{"diagnosis": [], "summary": "ok"}'
@@ -485,8 +487,9 @@ class TestInvestigate:
         # The URL should appear in the prompt text, not be fetched.
         prompt = mock_text_query.call_args[0][0]
         assert "https://bad-example.com" in prompt
-        # No fetch calls should have been made for the URL.
-        # (investigate never fetches — it delegates to query/query_with_images)
+        # Fetcher must NOT be called for counter-example URLs.
+        mock_fetch_text.assert_not_called()
+        mock_fetch_site.assert_not_called()
 
     @patch("duplo.investigator._gather_context")
     def test_docs_text_in_prompt(self, mock_gather):
