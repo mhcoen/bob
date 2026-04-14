@@ -1142,6 +1142,67 @@ class TestFetchSiteFailedFetches:
             assert rec.url in raw
 
 
+class TestFetchSiteReturnShape:
+    """Tests for 5-tuple return shape across all scrape depths."""
+
+    def _make_response(self, html: str, url: str = "") -> MagicMock:
+        resp = MagicMock()
+        resp.content = html.encode("utf-8")
+        resp.url = url
+        resp.headers = {"content-type": "text/html; charset=utf-8"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_deep_returns_five_element_tuple(self):
+        html = "<html><body><p>Content</p></body></html>"
+        resp = self._make_response(html, url="https://example.com")
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            result = fetch_site("https://example.com", scrape_depth="deep")
+        assert isinstance(result, tuple)
+        assert len(result) == 5
+
+    def test_shallow_returns_five_element_tuple(self):
+        html = "<html><body><p>Content</p></body></html>"
+        resp = self._make_response(html, url="https://example.com")
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            result = fetch_site("https://example.com", scrape_depth="shallow")
+        assert isinstance(result, tuple)
+        assert len(result) == 5
+
+    def test_none_returns_five_element_tuple(self):
+        result = fetch_site("https://example.com", scrape_depth="none")
+        assert isinstance(result, tuple)
+        assert len(result) == 5
+
+    def test_return_types(self):
+        """Each element has the expected type."""
+        html = "<html><body><p>Content</p></body></html>"
+        resp = self._make_response(html, url="https://example.com")
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            text, examples, structs, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert isinstance(text, str)
+        assert isinstance(examples, list)
+        from duplo.doc_tables import DocStructures
+
+        assert isinstance(structs, DocStructures)
+        assert isinstance(records, list)
+        assert isinstance(raw, dict)
+
+    def test_deep_cross_origin_not_in_raw_pages_or_records(self):
+        """Cross-origin URLs do not appear in raw_pages keys or PageRecord URLs."""
+        seed_html = (
+            '<html><body><p>Home</p><a href="https://other.com/docs">External</a></body></html>'
+        )
+        resp = self._make_response(seed_html, url="https://example.com")
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        record_urls = {r.url for r in records}
+        assert not any("other.com" in u for u in raw)
+        assert not any("other.com" in u for u in record_urls)
+
+
 class TestFetchText:
     def _mock_response(self, html: str, status_code: int = 200) -> MagicMock:
         resp = MagicMock()
