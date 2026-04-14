@@ -9896,3 +9896,415 @@ class TestSubsequentRunSpecSourcesIntegration:
         # _subsequent_run for the non-spec path (it's called
         # inside _rescrape_product_url).
         mock_dl.assert_not_called()
+
+
+class TestSpecSourceOfTruth:
+    """The in-memory spec from read_spec() at the top of _first_run /
+    _subsequent_run is the source of truth for ALL decisions.  SPEC.md
+    is re-read from disk ONLY to stage writes (step 6: discovered URLs,
+    step 13: design autogen).  It is NEVER re-read to drive extraction
+    or filtering decisions."""
+
+    def test_first_run_read_spec_called_once(self, tmp_path, monkeypatch):
+        """read_spec is called exactly once in _first_run — not
+        re-read after _persist_scrape_result may modify SPEC.md."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "notes.txt").write_text("https://a.com")
+
+        spec = ProductSpec(
+            raw="test",
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+            design=DesignBlock(),
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec) as mock_rs,
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[spec.sources[0]],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=ScrapeResult(combined_text="text"),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        assert mock_rs.call_count == 1
+
+    def test_subsequent_run_read_spec_called_once(self, tmp_path, monkeypatch):
+        """read_spec is called exactly once in _subsequent_run — not
+        re-read after _persist_scrape_result or design write-back."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://a.com",
+                "features": [
+                    {"name": "F1", "description": "d", "category": "c"},
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {
+                        "phase": 1,
+                        "title": "Core",
+                        "goal": "g",
+                        "features": ["F1"],
+                        "test_criteria": [],
+                    }
+                ],
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        spec = ProductSpec(
+            raw="test",
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(combined_text="text")
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec) as mock_rs,
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[spec.sources[0]],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch("duplo.main._download_site_media", return_value=([], [])),
+            patch(
+                "duplo.main.select_features",
+                side_effect=lambda feats, **kw: feats,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        assert mock_rs.call_count == 1
+
+    def test_first_run_scope_exclude_uses_in_memory_spec(self, tmp_path, monkeypatch):
+        """scope_exclude filtering uses the in-memory spec, not a
+        re-read of SPEC.md.  Prove by having SPEC.md on disk change
+        scope_exclude mid-run (via _persist_scrape_result) while the
+        in-memory spec retains the original value."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "notes.txt").write_text("https://a.com")
+
+        # In-memory spec excludes "billing"
+        spec = ProductSpec(
+            raw="test",
+            scope_exclude=["billing"],
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+            design=DesignBlock(),
+        )
+
+        billing_feature = Feature(
+            name="Billing",
+            description="Handle billing",
+            category="core",
+        )
+        good_feature = Feature(
+            name="Dashboard",
+            description="Main dashboard",
+            category="core",
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[spec.sources[0]],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=ScrapeResult(combined_text="text"),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=[billing_feature, good_feature],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=lambda feats: feats,
+            ) as mock_select,
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        # select_features should receive only Dashboard (billing excluded
+        # by in-memory spec.scope_exclude).
+        called_features = mock_select.call_args[0][0]
+        assert len(called_features) == 1
+        assert called_features[0].name == "Dashboard"
+
+    def test_subsequent_run_scope_exclude_uses_in_memory_spec(self, tmp_path, monkeypatch):
+        """_subsequent_run applies scope_exclude from in-memory spec,
+        not from a re-read of SPEC.md on disk."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://a.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {
+                        "phase": 1,
+                        "title": "Core",
+                        "goal": "g",
+                        "features": [],
+                        "test_criteria": [],
+                    }
+                ],
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        # In-memory spec excludes "analytics"
+        spec = ProductSpec(
+            raw="test",
+            scope_exclude=["analytics"],
+            sources=[
+                SourceEntry(
+                    url="https://a.com",
+                    role="product-reference",
+                    scrape="deep",
+                ),
+            ],
+            design=DesignBlock(),
+        )
+        analytics_feature = Feature(
+            name="Analytics",
+            description="Track analytics",
+            category="core",
+        )
+        scrape_result = ScrapeResult(combined_text="scraped")
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[spec.sources[0]],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=[analytics_feature],
+            ),
+            patch(
+                "duplo.main.save_features",
+            ) as mock_save,
+            patch("duplo.main._download_site_media", return_value=([], [])),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        # save_features should NOT have been called because the only
+        # extracted feature matched scope_exclude and was filtered out.
+        mock_save.assert_not_called()
+
+    def test_persist_scrape_result_reads_spec_only_for_write(self, tmp_path, monkeypatch):
+        """_persist_scrape_result reads SPEC.md from disk ONLY to stage
+        the discovered-URLs write-back (step 6).  It does NOT call
+        read_spec() — it reads the raw file text."""
+        monkeypatch.chdir(tmp_path)
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(
+            "## Sources\n- https://a.com\n  role: product-reference\n  scrape: deep\n",
+            encoding="utf-8",
+        )
+
+        result = ScrapeResult(
+            combined_text="text",
+            discovered_urls=["https://new-link.com"],
+        )
+
+        with patch("duplo.main.read_spec") as mock_rs:
+            _persist_scrape_result(result)
+
+        # _persist_scrape_result must NOT call read_spec.
+        mock_rs.assert_not_called()
+        # But SPEC.md should have the discovered URL appended.
+        content = spec_path.read_text(encoding="utf-8")
+        assert "https://new-link.com" in content
+
+    def test_scrapeable_sources_uses_in_memory_spec(self, tmp_path, monkeypatch):
+        """_first_run passes the in-memory spec to scrapeable_sources,
+        not a re-read from disk.  Prove by having the in-memory spec
+        contain sources that differ from what's on disk."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "notes.txt").write_text("https://in-memory.com")
+
+        # SPEC.md on disk has a DIFFERENT source URL
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(
+            "## Sources\n- https://on-disk.com\n  role: product-reference\n  scrape: deep\n",
+            encoding="utf-8",
+        )
+
+        # In-memory spec has https://in-memory.com
+        in_memory_source = SourceEntry(
+            url="https://in-memory.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[in_memory_source],
+            design=DesignBlock(),
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://in-memory.com"),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[in_memory_source],
+            ) as mock_ss,
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=ScrapeResult(combined_text="text"),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        # scrapeable_sources was called with the in-memory spec,
+        # not a re-parsed version from disk.
+        mock_ss.assert_called_once_with(spec)
