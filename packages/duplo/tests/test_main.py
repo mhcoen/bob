@@ -7353,6 +7353,34 @@ class TestScrapeDeclaredSources:
         assert "https://prod.com" in result.all_raw_pages
         assert "https://docs.com" in result.all_raw_pages
 
+    def test_first_source_wins_product_ref_raw_pages(self):
+        """Duplicate URL across product-reference sources keeps first HTML."""
+        src_a = self._make_source("https://a.com", role="product-reference")
+        src_b = self._make_source("https://b.com", role="product-reference")
+        spec = self._make_spec([src_a, src_b])
+
+        fetch_results = [
+            ("", [], None, [], {"https://shared.com": "<html>A</html>"}),
+            ("", [], None, [], {"https://shared.com": "<html>B</html>"}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert result.product_ref_raw_pages["https://shared.com"] == "<html>A</html>"
+
     def test_doc_structures_merged(self):
         """Doc structures accumulated across sources."""
         from duplo.doc_tables import DocStructures, FeatureTable
