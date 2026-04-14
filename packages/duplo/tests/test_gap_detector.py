@@ -14,6 +14,8 @@ from duplo.gap_detector import (
     MissingFeature,
     _format_examples,
     _format_features,
+    _merge_design_dicts,
+    _parse_design_markdown,
     _parse_result,
     detect_design_gaps,
     detect_gaps,
@@ -456,3 +458,140 @@ class TestFormatGapTasksAppendOnly:
         for line in text.splitlines():
             if line.startswith("- "):
                 assert line.startswith("- [ ]"), f"Non-unchecked task: {line!r}"
+
+
+# ---------------------------------------------------------------------------
+# _parse_design_markdown
+# ---------------------------------------------------------------------------
+
+
+class TestParseDesignMarkdown:
+    def test_empty_string(self):
+        assert _parse_design_markdown("") == {}
+
+    def test_whitespace_only(self):
+        assert _parse_design_markdown("   \n  ") == {}
+
+    def test_parses_colors_with_backtick_values(self):
+        text = "### Colors\n- **primary**: `#1a73e8`\n- **background**: `#ffffff`"
+        result = _parse_design_markdown(text)
+        assert result["colors"] == {"primary": "#1a73e8", "background": "#ffffff"}
+
+    def test_parses_fonts(self):
+        text = "### Typography\n- **body**: Inter, sans-serif ~16px"
+        result = _parse_design_markdown(text)
+        assert result["fonts"] == {"body": "Inter, sans-serif ~16px"}
+
+    def test_parses_spacing(self):
+        text = "### Spacing\n- **content_padding**: 16px"
+        result = _parse_design_markdown(text)
+        assert result["spacing"] == {"content_padding": "16px"}
+
+    def test_parses_layout(self):
+        text = "### Layout\n- **navigation**: top\n- **sidebar**: left"
+        result = _parse_design_markdown(text)
+        assert result["layout"] == {"navigation": "top", "sidebar": "left"}
+
+    def test_parses_components(self):
+        text = (
+            "### Component Styles\n- **card**: rounded corners, shadow\n- **button**: pill shape"
+        )
+        result = _parse_design_markdown(text)
+        assert len(result["components"]) == 2
+        assert result["components"][0] == {"name": "card", "style": "rounded corners, shadow"}
+        assert result["components"][1] == {"name": "button", "style": "pill shape"}
+
+    def test_component_without_style(self):
+        text = "### Component Styles\n- **modal**:"
+        result = _parse_design_markdown(text)
+        assert result["components"] == [{"name": "modal"}]
+
+    def test_multiple_sections(self):
+        text = (
+            "### Colors\n- **primary**: `#ff0000`\n\n"
+            "### Typography\n- **headings**: Roboto\n\n"
+            "### Component Styles\n- **card**: rounded"
+        )
+        result = _parse_design_markdown(text)
+        assert result["colors"] == {"primary": "#ff0000"}
+        assert result["fonts"] == {"headings": "Roboto"}
+        assert result["components"] == [{"name": "card", "style": "rounded"}]
+
+    def test_ignores_unknown_heading(self):
+        text = "### Unknown Section\n- **key**: value"
+        result = _parse_design_markdown(text)
+        assert result == {}
+
+    def test_ignores_non_bold_lines(self):
+        text = "### Colors\n- plain line without bold\n- **primary**: `#000`"
+        result = _parse_design_markdown(text)
+        assert result["colors"] == {"primary": "#000"}
+
+    def test_roundtrip_with_format_design_block(self):
+        """Parsing the output of format_design_block recovers the same data."""
+        from duplo.design_extractor import DesignRequirements, format_design_block
+
+        original = DesignRequirements(
+            colors={"primary": "#1a73e8", "bg": "#ffffff"},
+            fonts={"body": "Inter"},
+            spacing={"gap": "16px"},
+            layout={"navigation": "top"},
+            components=[{"name": "card", "style": "rounded"}],
+        )
+        block = format_design_block(original)
+        parsed = _parse_design_markdown(block)
+        assert parsed["colors"] == original.colors
+        assert parsed["fonts"] == original.fonts
+        assert parsed["spacing"] == original.spacing
+        assert parsed["layout"] == original.layout
+        assert parsed["components"] == original.components
+
+
+# ---------------------------------------------------------------------------
+# _merge_design_dicts
+# ---------------------------------------------------------------------------
+
+
+class TestMergeDesignDicts:
+    def test_empty_both(self):
+        assert _merge_design_dicts({}, {}) == {}
+
+    def test_a_only(self):
+        a = {"colors": {"primary": "#ff0000"}}
+        assert _merge_design_dicts(a, {}) == a
+
+    def test_b_only(self):
+        b = {"fonts": {"body": "Inter"}}
+        assert _merge_design_dicts({}, b) == b
+
+    def test_a_wins_on_collision(self):
+        a = {"colors": {"primary": "#ff0000"}}
+        b = {"colors": {"primary": "#0000ff", "secondary": "#00ff00"}}
+        result = _merge_design_dicts(a, b)
+        assert result["colors"]["primary"] == "#ff0000"
+        assert result["colors"]["secondary"] == "#00ff00"
+
+    def test_components_concatenated_and_deduped(self):
+        a = {"components": [{"name": "card", "style": "rounded"}]}
+        b = {
+            "components": [{"name": "button", "style": "pill"}, {"name": "card", "style": "flat"}]
+        }
+        result = _merge_design_dicts(a, b)
+        names = [c["name"] for c in result["components"]]
+        assert names == ["card", "button"]
+        # a's version wins for card
+        assert result["components"][0]["style"] == "rounded"
+
+    def test_merges_different_keys(self):
+        a = {"colors": {"primary": "#ff0000"}}
+        b = {"fonts": {"body": "Inter"}}
+        result = _merge_design_dicts(a, b)
+        assert result["colors"] == {"primary": "#ff0000"}
+        assert result["fonts"] == {"body": "Inter"}
+
+    def test_skips_non_dict_components(self):
+        a = {"components": ["not a dict"]}
+        b = {"components": [{"name": "card", "style": "rounded"}]}
+        result = _merge_design_dicts(a, b)
+        assert len(result["components"]) == 1
+        assert result["components"][0]["name"] == "card"

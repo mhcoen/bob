@@ -183,6 +183,98 @@ def _parse_result(
     )
 
 
+def _parse_design_markdown(text: str) -> dict:
+    """Parse AUTO-GENERATED design block markdown into a design dict.
+
+    Recognises the markdown format produced by
+    :func:`~duplo.design_extractor.format_design_block`:
+
+    - ``### Colors`` → ``colors`` dict (values may be backtick-wrapped)
+    - ``### Typography`` → ``fonts`` dict
+    - ``### Spacing`` → ``spacing`` dict
+    - ``### Layout`` → ``layout`` dict
+    - ``### Component Styles`` → ``components`` list of ``{name, style}``
+
+    Returns a dict with the same shape as ``duplo.json``'s
+    ``design_requirements``.
+    """
+    if not text or not text.strip():
+        return {}
+
+    result: dict = {}
+    section: str = ""
+    _SECTION_MAP = {
+        "colors": "colors",
+        "typography": "fonts",
+        "spacing": "spacing",
+        "layout": "layout",
+        "component styles": "components",
+    }
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            heading = stripped[4:].strip().lower()
+            section = _SECTION_MAP.get(heading, "")
+            continue
+        if not section or not stripped.startswith("- **"):
+            continue
+        # Parse "- **key**: value" pattern.
+        rest = stripped[4:]  # after "- **"
+        close = rest.find("**")
+        if close < 0:
+            continue
+        key = rest[:close].rstrip(":")
+        value = rest[close + 2 :].lstrip(": ").strip()
+        # Strip backtick wrapping (colors use `#hex`).
+        if value.startswith("`") and value.endswith("`"):
+            value = value[1:-1]
+        if section == "components":
+            comps = result.setdefault("components", [])
+            entry: dict[str, str] = {"name": key}
+            if value:
+                entry["style"] = value
+            comps.append(entry)
+        else:
+            result.setdefault(section, {})[key] = value
+
+    return result
+
+
+def _merge_design_dicts(a: dict, b: dict) -> dict:
+    """Merge two design dicts, unioning their contents.
+
+    For dict-valued keys (colors, fonts, spacing, layout), entries from
+    *a* take precedence on key collision.  For ``components``, lists are
+    concatenated and deduplicated by ``name`` (first occurrence wins).
+    """
+    merged: dict = {}
+    for key in ("colors", "fonts", "spacing", "layout"):
+        av = a.get(key, {})
+        bv = b.get(key, {})
+        if av or bv:
+            combined = dict(bv) if isinstance(bv, dict) else {}
+            if isinstance(av, dict):
+                combined.update(av)  # a wins on collision
+            merged[key] = combined
+
+    ac = a.get("components", [])
+    bc = b.get("components", [])
+    if ac or bc:
+        seen: set[str] = set()
+        merged_comps: list[dict] = []
+        for comp in list(ac) + list(bc):
+            if not isinstance(comp, dict):
+                continue
+            name = comp.get("name", "")
+            if name and name not in seen:
+                seen.add(name)
+                merged_comps.append(comp)
+        merged["components"] = merged_comps
+
+    return merged
+
+
 def detect_design_gaps(
     plan_content: str,
     design: dict,

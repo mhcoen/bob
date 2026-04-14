@@ -215,7 +215,13 @@ from duplo.orchestrator import collect_design_input
 from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, _matches_excluded, extract_features
-from duplo.gap_detector import detect_design_gaps, detect_gaps, format_gap_tasks
+from duplo.gap_detector import (
+    _merge_design_dicts,
+    _parse_design_markdown,
+    detect_design_gaps,
+    detect_gaps,
+    format_gap_tasks,
+)
 from duplo.notifier import notify_phase_complete
 from duplo.fetcher import download_media, extract_media_urls, fetch_site
 from duplo.docs_extractor import docs_text_extractor
@@ -1313,6 +1319,7 @@ def _rescrape_product_url(
 
 def _detect_and_append_gaps(
     scope_exclude: list[str] | None = None,
+    spec: ProductSpec | None = None,
 ) -> tuple[int, int, int, int]:
     """Compare features and examples from duplo.json against PLAN.md.
 
@@ -1322,6 +1329,10 @@ def _detect_and_append_gaps(
     Args:
         scope_exclude: Terms from SPEC.md ``scope_exclude``. Features
             matching any term are filtered out before gap detection.
+        spec: Parsed SPEC.md.  When present, the AUTO-GENERATED block
+            in ``## Design`` is parsed and merged with ``duplo.json``'s
+            ``design_requirements`` for design-gap detection.  Redundant
+            during transition; can simplify in Phase 7.
 
     Returns ``(missing_features, missing_examples, design_refinements,
     tasks_appended)`` counts.
@@ -1355,9 +1366,15 @@ def _detect_and_append_gaps(
     )
 
     # Check for design refinements not yet in the plan.
+    # Merge design data from duplo.json AND SPEC.md's AUTO-GENERATED
+    # block (redundant during transition; can simplify in Phase 7).
     design_data = data.get("design_requirements", {})
-    if design_data:
-        design_gaps = detect_design_gaps(plan_content, design_data)
+    spec_design_data: dict = {}
+    if spec and spec.design.auto_generated:
+        spec_design_data = _parse_design_markdown(spec.design.auto_generated)
+    merged_design = _merge_design_dicts(design_data, spec_design_data)
+    if merged_design:
+        design_gaps = detect_design_gaps(plan_content, merged_design)
         result.design_refinements = design_gaps
 
     if (
@@ -1571,6 +1588,7 @@ def _subsequent_run() -> None:
     if not plan_complete and not plan_has_unchecked:
         mf, me, dr, ta = _detect_and_append_gaps(
             scope_exclude=spec.scope_exclude if spec else None,
+            spec=spec,
         )
         summary.missing_features = mf
         summary.missing_examples = me
