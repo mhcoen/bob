@@ -7570,6 +7570,28 @@ class TestPersistScrapeResult:
         assert len(entries) == 1
         assert entries[0].discovered is True
         assert entries[0].role == "docs"
+        assert entries[0].scrape == "deep"
+        # Verify SPEC.md was actually written with modified content.
+        written = spec_path.read_text(encoding="utf-8")
+        assert "https://discovered.com" in written
+
+    def test_no_write_when_discovered_urls_empty(self, tmp_path, monkeypatch):
+        """SPEC.md not touched when discovered_urls is empty."""
+        monkeypatch.chdir(tmp_path)
+        original = "## Sources\n"
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(original, encoding="utf-8")
+        result = ScrapeResult(discovered_urls=[])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+            patch("duplo.main.append_sources") as mock_append,
+        ):
+            _persist_scrape_result(result)
+        mock_append.assert_not_called()
+        assert spec_path.read_text(encoding="utf-8") == original
 
     def test_no_write_when_spec_unchanged(self, tmp_path, monkeypatch):
         """SPEC.md not rewritten when append_sources returns same."""
