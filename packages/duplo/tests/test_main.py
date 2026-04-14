@@ -4755,6 +4755,214 @@ class TestFixModeDiagnosis:
         assert "(undiagnosed)" in out
 
 
+class TestFixModeSpecContext:
+    """Tests that _fix_mode passes spec context (counter-examples,
+    behavior contracts) through to investigate()."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "app_name": "TestApp",
+        "features": [],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {"phase": 0, "title": "Core", "goal": "Core", "features": [], "test": "ok"},
+        ],
+        "current_phase": 0,
+    }
+
+    def test_counter_examples_reach_investigator(self, capsys, tmp_path, monkeypatch):
+        """Counter-example references from SPEC.md reach investigate() kwargs."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+
+        # Create a counter-example reference file in ref/.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        ce_file = ref_dir / "bad_design.png"
+        ce_file.write_bytes(b"PNG" * 10)
+
+        # Write a SPEC.md declaring the counter-example reference.
+        spec_text = (
+            "# TestApp\n\n"
+            "## Purpose\nA test app.\n\n"
+            "## References\n"
+            "- ref/bad_design.png\n"
+            "  role: counter-example\n"
+            "  notes: Avoid this layout\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "layout is wrong"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="layout mismatch",
+                    expected="correct layout",
+                    severity="major",
+                    area="UI",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+            main()
+
+        # investigate() was called with counter_examples kwarg.
+        assert mock_inv.call_count == 1
+        kwargs = mock_inv.call_args[1]
+        assert "counter_examples" in kwargs
+        assert len(kwargs["counter_examples"]) == 1
+        assert kwargs["counter_examples"][0].path == Path("ref/bad_design.png")
+
+    def test_behavior_contracts_reach_investigator(self, capsys, tmp_path, monkeypatch):
+        """Behavior contracts from SPEC.md reach investigate() kwargs."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+
+        # Write SPEC.md with behavior contracts.
+        spec_text = (
+            "# TestApp\n\n"
+            "## Purpose\nA test app.\n\n"
+            "## Behavior\n"
+            "`2+3` \u2192 `5`\n"
+            "`10/2` \u2192 `5`\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "wrong calculation"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="calc error",
+                    expected="correct result",
+                    severity="major",
+                    area="math",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+            main()
+
+        # investigate() was called with behavior_contracts kwarg.
+        assert mock_inv.call_count == 1
+        kwargs = mock_inv.call_args[1]
+        assert "behavior_contracts" in kwargs
+        assert len(kwargs["behavior_contracts"]) == 2
+        assert kwargs["behavior_contracts"][0].input == "2+3"
+        assert kwargs["behavior_contracts"][0].expected == "5"
+        assert kwargs["behavior_contracts"][1].input == "10/2"
+        assert kwargs["behavior_contracts"][1].expected == "5"
+
+    def test_counter_example_sources_reach_investigator(self, capsys, tmp_path, monkeypatch):
+        """Counter-example source URLs from SPEC.md reach investigate() kwargs."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+
+        # Write SPEC.md with a counter-example source.
+        spec_text = (
+            "# TestApp\n\n"
+            "## Purpose\nA test app.\n\n"
+            "## Sources\n"
+            "- https://bad-example.com\n"
+            "  role: counter-example\n"
+            "  scrape: none\n"
+            "  notes: Anti-pattern site\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "fix", "design is wrong"])
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="design issue",
+                    expected="better design",
+                    severity="minor",
+                    area="UI",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+            main()
+
+        assert mock_inv.call_count == 1
+        kwargs = mock_inv.call_args[1]
+        assert "counter_example_sources" in kwargs
+        assert len(kwargs["counter_example_sources"]) == 1
+        assert kwargs["counter_example_sources"][0].url == "https://bad-example.com"
+
+    def test_investigate_flag_also_passes_spec_context(self, capsys, tmp_path, monkeypatch):
+        """The --investigate path also passes counter-examples and contracts."""
+        from duplo.investigator import Diagnosis, InvestigationResult
+
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "PLAN.md").write_text("- [x] done\n", encoding="utf-8")
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "avoid.png").write_bytes(b"PNG" * 10)
+
+        spec_text = (
+            "# TestApp\n\n"
+            "## Purpose\nA test app.\n\n"
+            "## Behavior\n"
+            "`hello` \u2192 `world`\n\n"
+            "## References\n"
+            "- ref/avoid.png\n"
+            "  role: counter-example\n"
+        )
+        (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["duplo", "fix", "--investigate", "greeting broken"],
+        )
+
+        result = InvestigationResult(
+            diagnoses=[
+                Diagnosis(
+                    symptom="greeting broken",
+                    expected="correct greeting",
+                    severity="major",
+                    area="greet",
+                ),
+            ],
+            summary="One bug.",
+        )
+
+        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+            main()
+
+        assert mock_inv.call_count == 1
+        kwargs = mock_inv.call_args[1]
+        assert "counter_examples" in kwargs
+        assert "behavior_contracts" in kwargs
+        assert kwargs["behavior_contracts"][0].input == "hello"
+        assert kwargs["counter_examples"][0].path == Path("ref/avoid.png")
+
+
 class TestCompareWithReferences:
     """Tests for _compare_with_references reference image lookup."""
 
