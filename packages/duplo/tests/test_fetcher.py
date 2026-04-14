@@ -283,7 +283,7 @@ class TestSameOrigin:
 class TestFetchSite:
     def _make_response(self, html: str, status_code: int = 200, url: str = "") -> MagicMock:
         resp = MagicMock()
-        resp.text = html
+        resp.content = html.encode("utf-8")
         resp.status_code = status_code
         resp.url = url
         resp.headers = {"content-type": "text/html; charset=utf-8"}
@@ -493,7 +493,7 @@ class TestFetchSiteScrapeDepth:
 
     def _make_response(self, html: str, status_code: int = 200, url: str = "") -> MagicMock:
         resp = MagicMock()
-        resp.text = html
+        resp.content = html.encode("utf-8")
         resp.status_code = status_code
         resp.url = url
         resp.headers = {"content-type": "text/html; charset=utf-8"}
@@ -802,10 +802,10 @@ class TestFetchSiteScrapeDepth:
             resp.raise_for_status = MagicMock()
             resp.headers = {"content-type": "text/html"}
             if "/old-page" in url:
-                resp.text = redirected_html
+                resp.content = redirected_html.encode("utf-8")
                 resp.url = "https://example.com/new-page"
             else:
-                resp.text = seed_html
+                resp.content = seed_html.encode("utf-8")
                 resp.url = url
             return resp
 
@@ -841,10 +841,10 @@ class TestFetchSiteScrapeDepth:
             resp.raise_for_status = MagicMock()
             resp.headers = {"content-type": "text/html"}
             if "/redir" in url:
-                resp.text = redir_html
+                resp.content = redir_html.encode("utf-8")
                 resp.url = "https://example.com/final"
             else:
-                resp.text = seed_html
+                resp.content = seed_html.encode("utf-8")
                 resp.url = url
             return resp
 
@@ -901,7 +901,7 @@ class TestFetchSiteFailedFetches:
         content_type: str = "text/html; charset=utf-8",
     ) -> MagicMock:
         resp = MagicMock()
-        resp.text = html
+        resp.content = html.encode("utf-8")
         resp.url = url
         resp.headers = {"content-type": content_type}
         resp.raise_for_status = MagicMock()
@@ -1022,49 +1022,54 @@ class TestFetchSiteFailedFetches:
         assert len(records) == 1
         assert len(raw) == 1
 
-    # -- decode failure --
+    # -- invalid UTF-8 decoded with replacement characters --
 
-    def test_deep_decode_failure_excluded(self):
-        """Deep: page that fails to decode is not in records or raw_pages."""
+    def test_deep_invalid_utf8_replaced(self):
+        """Deep: page with invalid UTF-8 bytes uses replacement characters."""
+        from duplo.url_canon import canonicalize_url
+
         seed_html = '<html><body><p>Home</p><a href="/bad">Bad</a></body></html>'
+        # Invalid UTF-8: 0xff is never valid in UTF-8
+        bad_bytes = b"<html><body><p>Caf\xff</p></body></html>"
 
         def fake_get(url, **kwargs):
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
             resp.headers = {"content-type": "text/html"}
             if "/bad" in url:
-                type(resp).text = property(
-                    lambda self: (_ for _ in ()).throw(
-                        UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
-                    )
-                )
+                resp.content = bad_bytes
                 resp.url = url
             else:
-                resp.text = seed_html
+                resp.content = seed_html.encode("utf-8")
                 resp.url = url
             return resp
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
-        assert len(records) == 1
-        assert len(raw) == 1
+            text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        # Both pages are included — invalid bytes replaced with U+FFFD
+        assert len(records) == 2
+        assert len(raw) == 2
+        bad_canon = canonicalize_url("https://example.com/bad")
+        assert "\ufffd" in raw[bad_canon]
 
-    def test_shallow_decode_failure_excluded(self):
-        """Shallow: decode failure returns empty results."""
+    def test_shallow_invalid_utf8_replaced(self):
+        """Shallow: invalid UTF-8 bytes produce replacement characters."""
+        from duplo.url_canon import canonicalize_url
+
+        bad_bytes = b"<html><body><p>Caf\xff</p></body></html>"
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
         resp.headers = {"content-type": "text/html"}
         resp.url = "https://example.com"
-        type(resp).text = property(
-            lambda self: (_ for _ in ()).throw(UnicodeDecodeError("utf-8", b"", 0, 1, "bad"))
-        )
+        resp.content = bad_bytes
         with patch("duplo.fetcher.httpx.get", return_value=resp):
             text, _ex, _st, records, raw = fetch_site(
                 "https://example.com", scrape_depth="shallow"
             )
-        assert text == ""
-        assert records == []
-        assert raw == {}
+        assert len(records) == 1
+        assert len(raw) == 1
+        canon = canonicalize_url("https://example.com")
+        assert "\ufffd" in raw[canon]
 
     # -- record_failure is called --
 
@@ -1140,7 +1145,7 @@ class TestFetchSiteFailedFetches:
 class TestFetchText:
     def _mock_response(self, html: str, status_code: int = 200) -> MagicMock:
         resp = MagicMock()
-        resp.text = html
+        resp.content = html.encode("utf-8")
         resp.status_code = status_code
         resp.raise_for_status = MagicMock()
         return resp

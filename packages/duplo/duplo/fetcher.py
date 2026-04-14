@@ -265,16 +265,7 @@ def fetch_site(
             )
             return empty
 
-        try:
-            html = resp.text
-        except Exception as exc:
-            record_failure(
-                "fetcher:fetch_site",
-                "fetch",
-                f"Decode failure for {url}: {exc}",
-                context={"url": url},
-            )
-            return empty
+        html = resp.content.decode("utf-8", errors="replace")
 
         canon = canonicalize_url(str(resp.url))
         record = PageRecord(
@@ -338,16 +329,7 @@ def fetch_site(
             )
             continue
 
-        try:
-            html = resp.text
-        except Exception as exc:
-            record_failure(
-                "fetcher:fetch_site",
-                "fetch",
-                f"Decode failure for {current_url}: {exc}",
-                context={"url": current_url},
-            )
-            continue
+        html = resp.content.decode("utf-8", errors="replace")
 
         final_norm = canonicalize_url(str(resp.url))
         if final_norm != norm:
@@ -391,7 +373,7 @@ def fetch_text(url: str) -> str:
     """Fetch *url* and return its visible text content."""
     response = httpx.get(url, follow_redirects=True, timeout=_TIMEOUT, headers=_HEADERS)
     response.raise_for_status()
-    return extract_text(response.text)
+    return extract_text(response.content.decode("utf-8", errors="replace"))
 
 
 def extract_text(html: str) -> str:
