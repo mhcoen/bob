@@ -531,7 +531,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## BuildPreferences and app_name
 
 - [ ] Implement `parse_build_preferences(architecture_prose) -> BuildPreferences` in `duplo/build_prefs.py` (new module)
-  - [ ] Per PIPELINE-design.md § BuildPreferences. New module per the "new module over extending long files" preference. NOT in `spec_reader.py` (PARSER-design.md forbids LLM calls there) and NOT in `questioner.py` (which is being replaced).
+  - [x] Per PIPELINE-design.md § BuildPreferences. New module per the "new module over extending long files" preference. NOT in `spec_reader.py` (PARSER-design.md forbids LLM calls there) and NOT in `questioner.py` (which is being replaced).
   - [ ] Calls `claude -p` with structured-output prompt asking for `{platform, language, framework, dependencies: list[str], other_constraints: list[str]}` extracted from the prose. Returns `BuildPreferences` with whatever fields the LLM populated; missing fields stay at default.
   - [ ] Section-scoped hash invalidation per design: the bytes hashed are `spec.architecture` (the parsed, comment-stripped content of `## Architecture`), NOT the whole SPEC.md file. Stored in `.duplo/duplo.json` under `architecture_hash`. Re-parse only when the hash changes.
   - [ ] When the LLM returns no usable fields, return `BuildPreferences()` (all defaults). Surface as a WARNING via `validate_for_run`, not an error — plan generation handles all-defaults gracefully.
