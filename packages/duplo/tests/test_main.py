@@ -3280,14 +3280,24 @@ class TestDownloadSiteMediaCachedVsNew:
         assert len(vids) == 1
         assert all(p.exists() for p in imgs + vids)
 
+        # Files stored under <url-hash> subdirectory.
+        import hashlib
+
+        url_hash = hashlib.sha256("https://example.com".encode()).hexdigest()[:16]
+        for p in imgs + vids:
+            assert p.parent.name == url_hash
+
     def test_returns_cached_paths_on_second_call(self, tmp_path, monkeypatch):
         """Second call returns cached paths without HTTP requests."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".duplo").mkdir()
 
         # Pre-populate the cache directory with files matching the
-        # URL-derived filenames that _download_file would create.
-        media_dir = tmp_path / ".duplo" / "site_media"
+        # URL-hash/filename layout that _download_site_media creates.
+        import hashlib
+
+        url_hash = hashlib.sha256("https://example.com".encode()).hexdigest()[:16]
+        media_dir = tmp_path / ".duplo" / "site_media" / url_hash
         media_dir.mkdir(parents=True)
         cached_img = media_dir / "cdn_example_com_hero.png"
         cached_img.write_bytes(b"x" * 20_000)
@@ -3309,7 +3319,10 @@ class TestDownloadSiteMediaCachedVsNew:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".duplo").mkdir()
 
-        media_dir = tmp_path / ".duplo" / "site_media"
+        import hashlib
+
+        url_hash = hashlib.sha256("https://example.com".encode()).hexdigest()[:16]
+        media_dir = tmp_path / ".duplo" / "site_media" / url_hash
         media_dir.mkdir(parents=True)
         # Cache only the image, not the video.
         cached_img = media_dir / "cdn_example_com_hero.png"
@@ -3342,7 +3355,7 @@ class TestDownloadSiteMediaCachedVsNew:
         assert vids == []
 
     def test_multiple_pages_all_media_returned(self, tmp_path, monkeypatch):
-        """Media from multiple pages is aggregated."""
+        """Media from multiple pages stored in separate url-hash dirs."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".duplo").mkdir()
 
@@ -3368,6 +3381,14 @@ class TestDownloadSiteMediaCachedVsNew:
 
         assert len(imgs) == 2
         assert vids == []
+
+        # Each page's media lives in a different url-hash directory.
+        import hashlib
+
+        hash_a = hashlib.sha256("https://a.com/page".encode()).hexdigest()[:16]
+        hash_b = hashlib.sha256("https://b.com/page".encode()).hexdigest()[:16]
+        parent_names = {p.parent.name for p in imgs}
+        assert parent_names == {hash_a, hash_b}
 
 
 class TestSubsequentRunFeatureCountingIntegration:

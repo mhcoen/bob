@@ -193,6 +193,7 @@ _mcloop_setup_crash_handlers()
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -404,32 +405,39 @@ def _download_site_media(
 
     Scans each page's HTML for ``<video>``, ``<source>``, ``<img>``,
     and ``<picture>`` tags, downloads media files to
-    ``.duplo/site_media/``, and returns ``(image_paths, video_paths)``
-    where each list contains LOCAL PATHS TO ALL EMBEDDED MEDIA —
-    both files newly downloaded during this call AND files already
-    present in the cache from previous runs.  Callers receive a
-    complete media inventory regardless of cache state.
+    ``.duplo/site_media/<url-hash>/<filename>``, and returns
+    ``(image_paths, video_paths)`` where each list contains LOCAL
+    PATHS TO ALL EMBEDDED MEDIA — both files newly downloaded during
+    this call AND files already present in the cache from previous
+    runs.  Callers receive a complete media inventory regardless of
+    cache state.
+
+    The URL hash is derived from the page URL the media was embedded
+    in; the filename is derived from the resource URL.
     """
-    all_image_urls: list[str] = []
-    all_video_urls: list[str] = []
+    base_dir = Path(".duplo") / "site_media"
+    all_images: list[Path] = []
+    all_videos: list[Path] = []
     seen: set[str] = set()
 
     for page_url, html in raw_pages.items():
         image_urls, video_urls = extract_media_urls(html, page_url)
-        for u in image_urls:
-            if u not in seen:
-                seen.add(u)
-                all_image_urls.append(u)
-        for u in video_urls:
-            if u not in seen:
-                seen.add(u)
-                all_video_urls.append(u)
+        url_hash = hashlib.sha256(page_url.encode()).hexdigest()[:16]
+        page_dir = base_dir / url_hash
 
-    if not all_image_urls and not all_video_urls:
-        return [], []
+        new_img_urls = [u for u in image_urls if u not in seen]
+        new_vid_urls = [u for u in video_urls if u not in seen]
+        seen.update(new_img_urls)
+        seen.update(new_vid_urls)
 
-    output_dir = Path(".duplo") / "site_media"
-    return download_media(all_image_urls, all_video_urls, output_dir)
+        if not new_img_urls and not new_vid_urls:
+            continue
+
+        imgs, vids = download_media(new_img_urls, new_vid_urls, page_dir)
+        all_images.extend(imgs)
+        all_videos.extend(vids)
+
+    return all_images, all_videos
 
 
 def main() -> None:
