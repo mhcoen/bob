@@ -412,7 +412,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] `scrape_depth="shallow"` fetches only the entry URL, no link-following.
   - [x] `scrape_depth="none"` does no fetch, returns empty content tuple plus empty `raw_pages` dict.
   - [x] The fifth return value `raw_pages: dict[str, str]` maps EVERY successfully fetched canonical URL to its raw HTML. For `deep`, includes entry URL plus same-origin pages followed and successfully fetched. For `shallow`, exactly one entry on success, empty dict on failure. For `none`, empty dict.
-  - [ ] All URL keys in `raw_pages` and all `PageRecord.url` values MUST be canonicalized via `url_utils.canonicalize_url`. Apply post-redirect (after the HTTP response, on the final URL the fetcher landed on).
+  - [x] All URL keys in `raw_pages` and all `PageRecord.url` values MUST be canonicalized via `url_utils.canonicalize_url`. Apply post-redirect (after the HTTP response, on the final URL the fetcher landed on).
   - [ ] Failed fetches (404, timeout, non-HTML content-type, decode failure) are NOT included in `raw_pages` and NOT included in `page_records`. Both structures stay in sync by construction. Failure surfaces via `record_failure("fetch_site", "fetch", ...)`.
   - [ ] HTML decode: UTF-8 with `errors="replace"` per the design.
   - [ ] Update existing callers of `fetch_site` in `duplo/main.py` to handle the new 5-tuple. Existing call sites that don't yet need `raw_pages` should still unpack it (assign to `_` if unused) so they don't crash on the tuple-length change.
