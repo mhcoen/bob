@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import re
 import shutil
@@ -1076,34 +1077,38 @@ REFERENCES_DIR = ".duplo/references"
 
 def save_raw_content(
     raw_pages: dict[str, str],
-    records: list[PageRecord],
+    page_records: list[PageRecord],
     *,
-    target_dir: Path | str = ".",
-) -> Path:
+    target_dir: Path = Path.cwd(),
+) -> None:
     """Save raw HTML content for each scraped page.
 
-    Writes each page's HTML to ``.duplo/raw_pages/<content_hash>.html``
-    so that re-runs can diff against what changed on the product site.
-    The content hash from *records* is used as the filename, linking
-    each file to its corresponding :class:`PageRecord`.
+    Writes each page's HTML to
+    ``.duplo/raw_pages/<sha256(record.url)>.html`` so that re-runs can
+    diff against what changed on the product site.  The SHA-256 of the
+    canonical URL is used as the cache filename.
 
     Args:
-        raw_pages: Dict mapping URL to raw HTML content.
-        records: List of :class:`PageRecord` with content hashes.
+        raw_pages: Dict mapping canonical URL to raw HTML content.
+        page_records: List of :class:`PageRecord` with canonical URLs.
         target_dir: Directory containing ``.duplo/``.
-
-    Returns:
-        Path to the ``raw_pages`` directory.
     """
+    if not page_records:
+        return
     pages_dir = Path(target_dir) / RAW_PAGES_DIR
     pages_dir.mkdir(parents=True, exist_ok=True)
-    for record in records:
+    for record in page_records:
         html = raw_pages.get(record.url)
         if html is None:
+            record_failure(
+                "save_raw_content",
+                "io",
+                f"no raw_pages entry for {record.url}; record skipped",
+            )
             continue
-        page_path = pages_dir / f"{record.content_hash}.html"
+        url_hash = hashlib.sha256(record.url.encode()).hexdigest()
+        page_path = pages_dir / f"{url_hash}.html"
         page_path.write_text(html, encoding="utf-8")
-    return pages_dir
 
 
 def save_design_requirements(

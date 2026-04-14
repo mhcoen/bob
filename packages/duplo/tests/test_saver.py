@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -688,47 +689,86 @@ class TestSaveRawContent:
         ),
     ]
 
+    @staticmethod
+    def _url_hash(url: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(url.encode()).hexdigest()
+
     def _raw_pages(self):
         return {
             "https://example.com": self._HTML_A,
             "https://example.com/docs": self._HTML_B,
         }
 
-    def test_creates_raw_pages_dir(self, tmp_path):
-        result = save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
-        assert result == tmp_path / RAW_PAGES_DIR
-        assert result.is_dir()
-
-    def test_saves_html_files(self, tmp_path):
+    def test_saves_html_to_url_hashed_filenames(self, tmp_path):
         save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
         pages_dir = tmp_path / RAW_PAGES_DIR
-        assert (pages_dir / "aaa111.html").read_text(encoding="utf-8") == self._HTML_A
-        assert (pages_dir / "bbb222.html").read_text(encoding="utf-8") == self._HTML_B
+        hash_a = self._url_hash("https://example.com")
+        hash_b = self._url_hash("https://example.com/docs")
+        assert (pages_dir / f"{hash_a}.html").read_text(encoding="utf-8") == self._HTML_A
+        assert (pages_dir / f"{hash_b}.html").read_text(encoding="utf-8") == self._HTML_B
 
-    def test_skips_missing_urls(self, tmp_path):
-        partial = {"https://example.com": self._HTML_A}
-        save_raw_content(partial, self._RECORDS, target_dir=tmp_path)
+    def test_url_hash_matches_sha256(self, tmp_path):
+        import hashlib
+
+        save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
         pages_dir = tmp_path / RAW_PAGES_DIR
-        assert (pages_dir / "aaa111.html").exists()
-        assert not (pages_dir / "bbb222.html").exists()
+        for record in self._RECORDS:
+            expected = hashlib.sha256(record.url.encode()).hexdigest()
+            assert (pages_dir / f"{expected}.html").exists()
 
-    def test_empty_raw_pages(self, tmp_path):
-        save_raw_content({}, self._RECORDS, target_dir=tmp_path)
-        pages_dir = tmp_path / RAW_PAGES_DIR
-        assert pages_dir.is_dir()
-        assert list(pages_dir.iterdir()) == []
-
-    def test_empty_records(self, tmp_path):
-        save_raw_content(self._raw_pages(), [], target_dir=tmp_path)
-        pages_dir = tmp_path / RAW_PAGES_DIR
-        assert list(pages_dir.iterdir()) == []
-
-    def test_overwrites_existing_files(self, tmp_path):
+    def test_overwrites_existing_file_at_same_hash(self, tmp_path):
         save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
         new_html = "<html><body><h1>Updated</h1></body></html>"
-        save_raw_content({"https://example.com": new_html}, self._RECORDS[:1], target_dir=tmp_path)
+        save_raw_content(
+            {"https://example.com": new_html},
+            self._RECORDS[:1],
+            target_dir=tmp_path,
+        )
         pages_dir = tmp_path / RAW_PAGES_DIR
-        assert (pages_dir / "aaa111.html").read_text(encoding="utf-8") == new_html
+        hash_a = self._url_hash("https://example.com")
+        assert (pages_dir / f"{hash_a}.html").read_text(encoding="utf-8") == new_html
+
+    def test_missing_key_skipped_with_diagnostic(self, tmp_path):
+        partial = {"https://example.com": self._HTML_A}
+        with patch("duplo.saver.record_failure") as mock_rf:
+            save_raw_content(partial, self._RECORDS, target_dir=tmp_path)
+        mock_rf.assert_called_once_with(
+            "save_raw_content",
+            "io",
+            "no raw_pages entry for https://example.com/docs; record skipped",
+        )
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        hash_a = self._url_hash("https://example.com")
+        hash_b = self._url_hash("https://example.com/docs")
+        assert (pages_dir / f"{hash_a}.html").exists()
+        assert not (pages_dir / f"{hash_b}.html").exists()
+
+    def test_remaining_records_persisted_when_one_skipped(self, tmp_path):
+        records = [
+            PageRecord(
+                url="https://example.com/missing",
+                fetched_at="2026-03-06T12:00:00+00:00",
+                content_hash="xxx",
+            ),
+            self._RECORDS[0],
+        ]
+        raw = {"https://example.com": self._HTML_A}
+        with patch("duplo.saver.record_failure"):
+            save_raw_content(raw, records, target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        hash_a = self._url_hash("https://example.com")
+        assert (pages_dir / f"{hash_a}.html").exists()
+
+    def test_empty_raw_pages_and_empty_records_noop(self, tmp_path):
+        save_raw_content({}, [], target_dir=tmp_path)
+        pages_dir = tmp_path / RAW_PAGES_DIR
+        assert not pages_dir.exists()
+
+    def test_returns_none(self, tmp_path):
+        result = save_raw_content(self._raw_pages(), self._RECORDS, target_dir=tmp_path)
+        assert result is None
 
 
 class TestMoveReferences:
