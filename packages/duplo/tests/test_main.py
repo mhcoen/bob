@@ -3199,16 +3199,28 @@ class TestRescrapeDocStructures:
 
 
 class TestRescrapeDownloadsSiteMedia:
-    """_rescrape_product_url downloads media from re-scraped pages."""
+    """_rescrape_product_url downloads media from product-reference pages."""
 
-    def test_downloads_media_from_raw_pages(self, capsys, tmp_path, monkeypatch):
+    def test_downloads_media_from_product_ref_raw_pages(self, capsys, tmp_path, monkeypatch):
+        """Caller passes product-reference raw pages to _download_site_media."""
         monkeypatch.chdir(tmp_path)
-        _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
+        _write_duplo_json(
+            tmp_path,
+            {"source_url": "https://example.com", "features": []},
+        )
 
-        raw_pages = {"https://example.com": "<html><img src='pic.png'/></html>"}
+        product_ref_raw_pages = {
+            "https://example.com": "<html><img src='pic.png'/></html>",
+        }
         with patch(
             "duplo.main.fetch_site",
-            return_value=("text", [], None, [], raw_pages),
+            return_value=(
+                "text",
+                [],
+                None,
+                [],
+                product_ref_raw_pages,
+            ),
         ):
             with patch(
                 "duplo.main._download_site_media",
@@ -3216,7 +3228,7 @@ class TestRescrapeDownloadsSiteMedia:
             ) as mock_dl:
                 _rescrape_product_url()
 
-        mock_dl.assert_called_once_with(raw_pages)
+        mock_dl.assert_called_once_with(product_ref_raw_pages)
         out = capsys.readouterr().out
         assert "1 image" in out
 

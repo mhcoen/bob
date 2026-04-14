@@ -792,7 +792,7 @@ def _first_run(*, url: str | None = None) -> None:
     code_examples: list = []
     doc_structures = None
     page_records: list = []
-    raw_pages: dict[str, str] = {}
+    product_ref_raw_pages: dict[str, str] = {}
     site_images: list[Path] = []
     site_videos: list[Path] = []
 
@@ -814,17 +814,23 @@ def _first_run(*, url: str | None = None) -> None:
 
     if source_url:
         print(f"\nFetching {source_url} \u2026")
-        scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
-            source_url
-        )
+        (
+            scraped_text,
+            code_examples,
+            doc_structures,
+            page_records,
+            product_ref_raw_pages,
+        ) = fetch_site(source_url)
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
-        # Download embedded images and videos from fetched pages.
+        # Download embedded images and videos from product-reference pages.
+        # The product URL is a product-reference source, so all raw pages
+        # from this single-source fetch are product-reference pages.
         # Returns all media (cached + new).  Kept separate from scan
         # so move_references does not try to relocate files that are
         # already under .duplo/site_media/.
-        site_images, site_videos = _download_site_media(raw_pages)
+        site_images, site_videos = _download_site_media(product_ref_raw_pages)
         if site_images:
             print(f"  {len(site_images)} image(s) from product site.")
         if site_videos:
@@ -946,7 +952,7 @@ def _first_run(*, url: str | None = None) -> None:
         code_examples=code_examples,
         doc_structures=doc_structures,
         page_records=page_records,
-        raw_pages=raw_pages,
+        raw_pages=product_ref_raw_pages,
         design=design,
         spec_text=spec_prompt,
     )
@@ -1206,9 +1212,13 @@ def _rescrape_product_url(
 
     print(f"\nRe-scraping {source_url} \u2026")
     try:
-        scraped_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
-            source_url
-        )
+        (
+            scraped_text,
+            code_examples,
+            doc_structures,
+            page_records,
+            product_ref_raw_pages,
+        ) = fetch_site(source_url)
     except Exception as exc:
         print(f"  Failed to re-scrape {source_url}: {exc}")
         return 0, 0, ""
@@ -1229,8 +1239,8 @@ def _rescrape_product_url(
 
     if page_records:
         save_reference_urls(page_records)
-        if raw_pages:
-            save_raw_content(raw_pages, page_records)
+        if product_ref_raw_pages:
+            save_raw_content(product_ref_raw_pages, page_records)
         pages_updated = len(page_records)
         print(f"  Updated {pages_updated} page record(s).")
     if code_examples:
@@ -1254,10 +1264,12 @@ def _rescrape_product_url(
     if doc_structures:
         save_doc_structures(doc_structures)
 
-    # Download embedded media from re-scraped pages.
+    # Download embedded media from product-reference pages.
+    # The product URL is a product-reference source, so all raw pages
+    # from this single-source re-scrape are product-reference pages.
     # Returns all media (cached + new) for a complete inventory.
-    if raw_pages:
-        site_images, site_videos = _download_site_media(raw_pages)
+    if product_ref_raw_pages:
+        site_images, site_videos = _download_site_media(product_ref_raw_pages)
         if site_images:
             print(f"  {len(site_images)} image(s) from product site.")
         site_video_frames: list[Path] = []
