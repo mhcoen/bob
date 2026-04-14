@@ -1854,6 +1854,191 @@ class TestAnalyzeNewFilesWithSpec:
         assert any(p.name == "shot.png" for p in call_args)
 
 
+class TestBehavioralVideoFiltering:
+    """Tests that extract_all_videos receives behavioral-target paths only."""
+
+    def test_analyze_new_files_behavioral_only_with_spec(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """When spec is present, only behavioral-target videos are extracted."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        beh_vid = ref_dir / "demo.mp4"
+        beh_vid.write_bytes(b"MP4" * 500)
+        vis_vid = ref_dir / "design.mp4"
+        vis_vid.write_bytes(b"MP4" * 500)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/design.mp4"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[],
+            ) as mock_extract,
+            patch("duplo.main.scan_files") as mock_scan,
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[beh_vid, vis_vid],
+                pdfs=[],
+                text_files=[],
+                urls=[],
+            )
+            _analyze_new_files(
+                ["ref/demo.mp4", "ref/design.mp4"],
+                spec=spec,
+            )
+
+        # Only the behavioral-target video should be passed.
+        mock_extract.assert_called_once()
+        video_paths = mock_extract.call_args[0][0]
+        assert len(video_paths) == 1
+        assert video_paths[0].name == "demo.mp4"
+
+    def test_analyze_new_files_all_videos_without_spec(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Without spec, all scanned videos are extracted (fallback)."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"MP4" * 500)
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[],
+            ) as mock_extract,
+        ):
+            _analyze_new_files(["demo.mp4"])
+
+        mock_extract.assert_called_once()
+        video_paths = mock_extract.call_args[0][0]
+        assert len(video_paths) == 1
+        assert video_paths[0].name == "demo.mp4"
+
+    def test_analyze_new_files_no_behavioral_videos_skips_extraction(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """When spec has no behavioral-target videos, extraction is skipped."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        vis_vid = ref_dir / "design.mp4"
+        vis_vid.write_bytes(b"MP4" * 500)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/design.mp4"),
+                    roles=["visual-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+            ) as mock_extract,
+            patch("duplo.main.scan_files") as mock_scan,
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vis_vid],
+                pdfs=[],
+                text_files=[],
+                urls=[],
+            )
+            _analyze_new_files(
+                ["ref/design.mp4"],
+                spec=spec,
+            )
+
+        mock_extract.assert_not_called()
+
+    def test_analyze_new_files_proposed_behavioral_excluded(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Proposed behavioral-target videos are excluded by the formatter."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        vid = ref_dir / "proposed.mp4"
+        vid.write_bytes(b"MP4" * 500)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.mp4"),
+                    roles=["behavioral-target"],
+                    proposed=True,
+                ),
+            ],
+        )
+
+        with (
+            patch(
+                "duplo.main.extract_all_videos",
+            ) as mock_extract,
+            patch("duplo.main.scan_files") as mock_scan,
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vid],
+                pdfs=[],
+                text_files=[],
+                urls=[],
+            )
+            _analyze_new_files(
+                ["ref/proposed.mp4"],
+                spec=spec,
+            )
+
+        mock_extract.assert_not_called()
+
+
 class TestRescrapeReturnsCounts:
     """Tests that _rescrape_product_url returns page/example counts."""
 

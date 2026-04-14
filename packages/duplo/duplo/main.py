@@ -246,6 +246,7 @@ from duplo.investigator import format_investigation, investigate, investigation_
 from duplo.migration import _check_migration
 from duplo.spec_reader import (
     ProductSpec,
+    format_behavioral_references,
     format_contracts_as_verification,
     format_spec_for_prompt,
     read_spec,
@@ -830,11 +831,21 @@ def _first_run(*, url: str | None = None) -> None:
         save_product(product_name, source_url)
         print("Product identity saved to .duplo/product.json.")
 
-    # Extract frames from ref/ video files at scene change points.
+    # Extract frames from behavioral-target videos at scene change points.
+    # When a spec is present, only videos declared as behavioral-target
+    # are processed; otherwise fall back to all scanned videos.
+    if spec:
+        behavioral_videos = [
+            e.path
+            for e in format_behavioral_references(spec)
+            if e.path.suffix.lower() in _VIDEO_EXTS
+        ]
+    else:
+        behavioral_videos = list(scan.videos)
     video_frames: list[Path] = []
-    if scan.videos:
-        print(f"\nExtracting frames from {len(scan.videos)} video(s) \u2026")
-        video_frames = _run_video_frame_pipeline(scan.videos)
+    if behavioral_videos:
+        print(f"\nExtracting frames from {len(behavioral_videos)} video(s) \u2026")
+        video_frames = _run_video_frame_pipeline(behavioral_videos)
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
 
@@ -849,7 +860,11 @@ def _first_run(*, url: str | None = None) -> None:
     # Compose design input from four sources (see collect_design_input)
     # when spec is available; fall back to all images + frames otherwise.
     if spec:
-        vt_frames = _visual_target_video_frames(spec, scan.videos, video_frames)
+        vt_frames = _visual_target_video_frames(
+            spec,
+            behavioral_videos,
+            video_frames,
+        )
         design_input = collect_design_input(spec, vt_frames, site_images, site_video_frames)
     else:
         design_input = list(scan.images) + video_frames + site_images + site_video_frames
@@ -991,19 +1006,34 @@ def _analyze_new_files(
     scan = scan_files(paths)
     analyzed_anything = False
 
-    # Extract frames from new video files at scene change points.
+    # Extract frames from new behavioral-target videos at scene change points.
+    # When spec is present, only videos declared as behavioral-target are
+    # processed; otherwise fall back to all scanned videos.
+    if spec:
+        behavioral_set = {
+            e.path.resolve()
+            for e in format_behavioral_references(spec)
+            if e.path.suffix.lower() in _VIDEO_EXTS
+        }
+        behavioral_videos = [v for v in scan.videos if v.resolve() in behavioral_set]
+    else:
+        behavioral_videos = list(scan.videos)
     video_frames: list[Path] = []
-    if scan.videos:
-        print(f"\nExtracting frames from {len(scan.videos)} new video(s) \u2026")
-        video_frames = _run_video_frame_pipeline(scan.videos)
-        summary.videos_found = len(scan.videos)
+    if behavioral_videos:
+        print(f"\nExtracting frames from {len(behavioral_videos)} new video(s) \u2026")
+        video_frames = _run_video_frame_pipeline(behavioral_videos)
+        summary.videos_found = len(behavioral_videos)
         analyzed_anything = True
         summary.video_frames_extracted = len(video_frames)
 
     # Compose design input via four-source model when spec is
     # available; fall back to all images + frames otherwise.
     if spec:
-        vt_frames = _visual_target_video_frames(spec, scan.videos, video_frames)
+        vt_frames = _visual_target_video_frames(
+            spec,
+            behavioral_videos,
+            video_frames,
+        )
         design_input = collect_design_input(spec, vt_frames)
     else:
         design_input = list(scan.images) + video_frames
