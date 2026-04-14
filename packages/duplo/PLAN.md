@@ -440,7 +440,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Refactor `duplo/extract_design` callers to use `format_visual_references` and the four-source design input set
   - [x] Per PIPELINE-design.md § `design_extractor.py`. The design input is the union of: (1) `format_visual_references(spec)` paths; (2) accepted frames from videos with `visual-target` in their roles; (3) accepted frames from scraped product-reference videos; (4) images downloaded from product-reference sources via `_download_site_media`.
-  - [ ] All four sources MUST exclude `proposed: true` references and frames derived from them. Filter via the existing per-stage formatters which already enforce this.
+  - [x] All four sources MUST exclude `proposed: true` references and frames derived from them. Filter via the existing per-stage formatters which already enforce this.
   - [ ] Implement frame-content-hash dedup per design § "Compose the design extraction input set from FOUR sources". A user with both a ref/-declared local copy of a demo video AND the same video appearing on a scraped product page should not have its frames counted twice. Use `hashlib.sha256(frame.read_bytes()).hexdigest()` as the dedup key. ref-declared frames win on collision (added to seen set first).
   - [ ] Update `extract_design`'s call site in `duplo/main.py` to pass `design_input` composed per the rules above instead of the current project-root scan.
   - [ ] Implementation lives in the orchestrator (composition of input set), not in `design_extractor.py` itself. `extract_design` continues to take `list[Path]`.
