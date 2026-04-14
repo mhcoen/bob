@@ -577,11 +577,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Cache invariant per design § "Note on the autogen-cache divergence": when autogen is skipped, `save_design_requirements` is ALSO skipped — the cache stays consistent with SPEC.md autogen.
   - [x] Tests: autogen-absent triggers Vision call and write-back; autogen-present skips Vision call AND skips cache write; skip emits diagnostic naming the input count; SPEC.md write only happens when content differs (idempotency); in-memory `spec.design.auto_generated` consulted, not a re-read of SPEC.md from disk.
 
-- [ ] [BATCH] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
-  - [ ] Per PIPELINE-design.md § `format_design_block`. Wraps the existing `format_design_section(design)` in the same module, MINUS the section heading.
-  - [ ] **Lives in `design_extractor.py`, NOT `spec_drafter.py`** per the layering rationale (drafter must not depend on pipeline stages).
-  - [ ] The orchestrator imports `format_design_block` from `design_extractor` and passes the resulting string into `spec_drafter.update_design_autogen`. The drafter sees only a string.
-  - [ ] Tests: output equals `format_design_section(design)` minus the heading line; round-trip: `update_design_autogen(spec, format_design_block(design))` produces a spec where the parsed `spec.design.auto_generated` content reflects `design`'s fields.
+- [x] [BATCH] Implement `format_design_block(design) -> str` in `duplo/design_extractor.py`
+  - [x] Per PIPELINE-design.md § `format_design_block`. Wraps the existing `format_design_section(design)` in the same module, MINUS the section heading.
+  - [x] **Lives in `design_extractor.py`, NOT `spec_drafter.py`** per the layering rationale (drafter must not depend on pipeline stages).
+  - [x] The orchestrator imports `format_design_block` from `design_extractor` and passes the resulting string into `spec_drafter.update_design_autogen`. The drafter sees only a string.
+  - [x] Tests: output equals `format_design_section(design)` minus the heading line; round-trip: `update_design_autogen(spec, format_design_block(design))` produces a spec where the parsed `spec.design.auto_generated` content reflects `design`'s fields.
 
 ## Orchestration: full _subsequent_run restructure
 
