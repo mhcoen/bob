@@ -492,7 +492,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Investigator
 
 - [ ] Update investigator to include counter-examples, counter-example sources, docs references, and behavior contracts
-  - [ ] Per PIPELINE-design.md § `investigator.py`. `investigate(bugs, ...)` gains role-filtered context inputs.
+  - [x] Per PIPELINE-design.md § `investigator.py`. `investigate(bugs, ...)` gains role-filtered context inputs.
   - [ ] Counter-example references via `format_counter_examples(spec)` get included in the prompt with an explicit "AVOID this pattern" label.
   - [ ] Counter-example SOURCES via `format_counter_example_sources(spec)` (the new formatter from the pre-work task) get included as URL+notes context with the same "AVOID" framing. **The URL is NOT fetched** — declarative context only. Pin this with a test.
   - [ ] Docs references via `format_doc_references(spec)` get included as supplementary context (PDF text via `extract_pdf_text`, .txt/.md via direct read — reuse the `docs_text_extractor` from the earlier task).
