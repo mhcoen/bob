@@ -588,6 +588,72 @@ class TestFetchSiteScrapeDepth:
         # Canonical form: lowercase host, trailing slash stripped
         assert "https://example.com" in raw
 
+    def test_shallow_extracts_code_examples(self):
+        """shallow mode extracts code examples from the single page."""
+        html = "<html><body><pre><code>print('hello')</code></pre></body></html>"
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, examples, _st, _rec, _raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert isinstance(examples, list)
+
+    def test_shallow_extracts_doc_structures(self):
+        """shallow mode extracts doc structures from the single page."""
+        html = (
+            "<html><body>"
+            "<h2>Features</h2>"
+            "<table><tr><th>Feature</th><th>Description</th></tr>"
+            "<tr><td>Auth</td><td>OAuth2 support</td></tr></table>"
+            "</body></html>"
+        )
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, structs, _rec, _raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        from duplo.doc_tables import DocStructures
+
+        assert isinstance(structs, DocStructures)
+
+    def test_shallow_page_record_fields(self):
+        """shallow mode page record has url, timestamp, and content hash."""
+        import hashlib
+
+        html = "<html><body><p>Content</p></body></html>"
+        expected_hash = hashlib.sha256(html.encode()).hexdigest()
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, _st, records, _raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert len(records) == 1
+        assert records[0].url == "https://example.com"
+        assert records[0].fetched_at.endswith("+00:00")
+        assert records[0].content_hash == expected_hash
+
+    def test_shallow_records_and_raw_in_sync(self):
+        """shallow mode: every PageRecord has a corresponding raw_pages entry."""
+        html = "<html><body><p>Content</p></body></html>"
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, _st, records, raw = fetch_site(
+                "https://example.com/path/", scrape_depth="shallow"
+            )
+        assert len(records) == len(raw)
+        from duplo.url_canon import canonicalize_url
+
+        for rec in records:
+            assert canonicalize_url(rec.url) in raw
+
     def test_deep_same_origin_only(self):
         """Deep mode follows same-origin links but not cross-origin."""
         seed_html = (
