@@ -391,10 +391,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Pre-work: missing per-stage formatter
 
-- [ ] [BATCH] Add `format_counter_example_sources(spec) -> list[SourceEntry]` to `duplo/spec_reader.py`
-  - [ ] Returns source entries where `role` is `counter-example`, excluding `proposed: true` AND `discovered: true`. Per PIPELINE-design.md § `format_counter_example_sources`.
-  - [ ] This is the missing per-stage formatter from Phase 3 — Phase 3 added the four reference formatters and `format_scrapeable_sources` but not this one. Required by the investigator changes in 5.11.
-  - [ ] Tests: returns counter-example sources only; excludes proposed/discovered; empty input handled; counter-example sources with other flags (e.g. `scrape: deep`, which the user almost certainly didn't mean) still returned by this filter (separate concern from the scrape-depth diagnostic emitted by `format_scrapeable_sources`).
+- [x] [BATCH] Add `format_counter_example_sources(spec) -> list[SourceEntry]` to `duplo/spec_reader.py`
+  - [x] Returns source entries where `role` is `counter-example`, excluding `proposed: true` AND `discovered: true`. Per PIPELINE-design.md § `format_counter_example_sources`.
+  - [x] This is the missing per-stage formatter from Phase 3 — Phase 3 added the four reference formatters and `format_scrapeable_sources` but not this one. Required by the investigator changes in 5.11.
+  - [x] Tests: returns counter-example sources only; excludes proposed/discovered; empty input handled; counter-example sources with other flags (e.g. `scrape: deep`, which the user almost certainly didn't mean) still returned by this filter (separate concern from the scrape-depth diagnostic emitted by `format_scrapeable_sources`).
 
 ## Foundation: URL canonicalization
 
