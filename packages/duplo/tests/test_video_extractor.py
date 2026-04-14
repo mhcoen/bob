@@ -137,6 +137,31 @@ def test_extract_all_videos(tmp_path):
     assert all(isinstance(r, ExtractionResult) for r in results)
 
 
+def test_extract_all_videos_source_path_preserved(tmp_path, monkeypatch):
+    """ExtractionResult.source MUST equal the input path byte-for-byte.
+
+    No Path.resolve(), no symlink following, no normalization.
+    Passes a relative path and asserts it comes back unchanged.
+    """
+    video = tmp_path / "demo.mp4"
+    video.touch()
+    out_dir = tmp_path / "out"
+
+    # Use a relative path to the video.
+    monkeypatch.chdir(tmp_path)
+    rel = Path("demo.mp4")
+
+    mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("duplo.video_extractor.subprocess.run", return_value=mock_result):
+        results = extract_all_videos([rel], out_dir)
+
+    assert len(results) == 1
+    # source must be the exact object/value we passed in — not resolved.
+    assert results[0].source == rel
+    assert type(results[0].source) is type(rel)
+    assert str(results[0].source) == "demo.mp4"
+
+
 def test_extract_scene_frames_ffmpeg_not_found_as_file_not_found(tmp_path):
     """FileNotFoundError from subprocess.run (ffmpeg binary missing)."""
     video = tmp_path / "test.mp4"
