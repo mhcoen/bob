@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from duplo.docs_extractor import docs_text_extractor
 from duplo.spec_reader import ReferenceEntry
@@ -73,11 +74,17 @@ class TestDocsTextExtractor:
     def test_empty_list(self):
         assert docs_text_extractor([]) == ""
 
-    def test_unknown_extension_skipped(self, tmp_path: Path):
+    def test_unknown_extension_skipped_with_diagnostic(self, tmp_path: Path):
         img = tmp_path / "photo.png"
         img.write_bytes(b"\x89PNG fake")
-        result = docs_text_extractor([_ref(img)])
+        with patch("duplo.docs_extractor.record_failure") as mock_rf:
+            result = docs_text_extractor([_ref(img)])
         assert result == ""
+        mock_rf.assert_called_once()
+        call_args = mock_rf.call_args
+        assert call_args[0][0] == "docs_extractor"
+        assert call_args[0][1] == "io"
+        assert "photo.png" in call_args[0][2]
 
     def test_missing_file_skipped(self, tmp_path: Path):
         missing = tmp_path / "gone.txt"
@@ -91,6 +98,22 @@ class TestDocsTextExtractor:
         good.write_text("Good text", encoding="utf-8")
         result = docs_text_extractor([_ref(bad), _ref(good)])
         assert "Good text" in result
+
+    def test_multiple_docs_combined_into_one_blob(self, tmp_path: Path):
+        pdf = tmp_path / "api.pdf"
+        pdf.write_bytes(_make_pdf("PDF blob"))
+        txt = tmp_path / "notes.txt"
+        txt.write_text("TXT blob", encoding="utf-8")
+        md = tmp_path / "guide.md"
+        md.write_text("MD blob", encoding="utf-8")
+        result = docs_text_extractor([_ref(pdf), _ref(txt), _ref(md)])
+        assert isinstance(result, str)
+        assert "PDF blob" in result
+        assert "TXT blob" in result
+        assert "MD blob" in result
+        # All content in a single string separated by double newlines
+        parts = result.split("\n\n")
+        assert len(parts) >= 3
 
     def test_header_per_file(self, tmp_path: Path):
         a = tmp_path / "a.txt"

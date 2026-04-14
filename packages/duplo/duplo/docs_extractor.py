@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from duplo.diagnostics import record_failure
 from duplo.pdf_extractor import extract_pdf_text
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ def docs_text_extractor(entries: list[ReferenceEntry]) -> str:
 
     - ``.pdf`` files go through ``extract_pdf_text``.
     - ``.txt`` and ``.md`` files are read directly.
-    - Other extensions are silently skipped.
+    - Other extensions produce a diagnostic and are skipped.
 
     Returns combined text with a filename header per file.
     """
@@ -34,6 +35,12 @@ def docs_text_extractor(entries: list[ReferenceEntry]) -> str:
             text = _read_text_file(path)
             if text:
                 text_parts.append(f"=== {path.name} ===\n{text}")
+        else:
+            record_failure(
+                "docs_extractor",
+                "io",
+                f"unknown extension for docs reference; skipped: {path}",
+            )
 
     pdf_text = extract_pdf_text(pdfs)
     all_parts = []
