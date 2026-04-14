@@ -291,6 +291,76 @@ class TestCollectDesignInput:
         result = collect_design_input(None)
         assert result == []
 
+    def test_proposed_excluded_from_union_with_other_sources(self, tmp_path):
+        """Proposed visual-target refs are excluded even when other
+        (non-ref) sources are present — only source (1) is filtered."""
+        proposed_img = tmp_path / "ref" / "proposed.png"
+        proposed_img.parent.mkdir(parents=True)
+        proposed_img.write_bytes(_PNG_BYTES)
+        real_img = tmp_path / "ref" / "real.png"
+        real_img.write_bytes(_PNG_BYTES)
+        vt_frame = tmp_path / "vt_frame.png"
+        vt_frame.write_bytes(_PNG_BYTES)
+        site_img = tmp_path / "site.png"
+        site_img.write_bytes(_PNG_BYTES)
+        sv_frame = tmp_path / "sv_frame.png"
+        sv_frame.write_bytes(_PNG_BYTES)
+
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/proposed.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+                ReferenceEntry(
+                    path=Path("ref/real.png"),
+                    roles=["visual-target"],
+                ),
+            ]
+        )
+        result = collect_design_input(
+            spec,
+            visual_target_frames=[vt_frame],
+            site_images=[site_img],
+            site_video_frames=[sv_frame],
+            target_dir=tmp_path,
+        )
+        # proposed.png excluded, real.png + 3 other sources included.
+        assert len(result) == 4
+        names = [p.name for p in result]
+        assert "proposed.png" not in names
+        assert "real.png" in names
+        assert "vt_frame.png" in names
+        assert "site.png" in names
+        assert "sv_frame.png" in names
+
+    def test_all_proposed_refs_yields_only_other_sources(self, tmp_path):
+        """When ALL visual-target refs are proposed, only sources (2)-(4)
+        contribute."""
+        proposed = tmp_path / "ref" / "p.png"
+        proposed.parent.mkdir(parents=True)
+        proposed.write_bytes(_PNG_BYTES)
+        vt_frame = tmp_path / "frame.png"
+        vt_frame.write_bytes(_PNG_BYTES)
+
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/p.png"),
+                    roles=["visual-target"],
+                    proposed=True,
+                ),
+            ]
+        )
+        result = collect_design_input(
+            spec,
+            visual_target_frames=[vt_frame],
+            target_dir=tmp_path,
+        )
+        assert len(result) == 1
+        assert result[0] == vt_frame
+
     def test_non_visual_target_refs_excluded(self, tmp_path):
         img = tmp_path / "ref" / "behavioral.png"
         img.parent.mkdir(parents=True)
