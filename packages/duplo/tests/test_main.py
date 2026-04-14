@@ -7610,3 +7610,59 @@ class TestPersistScrapeResult:
             _persist_scrape_result(result)
         # File content unchanged.
         assert spec_path.read_text(encoding="utf-8") == original
+
+    def test_discovered_urls_write_flags_to_file(self, tmp_path, monkeypatch):
+        """discovered: true and role: docs written to SPEC.md (no mock)."""
+        monkeypatch.chdir(tmp_path)
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text("## Sources\n", encoding="utf-8")
+        result = ScrapeResult(discovered_urls=["https://new.example.com"])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+        ):
+            _persist_scrape_result(result)
+        written = spec_path.read_text(encoding="utf-8")
+        assert "https://new.example.com" in written
+        assert "discovered: true" in written
+        assert "role: docs" in written
+        assert "scrape: deep" in written
+
+    def test_idempotent_through_real_dedup(self, tmp_path, monkeypatch):
+        """Second persist with same discovered URL doesn't change SPEC.md."""
+        monkeypatch.chdir(tmp_path)
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text("## Sources\n", encoding="utf-8")
+        result = ScrapeResult(discovered_urls=["https://dedup.example.com"])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+        ):
+            _persist_scrape_result(result)
+            after_first = spec_path.read_text(encoding="utf-8")
+            # Second call with same URL — dedup in append_sources.
+            _persist_scrape_result(result)
+            after_second = spec_path.read_text(encoding="utf-8")
+        assert after_first == after_second
+        assert after_first.count("https://dedup.example.com") == 1
+
+    def test_idempotent_existing_url_in_sources(self, tmp_path, monkeypatch):
+        """URL already in ## Sources is not added again (no mock)."""
+        monkeypatch.chdir(tmp_path)
+        spec_path = tmp_path / "SPEC.md"
+        original = "## Sources\n\n- https://already.example.com\n  role: docs\n  scrape: deep\n"
+        spec_path.write_text(original, encoding="utf-8")
+        result = ScrapeResult(discovered_urls=["https://already.example.com"])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+        ):
+            _persist_scrape_result(result)
+        # Content unchanged — dedup prevented addition.
+        assert spec_path.read_text(encoding="utf-8") == original
