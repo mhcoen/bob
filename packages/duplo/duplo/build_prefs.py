@@ -138,6 +138,37 @@ def _parse_response(raw: str) -> BuildPreferences:
     )
 
 
+def is_all_defaults(prefs: BuildPreferences) -> bool:
+    """Return True when *prefs* has no usable fields.
+
+    All-defaults means the LLM could not extract any structured
+    information from the ``## Architecture`` prose.
+    """
+    return (
+        not prefs.platform
+        and not prefs.language
+        and not prefs.constraints
+        and not prefs.preferences
+    )
+
+
+def validate_build_preferences(prefs: BuildPreferences) -> list[str]:
+    """Return warning strings for *prefs*.
+
+    Returns a one-element list when all fields are at their defaults
+    (the LLM extracted nothing useful).  Returns an empty list when
+    at least one field is populated.
+    """
+    if is_all_defaults(prefs):
+        return [
+            "Build preferences are all defaults — "
+            "## Architecture may be too vague for the LLM to extract "
+            "platform, language, or constraints. "
+            "Plan generation will proceed but with less context."
+        ]
+    return []
+
+
 def _str_list(value: object) -> list[str]:
     """Coerce *value* to a list of strings, tolerating bad input."""
     if isinstance(value, list):

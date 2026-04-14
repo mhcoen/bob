@@ -9,7 +9,9 @@ from duplo.build_prefs import (
     _parse_response,
     _str_list,
     architecture_hash,
+    is_all_defaults,
     parse_build_preferences,
+    validate_build_preferences,
 )
 from duplo.claude_cli import ClaudeCliError
 from duplo.questioner import BuildPreferences
@@ -199,3 +201,108 @@ class TestStrList:
         assert _str_list("not a list") == []
         assert _str_list(42) == []
         assert _str_list(None) == []
+
+
+class TestIsAllDefaults:
+    """Tests for is_all_defaults()."""
+
+    def test_all_empty_is_defaults(self) -> None:
+        prefs = BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        assert is_all_defaults(prefs) is True
+
+    def test_platform_set_not_defaults(self) -> None:
+        prefs = BuildPreferences(platform="web", language="", constraints=[], preferences=[])
+        assert is_all_defaults(prefs) is False
+
+    def test_language_set_not_defaults(self) -> None:
+        prefs = BuildPreferences(platform="", language="Python", constraints=[], preferences=[])
+        assert is_all_defaults(prefs) is False
+
+    def test_constraints_set_not_defaults(self) -> None:
+        prefs = BuildPreferences(
+            platform="", language="", constraints=["PostgreSQL"], preferences=[]
+        )
+        assert is_all_defaults(prefs) is False
+
+    def test_preferences_set_not_defaults(self) -> None:
+        prefs = BuildPreferences(
+            platform="", language="", constraints=[], preferences=["minimal deps"]
+        )
+        assert is_all_defaults(prefs) is False
+
+    def test_all_populated_not_defaults(self) -> None:
+        prefs = BuildPreferences(
+            platform="web",
+            language="TypeScript/React",
+            constraints=["PostgreSQL"],
+            preferences=["functional style"],
+        )
+        assert is_all_defaults(prefs) is False
+
+
+class TestValidateBuildPreferences:
+    """Tests for validate_build_preferences()."""
+
+    def test_all_defaults_emits_warning(self) -> None:
+        prefs = BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        warnings = validate_build_preferences(prefs)
+        assert len(warnings) == 1
+        assert "all defaults" in warnings[0]
+
+    def test_populated_prefs_no_warning(self) -> None:
+        prefs = BuildPreferences(platform="cli", language="Rust", constraints=[], preferences=[])
+        warnings = validate_build_preferences(prefs)
+        assert warnings == []
+
+    def test_only_constraints_no_warning(self) -> None:
+        prefs = BuildPreferences(platform="", language="", constraints=["Redis"], preferences=[])
+        warnings = validate_build_preferences(prefs)
+        assert warnings == []
+
+
+class TestParseResponseAllDefaults:
+    """Tests for _parse_response returning all-defaults."""
+
+    def test_empty_json_object_returns_all_defaults(self) -> None:
+        result = _parse_response("{}")
+        assert is_all_defaults(result)
+
+    def test_all_empty_fields_returns_all_defaults(self) -> None:
+        raw = json.dumps(
+            {
+                "platform": "",
+                "language": "",
+                "framework": "",
+                "dependencies": [],
+                "other_constraints": [],
+            }
+        )
+        result = _parse_response(raw)
+        assert is_all_defaults(result)
+
+    def test_all_null_fields_returns_all_defaults(self) -> None:
+        raw = json.dumps(
+            {
+                "platform": None,
+                "language": None,
+                "framework": None,
+                "dependencies": None,
+                "other_constraints": None,
+            }
+        )
+        result = _parse_response(raw)
+        assert is_all_defaults(result)
+
+    @patch("duplo.build_prefs.query")
+    def test_llm_no_usable_fields_returns_defaults(self, mock_query: object) -> None:
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {
+                "platform": "",
+                "language": "",
+                "framework": "",
+                "dependencies": [],
+                "other_constraints": [],
+            }
+        )
+        result = parse_build_preferences("Some vague prose with no tech details")
+        assert is_all_defaults(result)

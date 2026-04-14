@@ -231,7 +231,11 @@ from duplo.planner import (
     parse_completed_tasks,
     save_plan,
 )
-from duplo.build_prefs import architecture_hash, parse_build_preferences
+from duplo.build_prefs import (
+    architecture_hash,
+    parse_build_preferences,
+    validate_build_preferences,
+)
 from duplo.questioner import BuildPreferences, ask_preferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
@@ -342,6 +346,8 @@ def _load_preferences(data: dict, spec) -> BuildPreferences:
     # Update in-memory data so later accesses in the same run see it.
     data["preferences"] = dataclasses.asdict(prefs)
     data["architecture_hash"] = current_hash
+    for w in validate_build_preferences(prefs):
+        print(f"Warning: {w}")
     return prefs
 
 
@@ -1024,6 +1030,8 @@ def _first_run(*, url: str | None = None) -> None:
     if spec and spec.architecture:
         prefs = parse_build_preferences(spec.architecture)
         arch_hash = architecture_hash(spec.architecture)
+        for w in validate_build_preferences(prefs):
+            print(f"Warning: {w}")
     else:
         prefs = ask_preferences()
 
