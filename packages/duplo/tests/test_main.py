@@ -10308,3 +10308,576 @@ class TestSpecSourceOfTruth:
         # scrapeable_sources was called with the in-memory spec,
         # not a re-parsed version from disk.
         mock_ss.assert_called_once_with(spec)
+
+
+# ------------------------------------------------------------------
+# Integration tests per PIPELINE-design.md § "Test plan"
+# ------------------------------------------------------------------
+
+
+def _setup_subsequent_run(tmp_path, monkeypatch, *, features=None, with_plan=False):
+    """Set up .duplo/ state for a _subsequent_run test.
+
+    Creates duplo.json, file_hashes.json, and chdir into tmp_path.
+    When *with_plan* is True, creates a PLAN.md with unchecked tasks
+    so _subsequent_run hits State 2 (return early after scraping).
+    """
+    monkeypatch.chdir(tmp_path)
+    _write_duplo_json(
+        tmp_path,
+        {
+            "source_url": "https://example.com",
+            "features": features or [{"name": "F1", "description": "d", "category": "c"}],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        },
+    )
+    duplo_dir = tmp_path / ".duplo"
+    (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+    if with_plan:
+        (tmp_path / "PLAN.md").write_text("# Phase 1\n- [ ] Pending task\n", encoding="utf-8")
+
+
+class TestIntegrationUrlOnlySpec:
+    """URL-only spec produces correct PLAN.md without consulting ref/.
+
+    Uses _subsequent_run (duplo.json exists) since the new spec-sources
+    pipeline is fully wired in _subsequent_run.  _first_run still has
+    the old scanner-based gate (Phase 7 cleanup).
+    """
+
+    def test_url_only_spec_scrapes_sources(self, tmp_path, monkeypatch):
+        """A SPEC.md with only ## Sources (URL entries) scrapes via
+        _scrape_declared_sources without direct fetch_site calls.
+        Uses State 2 (PLAN.md with unchecked tasks) to return early
+        after the scraping pipeline runs."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://example.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="## Sources\n- https://example.com\n",
+            purpose="A calculator app",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="Calculator features",
+            product_ref_raw_pages={"https://example.com": "<html>calc</html>"},
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(
+            m,
+            "validate_for_run",
+            lambda s: MagicMock(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        mock_scrape = MagicMock(return_value=scrape_result)
+        monkeypatch.setattr(m, "_scrape_declared_sources", mock_scrape)
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+        mock_fetch = MagicMock()
+        monkeypatch.setattr(m, "fetch_site", mock_fetch)
+
+        main()
+
+        # _scrape_declared_sources was used (the spec-sources path).
+        mock_scrape.assert_called_once()
+        # fetch_site was NOT called directly (no scanner fallback).
+        mock_fetch.assert_not_called()
+
+    def test_url_only_scan_finds_nothing_in_ref(self, tmp_path, monkeypatch):
+        """When ref/ is empty, scan_directory returns an empty
+        ScanResult and no ref/-based analysis runs."""
+        monkeypatch.chdir(tmp_path)
+        ref = tmp_path / "ref"
+        ref.mkdir()
+
+        from duplo.scanner import scan_directory
+
+        result = scan_directory(ref)
+        assert result.images == []
+        assert result.videos == []
+        assert result.pdfs == []
+        assert result.text_files == []
+        assert result.urls == []
+
+
+class TestIntegrationRefOnlySpec:
+    """ref/-only spec produces correct PLAN.md without HTTP requests."""
+
+    def test_ref_only_spec_no_http(self, tmp_path, monkeypatch):
+        """A SPEC.md with only ## References (no ## Sources) does
+        NOT call _scrape_declared_sources or fetch_site. Falls
+        back to _rescrape_product_url which is also mocked."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+        )
+
+        ref_entry = ReferenceEntry(
+            path=Path("ref/screenshot.png"),
+            roles=["visual-target"],
+        )
+        spec = ProductSpec(
+            raw="## References\n- ref/screenshot.png\n",
+            purpose="A calculator clone",
+            references=[ref_entry],
+            sources=[],
+            design=DesignBlock(),
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(
+            m,
+            "validate_for_run",
+            lambda s: MagicMock(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [])
+        mock_scrape = MagicMock()
+        monkeypatch.setattr(m, "_scrape_declared_sources", mock_scrape)
+        mock_fetch = MagicMock()
+        monkeypatch.setattr(m, "fetch_site", mock_fetch)
+        monkeypatch.setattr(
+            m,
+            "_rescrape_product_url",
+            lambda **kw: (0, 0, ""),
+        )
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+
+        main()
+
+        mock_fetch.assert_not_called()
+        mock_scrape.assert_not_called()
+
+
+class TestIntegrationBothSourcesAndRefs:
+    """Both URL sources and ref/ files contribute to the plan."""
+
+    def test_both_contribute(self, tmp_path, monkeypatch):
+        """When SPEC.md has both ## Sources and ## References,
+        features are extracted from scraped text AND ref/ docs
+        text, and both feed into feature extraction."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://example.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        ref_entry = ReferenceEntry(
+            path=Path("ref/guide.txt"),
+            roles=["docs"],
+        )
+        spec = ProductSpec(
+            raw="## Sources\n## References\n",
+            purpose="A tool",
+            sources=[src],
+            references=[ref_entry],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="Scraped product info",
+            product_ref_raw_pages={},
+        )
+
+        extract_calls = []
+
+        def fake_extract(text, **kwargs):
+            extract_calls.append(text)
+            return [Feature("F1", "feat", "Core")]
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(
+            m,
+            "validate_for_run",
+            lambda s: MagicMock(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(
+            m,
+            "_scrape_declared_sources",
+            lambda s: scrape_result,
+        )
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [ref_entry])
+        mock_docs = MagicMock(return_value="Guide doc text")
+        monkeypatch.setattr(m, "docs_text_extractor", mock_docs)
+        monkeypatch.setattr(m, "extract_features", fake_extract)
+        monkeypatch.setattr(m, "save_features", lambda *a: None)
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+        monkeypatch.setattr(
+            m,
+            "format_behavioral_references",
+            lambda s: [],
+        )
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        main()
+
+        mock_docs.assert_called_once_with([ref_entry])
+        assert len(extract_calls) == 1
+        assert "Guide doc text" in extract_calls[0]
+        assert "Scraped product info" in extract_calls[0]
+
+
+class TestIntegrationProposedExcluded:
+    """proposed: true entries in SPEC.md are excluded from all
+    pipeline stages."""
+
+    def test_proposed_refs_excluded_from_pipeline(self):
+        """References with proposed: true are excluded from
+        format_visual_references, format_behavioral_references,
+        and format_doc_references."""
+        from duplo.spec_reader import (
+            ProductSpec,
+            ReferenceEntry,
+            format_behavioral_references,
+            format_doc_references,
+            format_visual_references,
+        )
+
+        active_ref = ReferenceEntry(
+            path=Path("ref/active.png"),
+            roles=["visual-target"],
+            proposed=False,
+        )
+        proposed_ref = ReferenceEntry(
+            path=Path("ref/proposed.png"),
+            roles=["visual-target"],
+            proposed=True,
+        )
+        spec = ProductSpec(
+            references=[active_ref, proposed_ref],
+        )
+
+        visual = format_visual_references(spec)
+        assert len(visual) == 1
+        assert visual[0].path == Path("ref/active.png")
+
+        # Behavioral
+        active_beh = ReferenceEntry(
+            path=Path("ref/demo.mp4"),
+            roles=["behavioral-target"],
+            proposed=False,
+        )
+        proposed_beh = ReferenceEntry(
+            path=Path("ref/new_demo.mp4"),
+            roles=["behavioral-target"],
+            proposed=True,
+        )
+        spec_beh = ProductSpec(
+            references=[active_beh, proposed_beh],
+        )
+        behavioral = format_behavioral_references(spec_beh)
+        assert len(behavioral) == 1
+        assert behavioral[0].path == Path("ref/demo.mp4")
+
+        # Docs
+        active_doc = ReferenceEntry(
+            path=Path("ref/manual.pdf"),
+            roles=["docs"],
+            proposed=False,
+        )
+        proposed_doc = ReferenceEntry(
+            path=Path("ref/new_manual.pdf"),
+            roles=["docs"],
+            proposed=True,
+        )
+        spec_doc = ProductSpec(
+            references=[active_doc, proposed_doc],
+        )
+        docs = format_doc_references(spec_doc)
+        assert len(docs) == 1
+        assert docs[0].path == Path("ref/manual.pdf")
+
+    def test_proposed_sources_excluded_from_scraping(self):
+        """Sources with proposed: true are excluded from
+        scrapeable_sources."""
+        from duplo.spec_reader import (
+            ProductSpec,
+            SourceEntry,
+            scrapeable_sources,
+        )
+
+        active_src = SourceEntry(
+            url="https://active.com",
+            role="product-reference",
+            scrape="deep",
+            proposed=False,
+        )
+        proposed_src = SourceEntry(
+            url="https://proposed.com",
+            role="product-reference",
+            scrape="deep",
+            proposed=True,
+        )
+        spec = ProductSpec(sources=[active_src, proposed_src])
+
+        result = scrapeable_sources(spec)
+        assert len(result) == 1
+        assert result[0].url == "https://active.com"
+
+    def test_proposed_refs_not_in_design_input(self, tmp_path, monkeypatch):
+        """collect_design_input excludes proposed: true visual refs."""
+        monkeypatch.chdir(tmp_path)
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        active_img = ref / "active.png"
+        active_img.write_bytes(b"\x89PNG" + b"\x00" * 50)
+
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import (
+            ProductSpec,
+            ReferenceEntry,
+        )
+
+        active = ReferenceEntry(
+            path=Path("ref/active.png"),
+            roles=["visual-target"],
+            proposed=False,
+        )
+        proposed = ReferenceEntry(
+            path=Path("ref/proposed.png"),
+            roles=["visual-target"],
+            proposed=True,
+        )
+        spec = ProductSpec(references=[active, proposed])
+
+        result = collect_design_input(spec)
+        paths = [p.name for p in result]
+        assert "active.png" in paths
+        assert "proposed.png" not in paths
+
+    def test_subsequent_run_proposed_refs_not_processed(self, tmp_path, monkeypatch):
+        """In _subsequent_run, proposed: true refs are not
+        processed by the pipeline."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {
+                        "name": "F1",
+                        "description": "d",
+                        "category": "c",
+                    },
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "PLAN.md").write_text("# Phase 1\n- [ ] Do something\n", encoding="utf-8")
+
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        proposed_ref = ReferenceEntry(
+            path=Path("ref/new_screenshot.png"),
+            roles=["visual-target"],
+            proposed=True,
+        )
+        src = SourceEntry(
+            url="https://example.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[src],
+            references=[proposed_ref],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="text",
+            product_ref_raw_pages={},
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(
+            m,
+            "validate_for_run",
+            lambda s: MagicMock(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(
+            m,
+            "_scrape_declared_sources",
+            lambda s: scrape_result,
+        )
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        mock_di = MagicMock(return_value=[])
+        monkeypatch.setattr(m, "collect_design_input", mock_di)
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+
+        main()
+
+        mock_di.assert_called_once()
+
+
+class TestIntegrationProposedRemoved:
+    """After user removes proposed: true, next run includes
+    the files."""
+
+    def test_refs_included_after_proposed_removed(self):
+        """When proposed: true is removed from a ReferenceEntry,
+        it appears in the formatter results."""
+        from duplo.spec_reader import (
+            ProductSpec,
+            ReferenceEntry,
+            format_visual_references,
+        )
+
+        proposed = ReferenceEntry(
+            path=Path("ref/screenshot.png"),
+            roles=["visual-target"],
+            proposed=True,
+        )
+        spec = ProductSpec(references=[proposed])
+        assert format_visual_references(spec) == []
+
+        accepted = ReferenceEntry(
+            path=Path("ref/screenshot.png"),
+            roles=["visual-target"],
+            proposed=False,
+        )
+        spec_accepted = ProductSpec(references=[accepted])
+        result = format_visual_references(spec_accepted)
+        assert len(result) == 1
+        assert result[0].path == Path("ref/screenshot.png")
+
+    def test_sources_included_after_proposed_removed(self):
+        """When proposed: true is removed from a SourceEntry,
+        it appears in scrapeable_sources."""
+        from duplo.spec_reader import (
+            ProductSpec,
+            SourceEntry,
+            scrapeable_sources,
+        )
+
+        proposed = SourceEntry(
+            url="https://newsite.com",
+            role="docs",
+            scrape="deep",
+            proposed=True,
+        )
+        spec = ProductSpec(sources=[proposed])
+        assert scrapeable_sources(spec) == []
+
+        accepted = SourceEntry(
+            url="https://newsite.com",
+            role="docs",
+            scrape="deep",
+            proposed=False,
+        )
+        spec_accepted = ProductSpec(sources=[accepted])
+        result = scrapeable_sources(spec_accepted)
+        assert len(result) == 1
+        assert result[0].url == "https://newsite.com"
+
+    def test_accepted_ref_included_in_design_input(self, tmp_path, monkeypatch):
+        """After removing proposed: true from a visual-target
+        ref, collect_design_input includes it."""
+        monkeypatch.chdir(tmp_path)
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "accepted.png"
+        img.write_bytes(b"\x89PNG" + b"\x00" * 50)
+
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import (
+            ProductSpec,
+            ReferenceEntry,
+        )
+
+        accepted_ref = ReferenceEntry(
+            path=Path("ref/accepted.png"),
+            roles=["visual-target"],
+            proposed=False,
+        )
+        spec = ProductSpec(references=[accepted_ref])
+
+        result = collect_design_input(spec)
+        paths = [p.name for p in result]
+        assert "accepted.png" in paths
