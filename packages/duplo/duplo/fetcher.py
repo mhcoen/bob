@@ -95,6 +95,12 @@ _PLATFORM_DOMAINS = {
 }
 
 
+def _is_html_content_type(ct: str) -> bool:
+    """Return True if the Content-Type header indicates HTML content."""
+    ct_lower = ct.lower().split(";")[0].strip()
+    return ct_lower in ("text/html", "application/xhtml+xml")
+
+
 def _is_platform_domain(url: str) -> bool:
     """Return True if *url* points to a hosting platform's own pages.
 
@@ -240,12 +246,32 @@ def fetch_site(
                 headers=_HEADERS,
             )
             resp.raise_for_status()
-            html = resp.text
         except Exception as exc:
             record_failure(
                 "fetcher:fetch_site",
                 "fetch",
                 f"Failed to fetch {url}: {exc}",
+                context={"url": url},
+            )
+            return empty
+
+        ct = resp.headers.get("content-type", "")
+        if not _is_html_content_type(ct):
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Non-HTML content-type for {url}: {ct}",
+                context={"url": url, "content_type": ct},
+            )
+            return empty
+
+        try:
+            html = resp.text
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Decode failure for {url}: {exc}",
                 context={"url": url},
             )
             return empty
@@ -293,12 +319,32 @@ def fetch_site(
                 headers=_HEADERS,
             )
             resp.raise_for_status()
-            html = resp.text
         except Exception as exc:
             record_failure(
                 "fetcher:fetch_site",
                 "fetch",
                 f"Failed to fetch {current_url}: {exc}",
+                context={"url": current_url},
+            )
+            continue
+
+        ct = resp.headers.get("content-type", "")
+        if not _is_html_content_type(ct):
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Non-HTML content-type for {current_url}: {ct}",
+                context={"url": current_url, "content_type": ct},
+            )
+            continue
+
+        try:
+            html = resp.text
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Decode failure for {current_url}: {exc}",
                 context={"url": current_url},
             )
             continue

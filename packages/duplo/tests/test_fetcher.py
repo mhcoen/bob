@@ -286,6 +286,7 @@ class TestFetchSite:
         resp.text = html
         resp.status_code = status_code
         resp.url = url
+        resp.headers = {"content-type": "text/html; charset=utf-8"}
         resp.raise_for_status = MagicMock()
         return resp
 
@@ -495,6 +496,7 @@ class TestFetchSiteScrapeDepth:
         resp.text = html
         resp.status_code = status_code
         resp.url = url
+        resp.headers = {"content-type": "text/html; charset=utf-8"}
         resp.raise_for_status = MagicMock()
         return resp
 
@@ -798,6 +800,7 @@ class TestFetchSiteScrapeDepth:
         def fake_get(url, **kwargs):
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
+            resp.headers = {"content-type": "text/html"}
             if "/old-page" in url:
                 resp.text = redirected_html
                 resp.url = "https://example.com/new-page"
@@ -836,6 +839,7 @@ class TestFetchSiteScrapeDepth:
             fetch_calls.append(url)
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
+            resp.headers = {"content-type": "text/html"}
             if "/redir" in url:
                 resp.text = redir_html
                 resp.url = "https://example.com/final"
@@ -885,6 +889,252 @@ class TestFetchSiteScrapeDepth:
                 "https://Example.COM/Path/", scrape_depth="shallow"
             )
         assert records[0].url == "https://example.com/Path"
+
+
+class TestFetchSiteFailedFetches:
+    """Failed fetches are excluded from both raw_pages and page_records."""
+
+    def _make_response(
+        self,
+        html: str,
+        url: str = "",
+        content_type: str = "text/html; charset=utf-8",
+    ) -> MagicMock:
+        resp = MagicMock()
+        resp.text = html
+        resp.url = url
+        resp.headers = {"content-type": content_type}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    # -- 404 --
+
+    def test_deep_404_excluded(self):
+        """Deep: a 404 page is not in records or raw_pages."""
+        seed_html = '<html><body><p>Home</p><a href="/gone">Gone</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            if "/gone" in url:
+                resp = MagicMock()
+                resp.raise_for_status.side_effect = Exception("404")
+                return resp
+            return self._make_response(seed_html, url=url)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        assert len(records) == 1
+        assert len(raw) == 1
+        assert records[0].url == "https://example.com"
+
+    def test_shallow_404_excluded(self):
+        """Shallow: a 404 returns empty results."""
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status.side_effect = Exception("404")
+            return resp
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _ex, _st, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert text == ""
+        assert records == []
+        assert raw == {}
+
+    # -- timeout --
+
+    def test_deep_timeout_excluded(self):
+        """Deep: timed-out page is not in records or raw_pages."""
+        import httpx as httpx_mod
+
+        seed_html = '<html><body><p>Home</p><a href="/slow">Slow</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            if "/slow" in url:
+                raise httpx_mod.TimeoutException("timed out")
+            return self._make_response(seed_html, url=url)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        assert len(records) == 1
+        assert len(raw) == 1
+
+    def test_shallow_timeout_excluded(self):
+        """Shallow: timeout returns empty results."""
+        import httpx as httpx_mod
+
+        def fake_get(url, **kwargs):
+            raise httpx_mod.TimeoutException("timed out")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _ex, _st, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert text == ""
+        assert records == []
+        assert raw == {}
+
+    # -- non-HTML content-type --
+
+    def test_deep_non_html_excluded(self):
+        """Deep: non-HTML response is not in records or raw_pages."""
+        seed_html = '<html><body><p>Home</p><a href="/file.pdf">PDF</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            if "/file.pdf" in url:
+                return self._make_response("binary", url=url, content_type="application/pdf")
+            return self._make_response(seed_html, url=url)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        assert len(records) == 1
+        assert len(raw) == 1
+        assert records[0].url == "https://example.com"
+
+    def test_shallow_non_html_excluded(self):
+        """Shallow: non-HTML content-type returns empty results."""
+        resp = self._make_response(
+            "binary",
+            url="https://example.com/f.pdf",
+            content_type="application/pdf",
+        )
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            text, _ex, _st, records, raw = fetch_site(
+                "https://example.com/f.pdf", scrape_depth="shallow"
+            )
+        assert text == ""
+        assert records == []
+        assert raw == {}
+
+    def test_xhtml_accepted(self):
+        """application/xhtml+xml is treated as HTML."""
+        html = "<html><body><p>XHTML</p></body></html>"
+        resp = self._make_response(
+            html,
+            url="https://example.com",
+            content_type="application/xhtml+xml",
+        )
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            _text, _ex, _st, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert len(records) == 1
+        assert len(raw) == 1
+
+    # -- decode failure --
+
+    def test_deep_decode_failure_excluded(self):
+        """Deep: page that fails to decode is not in records or raw_pages."""
+        seed_html = '<html><body><p>Home</p><a href="/bad">Bad</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.headers = {"content-type": "text/html"}
+            if "/bad" in url:
+                type(resp).text = property(
+                    lambda self: (_ for _ in ()).throw(
+                        UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
+                    )
+                )
+                resp.url = url
+            else:
+                resp.text = seed_html
+                resp.url = url
+            return resp
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        assert len(records) == 1
+        assert len(raw) == 1
+
+    def test_shallow_decode_failure_excluded(self):
+        """Shallow: decode failure returns empty results."""
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.headers = {"content-type": "text/html"}
+        resp.url = "https://example.com"
+        type(resp).text = property(
+            lambda self: (_ for _ in ()).throw(UnicodeDecodeError("utf-8", b"", 0, 1, "bad"))
+        )
+        with patch("duplo.fetcher.httpx.get", return_value=resp):
+            text, _ex, _st, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+        assert text == ""
+        assert records == []
+        assert raw == {}
+
+    # -- record_failure is called --
+
+    def test_deep_404_records_failure(self):
+        """Deep: 404 calls record_failure."""
+        seed_html = '<html><body><p>Home</p><a href="/gone">G</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            if "/gone" in url:
+                resp = MagicMock()
+                resp.raise_for_status.side_effect = Exception("404")
+                return resp
+            return self._make_response(seed_html, url=url)
+
+        with (
+            patch("duplo.fetcher.httpx.get", side_effect=fake_get),
+            patch("duplo.fetcher.record_failure") as mock_rf,
+        ):
+            fetch_site("https://example.com", scrape_depth="deep")
+        mock_rf.assert_called_once()
+        args = mock_rf.call_args
+        assert args[0][0] == "fetcher:fetch_site"
+        assert args[0][1] == "fetch"
+
+    def test_deep_non_html_records_failure(self):
+        """Deep: non-HTML content-type calls record_failure."""
+        seed_html = '<html><body><p>Home</p><a href="/img.png">I</a></body></html>'
+
+        def fake_get(url, **kwargs):
+            if "/img.png" in url:
+                return self._make_response("bytes", url=url, content_type="image/png")
+            return self._make_response(seed_html, url=url)
+
+        with (
+            patch("duplo.fetcher.httpx.get", side_effect=fake_get),
+            patch("duplo.fetcher.record_failure") as mock_rf,
+        ):
+            fetch_site("https://example.com", scrape_depth="deep")
+        mock_rf.assert_called_once()
+        assert "Non-HTML" in mock_rf.call_args[0][2]
+
+    # -- sync invariant --
+
+    def test_deep_mixed_failures_sync(self):
+        """Deep: records and raw_pages stay in sync with mixed successes/failures."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="/ok">OK</a>'
+            '<a href="/fail">Fail</a>'
+            '<a href="/pdf">PDF</a>'
+            "</body></html>"
+        )
+        ok_html = "<html><body><p>OK page</p></body></html>"
+
+        def fake_get(url, **kwargs):
+            if "/fail" in url:
+                raise Exception("connection refused")
+            if "/pdf" in url:
+                return self._make_response("binary", url=url, content_type="application/pdf")
+            if "/ok" in url:
+                return self._make_response(ok_html, url=url)
+            return self._make_response(seed_html, url=url)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+        # Only seed + /ok should be present
+        assert len(records) == 2
+        assert len(raw) == 2
+        for rec in records:
+            assert rec.url in raw
 
 
 class TestFetchText:
