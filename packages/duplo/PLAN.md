@@ -398,11 +398,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Foundation: URL canonicalization
 
-- [ ] [BATCH] Create new module `duplo/url_utils.py` with `canonicalize_url(url: str) -> str`
-  - [ ] New module per design (the existing files are too long). Imports stdlib only (`urllib.parse`).
-  - [ ] Implement the four canonicalization rules per PIPELINE-design.md § "URL canonicalization": (1) lowercase scheme and host; (2) strip default ports (80 on http, 443 on https); (3) strip fragment (#section); (4) strip trailing slash from ALL paths INCLUDING the root path `/`. Preserve query strings.
-  - [ ] The trailing-slash rule MUST apply to the root path: `https://a.com/` → `https://a.com`. Do not special-case the root. Per PIPELINE-design.md § "Why strip all trailing slashes, including root" — root-path slash treatment is what makes user-authored host-only URLs and fetcher post-redirect URLs compare equal.
-  - [ ] Tests: each rule exercised individually; combined rules; root-path slash stripped (`https://a.com/` → `https://a.com`); non-root path slash stripped (`https://a.com/docs/` → `https://a.com/docs`); already-canonical URL unchanged; query string preserved (`https://a.com/?q=1` → `https://a.com?q=1` — root slash gone, query kept); fragment stripped; uppercase scheme/host lowercased; default port stripped on http (80) and https (443); non-default ports preserved (`https://a.com:8443/` → `https://a.com:8443`).
+- [x] [BATCH] Create new module `duplo/url_utils.py` with `canonicalize_url(url: str) -> str`
+  - [x] New module per design (the existing files are too long). Imports stdlib only (`urllib.parse`).
+  - [x] Implement the four canonicalization rules per PIPELINE-design.md § "URL canonicalization": (1) lowercase scheme and host; (2) strip default ports (80 on http, 443 on https); (3) strip fragment (#section); (4) strip trailing slash from ALL paths INCLUDING the root path `/`. Preserve query strings.
+  - [x] The trailing-slash rule MUST apply to the root path: `https://a.com/` → `https://a.com`. Do not special-case the root. Per PIPELINE-design.md § "Why strip all trailing slashes, including root" — root-path slash treatment is what makes user-authored host-only URLs and fetcher post-redirect URLs compare equal.
+  - [x] Tests: each rule exercised individually; combined rules; root-path slash stripped (`https://a.com/` → `https://a.com`); non-root path slash stripped (`https://a.com/docs/` → `https://a.com/docs`); already-canonical URL unchanged; query string preserved (`https://a.com/?q=1` → `https://a.com?q=1` — root slash gone, query kept); fragment stripped; uppercase scheme/host lowercased; default port stripped on http (80) and https (443); non-default ports preserved (`https://a.com:8443/` → `https://a.com:8443`).
 
 ## Foundation: fetch_site signature changes
 
