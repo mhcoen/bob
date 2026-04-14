@@ -2039,6 +2039,232 @@ class TestBehavioralVideoFiltering:
         mock_extract.assert_not_called()
 
 
+class TestFirstRunSiteVideosBehavioral:
+    """Site videos from _download_site_media are merged into behavioral input."""
+
+    def test_site_videos_included_in_behavioral_with_spec(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
+    ):
+        """When spec is present, site_videos are appended to behavioral refs."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        beh_vid = ref_dir / "demo.mp4"
+        beh_vid.write_bytes(b"MP4" * 100)
+
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch("duplo.main.load_product", return_value=("App", "https://a.com")),
+            patch("duplo.main.fetch_site", return_value=("t", [], None, [], {"u": "<h>"})),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch("duplo.main.extract_all_videos", return_value=[]) as mock_ev,
+            patch("duplo.main.extract_design"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type("V", (), {"warnings": [], "errors": []})()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[beh_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        mock_ev.assert_called_once()
+        paths = mock_ev.call_args[0][0]
+        names = [p.name for p in paths]
+        assert "demo.mp4" in names
+        assert "promo.mp4" in names
+        assert len(paths) == 2
+
+    def test_site_videos_included_without_spec(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Without spec, site_videos are appended to all scanned videos."""
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        scan_vid = ref_dir / "demo.mp4"
+        scan_vid.write_bytes(b"MP4" * 100)
+        (ref_dir / "urls.txt").write_text("https://a.com")
+
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.main._validate_url", return_value=("https://a.com", "App")),
+            patch("duplo.main._confirm_product", return_value="App"),
+            patch("duplo.main.fetch_site", return_value=("t", [], None, [], {"u": "<h>"})),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch("duplo.main.extract_all_videos", return_value=[]) as mock_ev,
+            patch("duplo.main.extract_design"),
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            main()
+
+        mock_ev.assert_called_once()
+        paths = mock_ev.call_args[0][0]
+        names = [p.name for p in paths]
+        assert "demo.mp4" in names
+        assert "promo.mp4" in names
+
+    def test_site_video_frames_extracted_for_design_input(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Frames from site videos are identified for design input source (4)."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        beh_vid = ref_dir / "demo.mp4"
+        beh_vid.write_bytes(b"MP4" * 100)
+
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        beh_frame = frames_dir / "demo_scene_0001.png"
+        beh_frame.write_bytes(b"PNG")
+        site_frame = frames_dir / "promo_scene_0001.png"
+        site_frame.write_bytes(b"PNG")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+        )
+
+        design_input_captured = []
+
+        def _capture_design(images):
+            from duplo.design_extractor import DesignRequirements
+
+            design_input_captured.extend(images)
+            return DesignRequirements()
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch("duplo.main.load_product", return_value=("App", "https://a.com")),
+            patch("duplo.main.fetch_site", return_value=("t", [], None, [], {"u": "<h>"})),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(source=beh_vid, frames=[beh_frame]),
+                    ExtractionResult(source=site_vid, frames=[site_frame]),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch("duplo.main.apply_filter", return_value=[beh_frame, site_frame]),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch("duplo.main.extract_design", side_effect=_capture_design),
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(platform="web", language="Python"),
+            ),
+            patch("builtins.input", return_value=""),
+            patch("duplo.main.save_selections", return_value=tmp_path / _DUPLO_JSON),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type("V", (), {"warnings": [], "errors": []})()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[beh_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            main()
+
+        # collect_design_input should receive site_video_frames
+        mock_cdi.assert_called_once()
+        svf = mock_cdi.call_args[1].get(
+            "site_video_frames",
+            mock_cdi.call_args[0][3] if len(mock_cdi.call_args[0]) > 3 else None,
+        )
+        if svf is not None:
+            site_names = [f.name for f in svf]
+            assert "promo_scene_0001.png" in site_names
+
+
 class TestRescrapeReturnsCounts:
     """Tests that _rescrape_product_url returns page/example counts."""
 

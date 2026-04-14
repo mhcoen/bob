@@ -833,15 +833,17 @@ def _first_run(*, url: str | None = None) -> None:
 
     # Extract frames from behavioral-target videos at scene change points.
     # When a spec is present, only videos declared as behavioral-target
-    # are processed; otherwise fall back to all scanned videos.
+    # are processed; otherwise fall back to all scanned videos.  Scraped
+    # demo videos from product-reference pages (site_videos) are
+    # first-class behavioral input and are merged into the set.
     if spec:
         behavioral_videos = [
             e.path
             for e in format_behavioral_references(spec)
             if e.path.suffix.lower() in _VIDEO_EXTS
-        ]
+        ] + site_videos
     else:
-        behavioral_videos = list(scan.videos)
+        behavioral_videos = list(scan.videos) + site_videos
     video_frames: list[Path] = []
     if behavioral_videos:
         print(f"\nExtracting frames from {len(behavioral_videos)} video(s) \u2026")
@@ -849,13 +851,18 @@ def _first_run(*, url: str | None = None) -> None:
         if video_frames:
             print(f"  Total: {len(video_frames)} frame(s) from video(s)")
 
-    # Extract frames from site videos.
-    site_video_frames: list[Path] = []
-    if site_videos:
-        print(f"\nExtracting frames from {len(site_videos)} site video(s) \u2026")
-        site_video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
-        if site_video_frames:
-            print(f"  Total: {len(site_video_frames)} frame(s) from site video(s)")
+    # Identify frames originating from scraped site videos so they
+    # can be passed as design input source (4) separately.
+    site_video_stems = {v.stem for v in site_videos}
+    site_video_frames = (
+        [
+            f
+            for f in video_frames
+            if any(f.name.startswith(stem + "_") for stem in site_video_stems)
+        ]
+        if site_video_stems
+        else []
+    )
 
     # Compose design input from four sources (see collect_design_input)
     # when spec is available; fall back to all images + frames otherwise.
