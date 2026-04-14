@@ -518,6 +518,21 @@ class TestFetchSiteScrapeDepth:
         mock_get.assert_not_called()
         assert text == ""
         assert examples == []
+        from duplo.doc_tables import DocStructures
+
+        assert isinstance(structs, DocStructures)
+        assert records == []
+        assert raw == {}
+
+    def test_none_no_network_regardless_of_url(self):
+        """scrape_depth='none' never touches the network, even with a valid URL."""
+        with patch("duplo.fetcher.httpx.get") as mock_get:
+            text, examples, structs, records, raw = fetch_site(
+                "https://real-product.example.com/docs", scrape_depth="none"
+            )
+        mock_get.assert_not_called()
+        assert text == ""
+        assert examples == []
         assert records == []
         assert raw == {}
 
