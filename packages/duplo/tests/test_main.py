@@ -3218,7 +3218,7 @@ class TestRescrapeDownloadsSiteMedia:
 
         mock_dl.assert_called_once_with(raw_pages)
         out = capsys.readouterr().out
-        assert "1 new image" in out
+        assert "1 image" in out
 
     def test_skips_media_when_no_raw_pages(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

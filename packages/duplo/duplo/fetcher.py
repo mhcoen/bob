@@ -447,29 +447,33 @@ def download_media(
 ) -> tuple[list[Path], list[Path]]:
     """Download images and videos to *output_dir*.
 
-    Skips files that already exist locally. Skips images smaller than
-    ``_MIN_IMAGE_BYTES``. Returns ``(new_images, new_videos)`` containing
-    only files that were actually downloaded (not cached).
+    Returns ``(images, videos)`` containing local paths for ALL
+    embedded media — both files newly downloaded during this call
+    AND files already present from previous runs.  Callers receive
+    a complete media inventory regardless of cache state.
+
+    Skips images smaller than ``_MIN_IMAGE_BYTES`` (newly downloaded
+    tiny images are deleted; previously cached tiny images that
+    somehow slipped through are excluded from the returned list).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    new_images: list[Path] = []
-    new_videos: list[Path] = []
+    images: list[Path] = []
+    videos: list[Path] = []
 
     for url in video_urls:
         path, is_new = _download_file(url, output_dir)
-        if path and is_new:
-            new_videos.append(path)
+        if path:
+            videos.append(path)
 
     for url in image_urls:
         path, is_new = _download_file(url, output_dir)
         if path and path.stat().st_size >= _MIN_IMAGE_BYTES:
-            if is_new:
-                new_images.append(path)
+            images.append(path)
         elif path and is_new:
-            # Too small, likely icon
+            # Too small, likely icon — remove newly downloaded junk
             path.unlink(missing_ok=True)
 
-    return new_images, new_videos
+    return images, videos
 
 
 def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:

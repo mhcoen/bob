@@ -400,11 +400,15 @@ class UpdateSummary:
 def _download_site_media(
     raw_pages: dict[str, str],
 ) -> tuple[list[Path], list[Path]]:
-    """Extract and download images and videos from fetched HTML pages.
+    """Collect embedded media paths from fetched HTML pages.
 
     Scans each page's HTML for ``<video>``, ``<source>``, ``<img>``,
-    and ``<picture>`` tags, downloads the media files to
-    ``.duplo/site_media/``, and returns ``(images, videos)``.
+    and ``<picture>`` tags, downloads media files to
+    ``.duplo/site_media/``, and returns ``(image_paths, video_paths)``
+    where each list contains LOCAL PATHS TO ALL EMBEDDED MEDIA —
+    both files newly downloaded during this call AND files already
+    present in the cache from previous runs.  Callers receive a
+    complete media inventory regardless of cache state.
     """
     all_image_urls: list[str] = []
     all_video_urls: list[str] = []
@@ -817,14 +821,14 @@ def _first_run(*, url: str | None = None) -> None:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
 
         # Download embedded images and videos from fetched pages.
-        # Only genuinely new files are returned.  Kept separate from
-        # scan so move_references does not try to relocate files that
-        # are already under .duplo/site_media/.
+        # Returns all media (cached + new).  Kept separate from scan
+        # so move_references does not try to relocate files that are
+        # already under .duplo/site_media/.
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
-            print(f"  Downloaded {len(site_images)} image(s) from product site.")
+            print(f"  {len(site_images)} image(s) from product site.")
         if site_videos:
-            print(f"  Downloaded {len(site_videos)} video(s) from product site.")
+            print(f"  {len(site_videos)} video(s) from product site.")
 
     if not saved_product:
         product_name = _confirm_product(product_name, source_url)
@@ -1251,14 +1255,14 @@ def _rescrape_product_url(
         save_doc_structures(doc_structures)
 
     # Download embedded media from re-scraped pages.
-    # Only genuinely new files are returned (cached files are skipped).
+    # Returns all media (cached + new) for a complete inventory.
     if raw_pages:
         site_images, site_videos = _download_site_media(raw_pages)
         if site_images:
-            print(f"  Downloaded {len(site_images)} new image(s) from product site.")
+            print(f"  {len(site_images)} image(s) from product site.")
         site_video_frames: list[Path] = []
         if site_videos:
-            print(f"  Downloaded {len(site_videos)} new video(s) from product site.")
+            print(f"  {len(site_videos)} video(s) from product site.")
             site_video_frames = _run_video_frame_pipeline(site_videos, indent="  ")
         if spec:
             design_input = collect_design_input(

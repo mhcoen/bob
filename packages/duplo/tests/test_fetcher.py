@@ -10,7 +10,9 @@ from duplo.fetcher import (
     PageRecord,
     _same_origin,
     detect_docs_links,
+    download_media,
     extract_links,
+    extract_media_urls,
     extract_text,
     fetch_site,
     fetch_text,
@@ -1229,3 +1231,156 @@ class TestFetchText:
         with patch("duplo.fetcher.httpx.get", return_value=resp):
             with pytest.raises(Exception, match="404"):
                 fetch_text("https://example.com/missing")
+
+
+class TestExtractMediaUrls:
+    """Tests for extract_media_urls."""
+
+    def test_extracts_img_src(self):
+        html = '<html><body><img src="/hero.png"></body></html>'
+        imgs, vids = extract_media_urls(html, "https://example.com/page")
+        assert "https://example.com/hero.png" in imgs
+        assert vids == []
+
+    def test_extracts_video_src(self):
+        html = '<html><body><video src="/demo.mp4"></video></body></html>'
+        imgs, vids = extract_media_urls(html, "https://example.com/page")
+        assert "https://example.com/demo.mp4" in vids
+
+    def test_extracts_source_tag_video(self):
+        html = (
+            '<html><body><video><source src="/clip.webm" type="video/webm"></video></body></html>'
+        )
+        imgs, vids = extract_media_urls(html, "https://example.com/page")
+        assert "https://example.com/clip.webm" in vids
+
+    def test_extracts_video_poster_as_image(self):
+        html = '<html><body><video src="/demo.mp4" poster="/thumb.png"></video></body></html>'
+        imgs, vids = extract_media_urls(html, "https://example.com/page")
+        assert "https://example.com/thumb.png" in imgs
+        assert "https://example.com/demo.mp4" in vids
+
+    def test_skips_data_uri(self):
+        html = '<html><body><img src="data:image/png;base64,abc"></body></html>'
+        imgs, _ = extract_media_urls(html, "https://example.com/")
+        assert imgs == []
+
+    def test_skips_svg(self):
+        html = '<html><body><img src="/icon.svg"></body></html>'
+        imgs, _ = extract_media_urls(html, "https://example.com/")
+        assert imgs == []
+
+    def test_deduplicates_within_page(self):
+        html = '<html><body><img src="/a.png"><img src="/a.png"></body></html>'
+        imgs, _ = extract_media_urls(html, "https://example.com/")
+        assert len(imgs) == 1
+
+    def test_picture_srcset(self):
+        html = (
+            "<html><body><picture>"
+            '<source srcset="/wide.jpg 1024w, /narrow.jpg 640w">'
+            "</picture></body></html>"
+        )
+        imgs, _ = extract_media_urls(html, "https://example.com/")
+        assert "https://example.com/wide.jpg" in imgs
+
+
+class TestDownloadMedia:
+    """Tests for download_media — cached-vs-new behavior."""
+
+    def test_returns_newly_downloaded_paths(self, tmp_path):
+        """New downloads appear in the returned lists."""
+        out = tmp_path / "media"
+        out.mkdir()
+
+        def fake_stream(method, url, **kw):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, vids = download_media(
+                ["https://example.com/a.png"],
+                ["https://example.com/b.mp4"],
+                out,
+            )
+        assert len(imgs) == 1
+        assert len(vids) == 1
+
+    def test_returns_cached_paths(self, tmp_path):
+        """Previously cached files are included in the returned lists."""
+        out = tmp_path / "media"
+        out.mkdir()
+        # Pre-create cached files.
+        cached_img = out / "example_com_hero.png"
+        cached_img.write_bytes(b"x" * 20_000)
+        cached_vid = out / "example_com_demo.mp4"
+        cached_vid.write_bytes(b"video-data")
+
+        # No HTTP calls should happen — files already exist.
+        with patch("duplo.fetcher.httpx.stream") as mock_stream:
+            imgs, vids = download_media(
+                ["https://example.com/hero.png"],
+                ["https://example.com/demo.mp4"],
+                out,
+            )
+        mock_stream.assert_not_called()
+        assert len(imgs) == 1
+        assert imgs[0] == cached_img
+        assert len(vids) == 1
+        assert vids[0] == cached_vid
+
+    def test_mixed_cached_and_new(self, tmp_path):
+        """Cached and newly downloaded files both appear in results."""
+        out = tmp_path / "media"
+        out.mkdir()
+        # Pre-create one cached image.
+        cached = out / "example_com_old.png"
+        cached.write_bytes(b"x" * 20_000)
+
+        def fake_stream(method, url, **kw):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 20_000])
+            return cm
+
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, _ = download_media(
+                [
+                    "https://example.com/old.png",
+                    "https://example.com/new.png",
+                ],
+                [],
+                out,
+            )
+        assert len(imgs) == 2
+
+    def test_tiny_image_excluded(self, tmp_path):
+        """Images smaller than _MIN_IMAGE_BYTES are not returned."""
+        out = tmp_path / "media"
+        out.mkdir()
+
+        def fake_stream(method, url, **kw):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            cm.raise_for_status = MagicMock()
+            # 100 bytes — below threshold
+            cm.iter_bytes = MagicMock(return_value=[b"x" * 100])
+            return cm
+
+        with patch("duplo.fetcher.httpx.stream", side_effect=fake_stream):
+            imgs, _ = download_media(["https://example.com/icon.png"], [], out)
+        assert imgs == []
+
+    def test_empty_urls(self, tmp_path):
+        """Empty input returns empty lists without creating output_dir."""
+        out = tmp_path / "media"
+        imgs, vids = download_media([], [], out)
+        assert imgs == []
+        assert vids == []
