@@ -8086,3 +8086,248 @@ class TestDesignInputPerSourceLookup:
         assert "demo_scene_0001.png" in captured_names  # source 2
         assert "promo_scene_0001.png" in captured_names  # source 3
         assert "hero.png" in captured_names  # source 4
+
+    def test_frame_content_hash_dedup_ref_wins(self, tmp_path, monkeypatch):
+        """Ref-declared frame with same content as scraped frame wins; scraped dropped."""
+        from duplo.orchestrator import collect_design_input
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+
+        # Visual-target video in ref/
+        vt_vid = ref_dir / "demo.mp4"
+        vt_vid.write_bytes(b"MP4" * 100)
+
+        # Scraped video (same demo appearing on the product page)
+        site_vid = tmp_path / ".duplo" / "site_media" / "demo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        # Both videos produce a frame with IDENTICAL content
+        identical_content = b"IDENTICAL_FRAME_CONTENT"
+        vt_frame = frames_dir / "demo_scene_0001.png"
+        vt_frame.write_bytes(identical_content)
+        scraped_frame = frames_dir / "demo_site_scene_0001.png"
+        scraped_frame.write_bytes(identical_content)
+
+        # A unique scraped frame (different content) should survive
+        unique_frame = frames_dir / "demo_site_scene_0002.png"
+        unique_frame.write_bytes(b"UNIQUE_SCRAPED_FRAME")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target", "visual-target"],
+                ),
+            ],
+        )
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch(
+                "duplo.main.load_product",
+                return_value=("App", "https://a.com"),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=Path("ref/demo.mp4"),
+                        frames=[vt_frame],
+                    ),
+                    ExtractionResult(
+                        source=site_vid,
+                        frames=[scraped_frame, unique_frame],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[vt_frame, scraped_frame, unique_frame],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.collect_design_input",
+                wraps=collect_design_input,
+            ) as mock_cdi,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[vt_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            mock_design.return_value = DesignRequirements()
+            main()
+
+        mock_cdi.assert_called_once()
+        args = mock_cdi.call_args[0]
+        vt_frames_arg = args[1]  # visual-target frames
+        svf_arg = args[3]  # site video frames
+
+        # Ref-declared frame kept
+        assert vt_frame in vt_frames_arg
+        # Duplicate scraped frame dropped (same content as ref frame)
+        assert scraped_frame not in svf_arg
+        # Unique scraped frame kept
+        assert unique_frame in svf_arg
+
+    def test_frame_content_hash_dedup_no_spec(self, tmp_path, monkeypatch):
+        """No-spec branch deduplicates video_frames against scraped frames."""
+        monkeypatch.chdir(tmp_path)
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        identical_content = b"SAME_FRAME"
+        ref_frame = frames_dir / "ref_scene_0001.png"
+        ref_frame.write_bytes(identical_content)
+        scraped_frame = frames_dir / "scraped_scene_0001.png"
+        scraped_frame.write_bytes(identical_content)
+        unique_scraped = frames_dir / "scraped_scene_0002.png"
+        unique_scraped.write_bytes(b"UNIQUE")
+
+        ref_vid = tmp_path / "ref" / "demo.mp4"
+        ref_vid.parent.mkdir(parents=True, exist_ok=True)
+        ref_vid.write_bytes(b"MP4" * 100)
+
+        site_vid = tmp_path / ".duplo" / "site_media" / "promo.mp4"
+        site_vid.parent.mkdir(parents=True, exist_ok=True)
+        site_vid.write_bytes(b"MP4" * 100)
+
+        from duplo.video_extractor import ExtractionResult
+
+        with (
+            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.main.validate_for_run") as mock_val,
+            patch("duplo.main.scan_directory") as mock_scan,
+            patch("duplo.main.load_product", return_value=None),
+            patch("duplo.main.validate_product_url") as mock_vprod,
+            patch(
+                "duplo.main.fetch_site",
+                return_value=("t", [], None, [], {"u": "<h>"}),
+            ),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], [site_vid]),
+            ),
+            patch(
+                "duplo.main.extract_all_videos",
+                return_value=[
+                    ExtractionResult(
+                        source=ref_vid,
+                        frames=[ref_frame],
+                    ),
+                    ExtractionResult(
+                        source=site_vid,
+                        frames=[scraped_frame, unique_scraped],
+                    ),
+                ],
+            ),
+            patch("duplo.main.filter_frames", return_value=[]),
+            patch(
+                "duplo.main.apply_filter",
+                return_value=[ref_frame, scraped_frame, unique_scraped],
+            ),
+            patch("duplo.main.describe_frames", return_value=[]),
+            patch("duplo.main.store_accepted_frames"),
+            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.main.extract_features", return_value=[]),
+            patch(
+                "duplo.main.ask_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="Python",
+                ),
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.save_selections",
+                return_value=tmp_path / _DUPLO_JSON,
+            ),
+            patch("duplo.main.write_claude_md"),
+            patch("duplo.main.generate_roadmap", return_value=None),
+        ):
+            from duplo.scanner import ScanResult
+
+            mock_val.return_value = type(
+                "V",
+                (),
+                {"warnings": [], "errors": []},
+            )()
+            mock_vprod.return_value = type(
+                "VR",
+                (),
+                {
+                    "single_product": True,
+                    "product_name": "App",
+                    "products": [],
+                    "reason": "",
+                    "unclear_boundaries": False,
+                },
+            )()
+            mock_scan.return_value = ScanResult(
+                images=[],
+                videos=[ref_vid],
+                pdfs=[],
+                text_files=[],
+                urls=["https://a.com"],
+            )
+            mock_design.return_value = DesignRequirements()
+            main()
+
+        # extract_design receives the deduped list
+        mock_design.assert_called_once()
+        design_input = mock_design.call_args[0][0]
+        design_names = [p.name for p in design_input]
+
+        # Ref frame kept
+        assert "ref_scene_0001.png" in design_names
+        # Duplicate scraped frame dropped
+        assert "scraped_scene_0001.png" not in design_names
+        # Unique scraped frame kept
+        assert "scraped_scene_0002.png" in design_names

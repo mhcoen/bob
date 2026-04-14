@@ -1122,16 +1122,36 @@ def _first_run(*, url: str | None = None) -> None:
     # Source 3: frames from scraped product-reference videos.
     # The per-source lookup uses exact path keys from
     # _accepted_frames_by_source, replacing stem-based matching.
+    #
+    # Frame-content-hash dedup: ref-declared frames (source 2) added
+    # to seen_frame_hashes first; scraped frames (source 3) added only
+    # if their content-hash is not already seen.  A user with both a
+    # ref/-declared local copy of a demo video AND the same video on a
+    # scraped product page should not have identical frames counted
+    # twice.  ref-declared frames win on collision.
     if spec:
-        vt_frames = [
+        vt_frames_raw = [
             frame
             for entry in behavioral_entries
             if "visual-target" in entry.roles
             for frame in accepted_by_source.get(entry.path, [])
         ]
-        site_video_frames = [
+        scraped_frames_raw = [
             frame for vp in site_videos for frame in accepted_by_source.get(vp, [])
         ]
+        seen_frame_hashes: set[str] = set()
+        vt_frames: list[Path] = []
+        for frame in vt_frames_raw:
+            h = hashlib.sha256(frame.read_bytes()).hexdigest()
+            if h not in seen_frame_hashes:
+                vt_frames.append(frame)
+                seen_frame_hashes.add(h)
+        site_video_frames: list[Path] = []
+        for frame in scraped_frames_raw:
+            h = hashlib.sha256(frame.read_bytes()).hexdigest()
+            if h not in seen_frame_hashes:
+                site_video_frames.append(frame)
+                seen_frame_hashes.add(h)
         design_input = collect_design_input(
             spec,
             vt_frames,
@@ -1139,11 +1159,25 @@ def _first_run(*, url: str | None = None) -> None:
             site_video_frames,
         )
     else:
+        # No spec: dedup video_frames (ref/) against scraped video
+        # frames using the same content-hash pattern.
+        seen_frame_hashes_ns: set[str] = set()
+        deduped_video_frames: list[Path] = []
+        for frame in video_frames:
+            h = hashlib.sha256(frame.read_bytes()).hexdigest()
+            if h not in seen_frame_hashes_ns:
+                deduped_video_frames.append(frame)
+                seen_frame_hashes_ns.add(h)
+        deduped_scraped_frames: list[Path] = []
+        for frame_path in (
+            frame for vp in site_videos for frame in accepted_by_source.get(vp, [])
+        ):
+            h = hashlib.sha256(frame_path.read_bytes()).hexdigest()
+            if h not in seen_frame_hashes_ns:
+                deduped_scraped_frames.append(frame_path)
+                seen_frame_hashes_ns.add(h)
         design_input = (
-            list(scan.images)
-            + video_frames
-            + site_images
-            + [frame for vp in site_videos for frame in accepted_by_source.get(vp, [])]
+            list(scan.images) + deduped_video_frames + site_images + deduped_scraped_frames
         )
     design = DesignRequirements()
     if design_input:
