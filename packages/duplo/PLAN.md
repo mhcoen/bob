@@ -420,13 +420,13 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Foundation: cross-origin link collection helper
 
-- [ ] [BATCH] Implement `_collect_cross_origin_links(raw_pages, source_url) -> list[str]` in `duplo/orchestrator.py` (new module)
-  - [ ] Per PIPELINE-design.md § `_collect_cross_origin_links`. Place in a new `duplo/orchestrator.py` module since `main.py` is already long; helper functions used by orchestration go here.
-  - [ ] Parse each HTML page in `raw_pages.values()`, extract every `<a href="...">` target, resolve to absolute URL, canonicalize via `url_utils.canonicalize_url`.
-  - [ ] Compare canonical form's (scheme, host, port) against the canonical `source_url`'s. Different = cross-origin = include in result.
-  - [ ] Only `<a href>` is considered. NOT `<link>`, `<script src>`, `<img src>`, `<video src>`, `<source src>`, etc. Per design § "Decisions".
-  - [ ] Return deduplicated list of canonical URLs. Per design: dedup happens here (per-run) and again in `append_sources` (against existing SPEC.md). Belt and braces; both use `canonicalize_url` so divergence is impossible by construction.
-  - [ ] Tests: same-origin links excluded; cross-origin links included; subdomain treated as cross-origin (`https://numi.app` vs `https://docs.numi.app` are different hosts); only `<a href>` collected (`<img src>` to cross-origin CDN is NOT collected); duplicates within a single page collapsed; duplicates across pages collapsed; canonicalization applied (uppercase or trailing-slash variants of the same URL collapse to one); empty `raw_pages` returns `[]`; relative href resolved against the page URL it appeared on (not against `source_url`) — a relative `href="docs"` on `https://example.com/foo/page.html` resolves to `https://example.com/foo/docs`, not `https://example.com/docs`.
+- [x] [BATCH] Implement `_collect_cross_origin_links(raw_pages, source_url) -> list[str]` in `duplo/orchestrator.py` (new module)
+  - [x] Per PIPELINE-design.md § `_collect_cross_origin_links`. Place in a new `duplo/orchestrator.py` module since `main.py` is already long; helper functions used by orchestration go here.
+  - [x] Parse each HTML page in `raw_pages.values()`, extract every `<a href="...">` target, resolve to absolute URL, canonicalize via `url_utils.canonicalize_url`.
+  - [x] Compare canonical form's (scheme, host, port) against the canonical `source_url`'s. Different = cross-origin = include in result.
+  - [x] Only `<a href>` is considered. NOT `<link>`, `<script src>`, `<img src>`, `<video src>`, `<source src>`, etc. Per design § "Decisions".
+  - [x] Return deduplicated list of canonical URLs. Per design: dedup happens here (per-run) and again in `append_sources` (against existing SPEC.md). Belt and braces; both use `canonicalize_url` so divergence is impossible by construction.
+  - [x] Tests: same-origin links excluded; cross-origin links included; subdomain treated as cross-origin (`https://numi.app` vs `https://docs.numi.app` are different hosts); only `<a href>` collected (`<img src>` to cross-origin CDN is NOT collected); duplicates within a single page collapsed; duplicates across pages collapsed; canonicalization applied (uppercase or trailing-slash variants of the same URL collapse to one); empty `raw_pages` returns `[]`; relative href resolved against the page URL it appeared on (not against `source_url`) — a relative `href="docs"` on `https://example.com/foo/page.html` resolves to `https://example.com/foo/docs`, not `https://example.com/docs`.
 
 ## Pipeline stage updates
 
