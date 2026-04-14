@@ -3180,6 +3180,19 @@ class TestFormatCounterExampleSources:
         spec = self._spec([keep, skip_proposed, skip_discovered, skip_docs])
         assert format_counter_example_sources(spec) == [keep]
 
+    def test_counter_example_with_scrape_deep_still_returned(self):
+        """scrape: deep on a counter-example is a separate concern; this filter
+        returns it regardless — the scrape-depth diagnostic lives in
+        format_scrapeable_sources, not here."""
+        e = self._entry(scrape="deep")
+        result = format_counter_example_sources(self._spec([e]))
+        assert result == [e]
+
+    def test_counter_example_with_scrape_shallow_still_returned(self):
+        e = self._entry(scrape="shallow")
+        result = format_counter_example_sources(self._spec([e]))
+        assert result == [e]
+
 
 class TestFormatDesignForPrompt:
     def test_both_present(self):
