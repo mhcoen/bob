@@ -572,7 +572,7 @@ def _parse_spec(text: str) -> ProductSpec:
             spec.behavior = body.strip()
             spec.behavior_contracts = _parse_contracts(body)
         elif key == "architecture":
-            spec.architecture = body.strip()
+            spec.architecture = _strip_comments(body).strip()
             if _FILL_IN_RE.search(_strip_comments(body)):
                 spec.fill_in_architecture = True
         elif key == "design":

@@ -306,3 +306,200 @@ class TestParseResponseAllDefaults:
         )
         result = parse_build_preferences("Some vague prose with no tech details")
         assert is_all_defaults(result)
+
+
+class TestTypicalArchitectureProse:
+    """Parse with typical architecture prose — fields populated correctly."""
+
+    @patch("duplo.build_prefs.query")
+    def test_swift_macos_app(self, mock_query: object) -> None:
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {
+                "platform": "desktop",
+                "language": "Swift",
+                "framework": "SwiftUI",
+                "dependencies": ["CoreData"],
+                "other_constraints": ["macOS only", "minimum macOS 14"],
+            }
+        )
+        result = parse_build_preferences(
+            "Native macOS desktop app built with Swift and SwiftUI. "
+            "Uses CoreData for persistence. Targets macOS 14+."
+        )
+        assert result.platform == "desktop"
+        assert result.language == "Swift/SwiftUI"
+        assert result.constraints == ["CoreData"]
+        assert result.preferences == ["macOS only", "minimum macOS 14"]
+
+    @patch("duplo.build_prefs.query")
+    def test_missing_fields_default(self, mock_query: object) -> None:
+        """LLM returns only platform and language; rest defaults."""
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {
+                "platform": "cli",
+                "language": "Go",
+            }
+        )
+        result = parse_build_preferences("Command-line tool written in Go.")
+        assert result.platform == "cli"
+        assert result.language == "Go"
+        assert result.constraints == []
+        assert result.preferences == []
+
+    @patch("duplo.build_prefs.query")
+    def test_web_fullstack(self, mock_query: object) -> None:
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {
+                "platform": "web",
+                "language": "TypeScript",
+                "framework": "Next.js",
+                "dependencies": ["PostgreSQL", "Tailwind CSS", "Prisma"],
+                "other_constraints": ["prefer server components"],
+            }
+        )
+        result = parse_build_preferences(
+            "Full-stack web app. TypeScript with Next.js. "
+            "PostgreSQL via Prisma. Tailwind CSS for styling. "
+            "Prefer server components where possible."
+        )
+        assert result.platform == "web"
+        assert result.language == "TypeScript/Next.js"
+        assert "PostgreSQL" in result.constraints
+        assert "Tailwind CSS" in result.constraints
+        assert result.preferences == ["prefer server components"]
+
+
+class TestCommentStrippingAndHash:
+    """Commented-out content in ## Architecture does NOT change hash."""
+
+    def test_comments_do_not_affect_hash(self) -> None:
+        """Adding/removing HTML comments does not change the hash."""
+        prose_no_comment = "Swift macOS app with SwiftUI."
+        prose_with_comment = "Swift macOS app with SwiftUI.<!-- TODO: consider AppKit fallback -->"
+        from duplo.spec_reader import _parse_spec
+
+        spec_clean = _parse_spec("## Architecture\n" + prose_no_comment)
+        spec_commented = _parse_spec("## Architecture\n" + prose_with_comment)
+        # Comments stripped before storage, so architecture text is identical.
+        assert spec_clean.architecture == spec_commented.architecture
+        # Therefore hashes are identical.
+        h1 = architecture_hash(spec_clean.architecture)
+        h2 = architecture_hash(spec_commented.architecture)
+        assert h1 == h2
+
+    def test_changing_real_content_changes_hash(self) -> None:
+        """Non-comment changes DO produce a different hash."""
+        from duplo.spec_reader import _parse_spec
+
+        spec_a = _parse_spec("## Architecture\nSwift macOS app.")
+        spec_b = _parse_spec("## Architecture\nRust CLI tool.")
+        assert architecture_hash(spec_a.architecture) != architecture_hash(spec_b.architecture)
+
+    def test_spec_architecture_has_comments_stripped(self) -> None:
+        """spec.architecture contains no HTML comments after parsing."""
+        from duplo.spec_reader import _parse_spec
+
+        spec = _parse_spec("## Architecture\nSwiftUI app.\n<!-- internal note -->\nUses MVVM.")
+        assert "<!--" not in spec.architecture
+        assert "internal note" not in spec.architecture
+        assert "SwiftUI app." in spec.architecture
+        assert "Uses MVVM." in spec.architecture
+
+
+class TestCacheHitAvoidsLlmCall:
+    """Cache hit avoids the LLM call (integration with _load_preferences)."""
+
+    def test_matching_hash_skips_parse(self) -> None:
+        from duplo.main import _load_preferences
+
+        arch = "Swift macOS app with SwiftUI and CoreData."
+        h = architecture_hash(arch)
+        spec = type("Spec", (), {"architecture": arch})()
+        data = {
+            "preferences": {
+                "platform": "desktop",
+                "language": "Swift/SwiftUI",
+                "constraints": ["CoreData"],
+                "preferences": ["macOS only"],
+            },
+            "architecture_hash": h,
+        }
+        with patch("duplo.main.parse_build_preferences") as mock_parse:
+            result = _load_preferences(data, spec)
+            mock_parse.assert_not_called()
+        assert result.platform == "desktop"
+        assert result.language == "Swift/SwiftUI"
+
+    def test_changed_architecture_triggers_reparse(self, tmp_path, monkeypatch) -> None:
+        from duplo.main import _load_preferences
+
+        monkeypatch.chdir(tmp_path)
+        old_arch = "Python CLI tool."
+        new_arch = "Swift macOS app with SwiftUI."
+        old_hash = architecture_hash(old_arch)
+        spec = type("Spec", (), {"architecture": new_arch})()
+        data = {
+            "preferences": {
+                "platform": "cli",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": old_hash,
+        }
+        new_prefs = BuildPreferences(
+            platform="desktop",
+            language="Swift/SwiftUI",
+            constraints=[],
+            preferences=["macOS only"],
+        )
+        with (
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=new_prefs,
+            ) as mock_parse,
+            patch("duplo.main.save_build_preferences"),
+        ):
+            result = _load_preferences(data, spec)
+            mock_parse.assert_called_once_with(new_arch)
+        assert result.platform == "desktop"
+        assert result.language == "Swift/SwiftUI"
+
+
+class TestAllDefaultsWarningViaValidate:
+    """All-defaults BuildPreferences emits warning via validate_build_preferences."""
+
+    def test_all_defaults_warning_message_content(self) -> None:
+        prefs = BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        warnings = validate_build_preferences(prefs)
+        assert len(warnings) == 1
+        assert "all defaults" in warnings[0]
+        assert "## Architecture" in warnings[0]
+        assert "Plan generation will proceed" in warnings[0]
+
+    @patch("duplo.build_prefs.query")
+    def test_all_defaults_from_parse_triggers_warning(self, mock_query: object) -> None:
+        """End-to-end: LLM returns empty -> validate emits warning."""
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {
+                "platform": "",
+                "language": "",
+                "framework": "",
+                "dependencies": [],
+                "other_constraints": [],
+            }
+        )
+        prefs = parse_build_preferences("vague text with no specifics")
+        assert is_all_defaults(prefs)
+        warnings = validate_build_preferences(prefs)
+        assert len(warnings) == 1
+
+    def test_populated_prefs_no_warning(self) -> None:
+        prefs = BuildPreferences(
+            platform="desktop",
+            language="Swift/SwiftUI",
+            constraints=["CoreData"],
+            preferences=["macOS only"],
+        )
+        warnings = validate_build_preferences(prefs)
+        assert warnings == []
