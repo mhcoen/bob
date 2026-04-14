@@ -1176,6 +1176,19 @@ def save_sources(
     return path
 
 
+def load_sources(
+    *,
+    target_dir: Path | str = ".",
+) -> list[dict]:
+    """Load the ``sources`` list from *duplo.json*.
+
+    Returns an empty list if no sources have been recorded.
+    """
+    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    data = _safe_read_json(path)
+    return data.get("sources", [])
+
+
 EXAMPLES_DIR = ".duplo/examples"
 RAW_PAGES_DIR = ".duplo/raw_pages"
 REFERENCES_DIR = ".duplo/references"

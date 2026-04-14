@@ -58,6 +58,7 @@ from duplo.saver import (
     save_reference_urls,
     save_roadmap,
     save_sources,
+    load_sources,
     save_screenshot_feature_map,
     save_selections,
     store_accepted_frames,
@@ -698,6 +699,39 @@ class TestSaveSources:
     def test_file_ends_with_newline(self, tmp_path):
         save_sources(self._SOURCES, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
+
+
+class TestLoadSources:
+    _SOURCES = [
+        {
+            "url": "https://example.com",
+            "last_scraped": "2026-04-14T10:00:00+00:00",
+            "content_hash": "abc123",
+            "scrape_depth_used": "deep",
+        },
+    ]
+
+    def test_returns_saved_sources(self, tmp_path):
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        result = load_sources(target_dir=tmp_path)
+        assert len(result) == 1
+        assert result[0]["url"] == "https://example.com"
+        assert result[0]["content_hash"] == "abc123"
+
+    def test_empty_when_no_file(self, tmp_path):
+        result = load_sources(target_dir=tmp_path)
+        assert result == []
+
+    def test_empty_when_no_sources_key(self, tmp_path):
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / DUPLO_JSON).write_text('{"features": []}')
+        result = load_sources(target_dir=tmp_path)
+        assert result == []
+
+    def test_round_trip(self, tmp_path):
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        result = load_sources(target_dir=tmp_path)
+        assert result == self._SOURCES
 
 
 class TestSaveExamples:
