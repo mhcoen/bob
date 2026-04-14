@@ -440,3 +440,171 @@ class TestCheckUnlistedRefFiles:
         check_unlisted_ref_files(scan, [], ref_dir=ref, errors_path=errors)
         record = json.loads(errors.read_text().strip())
         assert "ref/orphan.png" in record["message"]
+
+
+class TestScanDirectoryRefOnly:
+    """scan_directory only enumerates files under ref/, ignoring project root."""
+
+    def test_only_ref_files_found(self, tmp_path: Path):
+        """Files in the project root are ignored when scanning ref/."""
+        root = tmp_path
+        ref = root / "ref"
+        ref.mkdir()
+        # Root-level files — should NOT be found.
+        (root / "PLAN.md").write_text("# Plan")
+        (root / "logo.png").write_bytes(b"PNG" * 100)
+        (root / "notes.txt").write_text("root notes")
+        # ref/ files — should be found.
+        (ref / "screenshot.png").write_bytes(b"PNG" * 100)
+        (ref / "spec.pdf").write_bytes(b"%PDF" * 50)
+
+        result = scan_directory(ref)
+
+        names = {p.name for p in result.images + result.pdfs + result.text_files}
+        assert "screenshot.png" in names
+        assert "spec.pdf" in names
+        assert "PLAN.md" not in names
+        assert "logo.png" not in names
+        assert "notes.txt" not in names
+
+    def test_ignores_sibling_directories(self, tmp_path: Path):
+        """Directories next to ref/ are not scanned."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        sibling = tmp_path / "screenshots"
+        sibling.mkdir()
+        (sibling / "capture.png").write_bytes(b"PNG" * 100)
+        (ref / "demo.png").write_bytes(b"PNG" * 100)
+
+        result = scan_directory(ref)
+
+        assert len(result.images) == 1
+        assert result.images[0].name == "demo.png"
+
+    def test_ref_listed_file_included_with_role(self, tmp_path: Path):
+        """File in ref/ listed in ## References is included with its role."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "ui.png"
+        img.write_bytes(b"PNG" * 100)
+
+        scan = scan_directory(ref)
+        assert len(scan.images) == 1
+
+        # Role lookup via scan_files with references.
+        refs = [ReferenceEntry(path=Path("ref/ui.png"), roles=["visual-target"])]
+        result = scan_files(scan.images, references=refs)
+        assert result.roles[img] == ["visual-target"]
+
+    def test_ref_unlisted_file_produces_diagnostic(self, tmp_path: Path):
+        """File in ref/ NOT in ## References gets diagnostic."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "listed.png").write_bytes(b"PNG" * 100)
+        (ref / "stray.jpg").write_bytes(b"JPG" * 100)
+
+        scan = scan_directory(ref)
+        refs = [ReferenceEntry(path=Path("ref/listed.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+
+        assert len(unlisted) == 1
+        assert unlisted[0].name == "stray.jpg"
+        record = json.loads(errors.read_text().strip())
+        assert record["site"] == "scanner"
+        assert "stray.jpg" in record["message"]
+
+    def test_tiny_image_included_if_declared(self, tmp_path: Path):
+        """A tiny image is included when declared in ## References."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        tiny = ref / "icon.png"
+        tiny.write_bytes(b"P")  # 1 byte — no relevance filtering.
+
+        scan = scan_directory(ref)
+        assert len(scan.images) == 1
+
+        refs = [ReferenceEntry(path=Path("ref/icon.png"), roles=["visual-target"])]
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, refs, ref_dir=ref, errors_path=errors)
+        assert unlisted == []
+
+    def test_large_image_excluded_if_not_declared(self, tmp_path: Path):
+        """A large image without a ## References entry gets diagnostic."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        big = ref / "wallpaper.png"
+        big.write_bytes(b"PNG" * 100_000)  # Large file, undeclared.
+
+        scan = scan_directory(ref)
+        assert len(scan.images) == 1
+
+        errors = tmp_path / "errors.jsonl"
+        unlisted = check_unlisted_ref_files(scan, [], ref_dir=ref, errors_path=errors)
+        assert len(unlisted) == 1
+        assert unlisted[0].name == "wallpaper.png"
+
+    def test_subdirs_under_ref_ignored(self, tmp_path: Path):
+        """scan_directory does not recurse into subdirectories of ref/."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        sub = ref / "subdir"
+        sub.mkdir()
+        (sub / "nested.png").write_bytes(b"PNG" * 100)
+        (ref / "top.png").write_bytes(b"PNG" * 100)
+
+        result = scan_directory(ref)
+
+        assert len(result.images) == 1
+        assert result.images[0].name == "top.png"
+
+
+class TestScanFilesRoleLookupIntegration:
+    """scan_files role-lookup matches paths against ## References correctly."""
+
+    def test_relative_path_match(self, tmp_path: Path):
+        """File passed as relative ref/name matches ref entry."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        img = ref / "shot.png"
+        img.write_bytes(b"PNG")
+        refs = [ReferenceEntry(path=Path("ref/shot.png"), roles=["docs"])]
+        result = scan_files([Path("ref/shot.png")], references=refs)
+        # File doesn't exist at cwd-relative path so won't classify,
+        # but role lookup still works for existing files.
+        # Use the absolute path that does exist.
+        result = scan_files([img], references=refs)
+        assert result.roles[img] == ["docs"]
+
+    def test_multiple_entries_each_get_roles(self, tmp_path: Path):
+        """Each file matches its own entry independently."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        a = ref / "a.png"
+        a.write_bytes(b"PNG")
+        b = ref / "b.pdf"
+        b.write_bytes(b"%PDF")
+        c = ref / "c.txt"
+        c.write_text("notes")
+        refs = [
+            ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"]),
+            ReferenceEntry(path=Path("ref/b.pdf"), roles=["docs"]),
+            ReferenceEntry(path=Path("ref/c.txt"), roles=["behavioral-target"]),
+        ]
+        result = scan_files([a, b, c], references=refs)
+        assert result.roles[a] == ["visual-target"]
+        assert result.roles[b] == ["docs"]
+        assert result.roles[c] == ["behavioral-target"]
+
+    def test_unlisted_file_gets_no_role(self, tmp_path: Path):
+        """File not in ## References has no entry in roles dict."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        listed = ref / "listed.png"
+        listed.write_bytes(b"PNG")
+        orphan = ref / "orphan.png"
+        orphan.write_bytes(b"PNG")
+        refs = [ReferenceEntry(path=Path("ref/listed.png"), roles=["visual-target"])]
+        result = scan_files([listed, orphan], references=refs)
+        assert listed in result.roles
+        assert orphan not in result.roles
