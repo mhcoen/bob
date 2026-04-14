@@ -392,6 +392,30 @@ class TestMatchesExcluded:
         feat = self._feat("Cpp support")
         assert _matches_excluded(feat, ["C++"]) is False
 
+    def test_description_only_match(self):
+        """Term absent from name but present in description still matches."""
+        feat = self._feat("Data export", description="Exports via REST API.")
+        assert _matches_excluded(feat, ["REST API"]) is True
+
+    def test_description_only_no_match_when_absent(self):
+        """Neither name nor description contains term."""
+        feat = self._feat("Data export", description="Exports data to CSV.")
+        assert _matches_excluded(feat, ["REST API"]) is False
+
+    def test_name_matches_description_does_not(self):
+        """Match in name is sufficient even if description doesn't match."""
+        feat = self._feat("REST API", description="Provides data access.")
+        assert _matches_excluded(feat, ["REST API"]) is True
+
+    def test_diagnostic_on_description_match(self):
+        """Diagnostic emitted when match is in description, not name."""
+        feat = self._feat("Data export", description="Exports via REST API.")
+        with patch("duplo.extractor.record_failure") as mock_rf:
+            result = _matches_excluded(feat, ["REST API"])
+        assert result is True
+        mock_rf.assert_called_once()
+        assert "Data export" in mock_rf.call_args[0][2]
+
 
 # ---------------------------------------------------------------------------
 # helpers
