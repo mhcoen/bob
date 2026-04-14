@@ -8850,6 +8850,9 @@ class TestAutogenBlockSkipsVision:
                 return_value=("t", [], None, [], {}),
             ),
             patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
             patch("duplo.main.extract_features", return_value=[]),
             patch(
                 "duplo.main.ask_preferences",
@@ -8884,6 +8887,8 @@ class TestAutogenBlockSkipsVision:
 
         # Vision should NOT be called since autogen block already exists
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
 
     def test_first_run_writes_autogen_block(self, tmp_path, monkeypatch):
         """_first_run writes autogen block to SPEC.md when absent."""
@@ -9005,7 +9010,9 @@ class TestAutogenBlockSkipsVision:
 
         with (
             patch("duplo.main.extract_design") as mock_design,
-            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
         ):
             _analyze_new_files(
                 ["ref/new_shot.png"],
@@ -9013,6 +9020,8 @@ class TestAutogenBlockSkipsVision:
             )
 
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
 
     def test_rescrape_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
         """_rescrape_product_url skips extract_design when autogen exists."""
@@ -9066,13 +9075,17 @@ class TestAutogenBlockSkipsVision:
                 ],
             ),
             patch("duplo.main.extract_design") as mock_design,
-            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
             patch("duplo.main.save_reference_urls"),
             patch("duplo.main.save_raw_content"),
         ):
             _rescrape_product_url(spec=spec)
 
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
 
     def test_no_spec_does_not_skip_vision(self, tmp_path, monkeypatch):
         """When spec is None, autogen check is False and Vision proceeds."""
@@ -9199,6 +9212,9 @@ class TestAutogenBlockSkipsVision:
                 return_value=("t", [], None, [], {}),
             ),
             patch("duplo.main.extract_design") as mock_design,
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
             patch("duplo.main.collect_design_input", return_value=[img]),
             patch("duplo.main.extract_features", return_value=[]),
             patch(
@@ -9234,6 +9250,8 @@ class TestAutogenBlockSkipsVision:
             main()
 
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
         mock_rf.assert_called_once()
         args = mock_rf.call_args
         assert args[0][0] == "orchestrator:design_extraction"
@@ -9258,7 +9276,9 @@ class TestAutogenBlockSkipsVision:
 
         with (
             patch("duplo.main.extract_design") as mock_design,
-            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
             patch("duplo.main.collect_design_input", return_value=[img]),
             patch("duplo.main.record_failure") as mock_rf,
         ):
@@ -9268,6 +9288,8 @@ class TestAutogenBlockSkipsVision:
             )
 
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
         mock_rf.assert_called_once()
         args = mock_rf.call_args
         assert args[0][0] == "orchestrator:design_extraction"
@@ -9326,7 +9348,9 @@ class TestAutogenBlockSkipsVision:
                 ],
             ),
             patch("duplo.main.extract_design") as mock_design,
-            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.save_design_requirements",
+            ) as mock_save_dr,
             patch("duplo.main.save_reference_urls"),
             patch("duplo.main.save_raw_content"),
             patch("duplo.main.record_failure") as mock_rf,
@@ -9334,6 +9358,8 @@ class TestAutogenBlockSkipsVision:
             _rescrape_product_url(spec=spec)
 
         mock_design.assert_not_called()
+        # Cache invariant: save_design_requirements also skipped
+        mock_save_dr.assert_not_called()
         # May have multiple record_failure calls; find the design one.
         design_calls = [
             c for c in mock_rf.call_args_list if c[0][0] == "orchestrator:design_extraction"
