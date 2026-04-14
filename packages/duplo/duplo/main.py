@@ -211,7 +211,7 @@ from duplo.design_extractor import (
     extract_design,
     format_design_section,
 )
-from duplo.orchestrator import collect_design_input
+from duplo.orchestrator import _collect_cross_origin_links, collect_design_input
 from duplo.doc_tables import DocStructures
 from duplo.issuer import generate_issue_list, save_issue_list
 from duplo.extractor import Feature, _matches_excluded, extract_features
@@ -259,6 +259,7 @@ from duplo.investigator import format_investigation, investigate, investigation_
 from duplo.migration import _check_migration
 from duplo.spec_reader import (
     ProductSpec,
+    SourceEntry,
     format_behavioral_references,
     format_contracts_as_verification,
     format_counter_example_sources,
@@ -266,8 +267,10 @@ from duplo.spec_reader import (
     format_doc_references,
     format_spec_for_prompt,
     read_spec,
+    scrapeable_sources,
     validate_for_run,
 )
+from duplo.spec_writer import append_sources
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
@@ -450,6 +453,115 @@ class UpdateSummary:
     design_refinements: int = 0
     tasks_appended: int = 0
     collected_text: str = ""
+
+
+@dataclasses.dataclass
+class ScrapeResult:
+    """Accumulated results from scraping all declared sources."""
+
+    combined_text: str = ""
+    all_code_examples: list = dataclasses.field(default_factory=list)
+    all_page_records: list = dataclasses.field(default_factory=list)
+    all_raw_pages: dict = dataclasses.field(default_factory=dict)
+    product_ref_raw_pages: dict = dataclasses.field(default_factory=dict)
+    merged_doc_structures: DocStructures = dataclasses.field(default_factory=DocStructures)
+    discovered_urls: list = dataclasses.field(default_factory=list)
+
+
+def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
+    """Iterate scrapeable sources from SPEC.md and fetch each.
+
+    Accumulates scraped text, code examples, page records, raw pages,
+    and doc structures from all sources.  Deduplicates page records and
+    raw pages by canonical URL using first-source-wins semantics.
+    Collects cross-origin links from deep-crawl sources for SPEC.md
+    write-back.
+    """
+    result = ScrapeResult()
+    seen_canonical_urls: set[str] = set()
+
+    sources = scrapeable_sources(spec)
+    if not sources:
+        return result
+
+    print(f"\nScraping {len(sources)} declared source(s) \u2026")
+    for source in sources:
+        print(f"  Fetching {source.url} (depth={source.scrape}) \u2026")
+        try:
+            (
+                scraped_text,
+                code_examples,
+                doc_structures,
+                page_records,
+                source_raw_pages,
+            ) = fetch_site(source.url, scrape_depth=source.scrape)
+        except Exception as exc:
+            print(f"  Failed to fetch {source.url}: {exc}")
+            continue
+
+        result.combined_text += scraped_text + "\n"
+        result.all_code_examples.extend(code_examples)
+
+        # First-source-wins dedup for PageRecord and raw HTML.
+        for record in page_records:
+            if record.url not in seen_canonical_urls:
+                result.all_page_records.append(record)
+                seen_canonical_urls.add(record.url)
+        for url, html in source_raw_pages.items():
+            result.all_raw_pages.setdefault(url, html)
+            if source.role == "product-reference":
+                result.product_ref_raw_pages.setdefault(url, html)
+
+        if doc_structures:
+            result.merged_doc_structures.feature_tables.extend(doc_structures.feature_tables)
+            result.merged_doc_structures.operation_lists.extend(doc_structures.operation_lists)
+            result.merged_doc_structures.unit_lists.extend(doc_structures.unit_lists)
+            result.merged_doc_structures.function_refs.extend(doc_structures.function_refs)
+
+        # Cross-origin discovery is a deep-crawl behavior only.
+        if source.scrape == "deep":
+            result.discovered_urls.extend(
+                _collect_cross_origin_links(source.url, source_raw_pages)
+            )
+
+    return result
+
+
+def _persist_scrape_result(result: ScrapeResult) -> None:
+    """Save accumulated scrape artifacts to .duplo/.
+
+    Persists code examples, page records, raw page HTML, and doc
+    structures from a :class:`ScrapeResult`.  Appends discovered
+    cross-origin URLs to SPEC.md with ``discovered: true``.
+    """
+    if result.all_code_examples:
+        save_examples(result.all_code_examples)
+    if result.all_page_records:
+        save_reference_urls(result.all_page_records)
+        if result.all_raw_pages:
+            save_raw_content(result.all_raw_pages, result.all_page_records)
+    if result.merged_doc_structures:
+        save_doc_structures(result.merged_doc_structures)
+
+    # Append discovered URLs to ## Sources with discovered: true.
+    if result.discovered_urls:
+        spec_path = Path.cwd() / "SPEC.md"
+        if spec_path.exists():
+            existing = spec_path.read_text(encoding="utf-8")
+            modified = append_sources(
+                existing,
+                [
+                    SourceEntry(
+                        url=u,
+                        role="docs",
+                        scrape="deep",
+                        discovered=True,
+                    )
+                    for u in result.discovered_urls
+                ],
+            )
+            if modified != existing:
+                spec_path.write_text(modified, encoding="utf-8")
 
 
 def _download_site_media(
@@ -883,7 +995,8 @@ def _first_run(*, url: str | None = None) -> None:
             text_content = text_content + pdf_text + "\n"
             print(f"  Extracted text from {len(scan.pdfs)} PDF(s).")
 
-    # Fetch the first URL found (primary product URL).
+    # Scrape declared sources (when SPEC.md exists) or fall back to
+    # single-URL fetch from scanner results.
     source_url = ""
     scraped_text = ""
     code_examples: list = []
@@ -903,30 +1016,51 @@ def _first_run(*, url: str | None = None) -> None:
         if source_url:
             print(f"  Source: {source_url}")
 
-    if scan.urls and not source_url:
-        source_url = scan.urls[0]
-        source_url, product_name = _validate_url(source_url)
-        if not source_url:
-            return
-
-    if source_url:
-        print(f"\nFetching {source_url} \u2026")
-        (
-            scraped_text,
-            code_examples,
-            doc_structures,
-            page_records,
-            product_ref_raw_pages,
-        ) = fetch_site(source_url)
+    # When a spec declares scrapeable sources, iterate them all with
+    # their declared scrape depths.  Otherwise fall back to single-URL
+    # fetch from scanner results / saved product identity.
+    spec_sources = scrapeable_sources(spec) if spec else []
+    if spec_sources:
+        scrape_result = _scrape_declared_sources(spec)
+        scraped_text = scrape_result.combined_text
+        code_examples = scrape_result.all_code_examples
+        doc_structures = scrape_result.merged_doc_structures
+        page_records = scrape_result.all_page_records
+        product_ref_raw_pages = scrape_result.product_ref_raw_pages
+        _persist_scrape_result(scrape_result)
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
+        # Use the first product-reference source URL as the canonical
+        # source_url for product identity (if not already saved).
+        if not source_url:
+            for src in spec_sources:
+                if src.role == "product-reference":
+                    source_url = src.url
+                    break
+    else:
+        if scan.urls and not source_url:
+            source_url = scan.urls[0]
+            source_url, product_name = _validate_url(source_url)
+            if not source_url:
+                return
 
-        # Download embedded images and videos from product-reference pages.
-        # The product URL is a product-reference source, so all raw pages
-        # from this single-source fetch are product-reference pages.
-        # Returns all media (cached + new).  Kept separate from scan
-        # so move_references does not try to relocate files that are
-        # already under .duplo/site_media/.
+        if source_url:
+            print(f"\nFetching {source_url} \u2026")
+            (
+                scraped_text,
+                code_examples,
+                doc_structures,
+                page_records,
+                product_ref_raw_pages,
+            ) = fetch_site(source_url)
+            if code_examples:
+                print(f"Extracted {len(code_examples)} code example(s) from docs.")
+
+    # Download embedded images and videos from product-reference pages.
+    # Returns all media (cached + new).  Kept separate from scan
+    # so move_references does not try to relocate files that are
+    # already under .duplo/site_media/.
+    if product_ref_raw_pages:
         site_images, site_videos = _download_site_media(product_ref_raw_pages)
         if site_images:
             print(f"  {len(site_images)} image(s) from product site.")
@@ -1609,10 +1743,20 @@ def _subsequent_run() -> None:
             summary.video_frames_extracted = analysis.video_frames_extracted
             summary.collected_text = analysis.collected_text
 
-    # Re-scrape the product URL to pick up site changes.
-    pages, examples, scraped_text = _rescrape_product_url(spec=spec)
-    summary.pages_rescraped = pages
-    summary.examples_rescraped = examples
+    # Scrape declared sources (when SPEC.md has scrapeable entries) or
+    # fall back to single-URL re-scrape from duplo.json.
+    scraped_text = ""
+    spec_sources = scrapeable_sources(spec) if spec else []
+    if spec_sources:
+        scrape_result = _scrape_declared_sources(spec)
+        scraped_text = scrape_result.combined_text
+        _persist_scrape_result(scrape_result)
+        summary.pages_rescraped = len(scrape_result.all_page_records)
+        summary.examples_rescraped = len(scrape_result.all_code_examples)
+    else:
+        pages, examples, scraped_text = _rescrape_product_url(spec=spec)
+        summary.pages_rescraped = pages
+        summary.examples_rescraped = examples
 
     # Extract text from docs-role references.
     if spec:
@@ -1624,7 +1768,8 @@ def _subsequent_run() -> None:
                 summary.collected_text += docs_text + "\n"
                 print(f"  Extracted text from {len(doc_refs)} docs reference(s).")
 
-    # Combine text from new files with re-scraped content for feature extraction.
+    # Combine text from new files with re-scraped content for feature
+    # extraction.
     combined_text = scraped_text
     if summary.collected_text.strip():
         combined_text = summary.collected_text + "\n" + combined_text

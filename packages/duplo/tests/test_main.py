@@ -14,6 +14,7 @@ from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 from duplo.gap_detector import detect_design_gaps
 from duplo.main import (
+    ScrapeResult,
     UpdateSummary,
     _analyze_new_files,
     _build_completion_history,
@@ -25,6 +26,7 @@ from duplo.main import (
     _investigation_context,
     _load_preferences,
     _partition_features,
+    _persist_scrape_result,
     _plan_has_unchecked_tasks,
     _plan_is_complete,
     _prefs_from_dict,
@@ -32,6 +34,7 @@ from duplo.main import (
     _print_status,
     _print_summary,
     _rescrape_product_url,
+    _scrape_declared_sources,
     _unimplemented_features,
     _visual_target_video_frames,
     main,
@@ -5802,6 +5805,7 @@ class TestValidateForRunWiring:
                 "scope_include": None,
                 "scope_exclude": None,
                 "references": [],
+                "sources": [],
             },
         )()
         vr = ValidationResult(
@@ -7162,3 +7166,333 @@ class TestLoadPreferences:
             _load_preferences(data, spec)
         assert data["preferences"]["platform"] == "api"
         assert data["architecture_hash"] != "old"
+
+
+class TestScrapeDeclaredSources:
+    """Tests for _scrape_declared_sources multi-source iteration."""
+
+    def _make_spec(self, sources):
+        from duplo.spec_reader import ProductSpec
+
+        return ProductSpec(sources=sources)
+
+    def _make_source(self, url, role="product-reference", scrape="deep"):
+        from duplo.spec_reader import SourceEntry
+
+        return SourceEntry(url=url, role=role, scrape=scrape)
+
+    def test_calls_fetch_site_per_source(self):
+        """fetch_site called once per scrapeable source."""
+        src_a = self._make_source("https://a.com", scrape="deep")
+        src_b = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_a, src_b])
+
+        calls = []
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            calls.append((url, scrape_depth))
+            return ("text", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(calls) == 2
+        assert calls[0] == ("https://a.com", "deep")
+        assert calls[1] == ("https://b.com", "shallow")
+        assert "text" in result.combined_text
+
+    def test_first_source_wins_page_records(self):
+        """Duplicate canonical URL keeps first source's record."""
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs")
+        spec = self._make_spec([src_a, src_b])
+
+        record_a = PageRecord(
+            url="https://shared.com/page",
+            fetched_at="t1",
+            content_hash="hash_a",
+        )
+        record_b = PageRecord(
+            url="https://shared.com/page",
+            fetched_at="t2",
+            content_hash="hash_b",
+        )
+
+        fetch_results = [
+            ("text_a", [], None, [record_a], {}),
+            ("text_b", [], None, [record_b], {}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.all_page_records) == 1
+        assert result.all_page_records[0].content_hash == "hash_a"
+
+    def test_first_source_wins_raw_pages(self):
+        """Duplicate canonical URL in raw_pages keeps first HTML."""
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs")
+        spec = self._make_spec([src_a, src_b])
+
+        fetch_results = [
+            ("", [], None, [], {"https://shared.com": "<html>A</html>"}),
+            ("", [], None, [], {"https://shared.com": "<html>B</html>"}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert result.all_raw_pages["https://shared.com"] == "<html>A</html>"
+
+    def test_discovered_urls_only_from_deep(self):
+        """Cross-origin links collected only from deep sources."""
+        src_deep = self._make_source("https://a.com", scrape="deep")
+        src_shallow = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_deep, src_shallow])
+
+        deep_raw = {"https://a.com": ('<html><a href="https://x.com">link</a></html>')}
+        shallow_raw = {"https://b.com": ('<html><a href="https://y.com">link</a></html>')}
+
+        fetch_results = [
+            ("", [], None, [], deep_raw),
+            ("", [], None, [], shallow_raw),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_deep, src_shallow],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        # Deep source's cross-origin link is collected.
+        assert "https://x.com" in result.discovered_urls
+        # Shallow source's cross-origin link is NOT collected.
+        assert "https://y.com" not in result.discovered_urls
+
+    def test_product_ref_raw_pages_only_from_product_ref(self):
+        """Only product-reference sources contribute to product_ref."""
+        src_prod = self._make_source("https://prod.com", role="product-reference")
+        src_docs = self._make_source("https://docs.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_prod, src_docs])
+
+        fetch_results = [
+            (
+                "",
+                [],
+                None,
+                [],
+                {"https://prod.com": "<html>prod</html>"},
+            ),
+            (
+                "",
+                [],
+                None,
+                [],
+                {"https://docs.com": "<html>docs</html>"},
+            ),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_prod, src_docs],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert "https://prod.com" in result.product_ref_raw_pages
+        assert "https://docs.com" not in result.product_ref_raw_pages
+        # Both present in all_raw_pages.
+        assert "https://prod.com" in result.all_raw_pages
+        assert "https://docs.com" in result.all_raw_pages
+
+    def test_doc_structures_merged(self):
+        """Doc structures accumulated across sources."""
+        from duplo.doc_tables import DocStructures, FeatureTable
+
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs")
+        spec = self._make_spec([src_a, src_b])
+
+        ds_a = DocStructures(
+            feature_tables=[FeatureTable(heading="h", rows=[["r"]], source_url="a")]
+        )
+        ds_b = DocStructures(
+            feature_tables=[FeatureTable(heading="h2", rows=[["r2"]], source_url="b")]
+        )
+
+        fetch_results = [
+            ("", [], ds_a, [], {}),
+            ("", [], ds_b, [], {}),
+        ]
+        call_idx = [0]
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            return fetch_results[idx]
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.merged_doc_structures.feature_tables) == 2
+
+    def test_empty_sources_returns_empty_result(self):
+        """No scrapeable sources returns empty ScrapeResult."""
+        spec = self._make_spec([])
+        with patch("duplo.main.scrapeable_sources", return_value=[]):
+            result = _scrape_declared_sources(spec)
+
+        assert result.combined_text == ""
+        assert result.all_page_records == []
+        assert result.all_raw_pages == {}
+        assert result.product_ref_raw_pages == {}
+
+    def test_fetch_failure_continues(self):
+        """Exception from fetch_site for one source skips it."""
+        src_a = self._make_source("https://a.com")
+        src_b = self._make_source("https://b.com", role="docs")
+        spec = self._make_spec([src_a, src_b])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            if url == "https://a.com":
+                raise ConnectionError("timeout")
+            return ("b_text", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert "b_text" in result.combined_text
+
+
+class TestPersistScrapeResult:
+    """Tests for _persist_scrape_result saving to .duplo/."""
+
+    def test_saves_examples(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = ScrapeResult(all_code_examples=["ex1"])
+        with (
+            patch("duplo.main.save_examples") as mock_save,
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+        ):
+            _persist_scrape_result(result)
+        mock_save.assert_called_once_with(["ex1"])
+
+    def test_saves_page_records_and_raw(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        record = PageRecord(url="https://a.com", fetched_at="t", content_hash="h")
+        result = ScrapeResult(
+            all_page_records=[record],
+            all_raw_pages={"https://a.com": "<html>A</html>"},
+        )
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls") as mock_urls,
+            patch("duplo.main.save_raw_content") as mock_raw,
+            patch("duplo.main.save_doc_structures"),
+        ):
+            _persist_scrape_result(result)
+        mock_urls.assert_called_once_with([record])
+        mock_raw.assert_called_once()
+
+    def test_discovered_urls_append_to_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text("## Sources\n", encoding="utf-8")
+        result = ScrapeResult(discovered_urls=["https://discovered.com"])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+            patch(
+                "duplo.main.append_sources",
+                return_value="## Sources\n- https://discovered.com\n",
+            ) as mock_append,
+        ):
+            _persist_scrape_result(result)
+        mock_append.assert_called_once()
+        args = mock_append.call_args
+        entries = args[0][1]
+        assert len(entries) == 1
+        assert entries[0].discovered is True
+        assert entries[0].role == "docs"
+
+    def test_no_write_when_spec_unchanged(self, tmp_path, monkeypatch):
+        """SPEC.md not rewritten when append_sources returns same."""
+        monkeypatch.chdir(tmp_path)
+        original = "## Sources\n- https://discovered.com\n"
+        spec_path = tmp_path / "SPEC.md"
+        spec_path.write_text(original, encoding="utf-8")
+        result = ScrapeResult(discovered_urls=["https://discovered.com"])
+        with (
+            patch("duplo.main.save_examples"),
+            patch("duplo.main.save_reference_urls"),
+            patch("duplo.main.save_raw_content"),
+            patch("duplo.main.save_doc_structures"),
+            patch("duplo.main.append_sources", return_value=original),
+        ):
+            _persist_scrape_result(result)
+        # File content unchanged.
+        assert spec_path.read_text(encoding="utf-8") == original
