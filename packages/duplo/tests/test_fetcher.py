@@ -255,13 +255,11 @@ class TestFetchSite:
     def test_fetches_seed_url(self):
         html = "<html><body><h1>Product</h1></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=1
-            )
+            text, _examples, _structs, _records, _raw = fetch_site("https://example.com")
         assert "Product" in text
         assert "https://example.com" in text
 
-    def test_follows_high_priority_links(self):
+    def test_follows_high_priority_same_origin_links(self):
         seed_html = '<html><body><p>Home</p><a href="/docs">Documentation</a></body></html>'
         docs_html = "<html><body><p>API docs here</p></body></html>"
 
@@ -278,9 +276,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=5
-            )
+            text, _examples, _structs, _records, _raw = fetch_site("https://example.com")
 
         assert "Home" in text
         assert "API docs here" in text
@@ -300,89 +296,17 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site("https://example.com", max_pages=5)
+            fetch_site("https://example.com")
 
         fetched_paths = [url for url in fetch_calls if "pricing" in url or "blog" in url]
         assert fetched_paths == []
 
-    def test_respects_max_pages(self):
-        def make_page(links: list[str]) -> str:
-            hrefs = "".join(f'<a href="{u}">page</a>' for u in links)
-            return f"<html><body><p>Content</p>{hrefs}</body></html>"
-
-        seed_html = make_page(["/a", "/b", "/c", "/d", "/e"])
-
-        def fake_get(url, **kwargs):
-            return self._make_response(seed_html)
-
-        fetch_calls: list[str] = []
-        original_get = fake_get
-
-        def tracking_get(url, **kwargs):
-            fetch_calls.append(url)
-            return original_get(url, **kwargs)
-
-        with patch("duplo.fetcher.httpx.get", side_effect=tracking_get):
-            fetch_site("https://example.com", max_pages=3)
-
-        assert len(fetch_calls) == 3
-
-    def test_stays_on_same_domain(self):
+    def test_does_not_follow_cross_origin_links(self):
+        """Deep mode only follows same-origin links."""
         seed_html = (
             "<html><body><p>Home</p>"
             '<a href="https://other.com/product">Check it out</a>'
-            "</body></html>"
-        )
-
-        fetch_calls: list[str] = []
-
-        def fake_get(url, **kwargs):
-            fetch_calls.append(url)
-            return self._make_response(seed_html)
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site("https://example.com", max_pages=5)
-
-        assert not any("other.com" in url for url in fetch_calls)
-
-    def test_follows_cross_domain_docs_links(self):
-        """Cross-domain docs links are followed, including product wikis on platforms."""
-        seed_html = (
-            "<html><body><p>Home</p>"
             '<a href="https://other.com/docs/intro">Documentation</a>'
-            '<a href="https://github.com/org/repo/wiki">Wiki</a>'
-            "</body></html>"
-        )
-        docs_html = "<html><body><p>External docs content</p></body></html>"
-        wiki_html = "<html><body><p>Wiki content</p></body></html>"
-
-        responses = {
-            "https://example.com": self._make_response(seed_html),
-            "https://other.com/docs/intro": self._make_response(docs_html),
-            "https://github.com/org/repo/wiki": self._make_response(wiki_html),
-        }
-
-        def fake_get(url, **kwargs):
-            url_stripped = url.rstrip("/")
-            for key, val in responses.items():
-                if key.rstrip("/") == url_stripped:
-                    return val
-            return self._make_response("")
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=5
-            )
-
-        assert "External docs content" in text
-        # github.com/org/repo/wiki is product docs, not platform marketing.
-        assert "Wiki content" in text
-
-    def test_blocks_platform_marketing_pages(self):
-        """Platform root/marketing pages are blocked even if they match docs patterns."""
-        seed_html = (
-            "<html><body><p>Home</p>"
-            '<a href="https://github.com/features">Features</a>'
             "</body></html>"
         )
 
@@ -393,60 +317,7 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site("https://example.com", max_pages=5)
-
-        assert not any("github.com" in url for url in fetch_calls)
-
-    def test_follows_links_within_docs_domain(self):
-        """Once a cross-domain docs site is reached, follow its internal links."""
-        seed_html = (
-            '<html><body><p>Home</p><a href="https://docs.other.com/guide">Guide</a></body></html>'
-        )
-        guide_html = (
-            "<html><body><p>Guide content</p>"
-            '<a href="https://docs.other.com/concepts">Concepts</a>'
-            '<a href="https://docs.other.com/advanced">Advanced</a>'
-            "</body></html>"
-        )
-        concepts_html = "<html><body><p>Concepts content</p></body></html>"
-        advanced_html = "<html><body><p>Advanced content</p></body></html>"
-
-        responses = {
-            "https://example.com": self._make_response(seed_html),
-            "https://docs.other.com/guide": self._make_response(guide_html),
-            "https://docs.other.com/concepts": self._make_response(concepts_html),
-            "https://docs.other.com/advanced": self._make_response(advanced_html),
-        }
-
-        def fake_get(url, **kwargs):
-            url_stripped = url.rstrip("/")
-            for key, val in responses.items():
-                if key.rstrip("/") == url_stripped:
-                    return val
-            return self._make_response("")
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=10
-            )
-
-        assert "Guide content" in text
-        assert "Concepts content" in text
-        assert "Advanced content" in text
-
-    def test_does_not_follow_non_docs_cross_domain(self):
-        seed_html = (
-            '<html><body><p>Home</p><a href="https://other.com/product">Product</a></body></html>'
-        )
-
-        fetch_calls: list[str] = []
-
-        def fake_get(url, **kwargs):
-            fetch_calls.append(url)
-            return self._make_response(seed_html)
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site("https://example.com", max_pages=5)
+            fetch_site("https://example.com")
 
         assert not any("other.com" in url for url in fetch_calls)
 
@@ -468,7 +339,7 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site("https://example.com", max_pages=10)
+            fetch_site("https://example.com")
 
         docs_calls = [u for u in fetch_calls if "docs" in u]
         assert len(docs_calls) == 1
@@ -476,103 +347,8 @@ class TestFetchSite:
     def test_section_headers_in_output(self):
         html = "<html><body><p>Content</p></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=1
-            )
+            text, _examples, _structs, _records, _raw = fetch_site("https://example.com")
         assert "=== https://example.com ===" in text
-
-    def test_respects_max_docs_pages(self):
-        """Docs-domain pages are limited by max_docs_pages, not max_pages."""
-        seed_html = (
-            '<html><body><p>Home</p><a href="https://docs.other.com/guide">Guide</a></body></html>'
-        )
-        # Guide page links to many docs subpages
-        guide_links = "".join(
-            f'<a href="https://docs.other.com/page{i}">Page {i}</a>' for i in range(10)
-        )
-        guide_html = f"<html><body><p>Guide</p>{guide_links}</body></html>"
-        subpage_html = "<html><body><p>Subpage</p></body></html>"
-
-        responses = {
-            "https://example.com": self._make_response(seed_html),
-            "https://docs.other.com/guide": self._make_response(guide_html),
-        }
-        for i in range(10):
-            url = f"https://docs.other.com/page{i}"
-            responses[url] = self._make_response(subpage_html)
-
-        docs_fetched: list[str] = []
-
-        def fake_get(url, **kwargs):
-            if "docs.other.com" in url:
-                docs_fetched.append(url)
-            url_stripped = url.rstrip("/")
-            for key, val in responses.items():
-                if key.rstrip("/") == url_stripped:
-                    return val
-            return self._make_response("")
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site(
-                "https://example.com",
-                max_pages=5,
-                max_docs_pages=3,
-            )
-
-        assert len(docs_fetched) == 3
-
-    def test_docs_limit_independent_of_seed_limit(self):
-        """Seed and docs page budgets are tracked independently."""
-        seed_html = (
-            "<html><body><p>Home</p>"
-            '<a href="/page1">P1</a>'
-            '<a href="/page2">P2</a>'
-            '<a href="https://docs.ext.com/guide">Guide</a>'
-            "</body></html>"
-        )
-        page_html = "<html><body><p>Seed page</p></body></html>"
-        guide_html = (
-            "<html><body><p>Guide</p>"
-            '<a href="https://docs.ext.com/a">A</a>'
-            '<a href="https://docs.ext.com/b">B</a>'
-            "</body></html>"
-        )
-        doc_html = "<html><body><p>Doc page</p></body></html>"
-
-        responses = {
-            "https://example.com": self._make_response(seed_html),
-            "https://example.com/page1": self._make_response(page_html),
-            "https://example.com/page2": self._make_response(page_html),
-            "https://docs.ext.com/guide": self._make_response(guide_html),
-            "https://docs.ext.com/a": self._make_response(doc_html),
-            "https://docs.ext.com/b": self._make_response(doc_html),
-        }
-
-        seed_fetched: list[str] = []
-        docs_fetched: list[str] = []
-
-        def fake_get(url, **kwargs):
-            if "docs.ext.com" in url:
-                docs_fetched.append(url)
-            elif "example.com" in url:
-                seed_fetched.append(url)
-            url_stripped = url.rstrip("/")
-            for key, val in responses.items():
-                if key.rstrip("/") == url_stripped:
-                    return val
-            return self._make_response("")
-
-        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            fetch_site(
-                "https://example.com",
-                max_pages=2,
-                max_docs_pages=10,
-            )
-
-        # Seed limited to 2 (home + page1 or page2)
-        assert len(seed_fetched) == 2
-        # Docs not limited (all 3 fit within max_docs_pages=10)
-        assert len(docs_fetched) == 3
 
     def test_skips_failed_pages(self):
         seed_html = '<html><body><p>Home</p><a href="/docs">Docs</a></body></html>'
@@ -583,18 +359,14 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com", max_pages=5
-            )
+            text, _examples, _structs, _records, _raw = fetch_site("https://example.com")
 
         assert "Home" in text  # seed page still returned
 
     def test_returns_page_records(self):
         html = "<html><body><h1>Product</h1></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            _text, _examples, _structs, records, _raw = fetch_site(
-                "https://example.com", max_pages=1
-            )
+            _text, _examples, _structs, records, _raw = fetch_site("https://example.com")
         assert len(records) == 1
         assert isinstance(records[0], PageRecord)
         assert records[0].url == "https://example.com"
@@ -602,9 +374,7 @@ class TestFetchSite:
     def test_page_record_has_timestamp(self):
         html = "<html><body><p>Hello</p></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            _text, _examples, _structs, records, _raw = fetch_site(
-                "https://example.com", max_pages=1
-            )
+            _text, _examples, _structs, records, _raw = fetch_site("https://example.com")
         assert records[0].fetched_at.endswith("+00:00")
 
     def test_page_record_has_content_hash(self):
@@ -613,9 +383,7 @@ class TestFetchSite:
         html = "<html><body><p>Hello</p></body></html>"
         expected_hash = hashlib.sha256(html.encode()).hexdigest()
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            _text, _examples, _structs, records, _raw = fetch_site(
-                "https://example.com", max_pages=1
-            )
+            _text, _examples, _structs, records, _raw = fetch_site("https://example.com")
         assert records[0].content_hash == expected_hash
 
     def test_page_records_for_multiple_pages(self):
@@ -634,9 +402,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            _text, _examples, _structs, records, _raw = fetch_site(
-                "https://example.com", max_pages=5
-            )
+            _text, _examples, _structs, records, _raw = fetch_site("https://example.com")
         assert len(records) == 2
         urls = [r.url for r in records]
         assert "https://example.com" in urls
@@ -651,16 +417,14 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            _text, _examples, _structs, records, _raw = fetch_site(
-                "https://example.com", max_pages=5
-            )
+            _text, _examples, _structs, records, _raw = fetch_site("https://example.com")
         assert len(records) == 1
         assert records[0].url == "https://example.com"
 
-    def test_returns_raw_pages(self):
+    def test_returns_raw_pages_keyed_by_canonical_url(self):
         html = "<html><body><h1>Product</h1></body></html>"
         with patch("duplo.fetcher.httpx.get", return_value=self._make_response(html)):
-            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", max_pages=1)
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com")
         assert "https://example.com" in raw
         assert raw["https://example.com"] == html
 
@@ -680,7 +444,7 @@ class TestFetchSite:
             return self._make_response("")
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", max_pages=5)
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com")
         assert len(raw) == 2
         assert raw["https://example.com"] == seed_html
         assert raw["https://example.com/docs"] == docs_html
@@ -694,9 +458,189 @@ class TestFetchSite:
             return self._make_response(seed_html)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            _text, _ex, _st, _rec, raw = fetch_site("https://example.com", max_pages=5)
+            _text, _ex, _st, _rec, raw = fetch_site("https://example.com")
         assert len(raw) == 1
         assert "https://example.com" in raw
+
+
+class TestFetchSiteScrapeDepth:
+    """Tests for the scrape_depth parameter."""
+
+    def _make_response(self, html: str, status_code: int = 200) -> MagicMock:
+        resp = MagicMock()
+        resp.text = html
+        resp.status_code = status_code
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_none_returns_empty(self):
+        """scrape_depth='none' returns empty results without fetching."""
+        with patch("duplo.fetcher.httpx.get") as mock_get:
+            text, examples, structs, records, raw = fetch_site(
+                "https://example.com", scrape_depth="none"
+            )
+        mock_get.assert_not_called()
+        assert text == ""
+        assert examples == []
+        assert records == []
+        assert raw == {}
+
+    def test_shallow_fetches_single_page(self):
+        """scrape_depth='shallow' fetches only the entry URL."""
+        seed_html = '<html><body><p>Home</p><a href="/docs">Docs</a></body></html>'
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _ex, _st, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+
+        assert len(fetch_calls) == 1
+        assert "Home" in text
+        assert len(records) == 1
+        assert len(raw) == 1
+
+    def test_shallow_no_link_following(self):
+        """scrape_depth='shallow' does not follow any links."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="/docs">Docs</a>'
+            '<a href="/features">Features</a></body></html>'
+        )
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            return self._make_response(seed_html)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            fetch_site("https://example.com", scrape_depth="shallow")
+
+        assert len(fetch_calls) == 1
+        assert fetch_calls[0] == "https://example.com"
+
+    def test_shallow_failure_returns_empty(self):
+        """scrape_depth='shallow' returns empty results on fetch failure."""
+
+        def fake_get(url, **kwargs):
+            raise Exception("connection error")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, examples, structs, records, raw = fetch_site(
+                "https://example.com", scrape_depth="shallow"
+            )
+
+        assert text == ""
+        assert examples == []
+        assert records == []
+        assert raw == {}
+
+    def test_shallow_raw_pages_keyed_by_canonical_url(self):
+        """shallow mode keys raw_pages by canonical URL."""
+        html = "<html><body><p>Hello</p></body></html>"
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, _st, _rec, raw = fetch_site("https://Example.COM/", scrape_depth="shallow")
+        # Canonical form: lowercase host, trailing slash stripped
+        assert "https://example.com" in raw
+
+    def test_deep_same_origin_only(self):
+        """Deep mode follows same-origin links but not cross-origin."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="/docs">Docs</a>'
+            '<a href="https://other.com/docs">External Docs</a>'
+            "</body></html>"
+        )
+        docs_html = "<html><body><p>Internal docs</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://example.com/docs": self._make_response(docs_html),
+        }
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _ex, _st, _rec, _raw = fetch_site("https://example.com", scrape_depth="deep")
+
+        assert "Internal docs" in text
+        assert not any("other.com" in u for u in fetch_calls)
+
+    def test_deep_is_default(self):
+        """Default scrape_depth is 'deep' (follows same-origin links)."""
+        seed_html = '<html><body><p>Home</p><a href="/page2">Page 2</a></body></html>'
+        page2_html = "<html><body><p>Page 2 content</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://example.com/page2": self._make_response(page2_html),
+        }
+
+        def fake_get(url, **kwargs):
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _ex, _st, _rec, _raw = fetch_site("https://example.com")
+
+        assert "Page 2 content" in text
+
+    def test_deep_raw_pages_keyed_by_canonical_url(self):
+        """Deep mode keys raw_pages by canonicalized URL."""
+        html = "<html><body><p>Hello</p></body></html>"
+        with patch(
+            "duplo.fetcher.httpx.get",
+            return_value=self._make_response(html),
+        ):
+            _text, _ex, _st, _rec, raw = fetch_site("https://Example.COM/", scrape_depth="deep")
+        assert "https://example.com" in raw
+
+    def test_records_and_raw_pages_in_sync(self):
+        """Every PageRecord has a corresponding raw_pages entry."""
+        seed_html = '<html><body><p>Home</p><a href="/a">A</a></body></html>'
+        a_html = "<html><body><p>A</p></body></html>"
+
+        responses = {
+            "https://example.com": self._make_response(seed_html),
+            "https://example.com/a": self._make_response(a_html),
+        }
+
+        def fake_get(url, **kwargs):
+            url_stripped = url.rstrip("/")
+            for key, val in responses.items():
+                if key.rstrip("/") == url_stripped:
+                    return val
+            return self._make_response("")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            _text, _ex, _st, records, raw = fetch_site("https://example.com", scrape_depth="deep")
+
+        assert len(records) == len(raw)
+        # Every record URL's canonical form should be in raw_pages
+        from duplo.url_canon import canonicalize_url
+
+        for rec in records:
+            assert canonicalize_url(rec.url) in raw
 
 
 class TestFetchText:

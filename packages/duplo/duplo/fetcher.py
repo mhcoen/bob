@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -15,6 +16,7 @@ from bs4 import BeautifulSoup
 from duplo.diagnostics import record_failure
 from duplo.doc_examples import CodeExample, extract_code_examples
 from duplo.doc_tables import DocStructures, extract_doc_structures
+from duplo.url_canon import canonicalize_url
 
 
 @dataclass
@@ -175,22 +177,34 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     return links
 
 
+def _same_origin(url_a: str, url_b: str) -> bool:
+    """Return True if *url_a* and *url_b* share scheme, host, and port."""
+    a = urlparse(url_a)
+    b = urlparse(url_b)
+    return (
+        a.scheme.lower() == b.scheme.lower()
+        and (a.hostname or "").lower() == (b.hostname or "").lower()
+        and a.port == b.port
+    )
+
+
 def fetch_site(
-    url: str, max_pages: int = 10, max_docs_pages: int = 50
+    url: str,
+    *,
+    scrape_depth: Literal["deep", "shallow", "none"] = "deep",
 ) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]:
-    """Fetch *url* and follow prioritized same-domain links.
+    """Fetch *url* and return extracted artifacts plus raw HTML.
 
-    High-priority links (docs, features, guides, changelog, API references)
-    are visited before neutral links. Low-priority links (marketing, blog,
-    pricing, legal, login) are skipped entirely. Cross-domain documentation
-    links (detected by link text and URL path) are always followed, and once
-    a cross-domain docs site is reached, same-domain links within that docs
-    site are followed too (priority-scored like the seed domain).
+    *scrape_depth* controls how aggressively the fetcher follows links:
 
-    *max_pages* limits pages fetched from the seed domain.
-    *max_docs_pages* limits pages fetched from documentation domains
-    (cross-domain docs sites). Doc pages are individually small but
-    collectively important, so this defaults higher than *max_pages*.
+    * ``"deep"`` — fetch the entry URL and follow **same-origin** links
+      (same scheme + host + port).  High-priority links (docs, features,
+      guides, changelog, API references) are visited before neutral links.
+      Low-priority links (marketing, blog, pricing, legal, login) are
+      skipped.  Cross-origin links are **not** followed; they are
+      recorded for the orchestrator to discover separately.
+    * ``"shallow"`` — fetch only the entry URL, no link-following.
+    * ``"none"`` — don't fetch anything; return empty results.
 
     Returns a tuple of
     ``(text, code_examples, doc_structures, page_records, raw_pages)``
@@ -200,9 +214,55 @@ def fetch_site(
     operation lists, unit lists, and function references,
     *page_records* is a list of :class:`PageRecord` with URL, timestamp,
     and content hash for every successfully fetched page, and
-    *raw_pages* is a dict mapping each fetched URL to its raw HTML content
-    so re-runs can diff against what changed on the product site.
+    *raw_pages* is a dict mapping each fetched URL to its raw HTML
+    content so re-runs can diff against what changed on the product
+    site.  For every URL in *raw_pages* there is a corresponding
+    :class:`PageRecord`; failed fetches appear in neither.
     """
+    empty: tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]] = (
+        "",
+        [],
+        DocStructures(),
+        [],
+        {},
+    )
+
+    if scrape_depth == "none":
+        return empty
+
+    # --- shallow: single page, no link-following ---
+    if scrape_depth == "shallow":
+        try:
+            resp = httpx.get(
+                url,
+                follow_redirects=True,
+                timeout=_TIMEOUT,
+                headers=_HEADERS,
+            )
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Failed to fetch {url}: {exc}",
+                context={"url": url},
+            )
+            return empty
+
+        canon = canonicalize_url(url)
+        record = PageRecord(
+            url=url,
+            fetched_at=datetime.now(tz=timezone.utc).isoformat(),
+            content_hash=hashlib.sha256(html.encode()).hexdigest(),
+        )
+        text = extract_text(html)
+        text_out = f"=== {url} ===\n{text}" if text else ""
+        examples = extract_code_examples(html, url)
+        structures = extract_doc_structures(html, url)
+        return text_out, examples, structures, [record], {canon: html}
+
+    # --- deep: same-origin BFS crawl ---
     visited: set[str] = set()
     queued: set[str] = set()
     results: list[str] = []
@@ -210,12 +270,8 @@ def fetch_site(
     all_structures = DocStructures()
     all_records: list[PageRecord] = []
     raw_pages: dict[str, str] = {}
-    docs_domains: set[str] = set()
-    seed_visited = 0
-    docs_visited = 0
 
-    seed_domain = urlparse(url).netloc
-    seed_norm = url.rstrip("/")
+    seed_norm = canonicalize_url(url)
     queue: list[tuple[int, str]] = [(2, url)]  # seed at highest priority
     queued.add(seed_norm)
 
@@ -223,18 +279,9 @@ def fetch_site(
         queue.sort(key=lambda x: x[0])
         _, current_url = queue.pop()
 
-        norm = current_url.rstrip("/")
+        norm = canonicalize_url(current_url)
         if norm in visited:
             continue
-
-        current_domain = urlparse(current_url).netloc
-        is_docs = current_domain in docs_domains
-        if is_docs:
-            if docs_visited >= max_docs_pages:
-                continue
-        else:
-            if seed_visited >= max_pages:
-                continue
 
         visited.add(norm)
 
@@ -256,14 +303,9 @@ def fetch_site(
             )
             continue
 
-        final_norm = str(resp.url).rstrip("/")
+        final_norm = canonicalize_url(str(resp.url))
         if final_norm != norm:
             visited.add(final_norm)
-
-        if is_docs:
-            docs_visited += 1
-        else:
-            seed_visited += 1
 
         record = PageRecord(
             url=current_url,
@@ -271,7 +313,7 @@ def fetch_site(
             content_hash=hashlib.sha256(html.encode()).hexdigest(),
         )
         all_records.append(record)
-        raw_pages[current_url] = html
+        raw_pages[norm] = html
 
         text = extract_text(html)
         if text:
@@ -284,24 +326,17 @@ def fetch_site(
         all_structures.merge(page_structures)
 
         for link_url, anchor in extract_links(html, current_url):
-            link_norm = link_url.rstrip("/")
+            link_norm = canonicalize_url(link_url)
             if link_norm in visited or link_norm in queued:
                 continue
-            link_domain = urlparse(link_url).netloc
-            if is_docs_link(link_url, anchor):
-                if link_domain != seed_domain:
-                    # Never follow cross-domain links into hosting
-                    # platform docs (e.g. GitHub's own features).
-                    if _is_platform_domain(link_url):
-                        continue
-                    docs_domains.add(link_domain)
-                queue.append((1, link_url))
+            # Only follow same-origin links; cross-origin links are
+            # recorded by the orchestrator, not fetched here.
+            if not _same_origin(link_url, url):
+                continue
+            link_score = score_link(link_url, anchor)
+            if link_score >= 0:
+                queue.append((link_score, link_url))
                 queued.add(link_norm)
-            elif link_domain == seed_domain or link_domain in docs_domains:
-                link_score = score_link(link_url, anchor)
-                if link_score >= 0:
-                    queue.append((link_score, link_url))
-                    queued.add(link_norm)
 
     return "\n\n".join(results), all_examples, all_structures, all_records, raw_pages
 
