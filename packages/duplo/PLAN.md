@@ -617,7 +617,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
 - [ ] Add `tests/test_phase5_integration.py` with `test_url_only_spec_runs_end_to_end`
   - [x] Construct a tmpdir with a SPEC.md containing the marker comment, a `## Purpose` of >50 chars, a `## Architecture` block, and a `## Sources` block listing one entry with `role: product-reference` and `scrape: deep`. No `ref/` directory.
   - [x] Mock `duplo.fetcher.fetch_site` to return a fixture 5-tuple: a small scraped_text, empty code_examples, empty doc_structures, one PageRecord with the canonical URL, and a `raw_pages` dict mapping that URL to a small HTML fixture containing one `<a href>` to a same-origin path and one `<a href>` to a cross-origin path.
-  - [ ] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
+  - [x] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
   - [ ] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
   - [ ] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
   - [ ] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
