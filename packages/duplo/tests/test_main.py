@@ -11519,3 +11519,173 @@ class TestRemovedSourceIdempotent:
 
         urls = [r["url"] for r in result.source_records]
         assert urls == ["https://a.com"]
+
+
+class TestSourcesFieldPopulated:
+    """source_records from _scrape_declared_sources contain all required
+    fields; product.json source_url populated from first product-reference."""
+
+    def _make_source(self, url, role="product-reference", scrape="deep"):
+        from duplo.spec_reader import SourceEntry
+
+        return SourceEntry(url=url, role=role, scrape=scrape)
+
+    def _make_spec(self, sources):
+        from duplo.spec_reader import ProductSpec
+
+        return ProductSpec(sources=sources)
+
+    def test_source_records_have_all_fields(self):
+        """Each source_record has url, last_scraped, content_hash,
+        and scrape_depth_used."""
+        src = self._make_source("https://example.com", scrape="deep")
+        spec = self._make_spec([src])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return ("page text", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.main.scrapeable_sources", return_value=[src]),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.source_records) == 1
+        rec = result.source_records[0]
+        assert rec["url"] == "https://example.com"
+        assert "last_scraped" in rec
+        assert isinstance(rec["last_scraped"], str)
+        assert len(rec["last_scraped"]) > 0
+        assert "content_hash" in rec
+        assert isinstance(rec["content_hash"], str)
+        assert len(rec["content_hash"]) == 64  # SHA-256 hex
+        assert rec["scrape_depth_used"] == "deep"
+
+    def test_content_hash_is_sha256_of_scraped_text(self):
+        """content_hash is the SHA-256 of the scraped text."""
+        import hashlib
+
+        src = self._make_source("https://example.com")
+        spec = self._make_spec([src])
+        scraped = "hello world"
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return (scraped, [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.main.scrapeable_sources", return_value=[src]),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        expected = hashlib.sha256(scraped.encode("utf-8")).hexdigest()
+        assert result.source_records[0]["content_hash"] == expected
+
+    def test_multiple_sources_produce_independent_records(self):
+        """Each source gets its own source_record with independent metadata."""
+        src_a = self._make_source("https://a.com", scrape="deep")
+        src_b = self._make_source("https://b.com", role="docs", scrape="shallow")
+        spec = self._make_spec([src_a, src_b])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            text = f"text from {url}"
+            return (text, [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a, src_b],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert len(result.source_records) == 2
+        by_url = {r["url"]: r for r in result.source_records}
+        assert by_url["https://a.com"]["scrape_depth_used"] == "deep"
+        assert by_url["https://b.com"]["scrape_depth_used"] == "shallow"
+        # Each has its own content_hash.
+        assert by_url["https://a.com"]["content_hash"] != by_url["https://b.com"]["content_hash"]
+
+    def test_product_json_source_url_from_first_product_reference(self, tmp_path, monkeypatch):
+        """product.json source_url is populated from the first
+        product-reference entry in ## Sources."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+        duplo_dir = tmp_path / ".duplo"
+
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "App"}),
+            encoding="utf-8",
+        )
+
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        docs = SourceEntry(url="https://docs.example.com", role="docs", scrape="deep")
+        prod = SourceEntry(
+            url="https://product.example.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="## Sources\n- https://product.example.com\n",
+            purpose="A tool",
+            sources=[docs, prod],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="features",
+            product_ref_raw_pages={},
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [docs, prod])
+        monkeypatch.setattr(m, "_scrape_declared_sources", MagicMock(return_value=scrape_result))
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        main()
+
+        pdata = json.loads((duplo_dir / "product.json").read_text(encoding="utf-8"))
+        # First product-reference is "https://product.example.com",
+        # not the docs entry.
+        assert pdata["source_url"] == "https://product.example.com"
+
+    def test_save_sources_idempotent_across_runs(self, tmp_path):
+        """Calling save_sources with same records twice yields identical
+        duplo.json sources entries."""
+        from duplo.saver import load_sources, save_sources
+
+        records = [
+            {
+                "url": "https://a.com",
+                "last_scraped": "2026-04-14T10:00:00+00:00",
+                "content_hash": "hash_a",
+                "scrape_depth_used": "deep",
+            },
+            {
+                "url": "https://b.com",
+                "last_scraped": "2026-04-14T10:05:00+00:00",
+                "content_hash": "hash_b",
+                "scrape_depth_used": "shallow",
+            },
+        ]
+        save_sources(records, target_dir=tmp_path)
+        first = load_sources(target_dir=tmp_path)
+        save_sources(records, target_dir=tmp_path)
+        second = load_sources(target_dir=tmp_path)
+        assert first == second

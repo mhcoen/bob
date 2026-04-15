@@ -721,6 +721,68 @@ class TestSaveSources:
         save_sources(self._SOURCES, target_dir=tmp_path)
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
 
+    def test_idempotent_double_call(self, tmp_path):
+        """Calling save_sources twice with the same data produces
+        identical duplo.json content."""
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        first = (tmp_path / DUPLO_JSON).read_text()
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        second = (tmp_path / DUPLO_JSON).read_text()
+        assert first == second
+
+    def test_multiple_sources_tracked_independently(self, tmp_path):
+        """Each source entry retains its own metadata independently."""
+        sources = [
+            {
+                "url": "https://alpha.com",
+                "last_scraped": "2026-04-14T10:00:00+00:00",
+                "content_hash": "hash_alpha",
+                "scrape_depth_used": "deep",
+            },
+            {
+                "url": "https://beta.com",
+                "last_scraped": "2026-04-14T10:05:00+00:00",
+                "content_hash": "hash_beta",
+                "scrape_depth_used": "shallow",
+            },
+            {
+                "url": "https://gamma.com",
+                "last_scraped": "2026-04-14T10:10:00+00:00",
+                "content_hash": "hash_gamma",
+                "scrape_depth_used": "deep",
+            },
+        ]
+        save_sources(sources, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        by_url = {s["url"]: s for s in data["sources"]}
+        assert len(by_url) == 3
+        assert by_url["https://alpha.com"]["content_hash"] == "hash_alpha"
+        assert by_url["https://alpha.com"]["scrape_depth_used"] == "deep"
+        assert by_url["https://beta.com"]["content_hash"] == "hash_beta"
+        assert by_url["https://beta.com"]["scrape_depth_used"] == "shallow"
+        assert by_url["https://gamma.com"]["content_hash"] == "hash_gamma"
+        assert by_url["https://gamma.com"]["last_scraped"] == "2026-04-14T10:10:00+00:00"
+
+    def test_update_one_source_leaves_others_untouched(self, tmp_path):
+        """Updating one source's metadata does not alter other entries."""
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        updated = [
+            {
+                "url": "https://example.com",
+                "last_scraped": "2026-04-15T12:00:00+00:00",
+                "content_hash": "new_hash",
+                "scrape_depth_used": "shallow",
+            },
+        ]
+        save_sources(updated, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        by_url = {s["url"]: s for s in data["sources"]}
+        # Updated entry changed.
+        assert by_url["https://example.com"]["content_hash"] == "new_hash"
+        # Other entry untouched.
+        assert by_url["https://docs.example.com"]["content_hash"] == "def456"
+        assert by_url["https://docs.example.com"]["scrape_depth_used"] == "shallow"
+
 
 class TestLoadSources:
     _SOURCES = [
