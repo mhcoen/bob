@@ -4392,3 +4392,114 @@ class TestProposedVisualTargetFixture:
         start = text.index("\n", idx) + 1
         end = text.find("##", start)
         assert len(text[start:end].strip()) > 50
+
+
+# ---------------------------------------------------------------------------
+# 5.32.2 — Mock extract_design and capture its design_input argument
+# ---------------------------------------------------------------------------
+
+
+class TestProposedVisualTargetDesignInput:
+    """Mock extract_design for a two-visual-target spec (one proposed).
+
+    Uses the _setup_proposed_vt_tmpdir fixture (ref-only, no ## Sources).
+    Mocks extract_design to return the deterministic fixture and captures
+    the design_input argument for downstream assertion.
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up and run _first_run, returning the extract_design mock."""
+        _setup_proposed_vt_tmpdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "CalcApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+        mock_extract_design = MagicMock(
+            return_value=_DESIGN_REQUIREMENTS,
+        )
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="macOS",
+                    language="Swift",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.save_reference_screenshots",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        return mock_extract_design
+
+    def test_extract_design_called_once(self, tmp_path, monkeypatch):
+        """extract_design is called exactly once."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        mock_ed.assert_called_once()
+
+    def test_design_input_is_list(self, tmp_path, monkeypatch):
+        """design_input argument is a list."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        assert isinstance(design_input, list)
+
+    def test_design_input_contains_paths(self, tmp_path, monkeypatch):
+        """design_input elements are Path objects."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        for item in design_input:
+            assert isinstance(item, Path)
+
+    def test_design_input_non_empty(self, tmp_path, monkeypatch):
+        """design_input is non-empty (at least the active ref)."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        assert len(design_input) > 0
