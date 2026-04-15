@@ -605,7 +605,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per PIPELINE-design.md § "Multi-source persistence". `.duplo/duplo.json` gains a `sources` field: list of `{url, last_scraped, content_hash, scrape_depth_used}` entries, one per scrapeable source.
   - [x] Add `save_sources(sources_metadata)` and `load_sources()` functions to `duplo/saver.py`. Sources metadata accumulated during the iteration loop and persisted after.
   - [x] Backward compatibility per design: `.duplo/product.json` keeps the single `source_url` field, populated from the FIRST product-reference entry in `## Sources`. New code reads from the spec, not from `product.json`. The field is preserved only so old tooling and migration detection keep working.
-  - [ ] When user removes a URL from `## Sources`, the entry STAYS in `duplo.json` (idempotent state) but the pipeline doesn't re-scrape and doesn't include cached content in subsequent extractions. Per design.
+  - [x] When user removes a URL from `## Sources`, the entry STAYS in `duplo.json` (idempotent state) but the pipeline doesn't re-scrape and doesn't include cached content in subsequent extractions. Per design.
   - [ ] Tests: sources field populated correctly; existing `product.json:source_url` populated from first product-reference entry; removed source stays in `duplo.json` but is not re-scraped; `save_sources` is idempotent; multiple sources tracked independently.
 
 ## Manual verification (user must test)
