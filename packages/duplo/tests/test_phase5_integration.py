@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from unittest.mock import patch
 
+from duplo.design_extractor import DesignRequirements
 from duplo.doc_tables import DocStructures
 from duplo.fetcher import PageRecord
 
@@ -100,6 +101,107 @@ class TestFetchSiteFixture:
         raw_pages = _FETCH_SITE_RESULT[4]
         for rec in records:
             assert rec.url in raw_pages
+
+
+# ---------------------------------------------------------------------------
+# Design extractor fixture
+# ---------------------------------------------------------------------------
+
+_DESIGN_REQUIREMENTS = DesignRequirements(
+    colors={
+        "primary": "#1a73e8",
+        "secondary": "#5f6368",
+        "background": "#ffffff",
+        "text": "#202124",
+        "accent": "#fbbc04",
+    },
+    fonts={
+        "headings": "Inter, sans-serif, ~20px",
+        "body": "Inter, sans-serif, ~14px",
+        "mono": "Roboto Mono, monospace, ~13px",
+    },
+    spacing={
+        "content_padding": "24px",
+        "section_gap": "32px",
+        "element_gap": "12px",
+    },
+    layout={
+        "navigation": "top",
+        "sidebar": "left",
+        "content_width": "medium",
+        "grid": "single-column content area with sidebar",
+    },
+    components=[
+        {"name": "card", "style": "8px border-radius, subtle shadow"},
+        {"name": "button", "style": "4px border-radius, solid fill"},
+        {"name": "input field", "style": "1px border, 4px radius"},
+    ],
+    source_images=["screenshot1.png", "screenshot2.png"],
+)
+
+
+class TestDesignFixture:
+    """Verify the DesignRequirements fixture is well-formed."""
+
+    def test_colors_has_expected_keys(self):
+        expected = {"primary", "secondary", "background", "text", "accent"}
+        assert set(_DESIGN_REQUIREMENTS.colors.keys()) == expected
+
+    def test_colors_are_hex_strings(self):
+        for val in _DESIGN_REQUIREMENTS.colors.values():
+            assert val.startswith("#")
+            assert len(val) == 7
+
+    def test_fonts_has_expected_keys(self):
+        assert set(_DESIGN_REQUIREMENTS.fonts.keys()) == {
+            "headings",
+            "body",
+            "mono",
+        }
+
+    def test_spacing_has_expected_keys(self):
+        assert set(_DESIGN_REQUIREMENTS.spacing.keys()) == {
+            "content_padding",
+            "section_gap",
+            "element_gap",
+        }
+
+    def test_layout_has_expected_keys(self):
+        expected = {"navigation", "sidebar", "content_width", "grid"}
+        assert set(_DESIGN_REQUIREMENTS.layout.keys()) == expected
+
+    def test_components_non_empty(self):
+        assert len(_DESIGN_REQUIREMENTS.components) == 3
+
+    def test_components_have_name_and_style(self):
+        for comp in _DESIGN_REQUIREMENTS.components:
+            assert "name" in comp
+            assert "style" in comp
+
+    def test_source_images_non_empty(self):
+        assert len(_DESIGN_REQUIREMENTS.source_images) == 2
+
+
+class TestDesignMockWiring:
+    """Verify the fixture can be used as a mock return value."""
+
+    def test_mock_returns_fixture(self):
+        with patch(
+            "duplo.design_extractor.extract_design",
+            return_value=_DESIGN_REQUIREMENTS,
+        ) as mock_design:
+            from duplo.design_extractor import extract_design
+
+            result = extract_design([])
+
+        mock_design.assert_called_once()
+        assert isinstance(result, DesignRequirements)
+        assert result.colors["primary"] == "#1a73e8"
+        assert len(result.components) == 3
+        assert result.source_images == [
+            "screenshot1.png",
+            "screenshot2.png",
+        ]
 
 
 class TestFetchSiteMockWiring:
