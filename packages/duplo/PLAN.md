@@ -658,7 +658,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Mock `extract_design` and capture its `design_input` argument.
   - [x] Run `_subsequent_run` against the tmpdir.
   - [x] Assert: `extract_design` was called; its `design_input` contains the path of the non-proposed reference; its `design_input` does NOT contain the path of the proposed reference.
-  - [ ] Programmatically edit SPEC.md to remove `proposed: true` from the previously-proposed entry. Run `_subsequent_run` again. Assert: this time `extract_design` was called with both reference paths in `design_input`.
+  - [x] Programmatically edit SPEC.md to remove `proposed: true` from the previously-proposed entry. Run `_subsequent_run` again. Assert: this time `extract_design` was called with both reference paths in `design_input`.
   - [ ] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
 
 - [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
