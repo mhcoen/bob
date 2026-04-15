@@ -9,12 +9,15 @@ also mocked so tests don't depend on network or claude -p availability.
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import patch
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from duplo.design_extractor import DesignRequirements
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
+from duplo.main import ScrapeResult, main
 
 # ---------------------------------------------------------------------------
 # Shared fixtures for the URL-only spec integration test
@@ -368,3 +371,410 @@ class TestSelectorMockWiring:
             result = select_features(_FEATURES)
 
         assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# Roadmap fixture for _subsequent_run State 3
+# ---------------------------------------------------------------------------
+
+_ROADMAP = [
+    {
+        "phase": 1,
+        "title": "Core Notes",
+        "goal": "Basic note CRUD with local storage",
+        "features": [
+            "Real-time collaboration",
+            "End-to-end encryption",
+        ],
+        "test": "User can create, edit, and delete notes",
+    },
+]
+
+_PLAN_CONTENT = (
+    "# NotesApp — Phase 1: Core Notes\n\n"
+    "## Bugs\n\n"
+    "- [ ] Set up project scaffolding\n"
+    '- [ ] Implement note CRUD [feat: "Real-time collaboration"]\n'
+    '- [ ] Add encryption layer [feat: "End-to-end encryption"]\n'
+)
+
+
+# ---------------------------------------------------------------------------
+# Integration: run _subsequent_run via main() against tmpdir
+# ---------------------------------------------------------------------------
+
+
+def _write_duplo_json(tmp_path: Path, data: dict) -> None:
+    """Write duplo.json into the .duplo/ subdirectory of *tmp_path*."""
+    duplo_dir = tmp_path / ".duplo"
+    duplo_dir.mkdir(exist_ok=True)
+    (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+class TestSubsequentRunUrlOnlySpec:
+    """End-to-end: _subsequent_run with URL-only SPEC.md (State 3).
+
+    Constructs a tmpdir with:
+    - SPEC.md containing a product-reference source (scrape: deep)
+    - .duplo/duplo.json with features from a prior first run
+    - .duplo/file_hashes.json (empty — no file changes)
+    - No PLAN.md (triggers State 3: generate roadmap + plan)
+
+    All LLM/network calls are mocked.  Asserts that PLAN.md is
+    generated at the end of the run.
+    """
+
+    _SPEC_TEXT = (
+        "<!-- How the pieces fit together: -->\n"
+        "\n"
+        "## Purpose\n"
+        "NotesApp is a cross-platform note-taking application "
+        "with real-time collaboration and end-to-end encryption. "
+        "It supports rich text editing and offline mode.\n"
+        "\n"
+        "## Architecture\n"
+        "Web app using React + TypeScript. SQLite for local storage.\n"
+        "\n"
+        "## Sources\n"
+        f"- {_CANONICAL_URL}\n"
+        "  role: product-reference\n"
+        "  scrape: deep\n"
+    )
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: SPEC.md, duplo.json, file_hashes.json."""
+        # Write SPEC.md.
+        (tmp_path / "SPEC.md").write_text(self._SPEC_TEXT, encoding="utf-8")
+
+        # Write duplo.json with features saved by a prior first run.
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "NotesApp",
+                "source_url": _CANONICAL_URL,
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using React + TypeScript. SQLite for local storage."
+                ).hexdigest(),
+            },
+        )
+
+        # Empty file_hashes — no file changes to detect.
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        # No ref/ directory (URL-only spec).
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _scrape_result(self):
+        """Build a ScrapeResult from the shared fixtures."""
+        content_hash = hashlib.sha256(_SCRAPED_TEXT.encode("utf-8")).hexdigest()
+        return ScrapeResult(
+            combined_text=_SCRAPED_TEXT,
+            all_code_examples=[],
+            all_page_records=[_PAGE_RECORD],
+            all_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            product_ref_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            source_records=[
+                {
+                    "url": _CANONICAL_URL,
+                    "last_scraped": "2026-04-14T00:00:00Z",
+                    "content_hash": content_hash,
+                    "scrape_depth_used": "deep",
+                }
+            ],
+        )
+
+    def test_generates_plan_md(self, tmp_path, monkeypatch):
+        """_subsequent_run in State 3 generates PLAN.md."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        plan_path = tmp_path / "PLAN.md"
+        assert plan_path.exists(), "PLAN.md should be generated"
+        content = plan_path.read_text(encoding="utf-8")
+        assert "NotesApp" in content
+        assert "Phase 1" in content
+
+    def test_scrape_declared_sources_called(self, tmp_path, monkeypatch):
+        """_subsequent_run calls _scrape_declared_sources when spec
+        has scrapeable sources."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ) as mock_scrape,
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        mock_scrape.assert_called_once()
+
+    def test_roadmap_saved_to_duplo_json(self, tmp_path, monkeypatch):
+        """After generate_roadmap, the roadmap is persisted in
+        duplo.json and current_phase is set."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert "roadmap" in data
+        assert len(data["roadmap"]) == 1
+        assert data["roadmap"][0]["title"] == "Core Notes"
+        assert data["current_phase"] == 1
+
+    def test_no_network_requests(self, tmp_path, monkeypatch):
+        """The entire run completes without any real HTTP requests.
+        fetch_site is never called directly (only via mock)."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError(
+                    "fetch_site should not be called directly",
+                ),
+            ),
+        ):
+            main()
+
+    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md should contain a ## Bugs section (injected by
+        save_plan on first write)."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "## Bugs" in content
