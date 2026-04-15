@@ -623,14 +623,14 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
   - [x] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
 
-- [ ] Add `test_ref_only_spec_runs_without_http`
+- [x] Add `test_ref_only_spec_runs_without_http`
   - [x] Construct a tmpdir with a SPEC.md containing marker, Purpose, Architecture, NO `## Sources` (or empty `## Sources`), and a `## References` block listing two entries: one with `role: visual-target` and one with `role: docs`. Create `ref/` directory and place small fixture image and text files at the declared paths.
   - [x] Patch `duplo.fetcher.fetch_site` with a mock that raises if called — the test asserts no HTTP work happened.
   - [x] Mock `extract_design` to return deterministic output and assert it was called with the visual-target ref/ file paths in its `design_input`.
   - [x] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
   - [x] Mock `extract_features` and the interactive selectors as in the previous test.
   - [x] Run `_subsequent_run` against the tmpdir.
-  - [ ] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
+  - [x] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
 
 - [ ] Add `test_url_and_ref_with_scope_exclude_drops_features`
   - [ ] Construct a tmpdir with SPEC.md containing marker, Purpose, Architecture, one product-reference URL, one ref/ entry with `role: visual-target`, AND a `## Scope` block with `exclude: plugin API`.
