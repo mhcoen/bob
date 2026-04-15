@@ -3909,3 +3909,159 @@ class TestAutogenVariantASubsequentRun:
         self._run_variant_a(tmp_path, monkeypatch)
         data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
         assert "design_requirements" not in data
+
+
+# ---------------------------------------------------------------------------
+# 5.31.4 — Variant B: no autogen block triggers design extraction,
+#           SPEC.md gains AUTO-GENERATED block, duplo.json populated
+# ---------------------------------------------------------------------------
+
+
+class TestAutogenVariantBSubsequentRun:
+    """Run _subsequent_run against Variant B and verify side-effects.
+
+    Variant B has ``## Design`` with NO AUTO-GENERATED block.
+    The pipeline must:
+    - Call extract_design exactly once
+    - Write an AUTO-GENERATED block into SPEC.md
+    - Populate design_requirements in duplo.json
+    """
+
+    def _run_variant_b(self, tmp_path, monkeypatch):
+        """Set up Variant B tmpdir, run main(), return mocks dict."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+
+        spec_text_before = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=(
+                    [Path(".duplo/site_media/img.png")],
+                    [],
+                ),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[Path(".duplo/site_media/img.png")],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return {
+            "mock_extract_design": mock_extract_design,
+            "spec_text_before": spec_text_before,
+        }
+
+    def test_extract_design_called(self, tmp_path, monkeypatch):
+        """extract_design must be called when no autogen block exists."""
+        result = self._run_variant_b(tmp_path, monkeypatch)
+        result["mock_extract_design"].assert_called_once()
+
+    def test_spec_md_has_autogen_block(self, tmp_path, monkeypatch):
+        """SPEC.md must contain an AUTO-GENERATED block after the run."""
+        self._run_variant_b(tmp_path, monkeypatch)
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "BEGIN AUTO-GENERATED" in spec_text
+        assert "END AUTO-GENERATED" in spec_text
+
+    def test_spec_md_autogen_block_populated(self, tmp_path, monkeypatch):
+        """The AUTO-GENERATED block must contain design content."""
+        import re
+
+        self._run_variant_b(tmp_path, monkeypatch)
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        m = re.search(
+            r"<!--\s*BEGIN AUTO-GENERATED[^>]*-->(.*?)"
+            r"<!--\s*END AUTO-GENERATED\s*-->",
+            spec_text,
+            re.DOTALL,
+        )
+        assert m is not None, "AUTO-GENERATED block not found in SPEC.md"
+        block_content = m.group(1).strip()
+        assert block_content, "AUTO-GENERATED block should not be empty"
+
+    def test_spec_md_was_modified(self, tmp_path, monkeypatch):
+        """SPEC.md must differ from its pre-run content."""
+        result = self._run_variant_b(tmp_path, monkeypatch)
+        spec_text_after = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert spec_text_after != result["spec_text_before"]
+
+    def test_duplo_json_has_design_requirements(self, tmp_path, monkeypatch):
+        """duplo.json must contain a populated design_requirements key."""
+        self._run_variant_b(tmp_path, monkeypatch)
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert "design_requirements" in data
+        dr = data["design_requirements"]
+        assert dr.get("colors"), "colors should be populated"
+        assert dr.get("fonts"), "fonts should be populated"
+
+    def test_duplo_json_design_colors_match_fixture(self, tmp_path, monkeypatch):
+        """design_requirements colors must match the extract_design fixture."""
+        self._run_variant_b(tmp_path, monkeypatch)
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert data["design_requirements"]["colors"] == _AUTOGEN_DESIGN_FIXTURE.colors
+
+    def test_duplo_json_design_fonts_match_fixture(self, tmp_path, monkeypatch):
+        """design_requirements fonts must match the extract_design fixture."""
+        self._run_variant_b(tmp_path, monkeypatch)
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert data["design_requirements"]["fonts"] == _AUTOGEN_DESIGN_FIXTURE.fonts
