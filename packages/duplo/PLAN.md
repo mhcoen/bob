@@ -620,7 +620,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
   - [x] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
   - [x] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
-  - [ ] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
+  - [x] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
   - [ ] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
 
 - [ ] Add `test_ref_only_spec_runs_without_http`
