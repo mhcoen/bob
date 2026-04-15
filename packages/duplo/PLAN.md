@@ -662,7 +662,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
 
 - [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
-  - [ ] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
+  - [x] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
   - [ ] Mock `extract_design` and `extract_features` and capture their inputs.
   - [ ] Run `_subsequent_run`. Assert: `extract_design`'s `design_input` contains the visual-target path but NOT the counter-example path. The features list does NOT mention counter-example content.
   - [ ] Programmatically invoke `duplo fix "sample bug"`. Mock the investigator LLM call and capture the prompt.
