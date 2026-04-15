@@ -653,13 +653,13 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Run `_subsequent_run` against Variant B. Assert: `extract_design` WAS called; SPEC.md was modified to add a populated AUTO-GENERATED block; `.duplo/duplo.json` `design_requirements` was populated.
   - [x] Modify Variant A's SPEC.md to delete the autogen block contents (leave block markers but empty body). Run `_subsequent_run` again. Assert: `extract_design` IS called this time; SPEC.md autogen block is now populated.
 
-- [ ] Add `test_proposed_true_references_excluded_from_pipeline`
+- [x] Add `test_proposed_true_references_excluded_from_pipeline`
   - [x] Construct a tmpdir with SPEC.md containing two ref/ entries with the same `role: visual-target`: one with `proposed: true`, one without. Drop fixture image files for both.
   - [x] Mock `extract_design` and capture its `design_input` argument.
   - [x] Run `_subsequent_run` against the tmpdir.
   - [x] Assert: `extract_design` was called; its `design_input` contains the path of the non-proposed reference; its `design_input` does NOT contain the path of the proposed reference.
   - [x] Programmatically edit SPEC.md to remove `proposed: true` from the previously-proposed entry. Run `_subsequent_run` again. Assert: this time `extract_design` was called with both reference paths in `design_input`.
-  - [ ] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
+  - [x] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
 
 - [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
   - [ ] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
