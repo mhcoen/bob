@@ -2318,3 +2318,216 @@ class TestCombinedFeatureMockWiring:
         assert result[0].name == "Plugin API"
         assert result[1].name == "Non-plugin-API configuration"
         assert result[2].name == "Offline sync"
+
+
+# ---------------------------------------------------------------------------
+# Integration: _subsequent_run with combined SPEC.md + scope_exclude
+# ---------------------------------------------------------------------------
+
+
+class TestSubsequentRunCombinedSpec:
+    """End-to-end: _subsequent_run with combined SPEC.md (State 3).
+
+    Constructs a tmpdir with:
+    - SPEC.md containing product-reference URL, visual-target ref/,
+      and scope_exclude: plugin API
+    - .duplo/duplo.json with features from a prior first run
+    - .duplo/file_hashes.json (empty — no file changes)
+    - No PLAN.md (triggers State 3: generate roadmap + plan)
+
+    All LLM/network calls are mocked.  The key assertion is that
+    scope_exclude filtering drops "Plugin API" but keeps
+    "Non-plugin-API configuration" and "Offline sync".
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: combined fixture + duplo.json + monkeypatch."""
+        _setup_combined_tmpdir(tmp_path)
+
+        # Write duplo.json with features saved by a prior first run.
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "NotesApp",
+                "source_url": _CANONICAL_URL,
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _COMBINED_FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using React + TypeScript. SQLite for local storage."
+                ).hexdigest(),
+            },
+        )
+
+        # Empty file_hashes — no file changes to detect.
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        # product.json from first run.
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "NotesApp",
+                    "source_url": _CANONICAL_URL,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _scrape_result(self):
+        """Build a ScrapeResult from the shared fixtures."""
+        content_hash = hashlib.sha256(_SCRAPED_TEXT.encode("utf-8")).hexdigest()
+        return ScrapeResult(
+            combined_text=_SCRAPED_TEXT,
+            all_code_examples=[],
+            all_page_records=[_PAGE_RECORD],
+            all_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            product_ref_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            source_records=[
+                {
+                    "url": _CANONICAL_URL,
+                    "last_scraped": "2026-04-14T00:00:00Z",
+                    "content_hash": content_hash,
+                    "scrape_depth_used": "deep",
+                }
+            ],
+        )
+
+    def _run_with_mocks(self, extra_patches=None):
+        """Run main() with full combined subsequent-run mocks.
+
+        Returns dict of named mock objects for assertion.
+        """
+        patches = {
+            "validate_for_run": patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            "scrape_declared": patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            "persist_scrape": patch("duplo.main._persist_scrape_result"),
+            "download_site_media": patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            "behavioral_refs": patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            "collect_design_input": patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            "extract_features": patch(
+                "duplo.main.extract_features",
+                return_value=_COMBINED_FEATURES,
+            ),
+            "save_features": patch("duplo.main.save_features"),
+            "generate_roadmap": patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            "select_features": patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            "generate_phase_plan": patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            "load_frame_descriptions": patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+        }
+        if extra_patches:
+            patches.update(extra_patches)
+
+        mocks = {}
+        entered = []
+        try:
+            for name, mgr in patches.items():
+                mock_obj = mgr.__enter__()
+                entered.append(mgr)
+                mocks[name] = mock_obj
+            main()
+        finally:
+            for mgr in reversed(entered):
+                mgr.__exit__(None, None, None)
+        return mocks
+
+    def test_generates_plan_md(self, tmp_path, monkeypatch):
+        """_subsequent_run in State 3 generates PLAN.md."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        plan_path = tmp_path / "PLAN.md"
+        assert plan_path.exists(), "PLAN.md should be generated"
+        content = plan_path.read_text(encoding="utf-8")
+        assert "NotesApp" in content
+        assert "Phase 1" in content
+
+    def test_scope_exclude_filters_plugin_api(self, tmp_path, monkeypatch):
+        """scope_exclude 'plugin API' drops the Plugin API feature
+        but keeps Non-plugin-API configuration and Offline sync.
+
+        save_features receives only the two surviving features
+        after _matches_excluded filtering in _subsequent_run.
+        """
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        # save_features should have been called with the filtered list.
+        mocks["save_features"].assert_called_once()
+        saved = mocks["save_features"].call_args[0][0]
+        saved_names = [f.name for f in saved]
+        assert "Plugin API" not in saved_names
+        assert "Non-plugin-API configuration" in saved_names
+        assert "Offline sync" in saved_names
+        assert len(saved) == 2
+
+    def test_scrape_declared_sources_called(self, tmp_path, monkeypatch):
+        """_scrape_declared_sources is called (spec has scrapeable
+        sources)."""
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        mocks["scrape_declared"].assert_called_once()
+
+    def test_roadmap_saved_to_duplo_json(self, tmp_path, monkeypatch):
+        """After generate_roadmap, the roadmap is persisted in
+        duplo.json and current_phase is set."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert "roadmap" in data
+        assert len(data["roadmap"]) == 1
+        assert data["current_phase"] == 1
+
+    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md should contain a ## Bugs section."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "## Bugs" in content
