@@ -4897,3 +4897,382 @@ class TestProposedRemovedBothRefsInDesignInput:
         """PLAN.md is generated at the end of the run."""
         self._run(tmp_path, monkeypatch)
         assert (tmp_path / "PLAN.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 5.32.6 — Two behavioral-target refs: one proposed, one active
+#
+# With proposed: true, extract_all_videos must NOT receive the proposed
+# video path.  Without the flag, it IS called with both paths.
+# ---------------------------------------------------------------------------
+
+# SPEC with ## Sources (triggers the spec_sources path in _subsequent_run)
+# and ## References with two behavioral-target VIDEO entries.
+_PROPOSED_BT_SUBSEQUENT_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "\n"
+    "## References\n"
+    "- ref/active_demo.mp4\n"
+    "  role: behavioral-target\n"
+    "- ref/proposed_demo.mp4\n"
+    "  role: behavioral-target\n"
+    "  proposed: true\n"
+)
+
+# Same SPEC with proposed: true removed — both behavioral-target refs active
+_PROPOSED_BT_UNPROPOSED_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "\n"
+    "## References\n"
+    "- ref/active_demo.mp4\n"
+    "  role: behavioral-target\n"
+    "- ref/proposed_demo.mp4\n"
+    "  role: behavioral-target\n"
+)
+
+
+def _setup_proposed_bt_subsequent_tmpdir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Create a project for _subsequent_run with proposed BT video refs.
+
+    Writes SPEC.md (with ## Sources + ## References), ref/ video stubs,
+    .duplo/duplo.json, .duplo/file_hashes.json, and .duplo/product.json.
+    """
+    (tmp_path / "SPEC.md").write_text(
+        _PROPOSED_BT_SUBSEQUENT_SPEC_TEXT,
+        encoding="utf-8",
+    )
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    # Write small stub files — they won't be opened by extract_all_videos
+    # because we mock _run_video_frame_pipeline.
+    (ref_dir / "active_demo.mp4").write_bytes(b"\x00\x00\x00\x1cftyp")
+    (ref_dir / "proposed_demo.mp4").write_bytes(b"\x00\x00\x00\x1cftyp\x00")
+
+    arch_text = "macOS native app built with SwiftUI and Swift."
+    _write_duplo_json(
+        tmp_path,
+        {
+            "app_name": "CalcApp",
+            "source_url": _AUTOGEN_SOURCE_URL,
+            "features": [
+                {
+                    "name": f.name,
+                    "description": f.description,
+                    "category": f.category,
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+                for f in _AUTOGEN_FEATURES
+            ],
+            "preferences": {
+                "platform": "macOS",
+                "language": "Swift",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": hashlib.sha256(arch_text.encode()).hexdigest(),
+        },
+    )
+
+    duplo_dir = tmp_path / ".duplo"
+
+    # Pre-populate file_hashes.json so no file changes trigger
+    # _analyze_new_files.
+    file_hashes = {}
+    for rel in (
+        "SPEC.md",
+        "ref/active_demo.mp4",
+        "ref/proposed_demo.mp4",
+    ):
+        full = tmp_path / rel
+        h = hashlib.sha256(full.read_bytes()).hexdigest()
+        file_hashes[rel] = h
+    (duplo_dir / "file_hashes.json").write_text(
+        json.dumps(file_hashes),
+        encoding="utf-8",
+    )
+
+    (duplo_dir / "product.json").write_text(
+        json.dumps(
+            {
+                "product_name": "CalcApp",
+                "source_url": _AUTOGEN_SOURCE_URL,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["duplo"])
+    monkeypatch.setattr(
+        "duplo.main._check_migration",
+        lambda target_dir: None,
+    )
+
+
+class TestProposedBehavioralTargetSubsequentRun:
+    """Run _subsequent_run with two behavioral-target video refs (one proposed).
+
+    The SPEC has ## Sources (product-reference) so the
+    ``if spec and spec_sources:`` path in _subsequent_run is entered,
+    triggering video frame extraction via _run_video_frame_pipeline.
+
+    _run_video_frame_pipeline is mocked so we capture the video paths
+    that reach extract_all_videos.  The proposed video must be excluded.
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up and run _subsequent_run, return pipeline mock."""
+        _setup_proposed_bt_subsequent_tmpdir(tmp_path, monkeypatch)
+
+        mock_pipeline = MagicMock(return_value=([], {}))
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main._run_video_frame_pipeline",
+                new=mock_pipeline,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_AUTOGEN_DESIGN_FIXTURE,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    "- [ ] Add graphing"
+                    ' [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return mock_pipeline
+
+    def test_pipeline_called_with_active_video(self, tmp_path, monkeypatch):
+        """The active behavioral-target video reaches the pipeline."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        mock_pl.assert_called_once()
+        video_paths = mock_pl.call_args[0][0]
+        names = [p.name for p in video_paths]
+        assert "active_demo.mp4" in names
+
+    def test_pipeline_excludes_proposed_video(self, tmp_path, monkeypatch):
+        """The proposed behavioral-target video is excluded."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        video_paths = mock_pl.call_args[0][0]
+        names = [p.name for p in video_paths]
+        assert "proposed_demo.mp4" not in names
+
+    def test_pipeline_receives_one_video(self, tmp_path, monkeypatch):
+        """Only one video (the active one) reaches the pipeline."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        video_paths = mock_pl.call_args[0][0]
+        assert len(video_paths) == 1
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated at the end of the run."""
+        self._run(tmp_path, monkeypatch)
+        assert (tmp_path / "PLAN.md").exists()
+
+
+class TestProposedBehavioralRemovedBothVideosInPipeline:
+    """After removing proposed: true, both videos reach the pipeline.
+
+    Sets up the same fixture but with SPEC.md edited to remove the
+    ``proposed: true`` line from the second behavioral-target entry.
+    Asserts that _run_video_frame_pipeline receives BOTH video paths.
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up tmpdir with unproposed SPEC, run _subsequent_run."""
+        _setup_proposed_bt_subsequent_tmpdir(tmp_path, monkeypatch)
+        (tmp_path / "SPEC.md").write_text(
+            _PROPOSED_BT_UNPROPOSED_SPEC_TEXT,
+            encoding="utf-8",
+        )
+
+        # Update file_hashes.json to reflect new SPEC.md content
+        duplo_dir = tmp_path / ".duplo"
+        file_hashes = {}
+        for rel in (
+            "SPEC.md",
+            "ref/active_demo.mp4",
+            "ref/proposed_demo.mp4",
+        ):
+            full = tmp_path / rel
+            h = hashlib.sha256(full.read_bytes()).hexdigest()
+            file_hashes[rel] = h
+        (duplo_dir / "file_hashes.json").write_text(
+            json.dumps(file_hashes),
+            encoding="utf-8",
+        )
+
+        mock_pipeline = MagicMock(return_value=([], {}))
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main._run_video_frame_pipeline",
+                new=mock_pipeline,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_AUTOGEN_DESIGN_FIXTURE,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    "- [ ] Add graphing"
+                    ' [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return mock_pipeline
+
+    def test_pipeline_called(self, tmp_path, monkeypatch):
+        """_run_video_frame_pipeline is called."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        mock_pl.assert_called_once()
+
+    def test_pipeline_receives_active_video(self, tmp_path, monkeypatch):
+        """The active behavioral-target video is in the pipeline args."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        video_paths = mock_pl.call_args[0][0]
+        names = [p.name for p in video_paths]
+        assert "active_demo.mp4" in names
+
+    def test_pipeline_receives_previously_proposed_video(self, tmp_path, monkeypatch):
+        """The previously-proposed video (now active) is in the args."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        video_paths = mock_pl.call_args[0][0]
+        names = [p.name for p in video_paths]
+        assert "proposed_demo.mp4" in names
+
+    def test_pipeline_receives_two_videos(self, tmp_path, monkeypatch):
+        """Both videos reach the pipeline."""
+        mock_pl = self._run(tmp_path, monkeypatch)
+        video_paths = mock_pl.call_args[0][0]
+        assert len(video_paths) == 2
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated at the end of the run."""
+        self._run(tmp_path, monkeypatch)
+        assert (tmp_path / "PLAN.md").exists()
