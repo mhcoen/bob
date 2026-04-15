@@ -18,6 +18,7 @@ from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 from duplo.main import ScrapeResult, main
+from duplo.questioner import BuildPreferences
 
 # ---------------------------------------------------------------------------
 # Shared fixtures for the URL-only spec integration test
@@ -1168,3 +1169,215 @@ class TestRefOnlyNoHttp:
                 raised = True
                 assert "must not be called" in str(exc)
             assert raised, "fetch_site guard did not raise"
+
+
+class TestRefOnlyDesignExtraction:
+    """Ref-only spec: extract_design called with visual-target ref paths.
+
+    Runs _first_run with a ref-only SPEC.md (no ## Sources).  The
+    visual-target image in ref/ should reach extract_design as the
+    design_input argument.  extract_design is mocked to return the
+    deterministic _DESIGN_REQUIREMENTS fixture.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: ref-only fixture + monkeypatch for main().
+
+        Pre-populates product.json so _confirm_product is skipped
+        (ref-only specs have no URL, so without a saved product the
+        pipeline would prompt the user and exit).
+        """
+        _setup_ref_only_tmpdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "NotesApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def test_extract_design_receives_visual_target(self, tmp_path, monkeypatch):
+        """extract_design is called with the visual-target ref/ path."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ) as mock_design,
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        mock_design.assert_called_once()
+        design_input = mock_design.call_args[0][0]
+        # The visual-target ref path should be in the design input.
+        input_names = [p.name for p in design_input]
+        assert "app_screenshot.png" in input_names, (
+            f"Expected visual-target ref in design_input, got {input_names}"
+        )
+
+    def test_extract_design_returns_fixture(self, tmp_path, monkeypatch):
+        """extract_design mock returns the deterministic fixture."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ) as mock_design,
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        result = mock_design.return_value
+        assert isinstance(result, DesignRequirements)
+        assert result.colors["primary"] == "#1a73e8"
+        assert len(result.components) == 3
+
+    def test_docs_ref_excluded_from_design_input(self, tmp_path, monkeypatch):
+        """Only visual-target refs appear in design_input, not docs."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ) as mock_design,
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        design_input = mock_design.call_args[0][0]
+        input_names = [p.name for p in design_input]
+        assert "user_guide.txt" not in input_names, (
+            "docs-role ref should not appear in design_input"
+        )
