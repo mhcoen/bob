@@ -296,3 +296,75 @@ class TestFetchSiteMockWiring:
         assert isinstance(doc_structs, DocStructures)
         assert len(records) == 1
         assert _CANONICAL_URL in raw_pages
+
+
+# ---------------------------------------------------------------------------
+# Selector mock — auto-select all features without prompting
+# ---------------------------------------------------------------------------
+
+
+def _select_all_features(features: list[Feature], **kwargs: object) -> list[Feature]:
+    """Mock replacement for select_features that returns all features."""
+    return list(features)
+
+
+class TestSelectorMockWiring:
+    """Verify the selector mock auto-selects all features."""
+
+    def test_mock_returns_all_features(self):
+        with patch(
+            "duplo.selector.select_features",
+            side_effect=_select_all_features,
+        ) as mock_sel:
+            from duplo.selector import select_features
+
+            result = select_features(_FEATURES)
+
+        mock_sel.assert_called_once()
+        assert len(result) == 2
+        assert result[0].name == "Real-time collaboration"
+        assert result[1].name == "End-to-end encryption"
+
+    def test_mock_ignores_recommended_kwarg(self):
+        """Mock works even when recommended/phase_label are passed."""
+        with patch(
+            "duplo.selector.select_features",
+            side_effect=_select_all_features,
+        ) as mock_sel:
+            from duplo.selector import select_features
+
+            result = select_features(
+                _FEATURES,
+                recommended=["End-to-end encryption"],
+                phase_label="Phase 2: Security",
+            )
+
+        mock_sel.assert_called_once()
+        assert len(result) == 2
+
+    def test_mock_with_empty_list(self):
+        with patch(
+            "duplo.selector.select_features",
+            side_effect=_select_all_features,
+        ):
+            from duplo.selector import select_features
+
+            result = select_features([])
+
+        assert result == []
+
+    def test_no_interactive_input_required(self):
+        """The mock must not call input() — patching input to raise
+        ensures the mock bypasses all interactive prompts."""
+        with (
+            patch(
+                "duplo.selector.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch("builtins.input", side_effect=RuntimeError("unexpected")),
+        ):
+            from duplo.selector import select_features
+
+            result = select_features(_FEATURES)
+
+        assert len(result) == 2
