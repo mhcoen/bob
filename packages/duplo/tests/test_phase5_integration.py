@@ -4728,3 +4728,172 @@ class TestProposedVisualTargetSubsequentRun:
         design_input = mock_ed.call_args[0][0]
         for item in design_input:
             assert isinstance(item, Path)
+
+
+# ---------------------------------------------------------------------------
+# 5.32.5 — Remove proposed: true, re-run, assert both refs in design_input
+# ---------------------------------------------------------------------------
+
+# SPEC.md with proposed: true removed — both refs are now active
+_PROPOSED_VT_UNPROPOSED_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "\n"
+    "## References\n"
+    "- ref/active_screenshot.png\n"
+    "  role: visual-target\n"
+    "- ref/proposed_mockup.png\n"
+    "  role: visual-target\n"
+)
+
+
+class TestProposedRemovedBothRefsInDesignInput:
+    """After removing proposed: true, both refs reach design_input.
+
+    Sets up the same fixture as TestProposedVisualTargetSubsequentRun
+    but with SPEC.md edited to remove the ``proposed: true`` line from
+    the second visual-target entry.  Asserts that extract_design is
+    called with BOTH reference image paths in its design_input.
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up tmpdir with unproposed SPEC, run _subsequent_run."""
+        # Re-use the proposed setup, then overwrite SPEC.md
+        _setup_proposed_vt_subsequent_tmpdir(tmp_path, monkeypatch)
+        (tmp_path / "SPEC.md").write_text(
+            _PROPOSED_VT_UNPROPOSED_SPEC_TEXT,
+            encoding="utf-8",
+        )
+
+        # Update file_hashes.json to reflect new SPEC.md content
+        duplo_dir = tmp_path / ".duplo"
+        file_hashes = {}
+        for rel in (
+            "SPEC.md",
+            "ref/active_screenshot.png",
+            "ref/proposed_mockup.png",
+        ):
+            full = tmp_path / rel
+            h = hashlib.sha256(full.read_bytes()).hexdigest()
+            file_hashes[rel] = h
+        (duplo_dir / "file_hashes.json").write_text(
+            json.dumps(file_hashes),
+            encoding="utf-8",
+        )
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return mock_extract_design
+
+    def test_extract_design_called(self, tmp_path, monkeypatch):
+        """extract_design is called during the run."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        mock_ed.assert_called_once()
+
+    def test_design_input_contains_active_ref(self, tmp_path, monkeypatch):
+        """The active visual-target ref is in design_input."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "active_screenshot.png" in names
+
+    def test_design_input_contains_previously_proposed_ref(self, tmp_path, monkeypatch):
+        """The previously-proposed ref (now active) is in design_input."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "proposed_mockup.png" in names
+
+    def test_design_input_has_two_entries(self, tmp_path, monkeypatch):
+        """design_input contains at least two entries (both refs)."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        assert len(design_input) >= 2
+
+    def test_design_input_has_paths(self, tmp_path, monkeypatch):
+        """All design_input elements are Path objects."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        for item in design_input:
+            assert isinstance(item, Path)
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated at the end of the run."""
+        self._run(tmp_path, monkeypatch)
+        assert (tmp_path / "PLAN.md").exists()
