@@ -4503,3 +4503,228 @@ class TestProposedVisualTargetDesignInput:
         mock_ed = self._run(tmp_path, monkeypatch)
         design_input = mock_ed.call_args[0][0]
         assert len(design_input) > 0
+
+
+# ---------------------------------------------------------------------------
+# 5.32.3 — Run _subsequent_run against the proposed-VT tmpdir
+# ---------------------------------------------------------------------------
+
+# SPEC with both ## Sources (triggers _scrape_declared_sources path)
+# and ## References with two visual-target entries (one proposed).
+_PROPOSED_VT_SUBSEQUENT_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "\n"
+    "## References\n"
+    "- ref/active_screenshot.png\n"
+    "  role: visual-target\n"
+    "- ref/proposed_mockup.png\n"
+    "  role: visual-target\n"
+    "  proposed: true\n"
+)
+
+
+def _setup_proposed_vt_subsequent_tmpdir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Create a project for _subsequent_run with proposed VT refs.
+
+    Writes SPEC.md (with ## Sources + ## References), ref/ images,
+    .duplo/duplo.json (prior first run), .duplo/file_hashes.json,
+    and .duplo/product.json.
+    """
+    (tmp_path / "SPEC.md").write_text(
+        _PROPOSED_VT_SUBSEQUENT_SPEC_TEXT,
+        encoding="utf-8",
+    )
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "active_screenshot.png").write_bytes(_FIXTURE_PNG)
+    (ref_dir / "proposed_mockup.png").write_bytes(_FIXTURE_PNG + b"\x00")
+
+    arch_text = "macOS native app built with SwiftUI and Swift."
+    _write_duplo_json(
+        tmp_path,
+        {
+            "app_name": "CalcApp",
+            "source_url": _AUTOGEN_SOURCE_URL,
+            "features": [
+                {
+                    "name": f.name,
+                    "description": f.description,
+                    "category": f.category,
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+                for f in _AUTOGEN_FEATURES
+            ],
+            "preferences": {
+                "platform": "macOS",
+                "language": "Swift",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": hashlib.sha256(arch_text.encode()).hexdigest(),
+        },
+    )
+
+    duplo_dir = tmp_path / ".duplo"
+
+    # Pre-populate file_hashes.json so no file changes are detected.
+    # This prevents _analyze_new_files from running and calling
+    # extract_design separately from the _subsequent_run design block.
+    file_hashes = {}
+    for rel in ("SPEC.md", "ref/active_screenshot.png", "ref/proposed_mockup.png"):
+        full = tmp_path / rel
+        h = hashlib.sha256(full.read_bytes()).hexdigest()
+        file_hashes[rel] = h
+    (duplo_dir / "file_hashes.json").write_text(
+        json.dumps(file_hashes),
+        encoding="utf-8",
+    )
+
+    (duplo_dir / "product.json").write_text(
+        json.dumps(
+            {
+                "product_name": "CalcApp",
+                "source_url": _AUTOGEN_SOURCE_URL,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["duplo"])
+    monkeypatch.setattr(
+        "duplo.main._check_migration",
+        lambda target_dir: None,
+    )
+
+
+class TestProposedVisualTargetSubsequentRun:
+    """Run _subsequent_run with two visual-target refs (one proposed).
+
+    The SPEC has ## Sources (product-reference) so the
+    ``if spec and spec_sources:`` path in _subsequent_run is entered,
+    triggering design extraction via collect_design_input.
+
+    extract_design is NOT mocked away — collect_design_input runs
+    for real so we verify the proposed entry is excluded from the
+    design input list that reaches extract_design.
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up and run _subsequent_run, return extract_design mock."""
+        _setup_proposed_vt_subsequent_tmpdir(tmp_path, monkeypatch)
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return mock_extract_design
+
+    def test_extract_design_called(self, tmp_path, monkeypatch):
+        """extract_design is called during _subsequent_run."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        mock_ed.assert_called_once()
+
+    def test_design_input_contains_active_ref(self, tmp_path, monkeypatch):
+        """The active visual-target ref reaches extract_design."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "active_screenshot.png" in names
+
+    def test_design_input_excludes_proposed_ref(self, tmp_path, monkeypatch):
+        """The proposed visual-target ref is excluded from design input."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "proposed_mockup.png" not in names
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated at the end of the run."""
+        self._run(tmp_path, monkeypatch)
+        assert (tmp_path / "PLAN.md").exists()
+
+    def test_design_input_has_paths(self, tmp_path, monkeypatch):
+        """All design_input elements are Path objects."""
+        mock_ed = self._run(tmp_path, monkeypatch)
+        design_input = mock_ed.call_args[0][0]
+        for item in design_input:
+            assert isinstance(item, Path)
