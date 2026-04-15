@@ -654,7 +654,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Modify Variant A's SPEC.md to delete the autogen block contents (leave block markers but empty body). Run `_subsequent_run` again. Assert: `extract_design` IS called this time; SPEC.md autogen block is now populated.
 
 - [ ] Add `test_proposed_true_references_excluded_from_pipeline`
-  - [ ] Construct a tmpdir with SPEC.md containing two ref/ entries with the same `role: visual-target`: one with `proposed: true`, one without. Drop fixture image files for both.
+  - [x] Construct a tmpdir with SPEC.md containing two ref/ entries with the same `role: visual-target`: one with `proposed: true`, one without. Drop fixture image files for both.
   - [ ] Mock `extract_design` and capture its `design_input` argument.
   - [ ] Run `_subsequent_run` against the tmpdir.
   - [ ] Assert: `extract_design` was called; its `design_input` contains the path of the non-proposed reference; its `design_input` does NOT contain the path of the proposed reference.
