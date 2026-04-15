@@ -648,7 +648,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
 
 - [ ] Add `test_autogen_design_block_present_skips_vision`
   - [x] Construct two tmpdirs sharing the same SPEC.md skeleton (URL-only, product-reference). Variant A: SPEC.md has `## Design` containing a populated AUTO-GENERATED block. Variant B: SPEC.md has `## Design` with no autogen block.
-  - [ ] Mock `extract_design` and assert call counts.
+  - [x] Mock `extract_design` and assert call counts.
   - [ ] Run `_subsequent_run` against Variant A. Assert: `extract_design` was NOT called; `duplo.diagnostics` recorded the autogen-skip message; SPEC.md was NOT modified by the run; `.duplo/duplo.json` has NO new `design_requirements`.
   - [ ] Run `_subsequent_run` against Variant B. Assert: `extract_design` WAS called; SPEC.md was modified to add a populated AUTO-GENERATED block; `.duplo/duplo.json` `design_requirements` was populated.
   - [ ] Modify Variant A's SPEC.md to delete the autogen block contents (leave block markers but empty body). Run `_subsequent_run` again. Assert: `extract_design` IS called this time; SPEC.md autogen block is now populated.
