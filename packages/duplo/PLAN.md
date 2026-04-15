@@ -632,13 +632,13 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Run `_subsequent_run` against the tmpdir.
   - [x] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
 
-- [ ] Add `test_url_and_ref_with_scope_exclude_drops_features`
+- [x] Add `test_url_and_ref_with_scope_exclude_drops_features`
   - [x] Construct a tmpdir with SPEC.md containing marker, Purpose, Architecture, one product-reference URL, one ref/ entry with `role: visual-target`, AND a `## Scope` block with `exclude: plugin API`.
   - [x] Mock `fetch_site` and `extract_design` deterministically.
   - [x] Mock `extract_features` to return three features whose names/descriptions are: (a) a clear match for `"plugin API"` as a whole phrase; (b) a non-match that contains the substring `"non-plugin-API"`; (c) an unrelated feature.
   - [x] Run `_subsequent_run` against the tmpdir.
   - [x] Assert: feature (a) was dropped — it does NOT appear in `.duplo/duplo.json` features list. Features (b) and (c) WERE kept (substring match must NOT trigger word-boundary regex).
-  - [ ] Assert: `duplo.diagnostics` recorded a `scope_exclude` diagnostic for feature (a) and only feature (a).
+  - [x] Assert: `duplo.diagnostics` recorded a `scope_exclude` diagnostic for feature (a) and only feature (a).
 
 - [ ] Add `test_discovered_urls_appended_to_spec_and_not_rescraped_on_second_run`
   - [ ] Construct a tmpdir with SPEC.md containing one product-reference URL with `scrape: deep`. Mock `fetch_site` to return a `raw_pages` dict whose HTML contains one cross-origin `<a href>` to a different host.
