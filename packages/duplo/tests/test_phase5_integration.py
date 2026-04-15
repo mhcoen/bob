@@ -2226,3 +2226,95 @@ class TestCombinedDesignMock:
             "screenshot1.png",
             "screenshot2.png",
         ]
+
+
+# ---------------------------------------------------------------------------
+# Feature extractor fixture for combined spec (scope_exclude filtering)
+# ---------------------------------------------------------------------------
+
+_COMBINED_FEATURES = [
+    Feature(
+        name="Plugin API",
+        description="Exposes a plugin API for third-party extensions "
+        "to hook into the note editor lifecycle.",
+        category="Extensibility",
+    ),
+    Feature(
+        name="Non-plugin-API configuration",
+        description="A non-plugin-API settings panel that lets users "
+        "customise the editor without writing code.",
+        category="Configuration",
+    ),
+    Feature(
+        name="Offline sync",
+        description="Notes are synced to local storage for offline "
+        "access and reconciled when connectivity returns.",
+        category="Sync",
+    ),
+]
+
+
+class TestCombinedFeatureFixture:
+    """Verify the three-feature fixture for scope_exclude filtering."""
+
+    def test_fixture_length(self):
+        assert len(_COMBINED_FEATURES) == 3
+
+    def test_features_are_feature_instances(self):
+        for feat in _COMBINED_FEATURES:
+            assert isinstance(feat, Feature)
+
+    def test_names_are_distinct(self):
+        names = [f.name for f in _COMBINED_FEATURES]
+        assert len(names) == len(set(names))
+
+    def test_descriptions_non_empty(self):
+        for feat in _COMBINED_FEATURES:
+            assert len(feat.description) > 0
+
+    def test_categories_non_empty(self):
+        for feat in _COMBINED_FEATURES:
+            assert len(feat.category) > 0
+
+    def test_default_status_pending(self):
+        for feat in _COMBINED_FEATURES:
+            assert feat.status == "pending"
+
+    def test_plugin_api_matches_excluded(self):
+        """Feature (a) 'Plugin API' is caught by _matches_excluded
+        for the term 'plugin API'."""
+        from duplo.extractor import _matches_excluded
+
+        assert _matches_excluded(_COMBINED_FEATURES[0], ["plugin API"])
+
+    def test_non_plugin_api_not_matched(self):
+        """Feature (b) 'Non-plugin-API configuration' contains the
+        substring but does NOT match word-boundary 'plugin API'."""
+        from duplo.extractor import _matches_excluded
+
+        assert not _matches_excluded(_COMBINED_FEATURES[1], ["plugin API"])
+
+    def test_unrelated_not_matched(self):
+        """Feature (c) 'Offline sync' is unrelated and not matched."""
+        from duplo.extractor import _matches_excluded
+
+        assert not _matches_excluded(_COMBINED_FEATURES[2], ["plugin API"])
+
+
+class TestCombinedFeatureMockWiring:
+    """Verify the combined-feature fixture works as a mock return value."""
+
+    def test_mock_returns_fixture(self):
+        with patch(
+            "duplo.extractor.extract_features",
+            return_value=_COMBINED_FEATURES,
+        ) as mock_extract:
+            from duplo.extractor import extract_features
+
+            result = extract_features("some text")
+
+        mock_extract.assert_called_once_with("some text")
+        assert len(result) == 3
+        assert result[0].name == "Plugin API"
+        assert result[1].name == "Non-plugin-API configuration"
+        assert result[2].name == "Offline sync"
