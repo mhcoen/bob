@@ -3334,6 +3334,28 @@ _AUTOGEN_SPEC_VARIANT_A = (
     "  scrape: deep\n"
 )
 
+# Variant A-emptied SPEC.md: ## Design with empty AUTO-GENERATED block
+# (markers present but body cleared — pipeline should re-extract)
+_AUTOGEN_SPEC_VARIANT_A_EMPTIED = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    f"{_AUTOGEN_PURPOSE}\n"
+    "\n"
+    "## Architecture\n"
+    f"{_AUTOGEN_ARCHITECTURE}\n"
+    "\n"
+    "## Design\n"
+    "\n"
+    "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+    "<!-- END AUTO-GENERATED -->\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+)
+
 # Variant B SPEC.md: ## Design with NO autogen block
 _AUTOGEN_SPEC_VARIANT_B = (
     "<!-- How the pieces fit together: -->\n"
@@ -3396,10 +3418,16 @@ def _setup_autogen_tmpdir(
 ) -> None:
     """Create an autogen-variant tmpdir.
 
-    *variant* is ``"A"`` (populated autogen block) or ``"B"``
-    (no autogen block).
+    *variant* is ``"A"`` (populated autogen block), ``"B"``
+    (no autogen block), or ``"A-emptied"`` (markers present,
+    body cleared).
     """
-    spec_text = _AUTOGEN_SPEC_VARIANT_A if variant == "A" else _AUTOGEN_SPEC_VARIANT_B
+    variant_map = {
+        "A": _AUTOGEN_SPEC_VARIANT_A,
+        "B": _AUTOGEN_SPEC_VARIANT_B,
+        "A-emptied": _AUTOGEN_SPEC_VARIANT_A_EMPTIED,
+    }
+    spec_text = variant_map[variant]
     (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
 
     _write_duplo_json(
@@ -4065,3 +4093,168 @@ class TestAutogenVariantBSubsequentRun:
         self._run_variant_b(tmp_path, monkeypatch)
         data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
         assert data["design_requirements"]["fonts"] == _AUTOGEN_DESIGN_FIXTURE.fonts
+
+
+# ---------------------------------------------------------------------------
+# 5.31.5 — Variant A-emptied: autogen markers present but body empty,
+#           extract_design IS called, SPEC.md autogen block populated
+# ---------------------------------------------------------------------------
+
+
+class TestAutogenVariantAEmptiedFixture:
+    """Verify the A-emptied SPEC.md variant is well-formed."""
+
+    def test_has_marker(self):
+        assert "How the pieces fit together:" in _AUTOGEN_SPEC_VARIANT_A_EMPTIED
+
+    def test_has_autogen_markers(self):
+        assert "BEGIN AUTO-GENERATED" in _AUTOGEN_SPEC_VARIANT_A_EMPTIED
+        assert "END AUTO-GENERATED" in _AUTOGEN_SPEC_VARIANT_A_EMPTIED
+
+    def test_autogen_body_is_empty(self):
+        """The autogen block markers exist but the body is empty."""
+        import re
+
+        m = re.search(
+            r"<!--\s*BEGIN AUTO-GENERATED[^>]*-->(.*?)"
+            r"<!--\s*END AUTO-GENERATED\s*-->",
+            _AUTOGEN_SPEC_VARIANT_A_EMPTIED,
+            re.DOTALL,
+        )
+        assert m is not None
+        assert not m.group(1).strip(), "Autogen block body should be empty"
+
+    def test_spec_parsed_has_empty_autogen(self):
+        """read_spec on the A-emptied text yields empty auto_generated."""
+        import tempfile
+
+        from duplo.spec_reader import read_spec
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            (p / "SPEC.md").write_text(_AUTOGEN_SPEC_VARIANT_A_EMPTIED, encoding="utf-8")
+            spec = read_spec(target_dir=p)
+        assert spec is not None
+        assert not spec.design.auto_generated.strip()
+
+
+class TestAutogenVariantAEmptiedSubsequentRun:
+    """Run _subsequent_run against Variant A-emptied and verify side-effects.
+
+    Variant A-emptied has AUTO-GENERATED markers but empty body.
+    The pipeline must:
+    - Call extract_design (empty body is treated as absent)
+    - Write design content into the AUTO-GENERATED block in SPEC.md
+    """
+
+    def _run_variant_a_emptied(self, tmp_path, monkeypatch):
+        """Set up A-emptied tmpdir, run main(), return mocks dict."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A-emptied")
+
+        spec_text_before = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=(
+                    [Path(".duplo/site_media/img.png")],
+                    [],
+                ),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[Path(".duplo/site_media/img.png")],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return {
+            "mock_extract_design": mock_extract_design,
+            "spec_text_before": spec_text_before,
+        }
+
+    def test_extract_design_called(self, tmp_path, monkeypatch):
+        """extract_design must be called when autogen body is empty."""
+        result = self._run_variant_a_emptied(tmp_path, monkeypatch)
+        result["mock_extract_design"].assert_called_once()
+
+    def test_spec_md_autogen_block_populated(self, tmp_path, monkeypatch):
+        """SPEC.md autogen block must contain design content after run."""
+        import re
+
+        self._run_variant_a_emptied(tmp_path, monkeypatch)
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        m = re.search(
+            r"<!--\s*BEGIN AUTO-GENERATED[^>]*-->(.*?)"
+            r"<!--\s*END AUTO-GENERATED\s*-->",
+            spec_text,
+            re.DOTALL,
+        )
+        assert m is not None, "AUTO-GENERATED block not found in SPEC.md"
+        block_content = m.group(1).strip()
+        assert block_content, "AUTO-GENERATED block should be populated"
+
+    def test_spec_md_was_modified(self, tmp_path, monkeypatch):
+        """SPEC.md must differ from its pre-run content."""
+        result = self._run_variant_a_emptied(tmp_path, monkeypatch)
+        spec_text_after = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert spec_text_after != result["spec_text_before"]
