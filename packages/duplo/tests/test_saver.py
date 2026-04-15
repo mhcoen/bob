@@ -681,7 +681,8 @@ class TestSaveSources:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["sources"] == []
 
-    def test_overwrites_existing_sources(self, tmp_path):
+    def test_merges_preserving_removed_urls(self, tmp_path):
+        """Entries for URLs no longer in the scrape list are preserved."""
         old = [
             {
                 "url": "https://old.com",
@@ -693,8 +694,28 @@ class TestSaveSources:
         save_sources(old, target_dir=tmp_path)
         save_sources(self._SOURCES, target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert len(data["sources"]) == 2
-        assert data["sources"][0]["url"] == "https://example.com"
+        urls = {s["url"] for s in data["sources"]}
+        assert "https://old.com" in urls
+        assert "https://example.com" in urls
+        assert "https://docs.example.com" in urls
+        assert len(data["sources"]) == 3
+
+    def test_updates_existing_entry_by_url(self, tmp_path):
+        """An entry with the same URL is updated, not duplicated."""
+        old = [
+            {
+                "url": "https://example.com",
+                "last_scraped": "2026-01-01T00:00:00+00:00",
+                "content_hash": "old_hash",
+                "scrape_depth_used": "shallow",
+            }
+        ]
+        save_sources(old, target_dir=tmp_path)
+        save_sources(self._SOURCES, target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        by_url = {s["url"]: s for s in data["sources"]}
+        assert by_url["https://example.com"]["content_hash"] == "abc123"
+        assert by_url["https://example.com"]["scrape_depth_used"] == "deep"
 
     def test_file_ends_with_newline(self, tmp_path):
         save_sources(self._SOURCES, target_dir=tmp_path)

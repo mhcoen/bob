@@ -11397,3 +11397,125 @@ class TestProductJsonBackwardCompat:
         main()
 
         assert captured.get("url") == "https://legacy.com"
+
+
+class TestRemovedSourceIdempotent:
+    """When a URL is removed from ## Sources, its entry stays in
+    duplo.json but the pipeline doesn't re-scrape or use cached
+    content from that source."""
+
+    def _make_source(self, url, role="product-reference", scrape="deep"):
+        from duplo.spec_reader import SourceEntry
+
+        return SourceEntry(url=url, role=role, scrape=scrape)
+
+    def _make_spec(self, sources):
+        from duplo.spec_reader import ProductSpec
+
+        return ProductSpec(sources=sources)
+
+    def test_removed_source_not_rescraped(self):
+        """A URL removed from ## Sources is not passed to fetch_site."""
+        src_a = self._make_source("https://a.com")
+        # Source B was previously scraped but is now removed from spec.
+        spec = self._make_spec([src_a])
+
+        calls = []
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            calls.append(url)
+            return ("text_a", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a],
+            ),
+        ):
+            _scrape_declared_sources(spec)
+
+        assert calls == ["https://a.com"]
+
+    def test_removed_source_cached_text_not_in_result(self):
+        """Scraped text from a removed source is not in the result."""
+        src_a = self._make_source("https://a.com")
+        spec = self._make_spec([src_a])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return ("text from A only", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        assert "text from A only" in result.combined_text
+        assert "text from B" not in result.combined_text
+
+    def test_save_sources_preserves_removed_entry(self, tmp_path):
+        """save_sources merges: removed URL entry stays in duplo.json."""
+        from duplo.saver import load_sources, save_sources
+
+        # First scrape: A and B both present.
+        first_run = [
+            {
+                "url": "https://a.com",
+                "last_scraped": "2026-04-14T10:00:00+00:00",
+                "content_hash": "hash_a",
+                "scrape_depth_used": "deep",
+            },
+            {
+                "url": "https://b.com",
+                "last_scraped": "2026-04-14T10:01:00+00:00",
+                "content_hash": "hash_b",
+                "scrape_depth_used": "shallow",
+            },
+        ]
+        save_sources(first_run, target_dir=tmp_path)
+
+        # Second scrape: only A in spec, B removed.
+        second_run = [
+            {
+                "url": "https://a.com",
+                "last_scraped": "2026-04-14T11:00:00+00:00",
+                "content_hash": "hash_a_v2",
+                "scrape_depth_used": "deep",
+            },
+        ]
+        save_sources(second_run, target_dir=tmp_path)
+
+        sources = load_sources(target_dir=tmp_path)
+        by_url = {s["url"]: s for s in sources}
+
+        # A was updated.
+        assert by_url["https://a.com"]["content_hash"] == "hash_a_v2"
+        assert by_url["https://a.com"]["last_scraped"] == "2026-04-14T11:00:00+00:00"
+        # B was preserved with original metadata.
+        assert "https://b.com" in by_url
+        assert by_url["https://b.com"]["content_hash"] == "hash_b"
+        assert by_url["https://b.com"]["last_scraped"] == "2026-04-14T10:01:00+00:00"
+
+    def test_removed_source_no_source_record_emitted(self):
+        """source_records only contains actually-scraped sources."""
+        src_a = self._make_source("https://a.com")
+        spec = self._make_spec([src_a])
+
+        def fake_fetch(url, *, scrape_depth="deep"):
+            return ("text", [], None, [], {})
+
+        with (
+            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src_a],
+            ),
+        ):
+            result = _scrape_declared_sources(spec)
+
+        urls = [r["url"] for r in result.source_records]
+        assert urls == ["https://a.com"]

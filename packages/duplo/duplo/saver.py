@@ -1155,14 +1155,19 @@ def save_sources(
     *,
     target_dir: Path | str = ".",
 ) -> Path:
-    """Save per-source scraping metadata to *duplo.json*.
+    """Merge per-source scraping metadata into *duplo.json*.
 
-    Writes ``{"sources": [...]}`` into *duplo.json*, preserving all
-    existing keys.  Each entry has ``url``, ``last_scraped``,
-    ``content_hash``, and ``scrape_depth_used`` fields.
+    Updates entries by URL: new entries are added, existing entries
+    with matching URLs are updated, and entries for URLs no longer in
+    *sources* are preserved as-is.  This means removing a URL from
+    ``## Sources`` in SPEC.md leaves its metadata in *duplo.json*
+    (idempotent state) while the pipeline simply stops re-scraping it.
+
+    Each entry has ``url``, ``last_scraped``, ``content_hash``, and
+    ``scrape_depth_used`` fields.
 
     Args:
-        sources: List of source metadata dicts from scraping.
+        sources: List of source metadata dicts from the current scrape.
         target_dir: Directory containing ``duplo.json``.
 
     Returns:
@@ -1171,7 +1176,14 @@ def save_sources(
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = _safe_read_json(path)
-    data["sources"] = sources
+
+    existing = data.get("sources", [])
+    existing_by_url: dict[str, dict] = {s["url"]: s for s in existing}
+
+    for entry in sources:
+        existing_by_url[entry["url"]] = entry
+
+    data["sources"] = list(existing_by_url.values())
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 
