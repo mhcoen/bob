@@ -2742,3 +2742,150 @@ class TestCrossOriginTmpdir:
     def test_no_ref_directory(self, tmp_path):
         _setup_cross_origin_tmpdir(tmp_path)
         assert not (tmp_path / "ref").exists()
+
+
+class TestCrossOriginDiscovery:
+    """End-to-end: _subsequent_run discovers cross-origin links.
+
+    Runs _subsequent_run with a SPEC.md that declares one
+    product-reference URL (scrape: deep).  The mocked fetch_site
+    returns HTML with a cross-origin <a href>.  After the run,
+    SPEC.md should have a new ## Sources entry for the cross-origin
+    URL with ``discovered: true``, and fetch_site should have been
+    called only once (for the source URL, not for the discovered
+    URL).
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: cross-origin SPEC.md + duplo.json."""
+        _setup_cross_origin_tmpdir(tmp_path)
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "MyProduct",
+                "source_url": _XORIGIN_SOURCE_URL,
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _XORIGIN_FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using Next.js + TypeScript. PostgreSQL for storage."
+                ).hexdigest(),
+            },
+        )
+
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "MyProduct",
+                    "source_url": _XORIGIN_SOURCE_URL,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self):
+        """Run main() with fetch_site mocked but real scrape pipeline.
+
+        _scrape_declared_sources and _persist_scrape_result run for
+        real so cross-origin links flow through to SPEC.md.
+        """
+        patches = {
+            "validate_for_run": patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            "fetch_site": patch(
+                "duplo.main.fetch_site",
+                return_value=_XORIGIN_FETCH_SITE_RESULT,
+            ),
+            "download_site_media": patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            "behavioral_refs": patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            "collect_design_input": patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            "extract_features": patch(
+                "duplo.main.extract_features",
+                return_value=_XORIGIN_FEATURES,
+            ),
+            "save_features": patch("duplo.main.save_features"),
+            "generate_roadmap": patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            "select_features": patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            "generate_phase_plan": patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            "load_frame_descriptions": patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+        }
+        mocks = {}
+        entered = []
+        try:
+            for name, mgr in patches.items():
+                mock_obj = mgr.__enter__()
+                entered.append(mgr)
+                mocks[name] = mock_obj
+            main()
+        finally:
+            for mgr in reversed(entered):
+                mgr.__exit__(None, None, None)
+        return mocks
+
+    def test_spec_md_modified_with_discovered_url(self, tmp_path, monkeypatch):
+        """SPEC.md gains a discovered: true entry for the cross-origin
+        URL after _subsequent_run."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "external.example.org" in spec_text, "Cross-origin URL should appear in SPEC.md"
+        assert "discovered: true" in spec_text, "Discovered URL should have discovered: true flag"
+
+    def test_cross_origin_url_not_fetched(self, tmp_path, monkeypatch):
+        """fetch_site is called only for the source URL, never for
+        the discovered cross-origin URL."""
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        mock_fetch = mocks["fetch_site"]
+        assert mock_fetch.call_count == 1, (
+            f"fetch_site should be called once, got {mock_fetch.call_count}"
+        )
+        called_url = mock_fetch.call_args[0][0]
+        assert called_url == _XORIGIN_SOURCE_URL, (
+            f"fetch_site should be called with source URL, got {called_url}"
+        )
