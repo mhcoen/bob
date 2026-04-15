@@ -778,3 +778,212 @@ class TestSubsequentRunUrlOnlySpec:
 
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert "## Bugs" in content
+
+    def test_persist_scrape_result_called(self, tmp_path, monkeypatch):
+        """_persist_scrape_result is called with the ScrapeResult
+        from _scrape_declared_sources."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result") as mock_persist,
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        mock_persist.assert_called_once()
+        result = mock_persist.call_args[0][0]
+        assert result.all_raw_pages == {_CANONICAL_URL: _RAW_HTML}
+        assert len(result.all_page_records) == 1
+        assert result.source_records[0]["url"] == _CANONICAL_URL
+
+    def test_raw_pages_written(self, tmp_path):
+        """.duplo/raw_pages/ contains sha256(canonical_url).html
+        after save_raw_content runs with scrape result data."""
+        from duplo.saver import save_raw_content
+
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+
+        save_raw_content(
+            {_CANONICAL_URL: _RAW_HTML},
+            [_PAGE_RECORD],
+            target_dir=tmp_path,
+        )
+
+        raw_pages_dir = duplo_dir / "raw_pages"
+        assert raw_pages_dir.exists(), ".duplo/raw_pages/ should exist"
+        url_hash = hashlib.sha256(_CANONICAL_URL.encode()).hexdigest()
+        expected_file = raw_pages_dir / f"{url_hash}.html"
+        assert expected_file.exists(), f"Expected {url_hash}.html in raw_pages/"
+        assert expected_file.read_text(encoding="utf-8") == _RAW_HTML
+
+    def test_sources_in_duplo_json(self, tmp_path):
+        """.duplo/duplo.json has sources populated with the URL
+        after save_sources runs with scrape result data."""
+        from duplo.saver import save_sources
+
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "duplo.json").write_text("{}", encoding="utf-8")
+
+        result = self._scrape_result()
+        save_sources(result.source_records, target_dir=tmp_path)
+
+        data = json.loads((duplo_dir / "duplo.json").read_text(encoding="utf-8"))
+        assert "sources" in data
+        source_urls = [s["url"] for s in data["sources"]]
+        assert _CANONICAL_URL in source_urls
+
+    def test_product_json_synced(self, tmp_path, monkeypatch):
+        """product.json has source_url from spec's first
+        product-reference after _subsequent_run."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        product_path = tmp_path / ".duplo" / "product.json"
+        assert product_path.exists(), "product.json should exist"
+        product = json.loads(product_path.read_text(encoding="utf-8"))
+        assert product["source_url"] == _CANONICAL_URL
+
+    def test_no_ref_dir_no_errors(self, tmp_path, monkeypatch):
+        """No FileNotFoundError and no ref/-related diagnostic when
+        ref/ directory does not exist (URL-only spec)."""
+        self._setup(tmp_path, monkeypatch)
+        assert not (tmp_path / "ref").exists()
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=self._scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        assert (tmp_path / "PLAN.md").exists()
+        errors_path = tmp_path / ".duplo" / "errors.jsonl"
+        if errors_path.exists():
+            errors_text = errors_path.read_text(encoding="utf-8")
+            assert "ref/" not in errors_text, "No diagnostic about missing ref/ expected"
