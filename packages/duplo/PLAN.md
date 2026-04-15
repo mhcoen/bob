@@ -625,7 +625,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
 
 - [ ] Add `test_ref_only_spec_runs_without_http`
   - [x] Construct a tmpdir with a SPEC.md containing marker, Purpose, Architecture, NO `## Sources` (or empty `## Sources`), and a `## References` block listing two entries: one with `role: visual-target` and one with `role: docs`. Create `ref/` directory and place small fixture image and text files at the declared paths.
-  - [ ] Patch `duplo.fetcher.fetch_site` with a mock that raises if called — the test asserts no HTTP work happened.
+  - [x] Patch `duplo.fetcher.fetch_site` with a mock that raises if called — the test asserts no HTTP work happened.
   - [ ] Mock `extract_design` to return deterministic output and assert it was called with the visual-target ref/ file paths in its `design_input`.
   - [ ] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
   - [ ] Mock `extract_features` and the interactive selectors as in the previous test.
