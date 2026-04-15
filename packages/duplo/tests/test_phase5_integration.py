@@ -3609,3 +3609,152 @@ class TestAutogenVariantTmpdir:
         """URL-only spec: no ref/ directory."""
         _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
         assert not (tmp_path / "ref").exists()
+
+
+# ---------------------------------------------------------------------------
+# 5.31.2 — Mock extract_design and assert call counts
+# ---------------------------------------------------------------------------
+
+_AUTOGEN_DESIGN_FIXTURE = DesignRequirements(
+    colors={"primary": "#0066cc", "background": "#f5f5f5"},
+    fonts={"body": "SF Pro, 14px", "display": "SF Pro Display, 28px"},
+    spacing={"content_padding": "16px"},
+    layout={"navigation": "top"},
+    components=[{"name": "button", "style": "rounded corners"}],
+    source_images=["site_img.png"],
+)
+
+
+def _autogen_scrape_result() -> ScrapeResult:
+    """Build a ScrapeResult for the autogen CalcApp URL."""
+    content_hash = hashlib.sha256(_AUTOGEN_SCRAPED_TEXT.encode("utf-8")).hexdigest()
+    return ScrapeResult(
+        combined_text=_AUTOGEN_SCRAPED_TEXT,
+        all_code_examples=[],
+        all_page_records=[_AUTOGEN_PAGE_RECORD],
+        all_raw_pages={_AUTOGEN_SOURCE_URL: _AUTOGEN_RAW_HTML},
+        product_ref_raw_pages={_AUTOGEN_SOURCE_URL: _AUTOGEN_RAW_HTML},
+        source_records=[
+            {
+                "url": _AUTOGEN_SOURCE_URL,
+                "last_scraped": "2026-04-15T12:00:00Z",
+                "content_hash": content_hash,
+                "scrape_depth_used": "deep",
+            }
+        ],
+    )
+
+
+class TestAutogenExtractDesignCallCount:
+    """Variant A (populated autogen) must NOT call extract_design.
+
+    Variant B (no autogen) must call extract_design exactly once
+    when collect_design_input returns a non-empty list.
+    """
+
+    def _run_variant(self, tmp_path, monkeypatch, *, variant: str):
+        """Set up tmpdir, run main() with mocks, return extract_design mock."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant=variant)
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=(
+                    [Path(".duplo/site_media/img.png")],
+                    [],
+                ),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[Path(".duplo/site_media/img.png")],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return mock_extract_design
+
+    def test_variant_a_extract_design_not_called(self, tmp_path, monkeypatch):
+        """Variant A: populated autogen block skips extract_design."""
+        mock_ed = self._run_variant(tmp_path, monkeypatch, variant="A")
+        mock_ed.assert_not_called()
+
+    def test_variant_b_extract_design_called_once(self, tmp_path, monkeypatch):
+        """Variant B: no autogen block triggers extract_design."""
+        mock_ed = self._run_variant(tmp_path, monkeypatch, variant="B")
+        mock_ed.assert_called_once()
+
+    def test_variant_b_extract_design_receives_design_input(self, tmp_path, monkeypatch):
+        """Variant B: extract_design receives the design input list."""
+        mock_ed = self._run_variant(tmp_path, monkeypatch, variant="B")
+        call_args = mock_ed.call_args[0][0]
+        assert len(call_args) == 1
+        assert Path(".duplo/site_media/img.png") in call_args
+
+    def test_variant_a_plan_md_generated(self, tmp_path, monkeypatch):
+        """Variant A still generates PLAN.md despite skipping Vision."""
+        self._run_variant(tmp_path, monkeypatch, variant="A")
+        assert (tmp_path / "PLAN.md").exists()
+
+    def test_variant_b_plan_md_generated(self, tmp_path, monkeypatch):
+        """Variant B generates PLAN.md after design extraction."""
+        self._run_variant(tmp_path, monkeypatch, variant="B")
+        assert (tmp_path / "PLAN.md").exists()
