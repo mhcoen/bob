@@ -2889,3 +2889,171 @@ class TestCrossOriginDiscovery:
         assert called_url == _XORIGIN_SOURCE_URL, (
             f"fetch_site should be called with source URL, got {called_url}"
         )
+
+
+class TestCrossOriginDiscoveryIdempotent:
+    """Second _subsequent_run on the same tmpdir preserves discovered URLs.
+
+    After the first run writes ``discovered: true`` entries to SPEC.md,
+    a second run (without any SPEC.md modification) must:
+    - still show the discovered entry with the flag intact,
+    - NOT fetch the cross-origin URL (fetch_site called only for the
+      original source URL, not the discovered one).
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: cross-origin SPEC.md + duplo.json."""
+        _setup_cross_origin_tmpdir(tmp_path)
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "MyProduct",
+                "source_url": _XORIGIN_SOURCE_URL,
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _XORIGIN_FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using Next.js + TypeScript. PostgreSQL for storage."
+                ).hexdigest(),
+            },
+        )
+
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "MyProduct",
+                    "source_url": _XORIGIN_SOURCE_URL,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self):
+        """Run main() with fetch_site mocked but real scrape pipeline."""
+        patches = {
+            "validate_for_run": patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            "fetch_site": patch(
+                "duplo.main.fetch_site",
+                return_value=_XORIGIN_FETCH_SITE_RESULT,
+            ),
+            "download_site_media": patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            "behavioral_refs": patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            "collect_design_input": patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            "extract_features": patch(
+                "duplo.main.extract_features",
+                return_value=_XORIGIN_FEATURES,
+            ),
+            "save_features": patch("duplo.main.save_features"),
+            "generate_roadmap": patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            "select_features": patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            "generate_phase_plan": patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            "load_frame_descriptions": patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+        }
+        mocks = {}
+        entered = []
+        try:
+            for name, mgr in patches.items():
+                mock_obj = mgr.__enter__()
+                entered.append(mgr)
+                mocks[name] = mock_obj
+            main()
+        finally:
+            for mgr in reversed(entered):
+                mgr.__exit__(None, None, None)
+        return mocks
+
+    def test_discovered_entry_persists_after_second_run(self, tmp_path, monkeypatch):
+        """Discovered URL entry stays in SPEC.md after a second run."""
+        self._setup(tmp_path, monkeypatch)
+
+        # First run: writes discovered entry to SPEC.md.
+        self._run_with_mocks()
+
+        spec_after_first = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "external.example.org" in spec_after_first
+        assert "discovered: true" in spec_after_first
+
+        # Second run: same tmpdir, no SPEC.md modification.
+        self._run_with_mocks()
+
+        spec_after_second = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "external.example.org" in spec_after_second, (
+            "Cross-origin discovered URL should still be in SPEC.md"
+        )
+        assert "discovered: true" in spec_after_second, "Discovered flag should still be present"
+
+    def test_cross_origin_url_not_fetched_on_second_run(self, tmp_path, monkeypatch):
+        """fetch_site is called only for the source URL on both runs."""
+        self._setup(tmp_path, monkeypatch)
+
+        # First run.
+        self._run_with_mocks()
+
+        # Second run: capture fetch_site calls.
+        mocks = self._run_with_mocks()
+
+        mock_fetch = mocks["fetch_site"]
+        # fetch_site should be called once per run (for the source URL).
+        assert mock_fetch.call_count == 1, (
+            f"fetch_site should be called once on second run, got {mock_fetch.call_count}"
+        )
+        called_url = mock_fetch.call_args[0][0]
+        assert called_url == _XORIGIN_SOURCE_URL, (
+            f"fetch_site should be called with source URL, got {called_url}"
+        )
+
+    def test_discovered_entry_not_duplicated(self, tmp_path, monkeypatch):
+        """Running twice does not duplicate the discovered entry."""
+        self._setup(tmp_path, monkeypatch)
+
+        self._run_with_mocks()
+        self._run_with_mocks()
+
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        # Count occurrences of the discovered URL — should appear exactly once.
+        count = spec_text.count("https://external.example.org/integrations")
+        assert count == 1, f"Discovered URL should appear once in SPEC.md, found {count}"
