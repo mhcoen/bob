@@ -615,7 +615,7 @@ All Phase 5 end-to-end behaviors are verified by automated pytest integration te
 The earlier USER verification block was authored incorrectly: every scenario in it is automatable and should never have been a manual task. The standing rule is: never ask the user to do what the system can do itself. USER tasks are reserved for genuine human-judgment cases (e.g. "does this look visually correct"). None of these scenarios meet that bar. They are rewritten below as automated integration tests that mcloop will execute.
 
 - [ ] Add `tests/test_phase5_integration.py` with `test_url_only_spec_runs_end_to_end`
-  - [ ] Construct a tmpdir with a SPEC.md containing the marker comment, a `## Purpose` of >50 chars, a `## Architecture` block, and a `## Sources` block listing one entry with `role: product-reference` and `scrape: deep`. No `ref/` directory.
+  - [x] Construct a tmpdir with a SPEC.md containing the marker comment, a `## Purpose` of >50 chars, a `## Architecture` block, and a `## Sources` block listing one entry with `role: product-reference` and `scrape: deep`. No `ref/` directory.
   - [ ] Mock `duplo.fetcher.fetch_site` to return a fixture 5-tuple: a small scraped_text, empty code_examples, empty doc_structures, one PageRecord with the canonical URL, and a `raw_pages` dict mapping that URL to a small HTML fixture containing one `<a href>` to a same-origin path and one `<a href>` to a cross-origin path.
   - [ ] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
   - [ ] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
