@@ -1770,3 +1770,193 @@ class TestRefOnlyFeatureExtraction:
         _, m_sel = self._run_with_mocks()
         m_sel.assert_called_once()
         assert m_sel.side_effect is _select_all_features
+
+
+# ---------------------------------------------------------------------------
+# Integration: _subsequent_run with ref-only SPEC.md (State 3)
+# ---------------------------------------------------------------------------
+
+
+class TestSubsequentRunRefOnlySpec:
+    """End-to-end: _subsequent_run with ref-only SPEC.md (State 3).
+
+    Constructs a tmpdir with:
+    - SPEC.md with ## References (no ## Sources)
+    - ref/ directory with visual-target image and docs text file
+    - .duplo/duplo.json with features from a prior first run
+    - .duplo/file_hashes.json (empty — no file changes)
+    - No PLAN.md (triggers State 3: generate roadmap + plan)
+
+    All LLM/network calls are mocked.  Asserts that PLAN.md is
+    generated at the end of the run, docs text flows into feature
+    extraction, and no HTTP requests are made.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: ref-only fixture + duplo.json + monkeypatch."""
+        _setup_ref_only_tmpdir(tmp_path)
+
+        # Write duplo.json with features saved by a prior first run.
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "NotesApp",
+                "source_url": "",
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using React + TypeScript. SQLite for local storage."
+                ).hexdigest(),
+            },
+        )
+
+        # Empty file_hashes — no file changes to detect.
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        # product.json from first run (no source URL for ref-only).
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "NotesApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self, extra_patches=None):
+        """Run main() with full ref-only subsequent-run mocks.
+
+        Returns dict of named mock objects for assertion.
+        """
+        patches = {
+            "validate_for_run": patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            "docs_text_extractor": patch(
+                "duplo.main.docs_text_extractor",
+                return_value=_DOCS_EXTRACTED_TEXT,
+            ),
+            "extract_features": patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            "save_features": patch("duplo.main.save_features"),
+            "generate_roadmap": patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            "select_features": patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            "generate_phase_plan": patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            "load_frame_descriptions": patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            "fetch_site": patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site should not be called for ref-only spec"),
+            ),
+        }
+        if extra_patches:
+            patches.update(extra_patches)
+
+        mocks = {}
+        managers = {k: v for k, v in patches.items()}
+        # Enter all context managers and collect mock objects.
+        entered = []
+        try:
+            for name, mgr in managers.items():
+                mock_obj = mgr.__enter__()
+                entered.append(mgr)
+                mocks[name] = mock_obj
+            main()
+        finally:
+            for mgr in reversed(entered):
+                mgr.__exit__(None, None, None)
+        return mocks
+
+    def test_generates_plan_md(self, tmp_path, monkeypatch):
+        """_subsequent_run in State 3 generates PLAN.md."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        plan_path = tmp_path / "PLAN.md"
+        assert plan_path.exists(), "PLAN.md should be generated"
+        content = plan_path.read_text(encoding="utf-8")
+        assert "NotesApp" in content
+        assert "Phase 1" in content
+
+    def test_docs_text_flows_into_features(self, tmp_path, monkeypatch):
+        """docs_text_extractor output flows into extract_features."""
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        mocks["docs_text_extractor"].assert_called_once()
+        mocks["extract_features"].assert_called_once()
+        combined_text = mocks["extract_features"].call_args[0][0]
+        assert "NotesApp User Guide" in combined_text
+
+    def test_no_http_requests(self, tmp_path, monkeypatch):
+        """fetch_site is never called (ref-only, no source URL)."""
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        mocks["fetch_site"].assert_not_called()
+
+    def test_roadmap_saved_to_duplo_json(self, tmp_path, monkeypatch):
+        """After generate_roadmap, the roadmap is persisted in
+        duplo.json and current_phase is set."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert "roadmap" in data
+        assert len(data["roadmap"]) == 1
+        assert data["roadmap"][0]["title"] == "Core Notes"
+        assert data["current_phase"] == 1
+
+    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md should contain a ## Bugs section."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        assert "## Bugs" in content
+
+    def test_select_features_called(self, tmp_path, monkeypatch):
+        """select_features is called during plan generation."""
+        self._setup(tmp_path, monkeypatch)
+        mocks = self._run_with_mocks()
+
+        mocks["select_features"].assert_called_once()
+
+    def test_no_ref_dir_diagnostic(self, tmp_path, monkeypatch):
+        """No diagnostic about ref/ is recorded."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        errors_path = tmp_path / ".duplo" / "errors.jsonl"
+        if errors_path.exists():
+            errors_text = errors_path.read_text(encoding="utf-8")
+            assert "ref/" not in errors_text
