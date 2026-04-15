@@ -1613,3 +1613,160 @@ class TestRefOnlyDocsExtraction:
             "Docs text should appear in the combined text sent to "
             f"extract_features, got: {combined_text[:200]}"
         )
+
+
+class TestRefOnlyFeatureExtraction:
+    """Ref-only spec: extract_features and select_features wiring.
+
+    Runs _first_run with a ref-only SPEC.md (no ## Sources).  Verifies
+    that extract_features is called with non-empty text derived from the
+    docs-role ref, and that select_features auto-selects all features
+    returned by the extractor.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: ref-only fixture + monkeypatch for main()."""
+        _setup_ref_only_tmpdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "NotesApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self):
+        """Run main() with full ref-only mocks.
+
+        Returns (mock_extract, mock_select) so callers can assert on
+        them.
+        """
+        mock_extract = MagicMock(return_value=_FEATURES)
+        mock_select = MagicMock(side_effect=_select_all_features)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value=_DOCS_EXTRACTED_TEXT,
+            ),
+            patch(
+                "duplo.main.extract_features",
+                new=mock_extract,
+            ),
+            patch(
+                "duplo.main.select_features",
+                new=mock_select,
+            ),
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.save_reference_screenshots",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        return mock_extract, mock_select
+
+    def test_extract_features_called(self, tmp_path, monkeypatch):
+        """extract_features is called exactly once."""
+        self._setup(tmp_path, monkeypatch)
+        m_ext, _ = self._run_with_mocks()
+        m_ext.assert_called_once()
+
+    def test_extract_features_receives_non_empty_text(self, tmp_path, monkeypatch):
+        """extract_features receives non-empty combined text as its
+        first positional argument."""
+        self._setup(tmp_path, monkeypatch)
+        m_ext, _ = self._run_with_mocks()
+        combined_text = m_ext.call_args[0][0]
+        assert len(combined_text) > 0, "extract_features should receive non-empty text"
+
+    def test_extract_features_returns_fixture(self, tmp_path, monkeypatch):
+        """extract_features mock returns the deterministic fixture."""
+        self._setup(tmp_path, monkeypatch)
+        m_ext, _ = self._run_with_mocks()
+        result = m_ext.return_value
+        assert len(result) == 2
+        assert result[0].name == "Real-time collaboration"
+        assert result[1].name == "End-to-end encryption"
+
+    def test_select_features_called(self, tmp_path, monkeypatch):
+        """select_features is called during the ref-only run."""
+        self._setup(tmp_path, monkeypatch)
+        _, m_sel = self._run_with_mocks()
+        m_sel.assert_called_once()
+
+    def test_select_features_receives_extracted_features(self, tmp_path, monkeypatch):
+        """select_features receives the features from
+        extract_features."""
+        self._setup(tmp_path, monkeypatch)
+        _, m_sel = self._run_with_mocks()
+        features_arg = m_sel.call_args[0][0]
+        names = [f.name for f in features_arg]
+        assert "Real-time collaboration" in names
+        assert "End-to-end encryption" in names
+
+    def test_select_features_auto_selects_all(self, tmp_path, monkeypatch):
+        """select_features mock returns all features (auto-select).
+
+        The side_effect function (_select_all_features) returns its
+        input list unchanged, so the call result equals the input.
+        We verify by replaying the recorded call args through the
+        side_effect.
+        """
+        self._setup(tmp_path, monkeypatch)
+        _, m_sel = self._run_with_mocks()
+        features_in = m_sel.call_args[0][0]
+        selected = _select_all_features(features_in)
+        assert len(selected) == 2
+        assert selected[0].name == "Real-time collaboration"
+        assert selected[1].name == "End-to-end encryption"
+
+    def test_selector_mock_bypasses_interactive_prompt(self, tmp_path, monkeypatch):
+        """The selector mock (_select_all_features) is a pure function
+        that returns its input unchanged — it never calls input().
+        Verify by checking the mock was invoked (proving the real
+        interactive selector was not used)."""
+        self._setup(tmp_path, monkeypatch)
+        _, m_sel = self._run_with_mocks()
+        m_sel.assert_called_once()
+        assert m_sel.side_effect is _select_all_features
