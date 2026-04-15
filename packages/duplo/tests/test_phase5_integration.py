@@ -3758,3 +3758,154 @@ class TestAutogenExtractDesignCallCount:
         """Variant B generates PLAN.md after design extraction."""
         self._run_variant(tmp_path, monkeypatch, variant="B")
         assert (tmp_path / "PLAN.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 5.31.3 — Variant A: autogen block skips Vision, records diagnostic,
+#           SPEC.md unchanged, no design_requirements written
+# ---------------------------------------------------------------------------
+
+
+class TestAutogenVariantASubsequentRun:
+    """Run _subsequent_run against Variant A and verify side-effects.
+
+    Variant A has a populated AUTO-GENERATED block in ## Design.
+    The pipeline must:
+    - NOT call extract_design
+    - Record an autogen-skip diagnostic in .duplo/errors.jsonl
+    - Leave SPEC.md unchanged
+    - NOT add design_requirements to duplo.json
+    """
+
+    def _run_variant_a(self, tmp_path, monkeypatch):
+        """Set up Variant A tmpdir, run main(), return mocks dict."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+
+        spec_text_before = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+
+        mock_extract_design = MagicMock(
+            return_value=_AUTOGEN_DESIGN_FIXTURE,
+        )
+        mock_save_design = MagicMock()
+
+        with (
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=_autogen_scrape_result(),
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main._download_site_media",
+                return_value=(
+                    [Path(".duplo/site_media/img.png")],
+                    [],
+                ),
+            ),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.collect_design_input",
+                return_value=[Path(".duplo/site_media/img.png")],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch(
+                "duplo.main.save_design_requirements",
+                new=mock_save_design,
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_AUTOGEN_FEATURES,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=[
+                    {
+                        "phase": 1,
+                        "title": "Core Calculator",
+                        "goal": "Basic arithmetic",
+                        "features": [
+                            "Graphing calculator",
+                            "Unit conversions",
+                        ],
+                        "test": "User can graph a function",
+                    },
+                ],
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=(
+                    "# CalcApp — Phase 1: Core Calculator\n\n"
+                    "## Bugs\n\n"
+                    "- [ ] Set up project\n"
+                    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+                ),
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+        ):
+            main()
+
+        return {
+            "mock_extract_design": mock_extract_design,
+            "mock_save_design": mock_save_design,
+            "spec_text_before": spec_text_before,
+        }
+
+    def test_extract_design_not_called(self, tmp_path, monkeypatch):
+        """extract_design must NOT be called when autogen block exists."""
+        result = self._run_variant_a(tmp_path, monkeypatch)
+        result["mock_extract_design"].assert_not_called()
+
+    def test_diagnostic_recorded(self, tmp_path, monkeypatch):
+        """An autogen-skip diagnostic must be recorded in errors.jsonl."""
+        self._run_variant_a(tmp_path, monkeypatch)
+        errors_path = tmp_path / ".duplo" / "errors.jsonl"
+        assert errors_path.exists(), "errors.jsonl should exist"
+        lines = [
+            line.strip()
+            for line in errors_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        autogen_entries = []
+        for line in lines:
+            entry = json.loads(line)
+            if "autogen" in entry.get("message", "").lower():
+                autogen_entries.append(entry)
+        assert len(autogen_entries) >= 1, "Expected at least one autogen-skip diagnostic"
+        msg = autogen_entries[0]["message"]
+        assert "skipped Vision extraction" in msg
+        assert autogen_entries[0]["site"] == "orchestrator:design_extraction"
+        assert autogen_entries[0]["category"] == "io"
+
+    def test_spec_md_unchanged(self, tmp_path, monkeypatch):
+        """SPEC.md must NOT be modified by the run."""
+        result = self._run_variant_a(tmp_path, monkeypatch)
+        spec_text_after = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert spec_text_after == result["spec_text_before"]
+
+    def test_no_design_requirements_saved(self, tmp_path, monkeypatch):
+        """save_design_requirements must NOT be called."""
+        result = self._run_variant_a(tmp_path, monkeypatch)
+        result["mock_save_design"].assert_not_called()
+
+    def test_duplo_json_no_design_requirements(self, tmp_path, monkeypatch):
+        """duplo.json must NOT contain a design_requirements key."""
+        self._run_variant_a(tmp_path, monkeypatch)
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert "design_requirements" not in data
