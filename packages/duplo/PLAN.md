@@ -640,11 +640,11 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Assert: feature (a) was dropped — it does NOT appear in `.duplo/duplo.json` features list. Features (b) and (c) WERE kept (substring match must NOT trigger word-boundary regex).
   - [x] Assert: `duplo.diagnostics` recorded a `scope_exclude` diagnostic for feature (a) and only feature (a).
 
-- [ ] Add `test_discovered_urls_appended_to_spec_and_not_rescraped_on_second_run`
+- [x] Add `test_discovered_urls_appended_to_spec_and_not_rescraped_on_second_run`
   - [x] Construct a tmpdir with SPEC.md containing one product-reference URL with `scrape: deep`. Mock `fetch_site` to return a `raw_pages` dict whose HTML contains one cross-origin `<a href>` to a different host.
   - [x] Run `_subsequent_run` once. Assert: SPEC.md was modified; `## Sources` now has a new entry for the cross-origin URL with `discovered: true` flag; the cross-origin URL was NOT fetched.
   - [x] Run `_subsequent_run` a second time on the same tmpdir without modifying SPEC.md. Assert: the discovered entry is still present with the flag intact; the cross-origin URL was STILL not fetched.
-  - [ ] Programmatically edit SPEC.md to remove the `discovered: true` line from the discovered entry. Run `_subsequent_run` a third time. Assert: this time the previously-discovered URL WAS fetched.
+  - [x] Programmatically edit SPEC.md to remove the `discovered: true` line from the discovered entry. Run `_subsequent_run` a third time. Assert: this time the previously-discovered URL WAS fetched.
 
 - [ ] Add `test_autogen_design_block_present_skips_vision`
   - [ ] Construct two tmpdirs sharing the same SPEC.md skeleton (URL-only, product-reference). Variant A: SPEC.md has `## Design` containing a populated AUTO-GENERATED block. Variant B: SPEC.md has `## Design` with no autogen block.
