@@ -629,7 +629,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Mock `extract_design` to return deterministic output and assert it was called with the visual-target ref/ file paths in its `design_input`.
   - [x] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
   - [x] Mock `extract_features` and the interactive selectors as in the previous test.
-  - [ ] Run `_subsequent_run` against the tmpdir.
+  - [x] Run `_subsequent_run` against the tmpdir.
   - [ ] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
 
 - [ ] Add `test_url_and_ref_with_scope_exclude_drops_features`
