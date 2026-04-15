@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from duplo.design_extractor import DesignRequirements
 from duplo.doc_tables import DocStructures
+from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 
 # ---------------------------------------------------------------------------
@@ -202,6 +203,77 @@ class TestDesignMockWiring:
             "screenshot1.png",
             "screenshot2.png",
         ]
+
+
+# ---------------------------------------------------------------------------
+# Feature extractor fixture
+# ---------------------------------------------------------------------------
+
+_FEATURES = [
+    Feature(
+        name="Real-time collaboration",
+        description="Multiple users can edit the same note simultaneously "
+        "with live cursor tracking and conflict resolution.",
+        category="Collaboration",
+    ),
+    Feature(
+        name="End-to-end encryption",
+        description="All notes are encrypted on the client before syncing, "
+        "ensuring only the note owner can read the content.",
+        category="Security",
+    ),
+]
+
+
+class TestFeatureFixture:
+    """Verify the Feature fixture list is well-formed."""
+
+    def test_fixture_length(self):
+        assert len(_FEATURES) == 2
+
+    def test_features_are_feature_instances(self):
+        for feat in _FEATURES:
+            assert isinstance(feat, Feature)
+
+    def test_names_are_distinct(self):
+        names = [f.name for f in _FEATURES]
+        assert len(names) == len(set(names))
+
+    def test_descriptions_non_empty(self):
+        for feat in _FEATURES:
+            assert len(feat.description) > 0
+
+    def test_categories_non_empty(self):
+        for feat in _FEATURES:
+            assert len(feat.category) > 0
+
+    def test_default_status_pending(self):
+        for feat in _FEATURES:
+            assert feat.status == "pending"
+
+    def test_default_implemented_in_empty(self):
+        for feat in _FEATURES:
+            assert feat.implemented_in == ""
+
+
+class TestFeatureMockWiring:
+    """Verify the fixture can be used as a mock return value."""
+
+    def test_mock_returns_fixture(self):
+        with patch(
+            "duplo.extractor.extract_features",
+            return_value=_FEATURES,
+        ) as mock_extract:
+            from duplo.extractor import extract_features
+
+            result = extract_features("some text")
+
+        mock_extract.assert_called_once()
+        assert len(result) == 2
+        assert result[0].name == "Real-time collaboration"
+        assert result[1].name == "End-to-end encryption"
+        assert result[0].category == "Collaboration"
+        assert result[1].category == "Security"
 
 
 class TestFetchSiteMockWiring:
