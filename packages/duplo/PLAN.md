@@ -614,14 +614,14 @@ All Phase 5 end-to-end behaviors are verified by automated pytest integration te
 
 The earlier USER verification block was authored incorrectly: every scenario in it is automatable and should never have been a manual task. The standing rule is: never ask the user to do what the system can do itself. USER tasks are reserved for genuine human-judgment cases (e.g. "does this look visually correct"). None of these scenarios meet that bar. They are rewritten below as automated integration tests that mcloop will execute.
 
-- [ ] Add `tests/test_phase5_integration.py` with `test_url_only_spec_runs_end_to_end`
+- [x] Add `tests/test_phase5_integration.py` with `test_url_only_spec_runs_end_to_end`
   - [x] Construct a tmpdir with a SPEC.md containing the marker comment, a `## Purpose` of >50 chars, a `## Architecture` block, and a `## Sources` block listing one entry with `role: product-reference` and `scrape: deep`. No `ref/` directory.
   - [x] Mock `duplo.fetcher.fetch_site` to return a fixture 5-tuple: a small scraped_text, empty code_examples, empty doc_structures, one PageRecord with the canonical URL, and a `raw_pages` dict mapping that URL to a small HTML fixture containing one `<a href>` to a same-origin path and one `<a href>` to a cross-origin path.
   - [x] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
   - [x] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
   - [x] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
   - [x] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
-  - [ ] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
+  - [x] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
 
 - [ ] Add `test_ref_only_spec_runs_without_http`
   - [ ] Construct a tmpdir with a SPEC.md containing marker, Purpose, Architecture, NO `## Sources` (or empty `## Sources`), and a `## References` block listing two entries: one with `role: visual-target` and one with `role: docs`. Create `ref/` directory and place small fixture image and text files at the declared paths.
