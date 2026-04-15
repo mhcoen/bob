@@ -987,3 +987,150 @@ class TestSubsequentRunUrlOnlySpec:
         if errors_path.exists():
             errors_text = errors_path.read_text(encoding="utf-8")
             assert "ref/" not in errors_text, "No diagnostic about missing ref/ expected"
+
+
+# ---------------------------------------------------------------------------
+# Fixture: ref-only SPEC.md (no ## Sources, with ## References + ref/ files)
+# ---------------------------------------------------------------------------
+
+# Minimal 1x1 white PNG (valid image file, 67 bytes)
+_FIXTURE_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+    b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+    b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+_FIXTURE_DOCS_TEXT = (
+    "NotesApp User Guide\n"
+    "===================\n"
+    "\n"
+    "NotesApp supports real-time collaboration and end-to-end\n"
+    "encryption for all your notes.\n"
+)
+
+_REF_ONLY_SPEC_TEXT = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    "NotesApp is a cross-platform note-taking application "
+    "with real-time collaboration and end-to-end encryption. "
+    "It supports rich text editing and offline mode.\n"
+    "\n"
+    "## Architecture\n"
+    "Web app using React + TypeScript. SQLite for local storage.\n"
+    "\n"
+    "## References\n"
+    "- ref/app_screenshot.png\n"
+    "  role: visual-target\n"
+    "- ref/user_guide.txt\n"
+    "  role: docs\n"
+)
+
+
+def _setup_ref_only_tmpdir(tmp_path: Path) -> None:
+    """Create a ref-only project fixture in *tmp_path*.
+
+    Writes SPEC.md (no ## Sources), ref/app_screenshot.png, and
+    ref/user_guide.txt.
+    """
+    (tmp_path / "SPEC.md").write_text(_REF_ONLY_SPEC_TEXT, encoding="utf-8")
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "app_screenshot.png").write_bytes(_FIXTURE_PNG)
+    (ref_dir / "user_guide.txt").write_text(_FIXTURE_DOCS_TEXT, encoding="utf-8")
+
+
+class TestRefOnlyFixture:
+    """Verify the ref-only tmpdir fixture is well-formed."""
+
+    def test_spec_has_marker(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "How the pieces fit together:" in text
+
+    def test_spec_has_purpose(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Purpose" in text
+        # Purpose must be substantial (>50 chars)
+        idx = text.index("## Purpose")
+        purpose_start = text.index("\n", idx) + 1
+        next_heading = text.find("##", purpose_start)
+        purpose_body = text[purpose_start:next_heading].strip()
+        assert len(purpose_body) > 50
+
+    def test_spec_has_architecture(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Architecture" in text
+
+    def test_spec_has_no_sources(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Sources" not in text
+
+    def test_spec_has_references(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## References" in text
+
+    def test_spec_references_visual_target(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "ref/app_screenshot.png" in text
+        assert "role: visual-target" in text
+
+    def test_spec_references_docs(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "ref/user_guide.txt" in text
+        assert "role: docs" in text
+
+    def test_ref_dir_exists(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        assert (tmp_path / "ref").is_dir()
+
+    def test_image_file_exists(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        img = tmp_path / "ref" / "app_screenshot.png"
+        assert img.exists()
+        assert img.stat().st_size > 0
+
+    def test_image_file_is_valid_png(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "app_screenshot.png").read_bytes()
+        assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_docs_file_exists(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        doc = tmp_path / "ref" / "user_guide.txt"
+        assert doc.exists()
+        assert doc.stat().st_size > 0
+
+    def test_docs_file_content(self, tmp_path):
+        _setup_ref_only_tmpdir(tmp_path)
+        text = (tmp_path / "ref" / "user_guide.txt").read_text(encoding="utf-8")
+        assert "NotesApp" in text
+
+    def test_spec_parses_correctly(self, tmp_path):
+        """read_spec returns a ProductSpec with the expected
+        references when run against the fixture."""
+        _setup_ref_only_tmpdir(tmp_path)
+        import os
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            from duplo.spec_reader import read_spec
+
+            spec = read_spec()
+        finally:
+            os.chdir(old_cwd)
+
+        assert spec is not None
+        assert len(spec.references) == 2
+        roles = {r.roles[0] for r in spec.references}
+        assert roles == {"visual-target", "docs"}
+        assert spec.sources == []
+        assert len(spec.purpose) > 50
