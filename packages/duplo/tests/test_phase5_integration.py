@@ -2505,6 +2505,46 @@ class TestSubsequentRunCombinedSpec:
         assert "Offline sync" in saved_names
         assert len(saved) == 2
 
+    def test_duplo_json_excludes_plugin_api(self, tmp_path, monkeypatch):
+        """On-disk duplo.json features list must NOT contain 'Plugin API'
+        after scope_exclude filtering.  Features 'Non-plugin-API
+        configuration' and 'Offline sync' must be present.
+
+        Uses a write-through save_features replacement so the filtered
+        features are persisted to disk without LLM dedup calls.
+        """
+        self._setup(tmp_path, monkeypatch)
+
+        import dataclasses as _dc
+
+        duplo_json_path = tmp_path / ".duplo" / "duplo.json"
+
+        def _write_through_save(features, *, target_dir="."):
+            data = json.loads(duplo_json_path.read_text(encoding="utf-8"))
+            data["features"] = [_dc.asdict(f) for f in features]
+            duplo_json_path.write_text(
+                json.dumps(data, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            return duplo_json_path
+
+        extra = {
+            "save_features": patch(
+                "duplo.main.save_features",
+                side_effect=_write_through_save,
+            ),
+        }
+        self._run_with_mocks(extra_patches=extra)
+
+        data = json.loads(duplo_json_path.read_text(encoding="utf-8"))
+        saved_names = [f["name"] for f in data["features"]]
+        assert "Plugin API" not in saved_names, "scope_exclude should have dropped 'Plugin API'"
+        assert "Non-plugin-API configuration" in saved_names, (
+            "substring 'non-plugin-API' must NOT trigger word-boundary match for 'plugin API'"
+        )
+        assert "Offline sync" in saved_names, "unrelated feature must survive scope_exclude"
+        assert len(data["features"]) == 2
+
     def test_scrape_declared_sources_called(self, tmp_path, monkeypatch):
         """_scrape_declared_sources is called (spec has scrapeable
         sources)."""
