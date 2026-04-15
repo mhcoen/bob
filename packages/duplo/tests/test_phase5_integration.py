@@ -1381,3 +1381,235 @@ class TestRefOnlyDesignExtraction:
         assert "user_guide.txt" not in input_names, (
             "docs-role ref should not appear in design_input"
         )
+
+
+# ---------------------------------------------------------------------------
+# Docs text extractor mock — deterministic output, called with docs ref path
+# ---------------------------------------------------------------------------
+
+_DOCS_EXTRACTED_TEXT = (
+    "=== user_guide.txt ===\n"
+    "NotesApp User Guide\n"
+    "===================\n"
+    "\n"
+    "NotesApp supports real-time collaboration and end-to-end\n"
+    "encryption for all your notes.\n"
+)
+
+
+class TestRefOnlyDocsExtraction:
+    """Ref-only spec: docs_text_extractor called with docs ref/ entries.
+
+    Runs _first_run with a ref-only SPEC.md (no ## Sources).  The
+    docs-role entry (ref/user_guide.txt) should reach
+    docs_text_extractor as a ReferenceEntry.  The mock returns
+    deterministic text and we assert the call received the right path.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: ref-only fixture + monkeypatch for main()."""
+        _setup_ref_only_tmpdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "NotesApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def test_docs_text_extractor_receives_docs_ref(self, tmp_path, monkeypatch):
+        """docs_text_extractor is called with the docs-role ref entry."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value=_DOCS_EXTRACTED_TEXT,
+            ) as mock_docs,
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        mock_docs.assert_called_once()
+        doc_entries = mock_docs.call_args[0][0]
+        paths = [e.path for e in doc_entries]
+        assert any("user_guide.txt" in str(p) for p in paths), (
+            f"Expected docs ref path containing user_guide.txt, got {paths}"
+        )
+
+    def test_docs_text_extractor_returns_deterministic_output(self, tmp_path, monkeypatch):
+        """docs_text_extractor mock returns the deterministic fixture."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value=_DOCS_EXTRACTED_TEXT,
+            ) as mock_docs,
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        assert mock_docs.return_value == _DOCS_EXTRACTED_TEXT
+        assert "NotesApp User Guide" in mock_docs.return_value
+
+    def test_docs_text_included_in_feature_extraction(self, tmp_path, monkeypatch):
+        """Docs text from docs_text_extractor flows into extract_features
+        as part of the combined text input."""
+        self._setup(tmp_path, monkeypatch)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_FEATURES,
+            ) as mock_extract,
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ),
+            patch(
+                "duplo.main.docs_text_extractor",
+                return_value=_DOCS_EXTRACTED_TEXT,
+            ),
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="web",
+                    language="TypeScript",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch("duplo.main.save_reference_screenshots", return_value=[]),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        mock_extract.assert_called_once()
+        combined_text = mock_extract.call_args[0][0]
+        assert "NotesApp User Guide" in combined_text, (
+            "Docs text should appear in the combined text sent to "
+            f"extract_features, got: {combined_text[:200]}"
+        )
