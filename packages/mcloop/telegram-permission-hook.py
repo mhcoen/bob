@@ -160,23 +160,27 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
     }
     if reason:
         resp["hookSpecificOutput"]["permissionDecisionReason"] = reason
-    # On allow for Bash tools, attempt RTK rewrite
+    # RTK DISABLED 2026-04-15 for mcloop sessions: rtk's pytest_cmd.rs
+    # parser only matches summary lines starting with "===", but pytest
+    # in duplo emits "2474 passed in 340.94s" with no === framing, so
+    # rtk returns "Pytest: No tests collected" on a clean pass and the
+    # inner Claude chases a non-existent failure.
+    #
+    # We override any updatedInput from the upstream rtk hook by
+    # writing the ORIGINAL tool_input.command back. Claude Code merges
+    # hook responses; whichever hook last sets updatedInput wins.
     if (
         decision == "allow"
         and tool_name == "Bash"
         and tool_input is not None
-        and shutil.which("rtk")
     ):
         cmd = tool_input.get("command", "").strip()
         if cmd:
-            rewritten = _rtk_rewrite(cmd)
-            if rewritten and rewritten != cmd:
-                resp["hookSpecificOutput"]["updatedInput"] = {
-                    **tool_input,
-                    "command": rewritten,
-                }
+            resp["hookSpecificOutput"]["updatedInput"] = {
+                **tool_input,
+                "command": cmd,
+            }
     json.dump(resp, sys.stdout)
-
 
 def load_allow_rules():
     """Read permissions.allow from ~/.claude/settings.json."""

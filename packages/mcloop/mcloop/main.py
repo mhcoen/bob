@@ -15,6 +15,7 @@ import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
 from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
+    PlanCorruptionError,
     Task,
     check_off,
     count_unchecked,
@@ -158,6 +159,7 @@ class RunStatus:
 
 def main() -> None:
     import atexit
+    import traceback
 
     import mcloop.runner as _runner
 
@@ -165,7 +167,25 @@ def main() -> None:
     atexit.register(_terminate_reviewers)
 
     register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
-    _main()
+    try:
+        _main()
+    except PlanCorruptionError as exc:
+        # The user shouldn't see a Python traceback for an expected
+        # condition like a malformed PLAN.md. Print the error message
+        # cleanly; write the full traceback to a log file for debugging.
+        print(f"\nmcloop: {exc}\n", file=sys.stderr)
+        try:
+            log_dir = Path.cwd() / ".mcloop"
+            log_dir.mkdir(exist_ok=True)
+            log_path = log_dir / "last_error.log"
+            log_path.write_text(
+                f"PlanCorruptionError\n\n{exc}\n\nTraceback:\n"
+                + "".join(traceback.format_exception(exc))
+            )
+            print(f"Full traceback logged to {log_path}", file=sys.stderr)
+        except OSError:
+            pass  # Logging is best-effort; never let it mask the real error.
+        sys.exit(2)
 
 
 def _main() -> None:

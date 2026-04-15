@@ -234,34 +234,42 @@ def _build_shared_parts(
         " and note it in NOTES.md for the user to"
         " decide."
     )
-    if check_commands:
-        cmds = ", ".join(check_commands)
-        parts.append(
-            "CHECK COMMANDS (mandatory, strict rules):\n"
-            f"Commands: {cmds}\n"
-            "1. Run each check command EXACTLY ONCE before finishing.\n"
-            "2. Run the command exactly as listed. Do not append"
-            " | tail, | head, or any pipe. Do not truncate output."
-            " Do not modify the command in any way.\n"
-            "3. If a check fails, fix the issue, then re-run that"
-            " same exact check command ONCE.\n"
-            "4. Maximum 3 total runs of any single check command."
-            " If it still fails after 3 runs, stop and report"
-            " what is failing.\n"
-            "5. NEVER run the same check command twice in a row"
-            " without making a code change between runs."
-            " Re-running a passing test is forbidden.\n"
-            "6. ONLY run the exact check commands listed above."
-            " Do not run subsets, individual test files, or"
-            " any variation. Do not run pytest on a single file."
-            " Do not run any test command other than the ones"
-            " listed here. The orchestrator runs its own"
-            " verification after this session ends."
-        )
-    if shutil.which("rtk"):
-        rtk_instruction = _build_rtk_instruction()
-        if rtk_instruction:
-            parts.append(rtk_instruction)
+    # CHECK COMMANDS mandate disabled 2026-04-15: was forcing the
+    # inner Claude to run the full pytest suite (5m 40s for 2474
+    # tests) before every task. The orchestrator's run_checks runs
+    # targeted tests after the session anyway, and retry rate is
+    # 1.7%. Re-enable by uncommenting after test suite is pruned.
+    # if check_commands:
+    #     cmds = ", ".join(check_commands)
+    #     parts.append(
+    #         "CHECK COMMANDS (mandatory, strict rules):\n"
+    #         f"Commands: {cmds}\n"
+    #         "1. Run each check command EXACTLY ONCE before finishing.\n"
+    #         "2. Run the command exactly as listed. Do not append"
+    #         " | tail, | head, or any pipe. Do not truncate output."
+    #         " Do not modify the command in any way.\n"
+    #         "3. If a check fails, fix the issue, then re-run that"
+    #         " same exact check command ONCE.\n"
+    #         "4. Maximum 3 total runs of any single check command."
+    #         " If it still fails after 3 runs, stop and report"
+    #         " what is failing.\n"
+    #         "5. NEVER run the same check command twice in a row"
+    #         " without making a code change between runs."
+    #         " Re-running a passing test is forbidden.\n"
+    #         "6. ONLY run the exact check commands listed above."
+    #         " Do not run subsets, individual test files, or"
+    #         " any variation. Do not run pytest on a single file."
+    #         " Do not run any test command other than the ones"
+    #         " listed here. The orchestrator runs its own"
+    #         " verification after this session ends."
+    #     )
+    # rtk instruction disabled 2026-04-15: rtk is disabled in the
+    # mcloop hook (telegram-permission-hook.py), so instructing the
+    # inner Claude to use rtk would be misleading.
+    # if shutil.which("rtk"):
+    #     rtk_instruction = _build_rtk_instruction()
+    #     if rtk_instruction:
+    #         parts.append(rtk_instruction)
     parts.append(
         "Do not remove or modify code between"
         " mcloop:wrap markers (e.g. `// mcloop:wrap:begin`"
@@ -326,18 +334,11 @@ def _build_normal_prompt(
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
     parts.append(f"Task: {task_text}")
-    parts.append("Write unit tests where they make sense.")
     parts.append(
-        "ABSOLUTELY FORBIDDEN: Do not run ANY test, lint,"
-        " import check, or verification command yourself."
-        " This includes pytest, python -c 'import ...', ruff,"
-        " mypy, and any other command that checks whether code"
-        " works. The ONLY commands you may run are the exact"
-        " check commands listed in the CHECK COMMANDS section"
-        " below. Running any other verification command is a"
-        " violation that wastes time and money. Make your code"
-        " changes, run the listed check commands, and stop."
-        " Nothing else."
+        "Write unit tests only when the change introduces"
+        " non-obvious behavior or a regression risk. Trivial"
+        " additions (constants, dataclass fields, simple"
+        " delegations) do not need tests."
     )
     parts.extend(_build_shared_parts(task_text, task_label, check_commands))
     if eliminated:

@@ -13,6 +13,8 @@ over-abstraction.
 
 ## Bugs
 
+- [ ] Post-task checker mutates worktree, invalidating committed state. `run_autofix()` in `mcloop/checks.py` runs `ruff check --fix .` and `ruff format .` after the task commits. When `ruff format` rewrites files, mcloop detects a dirty worktree and reports "checker introduced uncommitted changes," marks BATCH tasks as failed, and falls back to running subtasks individually. The committed state then does not match the on-disk state, violating the commit-represents-task invariant. Fix: drop `ruff format` from `run_autofix`. Use only `ruff format --check .` as a fail-condition in `run_checks`. If it fails, the inner Claude on retry sees the failure context and formats its own output. Tests: a BATCH task whose final state triggers `ruff format` to rewrite a committed file should either commit the formatter changes automatically or fail cleanly before the commit; an individual task with the same property should behave the same way (no asymmetry between batched and individual modes).
+
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)
