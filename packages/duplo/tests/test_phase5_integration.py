@@ -1951,6 +1951,40 @@ class TestSubsequentRunRefOnlySpec:
 
         mocks["select_features"].assert_called_once()
 
+    def test_extract_design_not_called(self, tmp_path, monkeypatch):
+        """extract_design is not called for ref-only subsequent run.
+
+        The design extraction block in _subsequent_run requires
+        spec_sources to be non-empty, which is False for ref-only
+        specs (no ## Sources).  The _rescrape_product_url fallback
+        returns early when source_url is empty.
+        """
+        self._setup(tmp_path, monkeypatch)
+        extra = {
+            "extract_design": patch(
+                "duplo.main.extract_design",
+                return_value=_DESIGN_REQUIREMENTS,
+            ),
+            "collect_design_input": patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+        }
+        mocks = self._run_with_mocks(extra_patches=extra)
+
+        mocks["extract_design"].assert_not_called()
+
+    def test_no_source_url_diagnostic(self, tmp_path, monkeypatch):
+        """No diagnostic about missing source URL is recorded."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        errors_path = tmp_path / ".duplo" / "errors.jsonl"
+        if errors_path.exists():
+            errors_text = errors_path.read_text(encoding="utf-8")
+            assert "source_url" not in errors_text.lower()
+            assert "source url" not in errors_text.lower()
+
     def test_no_ref_dir_diagnostic(self, tmp_path, monkeypatch):
         """No diagnostic about ref/ is recorded."""
         self._setup(tmp_path, monkeypatch)
