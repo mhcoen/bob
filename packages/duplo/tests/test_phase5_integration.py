@@ -2116,3 +2116,113 @@ class TestCombinedFixture:
         assert spec.sources[0].url == _CANONICAL_URL
         assert spec.scope_exclude == ["plugin API"]
         assert len(spec.purpose) > 50
+
+
+class TestCombinedFetchSiteMock:
+    """Verify fetch_site mock wiring for combined spec (URL + ref/).
+
+    The combined spec has a product-reference URL with scrape: deep,
+    so _scrape_declared_sources will call fetch_site.  The mock
+    returns the shared _FETCH_SITE_RESULT fixture deterministically.
+    """
+
+    def test_mock_returns_fixture_for_combined_url(self):
+        """Patching fetch_site returns the shared fixture when called
+        with the combined spec's canonical URL."""
+        with patch(
+            "duplo.fetcher.fetch_site",
+            return_value=_FETCH_SITE_RESULT,
+        ) as mock_fetch:
+            from duplo.fetcher import fetch_site
+
+            result = fetch_site(_CANONICAL_URL, scrape_depth="deep")
+
+        mock_fetch.assert_called_once_with(_CANONICAL_URL, scrape_depth="deep")
+        text, examples, doc_structs, records, raw_pages = result
+        assert text == _SCRAPED_TEXT
+        assert examples == []
+        assert isinstance(doc_structs, DocStructures)
+        assert len(records) == 1
+        assert records[0].url == _CANONICAL_URL
+        assert _CANONICAL_URL in raw_pages
+
+    def test_scrape_result_from_fixture(self):
+        """ScrapeResult built from the shared fixture has correct
+        fields for the combined spec."""
+        content_hash = hashlib.sha256(_SCRAPED_TEXT.encode("utf-8")).hexdigest()
+        result = ScrapeResult(
+            combined_text=_SCRAPED_TEXT,
+            all_code_examples=[],
+            all_page_records=[_PAGE_RECORD],
+            all_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            product_ref_raw_pages={_CANONICAL_URL: _RAW_HTML},
+            source_records=[
+                {
+                    "url": _CANONICAL_URL,
+                    "last_scraped": "2026-04-14T00:00:00Z",
+                    "content_hash": content_hash,
+                    "scrape_depth_used": "deep",
+                }
+            ],
+        )
+        assert result.combined_text == _SCRAPED_TEXT
+        assert len(result.all_page_records) == 1
+        assert result.product_ref_raw_pages == {
+            _CANONICAL_URL: _RAW_HTML,
+        }
+        assert len(result.source_records) == 1
+        assert result.source_records[0]["url"] == _CANONICAL_URL
+
+
+class TestCombinedDesignMock:
+    """Verify extract_design mock wiring for combined spec.
+
+    The combined spec has both a product-reference URL (site images)
+    and a ref/ visual-target image.  extract_design should receive
+    images from both sources.  The mock returns _DESIGN_REQUIREMENTS.
+    """
+
+    def test_mock_returns_fixture(self):
+        """Patching extract_design returns the shared fixture."""
+        with patch(
+            "duplo.main.extract_design",
+            return_value=_DESIGN_REQUIREMENTS,
+        ) as mock_design:
+            from duplo.main import extract_design
+
+            result = extract_design([Path("ref/app_screenshot.png")])
+
+        mock_design.assert_called_once()
+        assert isinstance(result, DesignRequirements)
+        assert result.colors["primary"] == "#1a73e8"
+        assert len(result.components) == 3
+
+    def test_mock_accepts_multiple_image_paths(self):
+        """extract_design mock works with a mixed list of paths
+        (ref/ visual-target + site images)."""
+        mixed_paths = [
+            Path("ref/app_screenshot.png"),
+            Path(".duplo/site_images/page1.png"),
+            Path(".duplo/site_images/page2.png"),
+        ]
+        with patch(
+            "duplo.main.extract_design",
+            return_value=_DESIGN_REQUIREMENTS,
+        ) as mock_design:
+            from duplo.main import extract_design
+
+            result = extract_design(mixed_paths)
+
+        mock_design.assert_called_once()
+        call_paths = mock_design.call_args[0][0]
+        assert len(call_paths) == 3
+        assert call_paths[0] == Path("ref/app_screenshot.png")
+        assert isinstance(result, DesignRequirements)
+        assert result.fonts["headings"] == "Inter, sans-serif, ~20px"
+
+    def test_fixture_source_images_are_deterministic(self):
+        """The fixture's source_images field is a fixed list."""
+        assert _DESIGN_REQUIREMENTS.source_images == [
+            "screenshot1.png",
+            "screenshot2.png",
+        ]
