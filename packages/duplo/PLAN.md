@@ -619,7 +619,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Mock `duplo.fetcher.fetch_site` to return a fixture 5-tuple: a small scraped_text, empty code_examples, empty doc_structures, one PageRecord with the canonical URL, and a `raw_pages` dict mapping that URL to a small HTML fixture containing one `<a href>` to a same-origin path and one `<a href>` to a cross-origin path.
   - [x] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
   - [x] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
-  - [ ] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
+  - [x] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
   - [ ] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
   - [ ] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
 
