@@ -2597,3 +2597,148 @@ class TestSubsequentRunCombinedSpec:
         assert "plugin API" in scope_records[0]["message"]
         assert "Non-plugin-API" not in scope_records[0]["message"]
         assert "Offline sync" not in scope_records[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-origin link collection from deep-scraped sources
+# ---------------------------------------------------------------------------
+
+# Canonical URL for cross-origin link test
+_XORIGIN_SOURCE_URL = "https://myproduct.example.com"
+
+# HTML fixture with one cross-origin <a href> to a different host
+_XORIGIN_RAW_HTML = (
+    "<html><head><title>MyProduct</title></head><body>"
+    "<h1>MyProduct</h1>"
+    "<p>A productivity tool for teams.</p>"
+    '<a href="/docs/api">API Docs</a>'
+    '<a href="https://external.example.org/integrations">Integrations</a>'
+    "</body></html>"
+)
+
+_XORIGIN_CONTENT_HASH = hashlib.sha256(_XORIGIN_RAW_HTML.encode()).hexdigest()
+
+_XORIGIN_PAGE_RECORD = PageRecord(
+    url=_XORIGIN_SOURCE_URL,
+    fetched_at="2026-04-15T00:00:00Z",
+    content_hash=_XORIGIN_CONTENT_HASH,
+)
+
+_XORIGIN_SCRAPED_TEXT = (
+    "MyProduct is a productivity tool for teams. "
+    "Features include task management and integrations."
+)
+
+_XORIGIN_FETCH_SITE_RESULT = (
+    _XORIGIN_SCRAPED_TEXT,
+    [],  # empty code_examples
+    DocStructures(),  # empty doc_structures
+    [_XORIGIN_PAGE_RECORD],  # one PageRecord
+    {_XORIGIN_SOURCE_URL: _XORIGIN_RAW_HTML},  # raw_pages
+)
+
+_XORIGIN_SPEC_TEXT = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    "MyProduct is a productivity tool for teams with task management "
+    "and third-party integrations. It helps distributed teams stay "
+    "organized and focused.\n"
+    "\n"
+    "## Architecture\n"
+    "Web app using Next.js + TypeScript. PostgreSQL for storage.\n"
+    "\n"
+    "## Sources\n"
+    f"- {_XORIGIN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+)
+
+_XORIGIN_FEATURES = [
+    Feature(
+        name="Task management",
+        description="Create, assign, and track tasks across projects.",
+        category="Core",
+    ),
+    Feature(
+        name="Third-party integrations",
+        description="Connect with external services like Slack and GitHub.",
+        category="Integrations",
+    ),
+]
+
+
+class TestCrossOriginFixture:
+    """Verify the cross-origin link test fixtures are well-formed."""
+
+    def test_html_has_cross_origin_link(self):
+        assert 'href="https://external.example.org/integrations"' in (_XORIGIN_RAW_HTML)
+
+    def test_html_has_same_origin_link(self):
+        assert 'href="/docs/api"' in _XORIGIN_RAW_HTML
+
+    def test_source_url_differs_from_cross_origin_host(self):
+        assert "myproduct.example.com" in _XORIGIN_SOURCE_URL
+        assert "external.example.org" in _XORIGIN_RAW_HTML
+        assert "myproduct.example.com" != "external.example.org"
+
+    def test_spec_has_marker(self):
+        assert "How the pieces fit together:" in _XORIGIN_SPEC_TEXT
+
+    def test_spec_has_purpose(self):
+        assert "## Purpose" in _XORIGIN_SPEC_TEXT
+        idx = _XORIGIN_SPEC_TEXT.index("## Purpose")
+        purpose_start = _XORIGIN_SPEC_TEXT.index("\n", idx) + 1
+        next_heading = _XORIGIN_SPEC_TEXT.find("##", purpose_start)
+        purpose_body = _XORIGIN_SPEC_TEXT[purpose_start:next_heading].strip()
+        assert len(purpose_body) > 50
+
+    def test_spec_has_architecture(self):
+        assert "## Architecture" in _XORIGIN_SPEC_TEXT
+
+    def test_spec_has_sources_with_deep_scrape(self):
+        assert "## Sources" in _XORIGIN_SPEC_TEXT
+        assert _XORIGIN_SOURCE_URL in _XORIGIN_SPEC_TEXT
+        assert "role: product-reference" in _XORIGIN_SPEC_TEXT
+        assert "scrape: deep" in _XORIGIN_SPEC_TEXT
+
+    def test_fetch_site_result_tuple_length(self):
+        assert len(_XORIGIN_FETCH_SITE_RESULT) == 5
+
+    def test_raw_pages_keyed_by_source_url(self):
+        raw_pages = _XORIGIN_FETCH_SITE_RESULT[4]
+        assert _XORIGIN_SOURCE_URL in raw_pages
+        assert len(raw_pages) == 1
+
+    def test_record_and_raw_pages_in_sync(self):
+        records = _XORIGIN_FETCH_SITE_RESULT[3]
+        raw_pages = _XORIGIN_FETCH_SITE_RESULT[4]
+        for rec in records:
+            assert rec.url in raw_pages
+
+
+def _setup_cross_origin_tmpdir(tmp_path: Path) -> None:
+    """Create a cross-origin link test fixture in *tmp_path*.
+
+    Writes SPEC.md with one product-reference URL (scrape: deep).
+    No ref/ directory (URL-only spec).
+    """
+    (tmp_path / "SPEC.md").write_text(_XORIGIN_SPEC_TEXT, encoding="utf-8")
+
+
+class TestCrossOriginTmpdir:
+    """Verify the cross-origin tmpdir helper creates correct state."""
+
+    def test_spec_md_exists(self, tmp_path):
+        _setup_cross_origin_tmpdir(tmp_path)
+        assert (tmp_path / "SPEC.md").exists()
+
+    def test_spec_md_content(self, tmp_path):
+        _setup_cross_origin_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert _XORIGIN_SOURCE_URL in text
+        assert "scrape: deep" in text
+
+    def test_no_ref_directory(self, tmp_path):
+        _setup_cross_origin_tmpdir(tmp_path)
+        assert not (tmp_path / "ref").exists()
