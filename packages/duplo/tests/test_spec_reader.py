@@ -4372,3 +4372,133 @@ class TestReferencePathsUnusualChars:
         assert spec.references[0].path == Path("ref/normal.png")
         assert spec.references[1].path == Path("ref/Screen Shot (final).png")
         assert spec.references[2].path == Path("ref/café-menu.pdf")
+
+
+class TestMinimalUrlOnlySpec:
+    """Construct a tmpdir with a SPEC.md containing the marker comment,
+    a ## Purpose of >50 chars, a ## Architecture block, and a ## Sources
+    block with one product-reference/deep entry.  No ref/ directory.
+
+    Verifies the spec parses correctly, passes migration detection,
+    passes validation, and yields the expected scrapeable source.
+    """
+
+    SPEC_TEXT = """\
+# MyApp
+
+<!--
+How the pieces fit together:
+SPEC.md → duplo → PLAN.md → mcloop.
+-->
+
+## Purpose
+
+A cross-platform note-taking application with real-time collaboration \
+and end-to-end encryption for secure team workflows.
+
+## Architecture
+
+Python 3.12, FastAPI backend, React frontend, PostgreSQL. \
+WebSocket for real-time sync. Docker Compose for local dev.
+
+## Sources
+
+- https://notesapp.example.com
+  role: product-reference
+  scrape: deep
+"""
+
+    def test_read_spec_returns_product_spec(self, tmp_path):
+        """read_spec() returns a ProductSpec from disk."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert isinstance(spec, ProductSpec)
+
+    def test_no_ref_directory(self, tmp_path):
+        """The tmpdir has no ref/ subdirectory."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        assert not (tmp_path / "ref").exists()
+
+    def test_purpose_over_50_chars(self, tmp_path):
+        """Purpose text exceeds 50 characters."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert len(spec.purpose) > 50
+
+    def test_architecture_populated(self, tmp_path):
+        """Architecture section is present and non-empty."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert "FastAPI" in spec.architecture
+        assert "PostgreSQL" in spec.architecture
+
+    def test_single_source_entry(self, tmp_path):
+        """Exactly one source entry parsed."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert len(spec.sources) == 1
+
+    def test_source_url(self, tmp_path):
+        """Source URL matches the declared entry."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.sources[0].url == "https://notesapp.example.com"
+
+    def test_source_role_product_reference(self, tmp_path):
+        """Source role is product-reference."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.sources[0].role == "product-reference"
+
+    def test_source_scrape_deep(self, tmp_path):
+        """Source scrape depth is deep."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.sources[0].scrape == "deep"
+
+    def test_no_references(self, tmp_path):
+        """No ## References section, so references list is empty."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec.references == []
+
+    def test_scrapeable_sources_returns_entry(self, tmp_path):
+        """scrapeable_sources() yields the single deep source."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        sources = scrapeable_sources(spec)
+        assert len(sources) == 1
+        assert sources[0].url == "https://notesapp.example.com"
+        assert sources[0].scrape == "deep"
+
+    def test_marker_comment_present(self, tmp_path):
+        """The marker string is present in the raw text."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert "How the pieces fit together:" in spec.raw
+
+    def test_migration_not_needed(self, tmp_path, monkeypatch):
+        """needs_migration() returns False for this new-format spec."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        (tmp_path / ".duplo").mkdir()
+        (tmp_path / ".duplo" / "duplo.json").write_text("{}")
+        from duplo.migration import needs_migration
+
+        assert needs_migration(tmp_path) is False
+
+    def test_validate_for_run_no_errors(self, tmp_path):
+        """validate_for_run() reports no errors."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        result = validate_for_run(spec)
+        assert result.errors == []
+
+    def test_design_block_empty(self, tmp_path):
+        """No ## Design section, so design block has defaults."""
+        (tmp_path / "SPEC.md").write_text(self.SPEC_TEXT)
+        spec = read_spec(target_dir=tmp_path)
+        assert isinstance(spec.design, DesignBlock)
+        assert spec.design.auto_generated == ""
+        assert spec.design.user_prose == ""
