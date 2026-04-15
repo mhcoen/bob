@@ -3287,3 +3287,325 @@ class TestCrossOriginDiscoveredPromotion:
             "discovered: true should not reappear after promotion"
         )
         assert "external.example.org" in spec_text, "Promoted URL should still be in SPEC.md"
+
+
+# ---------------------------------------------------------------------------
+# Autogen block variants: shared SPEC.md skeleton with/without design block
+# ---------------------------------------------------------------------------
+
+# Shared skeleton parts for variants A and B
+_AUTOGEN_PURPOSE = (
+    "CalcApp is a scientific calculator with graphing support, "
+    "unit conversions, and programmable macros for power users."
+)
+_AUTOGEN_ARCHITECTURE = "Native macOS app using SwiftUI. Core Math engine in Swift."
+_AUTOGEN_SOURCE_URL = "https://calcapp.example.com"
+
+# Populated AUTO-GENERATED design block content
+_AUTOGEN_DESIGN_CONTENT = (
+    "**Colors**\n"
+    "- primary: `#0066cc`\n"
+    "- background: `#f5f5f5`\n"
+    "\n"
+    "**Fonts**\n"
+    "- body: SF Pro, 14px\n"
+    "- display: SF Pro Display, 28px\n"
+)
+
+# Variant A SPEC.md: ## Design with populated AUTO-GENERATED block
+_AUTOGEN_SPEC_VARIANT_A = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    f"{_AUTOGEN_PURPOSE}\n"
+    "\n"
+    "## Architecture\n"
+    f"{_AUTOGEN_ARCHITECTURE}\n"
+    "\n"
+    "## Design\n"
+    "\n"
+    "<!-- BEGIN AUTO-GENERATED design-requirements -->\n"
+    f"{_AUTOGEN_DESIGN_CONTENT}"
+    "<!-- END AUTO-GENERATED -->\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+)
+
+# Variant B SPEC.md: ## Design with NO autogen block
+_AUTOGEN_SPEC_VARIANT_B = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    f"{_AUTOGEN_PURPOSE}\n"
+    "\n"
+    "## Architecture\n"
+    f"{_AUTOGEN_ARCHITECTURE}\n"
+    "\n"
+    "## Design\n"
+    "\n"
+    "## Sources\n"
+    f"- {_AUTOGEN_SOURCE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+)
+
+# Fetch fixture for CalcApp
+_AUTOGEN_SCRAPED_TEXT = "CalcApp is a scientific calculator with graphing and unit conversions."
+_AUTOGEN_RAW_HTML = (
+    "<html><head><title>CalcApp</title></head><body>"
+    "<h1>CalcApp</h1>"
+    "<p>Scientific calculator with graphing support.</p>"
+    "</body></html>"
+)
+_AUTOGEN_CONTENT_HASH = hashlib.sha256(_AUTOGEN_RAW_HTML.encode()).hexdigest()
+_AUTOGEN_PAGE_RECORD = PageRecord(
+    url=_AUTOGEN_SOURCE_URL,
+    fetched_at="2026-04-15T12:00:00Z",
+    content_hash=_AUTOGEN_CONTENT_HASH,
+)
+_AUTOGEN_FETCH_SITE_RESULT = (
+    _AUTOGEN_SCRAPED_TEXT,
+    [],
+    DocStructures(),
+    [_AUTOGEN_PAGE_RECORD],
+    {_AUTOGEN_SOURCE_URL: _AUTOGEN_RAW_HTML},
+)
+
+_AUTOGEN_FEATURES = [
+    Feature(
+        name="Graphing calculator",
+        description="Plot functions and equations on an interactive graph.",
+        category="Core",
+    ),
+    Feature(
+        name="Unit conversions",
+        description="Convert between metric, imperial, and scientific units.",
+        category="Utilities",
+    ),
+]
+
+
+def _setup_autogen_tmpdir(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    variant: str,
+) -> None:
+    """Create an autogen-variant tmpdir.
+
+    *variant* is ``"A"`` (populated autogen block) or ``"B"``
+    (no autogen block).
+    """
+    spec_text = _AUTOGEN_SPEC_VARIANT_A if variant == "A" else _AUTOGEN_SPEC_VARIANT_B
+    (tmp_path / "SPEC.md").write_text(spec_text, encoding="utf-8")
+
+    _write_duplo_json(
+        tmp_path,
+        {
+            "app_name": "CalcApp",
+            "source_url": _AUTOGEN_SOURCE_URL,
+            "features": [
+                {
+                    "name": f.name,
+                    "description": f.description,
+                    "category": f.category,
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+                for f in _AUTOGEN_FEATURES
+            ],
+            "preferences": {
+                "platform": "macOS",
+                "language": "Swift",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": hashlib.sha256(_AUTOGEN_ARCHITECTURE.encode()).hexdigest(),
+        },
+    )
+
+    duplo_dir = tmp_path / ".duplo"
+    (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+    (duplo_dir / "product.json").write_text(
+        json.dumps(
+            {
+                "product_name": "CalcApp",
+                "source_url": _AUTOGEN_SOURCE_URL,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["duplo"])
+    monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+
+class TestAutogenVariantFixture:
+    """Verify both autogen SPEC.md variants are well-formed."""
+
+    def test_variant_a_has_marker(self):
+        assert "How the pieces fit together:" in _AUTOGEN_SPEC_VARIANT_A
+
+    def test_variant_b_has_marker(self):
+        assert "How the pieces fit together:" in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_variant_a_has_purpose_over_50(self):
+        assert "## Purpose" in _AUTOGEN_SPEC_VARIANT_A
+        idx = _AUTOGEN_SPEC_VARIANT_A.index("## Purpose")
+        start = _AUTOGEN_SPEC_VARIANT_A.index("\n", idx) + 1
+        end = _AUTOGEN_SPEC_VARIANT_A.find("##", start)
+        assert len(_AUTOGEN_SPEC_VARIANT_A[start:end].strip()) > 50
+
+    def test_variant_b_has_purpose_over_50(self):
+        assert "## Purpose" in _AUTOGEN_SPEC_VARIANT_B
+        idx = _AUTOGEN_SPEC_VARIANT_B.index("## Purpose")
+        start = _AUTOGEN_SPEC_VARIANT_B.index("\n", idx) + 1
+        end = _AUTOGEN_SPEC_VARIANT_B.find("##", start)
+        assert len(_AUTOGEN_SPEC_VARIANT_B[start:end].strip()) > 50
+
+    def test_variant_a_has_architecture(self):
+        assert "## Architecture" in _AUTOGEN_SPEC_VARIANT_A
+
+    def test_variant_b_has_architecture(self):
+        assert "## Architecture" in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_variant_a_has_sources_deep(self):
+        assert "## Sources" in _AUTOGEN_SPEC_VARIANT_A
+        assert _AUTOGEN_SOURCE_URL in _AUTOGEN_SPEC_VARIANT_A
+        assert "role: product-reference" in _AUTOGEN_SPEC_VARIANT_A
+        assert "scrape: deep" in _AUTOGEN_SPEC_VARIANT_A
+
+    def test_variant_b_has_sources_deep(self):
+        assert "## Sources" in _AUTOGEN_SPEC_VARIANT_B
+        assert _AUTOGEN_SOURCE_URL in _AUTOGEN_SPEC_VARIANT_B
+        assert "role: product-reference" in _AUTOGEN_SPEC_VARIANT_B
+        assert "scrape: deep" in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_variant_a_has_autogen_block(self):
+        assert "BEGIN AUTO-GENERATED" in _AUTOGEN_SPEC_VARIANT_A
+        assert "END AUTO-GENERATED" in _AUTOGEN_SPEC_VARIANT_A
+
+    def test_variant_b_has_no_autogen_block(self):
+        assert "BEGIN AUTO-GENERATED" not in _AUTOGEN_SPEC_VARIANT_B
+        assert "END AUTO-GENERATED" not in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_variant_a_has_design_section(self):
+        assert "## Design" in _AUTOGEN_SPEC_VARIANT_A
+
+    def test_variant_b_has_design_section(self):
+        assert "## Design" in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_variant_a_autogen_has_content(self):
+        """The autogen block in variant A is populated (not empty)."""
+        import re
+
+        m = re.search(
+            r"<!--\s*BEGIN AUTO-GENERATED[^>]*-->(.*?)"
+            r"<!--\s*END AUTO-GENERATED\s*-->",
+            _AUTOGEN_SPEC_VARIANT_A,
+            re.DOTALL,
+        )
+        assert m is not None
+        assert m.group(1).strip(), "Autogen block should not be empty"
+
+    def test_skeletons_share_purpose(self):
+        """Both variants have the same Purpose section."""
+        assert _AUTOGEN_PURPOSE in _AUTOGEN_SPEC_VARIANT_A
+        assert _AUTOGEN_PURPOSE in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_skeletons_share_architecture(self):
+        """Both variants have the same Architecture section."""
+        assert _AUTOGEN_ARCHITECTURE in _AUTOGEN_SPEC_VARIANT_A
+        assert _AUTOGEN_ARCHITECTURE in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_skeletons_share_source_url(self):
+        """Both variants have the same product-reference URL."""
+        assert _AUTOGEN_SOURCE_URL in _AUTOGEN_SPEC_VARIANT_A
+        assert _AUTOGEN_SOURCE_URL in _AUTOGEN_SPEC_VARIANT_B
+
+    def test_fetch_fixture_tuple_length(self):
+        assert len(_AUTOGEN_FETCH_SITE_RESULT) == 5
+
+    def test_fetch_fixture_raw_pages_keyed_by_url(self):
+        raw_pages = _AUTOGEN_FETCH_SITE_RESULT[4]
+        assert _AUTOGEN_SOURCE_URL in raw_pages
+        assert len(raw_pages) == 1
+
+    def test_fetch_fixture_record_and_raw_pages_in_sync(self):
+        records = _AUTOGEN_FETCH_SITE_RESULT[3]
+        raw_pages = _AUTOGEN_FETCH_SITE_RESULT[4]
+        for rec in records:
+            assert rec.url in raw_pages
+
+
+class TestAutogenVariantTmpdir:
+    """Verify _setup_autogen_tmpdir creates valid project directories."""
+
+    def test_variant_a_specmd_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        assert (tmp_path / "SPEC.md").exists()
+
+    def test_variant_b_specmd_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        assert (tmp_path / "SPEC.md").exists()
+
+    def test_variant_a_duplo_json_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        assert (tmp_path / ".duplo" / "duplo.json").exists()
+
+    def test_variant_b_duplo_json_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        assert (tmp_path / ".duplo" / "duplo.json").exists()
+
+    def test_variant_a_product_json_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        assert (tmp_path / ".duplo" / "product.json").exists()
+
+    def test_variant_b_product_json_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        assert (tmp_path / ".duplo" / "product.json").exists()
+
+    def test_variant_a_file_hashes_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        assert (tmp_path / ".duplo" / "file_hashes.json").exists()
+
+    def test_variant_b_file_hashes_exists(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        assert (tmp_path / ".duplo" / "file_hashes.json").exists()
+
+    def test_variant_a_spec_parsed_has_autogen(self, tmp_path, monkeypatch):
+        """read_spec on variant A yields a non-empty auto_generated."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        from duplo.spec_reader import read_spec
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert spec.design.auto_generated.strip()
+
+    def test_variant_b_spec_parsed_has_no_autogen(self, tmp_path, monkeypatch):
+        """read_spec on variant B yields an empty auto_generated."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        from duplo.spec_reader import read_spec
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert not spec.design.auto_generated.strip()
+
+    def test_variant_a_duplo_json_has_features(self, tmp_path, monkeypatch):
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        data = json.loads((tmp_path / ".duplo" / "duplo.json").read_text(encoding="utf-8"))
+        assert len(data["features"]) == len(_AUTOGEN_FEATURES)
+
+    def test_variant_a_no_ref_dir(self, tmp_path, monkeypatch):
+        """URL-only spec: no ref/ directory."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="A")
+        assert not (tmp_path / "ref").exists()
+
+    def test_variant_b_no_ref_dir(self, tmp_path, monkeypatch):
+        """URL-only spec: no ref/ directory."""
+        _setup_autogen_tmpdir(tmp_path, monkeypatch, variant="B")
+        assert not (tmp_path / "ref").exists()
