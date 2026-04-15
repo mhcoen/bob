@@ -470,7 +470,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Implement `_matches_excluded(feature, scope_exclude) -> bool` per design § `_matches_excluded`. Place in `duplo/orchestrator.py` (new module from earlier task) or `duplo/extractor.py` if it fits naturally there.
   - [x] Matching rule: case-insensitive WORD-BOUNDARY regex (`\b...\b`), NOT substring. Multi-word excluded terms must match as contiguous word sequence. Per design: `"plugin API"` matches `"Plugin API"` and `"plugin API."` but not `"non-plugin-API"` or a description that mentions `"plugin API"` only as contrast.
   - [x] Compare against BOTH `feature.name` and `feature.description`.
-  - [x] When a feature is dropped, emit diagnostic via `record_failure("extractor:scope_exclude", "...", f"scope_exclude '<term>' matched feature '<name>'; dropped")`. Use whichever of the existing diagnostics categories fits best (likely `"io"` since `extractor` doesn't have a dedicated category); flag in code review if a new category is warranted.
+  - [x] When a feature is dropped, emit diagnostic via `record_failure("extractor:scope_exclude", "...", f"scope_exclude '<term>' matched feature '<n>'; dropped")`. Use whichever of the existing diagnostics categories fits best (likely `"io"` since `extractor` doesn't have a dedicated category); flag in code review if a new category is warranted.
   - [x] Apply the post-extraction filter at the orchestrator level: `features = [f for f in features if not _matches_excluded(f, spec.scope_exclude)]` after `extract_features` returns, before `save_features`.
   - [x] Tests: word-boundary match (positive cases for exact phrase, with trailing punctuation, with leading whitespace); word-boundary non-match (negative cases for substring-only matches like `"non-plugin-API"`, `"plugins-API"`); case-insensitive; multi-word excluded term must match as contiguous sequence (`"plugin API"` excluded does NOT match a description that mentions `"plugin"` and `"API"` separately); feature dropped produces diagnostic naming term and feature; empty `scope_exclude` is no-op; multiple matches emit one diagnostic per (term, feature) pair.
 
@@ -601,23 +601,111 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Multi-source persistence in duplo.json
 
-- [ ] Add `sources` field to `.duplo/duplo.json` and update saver functions
+- [x] Add `sources` field to `.duplo/duplo.json` and update saver functions
   - [x] Per PIPELINE-design.md § "Multi-source persistence". `.duplo/duplo.json` gains a `sources` field: list of `{url, last_scraped, content_hash, scrape_depth_used}` entries, one per scrapeable source.
   - [x] Add `save_sources(sources_metadata)` and `load_sources()` functions to `duplo/saver.py`. Sources metadata accumulated during the iteration loop and persisted after.
   - [x] Backward compatibility per design: `.duplo/product.json` keeps the single `source_url` field, populated from the FIRST product-reference entry in `## Sources`. New code reads from the spec, not from `product.json`. The field is preserved only so old tooling and migration detection keep working.
   - [x] When user removes a URL from `## Sources`, the entry STAYS in `duplo.json` (idempotent state) but the pipeline doesn't re-scrape and doesn't include cached content in subsequent extractions. Per design.
-  - [ ] Tests: sources field populated correctly; existing `product.json:source_url` populated from first product-reference entry; removed source stays in `duplo.json` but is not re-scraped; `save_sources` is idempotent; multiple sources tracked independently.
+  - [x] Tests: sources field populated correctly; existing `product.json:source_url` populated from first product-reference entry; removed source stays in `duplo.json` but is not re-scraped; `save_sources` is idempotent; multiple sources tracked independently.
 
-## Manual verification (user must test)
+## Automated integration tests
 
-- [ ] [USER] Run `duplo` on a project with URL-only SPEC.md (one product-reference URL, no `ref/` files). Confirm PLAN.md is produced, design is extracted from scraped product pages, no errors about missing `ref/`. Confirm cache populated under `.duplo/raw_pages/` and `.duplo/site_media/`.
-- [ ] [USER] Run `duplo` on a project with ref/-only SPEC.md (no `## Sources` URLs, only ref/ files declared in `## References`). Confirm PLAN.md is produced, design is extracted from ref/ visual targets, no HTTP requests made (verify with network monitoring or by running offline).
-- [ ] [USER] Run `duplo` on a project with both URL and ref/. Confirm both contribute to the plan. Confirm scope_exclude items in `## Scope` are dropped from features (check the diagnostic log for `scope_exclude '<term>' matched feature '<name>'; dropped` lines).
-- [ ] [USER] Run `duplo` on a project where deep crawling discovers cross-origin links. After the run, inspect SPEC.md and confirm `## Sources` has new entries with `discovered: true` flag. Run `duplo` AGAIN and confirm those discovered URLs are NOT re-scraped (they are still flagged). Remove the `discovered:` flag from one entry and run again; that URL should now be scraped.
-- [ ] [USER] Run `duplo` on a project with an existing AUTO-GENERATED design block in SPEC.md. Confirm the run does NOT call Vision (check the diagnostic log for the "Autogen design block exists" message and verify `extract_design` was not called by checking whether `.duplo/duplo.json` design_requirements changed). Delete the AUTO-GENERATED block manually and run again; Vision should now be called.
-- [ ] [USER] Run `duplo` on a project with `proposed: true` references. Confirm those references are NOT used by the pipeline (no Vision on proposed visual targets, no frames extracted from proposed behavioral targets). Remove `proposed: true` from one and run again; that reference should now be used.
-- [ ] [USER] Run `duplo` on a project with a `counter-example` reference. Confirm it does NOT appear in design extraction or feature extraction. Run `duplo fix` on a bug; confirm the counter-example reference appears in the investigator's context with an "AVOID" framing.
-- [ ] [USER] Run the full test suite: `pytest -x`. Confirm all pre-existing tests still pass and all new Phase 5 tests pass.
+All Phase 5 end-to-end behaviors are verified by automated pytest integration tests, not by manual user runs. Each test constructs a fixture project in a tmpdir, runs duplo's pipeline programmatically, and asserts on the output state. Tests must NOT make real HTTP requests — use `unittest.mock.patch` on `duplo.fetcher.fetch_site` (or a local HTTP fixture if mocking is awkward) so the suite is hermetic and fast. Vision/LLM calls must also be mocked so tests don't depend on `claude -p` availability or network. All tests live in `tests/test_phase5_integration.py` (new file).
+
+The earlier USER verification block was authored incorrectly: every scenario in it is automatable and should never have been a manual task. The standing rule is: never ask the user to do what the system can do itself. USER tasks are reserved for genuine human-judgment cases (e.g. "does this look visually correct"). None of these scenarios meet that bar. They are rewritten below as automated integration tests that mcloop will execute.
+
+- [ ] Add `tests/test_phase5_integration.py` with `test_url_only_spec_runs_end_to_end`
+  - [ ] Construct a tmpdir with a SPEC.md containing the marker comment, a `## Purpose` of >50 chars, a `## Architecture` block, and a `## Sources` block listing one entry with `role: product-reference` and `scrape: deep`. No `ref/` directory.
+  - [ ] Mock `duplo.fetcher.fetch_site` to return a fixture 5-tuple: a small scraped_text, empty code_examples, empty doc_structures, one PageRecord with the canonical URL, and a `raw_pages` dict mapping that URL to a small HTML fixture containing one `<a href>` to a same-origin path and one `<a href>` to a cross-origin path.
+  - [ ] Mock `duplo.design_extractor.extract_design` to return a deterministic DesignRequirements fixture.
+  - [ ] Mock `duplo.extractor.extract_features` to return a deterministic two-feature fixture.
+  - [ ] Mock `duplo.questioner.select_features` (or whatever interactive selector exists) to auto-select all features without prompting.
+  - [ ] Run duplo's `_subsequent_run` (or the top-level entry function) against the tmpdir.
+  - [ ] Assert: PLAN.md exists in tmpdir; `.duplo/raw_pages/` contains at least one `.html` file whose name is `sha256(canonical_url).hex` form; `.duplo/duplo.json` has the `sources` field populated with the URL; `.duplo/product.json` exists with `source_url` populated from the first product-reference; no `FileNotFoundError`, no diagnostic about missing `ref/` was recorded.
+
+- [ ] Add `test_ref_only_spec_runs_without_http`
+  - [ ] Construct a tmpdir with a SPEC.md containing marker, Purpose, Architecture, NO `## Sources` (or empty `## Sources`), and a `## References` block listing two entries: one with `role: visual-target` and one with `role: docs`. Create `ref/` directory and place small fixture image and text files at the declared paths.
+  - [ ] Patch `duplo.fetcher.fetch_site` with a mock that raises if called — the test asserts no HTTP work happened.
+  - [ ] Mock `extract_design` to return deterministic output and assert it was called with the visual-target ref/ file paths in its `design_input`.
+  - [ ] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
+  - [ ] Mock `extract_features` and the interactive selectors as in the previous test.
+  - [ ] Run `_subsequent_run` against the tmpdir.
+  - [ ] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
+
+- [ ] Add `test_url_and_ref_with_scope_exclude_drops_features`
+  - [ ] Construct a tmpdir with SPEC.md containing marker, Purpose, Architecture, one product-reference URL, one ref/ entry with `role: visual-target`, AND a `## Scope` block with `exclude: plugin API`.
+  - [ ] Mock `fetch_site` and `extract_design` deterministically.
+  - [ ] Mock `extract_features` to return three features whose names/descriptions are: (a) a clear match for `"plugin API"` as a whole phrase; (b) a non-match that contains the substring `"non-plugin-API"`; (c) an unrelated feature.
+  - [ ] Run `_subsequent_run` against the tmpdir.
+  - [ ] Assert: feature (a) was dropped — it does NOT appear in `.duplo/duplo.json` features list. Features (b) and (c) WERE kept (substring match must NOT trigger word-boundary regex).
+  - [ ] Assert: `duplo.diagnostics` recorded a `scope_exclude` diagnostic for feature (a) and only feature (a).
+
+- [ ] Add `test_discovered_urls_appended_to_spec_and_not_rescraped_on_second_run`
+  - [ ] Construct a tmpdir with SPEC.md containing one product-reference URL with `scrape: deep`. Mock `fetch_site` to return a `raw_pages` dict whose HTML contains one cross-origin `<a href>` to a different host.
+  - [ ] Run `_subsequent_run` once. Assert: SPEC.md was modified; `## Sources` now has a new entry for the cross-origin URL with `discovered: true` flag; the cross-origin URL was NOT fetched.
+  - [ ] Run `_subsequent_run` a second time on the same tmpdir without modifying SPEC.md. Assert: the discovered entry is still present with the flag intact; the cross-origin URL was STILL not fetched.
+  - [ ] Programmatically edit SPEC.md to remove the `discovered: true` line from the discovered entry. Run `_subsequent_run` a third time. Assert: this time the previously-discovered URL WAS fetched.
+
+- [ ] Add `test_autogen_design_block_present_skips_vision`
+  - [ ] Construct two tmpdirs sharing the same SPEC.md skeleton (URL-only, product-reference). Variant A: SPEC.md has `## Design` containing a populated AUTO-GENERATED block. Variant B: SPEC.md has `## Design` with no autogen block.
+  - [ ] Mock `extract_design` and assert call counts.
+  - [ ] Run `_subsequent_run` against Variant A. Assert: `extract_design` was NOT called; `duplo.diagnostics` recorded the autogen-skip message; SPEC.md was NOT modified by the run; `.duplo/duplo.json` has NO new `design_requirements`.
+  - [ ] Run `_subsequent_run` against Variant B. Assert: `extract_design` WAS called; SPEC.md was modified to add a populated AUTO-GENERATED block; `.duplo/duplo.json` `design_requirements` was populated.
+  - [ ] Modify Variant A's SPEC.md to delete the autogen block contents (leave block markers but empty body). Run `_subsequent_run` again. Assert: `extract_design` IS called this time; SPEC.md autogen block is now populated.
+
+- [ ] Add `test_proposed_true_references_excluded_from_pipeline`
+  - [ ] Construct a tmpdir with SPEC.md containing two ref/ entries with the same `role: visual-target`: one with `proposed: true`, one without. Drop fixture image files for both.
+  - [ ] Mock `extract_design` and capture its `design_input` argument.
+  - [ ] Run `_subsequent_run` against the tmpdir.
+  - [ ] Assert: `extract_design` was called; its `design_input` contains the path of the non-proposed reference; its `design_input` does NOT contain the path of the proposed reference.
+  - [ ] Programmatically edit SPEC.md to remove `proposed: true` from the previously-proposed entry. Run `_subsequent_run` again. Assert: this time `extract_design` was called with both reference paths in `design_input`.
+  - [ ] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
+
+- [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
+  - [ ] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
+  - [ ] Mock `extract_design` and `extract_features` and capture their inputs.
+  - [ ] Run `_subsequent_run`. Assert: `extract_design`'s `design_input` contains the visual-target path but NOT the counter-example path. The features list does NOT mention counter-example content.
+  - [ ] Programmatically invoke `duplo fix "sample bug"`. Mock the investigator LLM call and capture the prompt.
+  - [ ] Assert: the captured investigator prompt contains the counter-example reference's path or notes content, framed under an explicit "AVOID" label.
+  - [ ] If the spec has counter-example SOURCES (URLs with `role: counter-example`), assert: the URL appears in the investigator prompt under the same AVOID framing, AND `fetch_site` was NOT called against that URL.
+
+- [ ] Run the full test suite and confirm Phase 5 closes cleanly
+  - [ ] Execute `pytest -x` against the duplo repo.
+  - [ ] Assert: all pre-existing tests still pass; all seven new Phase 5 integration tests pass.
+  - [ ] If any test fails, the task fails and mcloop will retry. The retry should investigate the failure (read pytest output, identify the failing assertion, locate the responsible code, fix it). Phase 5 is not complete until this task passes.
+
+## Followup: bugs surfaced during the manual run of the URL-only scenario
+
+The manual run of the URL-only scenario (against numi.app) before this rewrite surfaced real bugs. Queued here so they don't get lost.
+
+- [ ] Fix planner output wrapped in markdown code fences
+  - [ ] When duplo's planner generates a PLAN.md via `claude -p` and the LLM returns the markdown wrapped in triple-backtick fences, duplo writes the wrapped text verbatim. The resulting file is unparseable by mcloop because the H1 heading is buried inside a code fence.
+  - [ ] Fix: in `duplo/planner.py` (or wherever the planner output is written), strip leading/trailing fences before writing. Use the existing `strip_fences` helper from `duplo/parsing.py` if it covers this case; if not, extend it.
+  - [ ] Tests: planner output containing a fenced markdown block is written without the fences. Output without fences is written unchanged. Output with `~~~` fences is also handled.
+
+- [ ] Fix planner placing feature tasks under `## Bugs` heading
+  - [ ] The Phase 1 PLAN.md generated during the manual run had its feature implementation tasks placed UNDER the `## Bugs` heading instead of as the plan body. `## Bugs` should be empty initially. Feature tasks should be at the top level under the phase H1 heading.
+  - [ ] Investigate `duplo/planner.py` (or saver.py's `save_plan`) to find where the structure is being assembled wrong.
+  - [ ] Fix: ensure the planner's output has the correct structure: H1 phase heading, then feature tasks at top level, then `## Bugs` heading at the end with no tasks below it.
+  - [ ] Tests: a generated PLAN.md has feature tasks at top level under the H1 heading. The `## Bugs` heading is present but contains no tasks. Mcloop's parser correctly identifies the feature tasks as Phase 1 work, not as bugs.
+
+- [ ] Fix `derive_app_name` not writing `product_name` to product.json
+  - [ ] During the manual run, the PLAN.md heading correctly read `# numi — Phase 1: Scaffold` (so the app name was derived as "numi" somewhere), but `.duplo/product.json` had `product_name: ""` (empty string).
+  - [ ] Investigate `duplo/orchestrator.py:derive_app_name` and its callers. Either the function isn't writing `product_name` (only writing `app_name`), or `product.json` is initialized with empty `product_name` and never updated.
+  - [ ] Fix: ensure `product.json` ends up with `product_name` populated to the same value used in the PLAN.md heading. Backward-compat: if `product.json` already has a non-empty `product_name` (user-edited), do not overwrite.
+  - [ ] Tests: after `_subsequent_run`, `product.json:product_name` matches the value used in PLAN.md's H1 heading. User-edited `product_name` survives a subsequent run.
+
+- [ ] Fix `frame_describer` parse-error on every video frame
+  - [ ] During the manual run, all 17 video frames extracted from a demo video were stored with `state: "unknown"`, `detail: "parse error"` in `.duplo/duplo.json` `frame_descriptions`. The frame describer's LLM call is returning output that the parser cannot handle. Pre-existing behavior, not caused by Phase 5, but surfaced clearly during Phase 5 verification.
+  - [ ] Investigate `duplo/frame_describer.py`. Capture a real LLM response sample and inspect what the parser is choking on.
+  - [ ] Fix: make the parser tolerant of common LLM output variations: strip code fences, strip leading/trailing prose, parse the first valid JSON object found. Alternatively, tighten the prompt to demand strict JSON output.
+  - [ ] Tests: parser handles JSON wrapped in fences; parser handles JSON preceded by prose; parser handles JSON with trailing whitespace; parser returns a useful error message when the LLM truly returned something unparseable.
+
+- [ ] Investigate why AUTO-GENERATED design block was not written to SPEC.md during the manual URL-only run
+  - [ ] During the manual run, design extraction appears to have completed (no error logged), but SPEC.md ended the run with no `## Design` section and no AUTO-GENERATED block.
+  - [ ] Investigate: in `_subsequent_run`, after `extract_design` is called, what happens with the result? Is `format_design_block(design)` producing a non-empty string? Is `update_design_autogen` being invoked? Is its result being written back? Add a diagnostic at each step if the chain breaks.
+  - [ ] Fix: ensure the write-back happens reliably whenever `extract_design` returns a non-empty result. The `test_autogen_design_block_present_skips_vision` test will catch this regression once the bug is fixed.
+  - [ ] Note: this bug may be entangled with the frame_describer bug — if the design extractor receives only "unknown" frame descriptions, it may produce empty or trivial output that legitimately doesn't merit a write-back. Investigate the relationship.
 
 ---
 
