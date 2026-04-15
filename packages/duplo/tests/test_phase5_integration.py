@@ -1994,3 +1994,125 @@ class TestSubsequentRunRefOnlySpec:
         if errors_path.exists():
             errors_text = errors_path.read_text(encoding="utf-8")
             assert "ref/" not in errors_text
+
+
+# ---------------------------------------------------------------------------
+# Fixture: combined SPEC.md — URL source + ref/ visual-target + scope exclude
+# ---------------------------------------------------------------------------
+
+_COMBINED_SPEC_TEXT = (
+    "<!-- How the pieces fit together: -->\n"
+    "\n"
+    "## Purpose\n"
+    "NotesApp is a cross-platform note-taking application "
+    "with real-time collaboration and end-to-end encryption. "
+    "It supports rich text editing and offline mode.\n"
+    "\n"
+    "## Architecture\n"
+    "Web app using React + TypeScript. SQLite for local storage.\n"
+    "\n"
+    "## Scope\n"
+    "- exclude: plugin API\n"
+    "\n"
+    "## Sources\n"
+    f"- {_CANONICAL_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "\n"
+    "## References\n"
+    "- ref/app_screenshot.png\n"
+    "  role: visual-target\n"
+)
+
+
+def _setup_combined_tmpdir(tmp_path: Path) -> None:
+    """Create a combined project fixture in *tmp_path*.
+
+    Writes SPEC.md (## Sources + ## References + ## Scope with
+    exclude: plugin API), and ref/app_screenshot.png.
+    """
+    (tmp_path / "SPEC.md").write_text(_COMBINED_SPEC_TEXT, encoding="utf-8")
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "app_screenshot.png").write_bytes(_FIXTURE_PNG)
+
+
+class TestCombinedFixture:
+    """Verify the combined tmpdir fixture is well-formed."""
+
+    def test_spec_has_marker(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "How the pieces fit together:" in text
+
+    def test_spec_has_purpose(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Purpose" in text
+        idx = text.index("## Purpose")
+        purpose_start = text.index("\n", idx) + 1
+        next_heading = text.find("##", purpose_start)
+        purpose_body = text[purpose_start:next_heading].strip()
+        assert len(purpose_body) > 50
+
+    def test_spec_has_architecture(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Architecture" in text
+
+    def test_spec_has_scope_exclude(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Scope" in text
+        assert "exclude: plugin API" in text
+
+    def test_spec_has_sources(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## Sources" in text
+        assert _CANONICAL_URL in text
+        assert "role: product-reference" in text
+
+    def test_spec_has_references(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## References" in text
+        assert "ref/app_screenshot.png" in text
+        assert "role: visual-target" in text
+
+    def test_ref_dir_exists(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        assert (tmp_path / "ref").is_dir()
+
+    def test_image_file_exists(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        img = tmp_path / "ref" / "app_screenshot.png"
+        assert img.exists()
+        assert img.stat().st_size > 0
+
+    def test_image_file_is_valid_png(self, tmp_path):
+        _setup_combined_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "app_screenshot.png").read_bytes()
+        assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_spec_parses_correctly(self, tmp_path):
+        """read_spec returns a ProductSpec with expected fields."""
+        _setup_combined_tmpdir(tmp_path)
+        import os
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            from duplo.spec_reader import read_spec
+
+            spec = read_spec()
+        finally:
+            os.chdir(old_cwd)
+
+        assert spec is not None
+        assert len(spec.references) == 1
+        assert spec.references[0].roles == ["visual-target"]
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == _CANONICAL_URL
+        assert spec.scope_exclude == ["plugin API"]
+        assert len(spec.purpose) > 50
