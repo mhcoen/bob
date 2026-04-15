@@ -2571,3 +2571,29 @@ class TestSubsequentRunCombinedSpec:
 
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert "## Bugs" in content
+
+    def test_scope_exclude_diagnostic_recorded(self, tmp_path, monkeypatch):
+        """diagnostics records a scope_exclude entry for 'Plugin API'
+        and only for that feature — not for 'Non-plugin-API
+        configuration' or 'Offline sync'.
+        """
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+
+        errors_path = tmp_path / ".duplo" / "errors.jsonl"
+        assert errors_path.exists(), "errors.jsonl should exist after scope_exclude drop"
+
+        records = []
+        for line in errors_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                records.append(json.loads(line))
+
+        scope_records = [r for r in records if r.get("site") == "extractor:scope_exclude"]
+        assert len(scope_records) == 1, (
+            f"Expected exactly 1 scope_exclude diagnostic, got"
+            f" {len(scope_records)}: {scope_records}"
+        )
+        assert "Plugin API" in scope_records[0]["message"]
+        assert "plugin API" in scope_records[0]["message"]
+        assert "Non-plugin-API" not in scope_records[0]["message"]
+        assert "Offline sync" not in scope_records[0]["message"]
