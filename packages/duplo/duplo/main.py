@@ -321,6 +321,16 @@ def _feature_from_dict(d: dict) -> Feature:
     return Feature(**{k: v for k, v in d.items() if k in _FEATURE_FIELDS})
 
 
+def _source_url_from_spec(spec: ProductSpec | None) -> str:
+    """Return the first product-reference URL from the spec, or ``""``."""
+    if not spec or not spec.sources:
+        return ""
+    for src in spec.sources:
+        if src.role == "product-reference" and not src.proposed and not src.discovered:
+            return src.url
+    return ""
+
+
 def _prefs_from_dict(prefs_data: dict) -> BuildPreferences:
     """Build :class:`BuildPreferences` from a raw duplo.json dict."""
     return BuildPreferences(
@@ -1066,12 +1076,11 @@ def _first_run(*, url: str | None = None) -> None:
         if code_examples:
             print(f"Extracted {len(code_examples)} code example(s) from docs.")
         # Use the first product-reference source URL as the canonical
-        # source_url for product identity (if not already saved).
-        if not source_url:
-            for src in spec_sources:
-                if src.role == "product-reference":
-                    source_url = src.url
-                    break
+        # source_url.  Always derive from the spec so product.json
+        # stays in sync (backward compat for old tooling).
+        spec_url = _source_url_from_spec(spec)
+        if spec_url:
+            source_url = spec_url
     else:
         if scan.urls and not source_url:
             source_url = scan.urls[0]
@@ -1109,6 +1118,10 @@ def _first_run(*, url: str | None = None) -> None:
             return
         save_product(product_name, source_url)
         print("Product identity saved to .duplo/product.json.")
+    elif saved_product and source_url and source_url != saved_product[1]:
+        # Spec's product-reference URL changed — sync product.json
+        # for backward compatibility with old tooling.
+        save_product(product_name, source_url)
 
     # Extract text from docs-role references (PDFs, text, markdown).
     if spec:
@@ -1908,6 +1921,13 @@ def _subsequent_run() -> None:
         summary.pages_rescraped = len(scrape_result.all_page_records)
         summary.examples_rescraped = len(scrape_result.all_code_examples)
         product_ref_raw_pages = scrape_result.product_ref_raw_pages
+        # Keep product.json source_url in sync with spec (backward compat).
+        spec_url = _source_url_from_spec(spec)
+        if spec_url:
+            saved = load_product()
+            if not saved or saved[1] != spec_url:
+                pname = saved[0] if saved else ""
+                save_product(pname, spec_url)
     else:
         pages, examples, scraped_text = _rescrape_product_url(spec=spec)
         summary.pages_rescraped = pages
@@ -2121,7 +2141,7 @@ def _subsequent_run() -> None:
         if not remaining:
             print("All features implemented. Nothing to do.")
             return
-        source_url = data.get("source_url", "")
+        source_url = _source_url_from_spec(spec) or data.get("source_url", "")
         preferences = _load_preferences(data, spec)
         history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
@@ -2180,7 +2200,7 @@ def _subsequent_run() -> None:
             phase_info["issues"] = [iss["description"] for iss in selected_issues]
 
     # Generate plan for current phase.
-    source_url = data.get("source_url", "")
+    source_url = _source_url_from_spec(spec) or data.get("source_url", "")
     features = [_feature_from_dict(f) for f in data.get("features", [])]
     preferences = _load_preferences(data, spec)
 

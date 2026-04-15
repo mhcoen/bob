@@ -36,6 +36,7 @@ from duplo.main import (
     _rescrape_product_url,
     _scrape_declared_sources,
     _unimplemented_features,
+    _source_url_from_spec,
     _visual_target_video_frames,
     main,
 )
@@ -11185,3 +11186,214 @@ class TestIntegrationProposedRemoved:
         result = collect_design_input(spec)
         paths = [p.name for p in result]
         assert "accepted.png" in paths
+
+
+class TestSourceUrlFromSpec:
+    """Tests for _source_url_from_spec helper."""
+
+    def test_returns_first_product_reference(self):
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src1 = SourceEntry(url="https://first.com", role="product-reference", scrape="deep")
+        src2 = SourceEntry(url="https://second.com", role="product-reference", scrape="deep")
+        spec = ProductSpec(raw="", sources=[src1, src2], design=DesignBlock())
+        assert _source_url_from_spec(spec) == "https://first.com"
+
+    def test_skips_proposed(self):
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(
+            url="https://proposed.com",
+            role="product-reference",
+            scrape="deep",
+            proposed=True,
+        )
+        spec = ProductSpec(raw="", sources=[src], design=DesignBlock())
+        assert _source_url_from_spec(spec) == ""
+
+    def test_skips_discovered(self):
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(
+            url="https://discovered.com",
+            role="product-reference",
+            scrape="deep",
+            discovered=True,
+        )
+        spec = ProductSpec(raw="", sources=[src], design=DesignBlock())
+        assert _source_url_from_spec(spec) == ""
+
+    def test_skips_non_product_reference(self):
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(url="https://docs.com", role="docs", scrape="deep")
+        spec = ProductSpec(raw="", sources=[src], design=DesignBlock())
+        assert _source_url_from_spec(spec) == ""
+
+    def test_none_spec(self):
+        assert _source_url_from_spec(None) == ""
+
+    def test_empty_sources(self):
+        from duplo.spec_reader import DesignBlock, ProductSpec
+
+        spec = ProductSpec(raw="", sources=[], design=DesignBlock())
+        assert _source_url_from_spec(spec) == ""
+
+    def test_first_product_ref_after_docs(self):
+        """product-reference is returned even when preceded by docs entries."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        docs = SourceEntry(url="https://docs.com", role="docs", scrape="deep")
+        prod = SourceEntry(url="https://prod.com", role="product-reference", scrape="deep")
+        spec = ProductSpec(raw="", sources=[docs, prod], design=DesignBlock())
+        assert _source_url_from_spec(spec) == "https://prod.com"
+
+
+class TestProductJsonBackwardCompat:
+    """product.json source_url stays in sync with spec's product-reference."""
+
+    def test_subsequent_run_syncs_product_json(self, tmp_path, monkeypatch):
+        """_subsequent_run updates product.json source_url from spec."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+        duplo_dir = tmp_path / ".duplo"
+
+        # Product.json has old URL.
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "Prod", "source_url": "https://old.com"}),
+            encoding="utf-8",
+        )
+
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(url="https://new-spec.com", role="product-reference", scrape="deep")
+        spec = ProductSpec(
+            raw="## Sources\n- https://new-spec.com\n",
+            purpose="A tool",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="features",
+            product_ref_raw_pages={},
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(m, "_scrape_declared_sources", MagicMock(return_value=scrape_result))
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        main()
+
+        pdata = json.loads((duplo_dir / "product.json").read_text(encoding="utf-8"))
+        assert pdata["source_url"] == "https://new-spec.com"
+
+    def test_subsequent_run_source_url_from_spec_for_roadmap(self, tmp_path, monkeypatch):
+        """_subsequent_run uses spec's source_url (not duplo.json) when
+        generating a roadmap."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=False)
+        duplo_dir = tmp_path / ".duplo"
+
+        # duplo.json has old URL, spec has new URL.
+        data = json.loads((duplo_dir / "duplo.json").read_text(encoding="utf-8"))
+        data["source_url"] = "https://old-duplo.com"
+        (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(url="https://spec-url.com", role="product-reference", scrape="deep")
+        spec = ProductSpec(
+            raw="## Sources\n- https://spec-url.com\n",
+            purpose="A tool",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(combined_text="features")
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(m, "_scrape_declared_sources", MagicMock(return_value=scrape_result))
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        # Capture the source_url passed to generate_roadmap.
+        captured = {}
+
+        def fake_generate(url, *a, **kw):
+            captured["url"] = url
+            return [{"phase": 1, "title": "Core", "goal": "g", "features": ["F1"]}]
+
+        monkeypatch.setattr(m, "generate_roadmap", fake_generate)
+        monkeypatch.setattr(m, "save_roadmap", lambda *a, **kw: None)
+        monkeypatch.setattr(m, "format_roadmap", lambda r: "roadmap")
+        monkeypatch.setattr(m, "get_current_phase", lambda: (1, None))
+        monkeypatch.setattr(m, "_print_feature_status", lambda d: None)
+
+        main()
+
+        assert captured.get("url") == "https://spec-url.com"
+
+    def test_no_spec_falls_back_to_duplo_json(self, tmp_path, monkeypatch):
+        """Without a spec, source_url falls back to duplo.json."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=False)
+        duplo_dir = tmp_path / ".duplo"
+
+        data = json.loads((duplo_dir / "duplo.json").read_text(encoding="utf-8"))
+        data["source_url"] = "https://legacy.com"
+        (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: None)
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [])
+        monkeypatch.setattr(m, "_rescrape_product_url", lambda **kw: (0, 0, ""))
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
+        )
+
+        captured = {}
+
+        def fake_generate(url, *a, **kw):
+            captured["url"] = url
+            return [{"phase": 1, "title": "Core", "goal": "g", "features": ["F1"]}]
+
+        monkeypatch.setattr(m, "generate_roadmap", fake_generate)
+        monkeypatch.setattr(m, "save_roadmap", lambda *a, **kw: None)
+        monkeypatch.setattr(m, "format_roadmap", lambda r: "roadmap")
+        monkeypatch.setattr(m, "get_current_phase", lambda: (1, None))
+        monkeypatch.setattr(m, "_print_feature_status", lambda d: None)
+
+        main()
+
+        assert captured.get("url") == "https://legacy.com"
