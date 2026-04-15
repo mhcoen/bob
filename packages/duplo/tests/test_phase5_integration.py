@@ -3057,3 +3057,233 @@ class TestCrossOriginDiscoveryIdempotent:
         # Count occurrences of the discovered URL — should appear exactly once.
         count = spec_text.count("https://external.example.org/integrations")
         assert count == 1, f"Discovered URL should appear once in SPEC.md, found {count}"
+
+
+# ---------------------------------------------------------------------------
+# Cross-origin discovered URL promotion (discovered: true removed)
+# ---------------------------------------------------------------------------
+
+# The cross-origin URL that gets discovered in the first run
+_XORIGIN_DISCOVERED_URL = "https://external.example.org/integrations"
+
+# fetch_site result for the discovered URL when it becomes scrapeable
+_XORIGIN_DISCOVERED_HTML = (
+    "<html><head><title>Integrations</title></head><body>"
+    "<h1>Integrations</h1>"
+    "<p>Connect MyProduct with your favorite tools.</p>"
+    "</body></html>"
+)
+
+_XORIGIN_DISCOVERED_CONTENT_HASH = hashlib.sha256(_XORIGIN_DISCOVERED_HTML.encode()).hexdigest()
+
+_XORIGIN_DISCOVERED_PAGE_RECORD = PageRecord(
+    url=_XORIGIN_DISCOVERED_URL,
+    fetched_at="2026-04-15T01:00:00Z",
+    content_hash=_XORIGIN_DISCOVERED_CONTENT_HASH,
+)
+
+_XORIGIN_DISCOVERED_FETCH_RESULT = (
+    "Connect MyProduct with your favorite tools.",
+    [],  # empty code_examples
+    DocStructures(),  # empty doc_structures
+    [_XORIGIN_DISCOVERED_PAGE_RECORD],
+    {_XORIGIN_DISCOVERED_URL: _XORIGIN_DISCOVERED_HTML},
+)
+
+
+def _xorigin_fetch_by_url(url, **kwargs):
+    """Side-effect for fetch_site that returns different results per URL."""
+    from duplo.url_canon import canonicalize_url
+
+    canon = canonicalize_url(url)
+    if canon == canonicalize_url(_XORIGIN_SOURCE_URL):
+        return _XORIGIN_FETCH_SITE_RESULT
+    if canon == canonicalize_url(_XORIGIN_DISCOVERED_URL):
+        return _XORIGIN_DISCOVERED_FETCH_RESULT
+    raise ValueError(f"Unexpected URL passed to fetch_site mock: {url}")
+
+
+class TestCrossOriginDiscoveredPromotion:
+    """After removing ``discovered: true``, the URL becomes scrapeable.
+
+    Steps:
+    1. First run: writes ``discovered: true`` entry to SPEC.md.
+    2. Programmatically edit SPEC.md to remove the ``discovered: true``
+       line from the discovered entry.
+    3. Second run: fetch_site should now be called for BOTH the
+       original source URL AND the previously-discovered URL.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: cross-origin SPEC.md + duplo.json."""
+        _setup_cross_origin_tmpdir(tmp_path)
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "app_name": "MyProduct",
+                "source_url": _XORIGIN_SOURCE_URL,
+                "features": [
+                    {
+                        "name": f.name,
+                        "description": f.description,
+                        "category": f.category,
+                        "status": "pending",
+                        "implemented_in": "",
+                    }
+                    for f in _XORIGIN_FEATURES
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "TypeScript",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "architecture_hash": hashlib.sha256(
+                    b"Web app using Next.js + TypeScript. PostgreSQL for storage."
+                ).hexdigest(),
+            },
+        )
+
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "MyProduct",
+                    "source_url": _XORIGIN_SOURCE_URL,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self, fetch_side_effect=None):
+        """Run main() with fetch_site mocked.
+
+        When *fetch_side_effect* is provided, fetch_site uses it as a
+        side_effect (callable dispatching by URL).  Otherwise the mock
+        returns the fixed source-URL result.
+        """
+        fetch_kwargs = {}
+        if fetch_side_effect is not None:
+            fetch_kwargs["side_effect"] = fetch_side_effect
+        else:
+            fetch_kwargs["return_value"] = _XORIGIN_FETCH_SITE_RESULT
+
+        patches = {
+            "validate_for_run": patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            "fetch_site": patch(
+                "duplo.main.fetch_site",
+                **fetch_kwargs,
+            ),
+            "download_site_media": patch(
+                "duplo.main._download_site_media",
+                return_value=([], []),
+            ),
+            "behavioral_refs": patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            "collect_design_input": patch(
+                "duplo.main.collect_design_input",
+                return_value=[],
+            ),
+            "extract_features": patch(
+                "duplo.main.extract_features",
+                return_value=_XORIGIN_FEATURES,
+            ),
+            "save_features": patch("duplo.main.save_features"),
+            "generate_roadmap": patch(
+                "duplo.main.generate_roadmap",
+                return_value=_ROADMAP,
+            ),
+            "select_features": patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            "generate_phase_plan": patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_PLAN_CONTENT,
+            ),
+            "load_frame_descriptions": patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+        }
+        mocks = {}
+        entered = []
+        try:
+            for name, mgr in patches.items():
+                mock_obj = mgr.__enter__()
+                entered.append(mgr)
+                mocks[name] = mock_obj
+            main()
+        finally:
+            for mgr in reversed(entered):
+                mgr.__exit__(None, None, None)
+        return mocks
+
+    @staticmethod
+    def _remove_discovered_flag(tmp_path):
+        """Edit SPEC.md to remove ``discovered: true`` from the entry."""
+        spec_path = tmp_path / "SPEC.md"
+        lines = spec_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        new_lines = [line for line in lines if "discovered: true" not in line]
+        spec_path.write_text("".join(new_lines), encoding="utf-8")
+
+    def test_discovered_url_fetched_after_flag_removed(self, tmp_path, monkeypatch):
+        """After removing discovered: true, fetch_site is called for
+        both the original source URL and the promoted URL."""
+        self._setup(tmp_path, monkeypatch)
+
+        # First run: writes discovered: true entry.
+        self._run_with_mocks()
+
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "discovered: true" in spec_text, "Precondition: discovered flag present"
+
+        # Remove discovered: true from SPEC.md.
+        self._remove_discovered_flag(tmp_path)
+
+        spec_after_edit = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "discovered: true" not in spec_after_edit, "discovered: true should be removed"
+        assert "external.example.org" in spec_after_edit, "URL entry should still be present"
+
+        # Second run: fetch_site should be called for both URLs.
+        mocks = self._run_with_mocks(fetch_side_effect=_xorigin_fetch_by_url)
+
+        mock_fetch = mocks["fetch_site"]
+        assert mock_fetch.call_count == 2, (
+            f"fetch_site should be called twice (source + promoted), got {mock_fetch.call_count}"
+        )
+        called_urls = {call.args[0] for call in mock_fetch.call_args_list}
+        assert _XORIGIN_SOURCE_URL in called_urls, "Source URL should still be fetched"
+        assert _XORIGIN_DISCOVERED_URL in called_urls, (
+            "Previously-discovered URL should now be fetched"
+        )
+
+    def test_discovered_flag_absent_after_promotion(self, tmp_path, monkeypatch):
+        """After the promoted run, SPEC.md still has no discovered: true."""
+        self._setup(tmp_path, monkeypatch)
+
+        # First run: writes discovered entry.
+        self._run_with_mocks()
+
+        # Remove discovered: true.
+        self._remove_discovered_flag(tmp_path)
+
+        # Second run with both URLs fetchable.
+        self._run_with_mocks(fetch_side_effect=_xorigin_fetch_by_url)
+
+        spec_text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "discovered: true" not in spec_text, (
+            "discovered: true should not reappear after promotion"
+        )
+        assert "external.example.org" in spec_text, "Promoted URL should still be in SPEC.md"
