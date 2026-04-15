@@ -5425,3 +5425,172 @@ class TestCounterVtFixture:
         start = text.index("\n", idx) + 1
         end = text.find("##", start)
         assert len(text[start:end].strip()) > 50
+
+
+# ---------------------------------------------------------------------------
+# 5.33.2 — Mock extract_design and extract_features, capture inputs
+# ---------------------------------------------------------------------------
+
+# Calculator-themed features matching _COUNTER_VT_SPEC_TEXT
+_COUNTER_VT_FEATURES = [
+    Feature(
+        name="Graphing calculator",
+        description="Plot mathematical functions on an interactive graph.",
+        category="Core",
+    ),
+    Feature(
+        name="Unit conversions",
+        description="Convert between metric, imperial, and scientific units.",
+        category="Utilities",
+    ),
+]
+
+_COUNTER_VT_DESIGN = DesignRequirements(
+    colors={"primary": "#0066cc", "background": "#f5f5f5"},
+    fonts={"body": "SF Pro, 14px", "display": "SF Pro Display, 28px"},
+    spacing={"content_padding": "16px"},
+    layout={"navigation": "top"},
+    components=[{"name": "button", "style": "rounded corners"}],
+    source_images=["target_screenshot.png"],
+)
+
+_COUNTER_VT_ROADMAP = [
+    {
+        "phase": 1,
+        "title": "Core Calculator",
+        "goal": "Basic arithmetic and graphing",
+        "features": ["Graphing calculator", "Unit conversions"],
+        "test": "User can graph a function",
+    },
+]
+
+_COUNTER_VT_PLAN = (
+    "# CalcApp \u2014 Phase 1: Core Calculator\n\n"
+    "## Bugs\n\n"
+    "- [ ] Set up SwiftUI project\n"
+    '- [ ] Add graphing [feat: "Graphing calculator"]\n'
+)
+
+
+class TestCounterVtMockedExtractors:
+    """Mock extract_design and extract_features for counter-example
+    + visual-target fixture, capturing their inputs.
+
+    The counter-example ref must NOT appear in extract_design input.
+    Only the visual-target ref should reach design extraction.
+    extract_features should be called (with empty/minimal text since
+    there are no Sources or docs-role refs in this fixture).
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Common setup: counter-vt fixture + monkeypatch for main()."""
+        _setup_counter_vt_tmpdir(tmp_path)
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir(exist_ok=True)
+        (duplo_dir / "product.json").write_text(
+            json.dumps({"product_name": "CalcApp", "source_url": ""}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+
+    def _run_with_mocks(self):
+        """Run main() with mocked extractors.
+
+        Returns (mock_extract_design, mock_extract_features) so
+        callers can assert on call args.
+        """
+        mock_design = MagicMock(return_value=_COUNTER_VT_DESIGN)
+        mock_features = MagicMock(return_value=_COUNTER_VT_FEATURES)
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_design,
+            ),
+            patch(
+                "duplo.main.extract_features",
+                new=mock_features,
+            ),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.parse_build_preferences",
+                return_value=BuildPreferences(
+                    platform="macOS",
+                    language="Swift",
+                    constraints=[],
+                    preferences=[],
+                ),
+            ),
+            patch(
+                "duplo.main.validate_build_preferences",
+                return_value=[],
+            ),
+            patch("builtins.input", return_value=""),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_COUNTER_VT_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_COUNTER_VT_PLAN,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.save_reference_screenshots",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site must not be called"),
+            ),
+        ):
+            main()
+
+        return mock_design, mock_features
+
+    def test_extract_design_called_once(self, tmp_path, monkeypatch):
+        """extract_design is called exactly once."""
+        self._setup(tmp_path, monkeypatch)
+        m_design, _ = self._run_with_mocks()
+        m_design.assert_called_once()
+
+    def test_extract_design_receives_visual_target_only(self, tmp_path, monkeypatch):
+        """extract_design input contains the visual-target ref path
+        but NOT the counter-example ref path."""
+        self._setup(tmp_path, monkeypatch)
+        m_design, _ = self._run_with_mocks()
+        design_input = m_design.call_args[0][0]
+        input_names = [p.name for p in design_input]
+        assert "target_screenshot.png" in input_names
+        assert "bad_example.png" not in input_names
+
+    def test_extract_features_called_once(self, tmp_path, monkeypatch):
+        """extract_features is called exactly once."""
+        self._setup(tmp_path, monkeypatch)
+        _, m_features = self._run_with_mocks()
+        m_features.assert_called_once()
+
+    def test_extract_features_receives_string(self, tmp_path, monkeypatch):
+        """extract_features first positional arg is a string."""
+        self._setup(tmp_path, monkeypatch)
+        _, m_features = self._run_with_mocks()
+        combined_text = m_features.call_args[0][0]
+        assert isinstance(combined_text, str)
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated after extraction."""
+        self._setup(tmp_path, monkeypatch)
+        self._run_with_mocks()
+        assert (tmp_path / "PLAN.md").exists()
