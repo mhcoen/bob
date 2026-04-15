@@ -5276,3 +5276,152 @@ class TestProposedBehavioralRemovedBothVideosInPipeline:
         """PLAN.md is generated at the end of the run."""
         self._run(tmp_path, monkeypatch)
         assert (tmp_path / "PLAN.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 5.33.1 — Counter-example + visual-target refs
+# ---------------------------------------------------------------------------
+
+_COUNTER_VT_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## References\n"
+    "- ref/bad_example.png\n"
+    "  role: counter-example\n"
+    "- ref/target_screenshot.png\n"
+    "  role: visual-target\n"
+)
+
+
+def _setup_counter_vt_tmpdir(tmp_path: Path) -> None:
+    """Create a project with one counter-example and one visual-target ref.
+
+    Writes SPEC.md, ref/bad_example.png, and
+    ref/target_screenshot.png.
+    """
+    (tmp_path / "SPEC.md").write_text(_COUNTER_VT_SPEC_TEXT, encoding="utf-8")
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "bad_example.png").write_bytes(_FIXTURE_PNG)
+    # Slightly different bytes so content hashes differ
+    (ref_dir / "target_screenshot.png").write_bytes(_FIXTURE_PNG + b"\x00")
+
+
+class TestCounterVtFixture:
+    """Verify the counter-example + visual-target fixture."""
+
+    def test_spec_has_marker(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "How the pieces fit together:" in text
+
+    def test_spec_has_references_section(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## References" in text
+
+    def test_spec_has_counter_example_entry(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert text.count("role: counter-example") == 1
+
+    def test_spec_has_visual_target_entry(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert text.count("role: visual-target") == 1
+
+    def test_counter_example_file_exists(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        assert (tmp_path / "ref" / "bad_example.png").exists()
+
+    def test_visual_target_file_exists(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        assert (tmp_path / "ref" / "target_screenshot.png").exists()
+
+    def test_counter_example_is_valid_png(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "bad_example.png").read_bytes()
+        assert data[:4] == b"\x89PNG"
+
+    def test_visual_target_is_valid_png(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "target_screenshot.png").read_bytes()
+        assert data[:4] == b"\x89PNG"
+
+    def test_files_have_different_content(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        ce = (tmp_path / "ref" / "bad_example.png").read_bytes()
+        vt = (tmp_path / "ref" / "target_screenshot.png").read_bytes()
+        assert ce != vt
+
+    def test_spec_parses_two_references(self, tmp_path):
+        """read_spec returns two ReferenceEntry objects."""
+        from duplo.spec_reader import read_spec
+
+        _setup_counter_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert len(spec.references) == 2
+
+    def test_counter_example_role_parsed(self, tmp_path):
+        """The bad_example entry has counter-example role."""
+        from duplo.spec_reader import read_spec
+
+        _setup_counter_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        by_name = {e.path.name: e for e in spec.references}
+        assert "counter-example" in by_name["bad_example.png"].roles
+
+    def test_visual_target_role_parsed(self, tmp_path):
+        """The target_screenshot entry has visual-target role."""
+        from duplo.spec_reader import read_spec
+
+        _setup_counter_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        by_name = {e.path.name: e for e in spec.references}
+        assert "visual-target" in by_name["target_screenshot.png"].roles
+
+    def test_format_visual_refs_excludes_counter_example(self, tmp_path):
+        """format_visual_references returns only visual-target."""
+        from duplo.spec_reader import (
+            format_visual_references,
+            read_spec,
+        )
+
+        _setup_counter_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        result = format_visual_references(spec)
+        assert len(result) == 1
+        assert result[0].path.name == "target_screenshot.png"
+
+    def test_format_counter_examples_excludes_visual_target(self, tmp_path):
+        """format_counter_examples returns only counter-example."""
+        from duplo.spec_reader import (
+            format_counter_examples,
+            read_spec,
+        )
+
+        _setup_counter_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        result = format_counter_examples(spec)
+        assert len(result) == 1
+        assert result[0].path.name == "bad_example.png"
+
+    def test_purpose_over_50_chars(self, tmp_path):
+        _setup_counter_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        idx = text.index("## Purpose")
+        start = text.index("\n", idx) + 1
+        end = text.find("##", start)
+        assert len(text[start:end].strip()) > 50
