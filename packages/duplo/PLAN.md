@@ -627,7 +627,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Construct a tmpdir with a SPEC.md containing marker, Purpose, Architecture, NO `## Sources` (or empty `## Sources`), and a `## References` block listing two entries: one with `role: visual-target` and one with `role: docs`. Create `ref/` directory and place small fixture image and text files at the declared paths.
   - [x] Patch `duplo.fetcher.fetch_site` with a mock that raises if called — the test asserts no HTTP work happened.
   - [x] Mock `extract_design` to return deterministic output and assert it was called with the visual-target ref/ file paths in its `design_input`.
-  - [ ] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
+  - [x] Mock the docs-text path (`docs_text_extractor`) to return deterministic output and assert it was called with the docs ref/ file path.
   - [ ] Mock `extract_features` and the interactive selectors as in the previous test.
   - [ ] Run `_subsequent_run` against the tmpdir.
   - [ ] Assert: PLAN.md produced; `fetch_site` mock recorded zero calls; `extract_design` was called with expected paths; no diagnostic about missing source URL.
