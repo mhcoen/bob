@@ -4258,3 +4258,137 @@ class TestAutogenVariantAEmptiedSubsequentRun:
         result = self._run_variant_a_emptied(tmp_path, monkeypatch)
         spec_text_after = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
         assert spec_text_after != result["spec_text_before"]
+
+
+# ---------------------------------------------------------------------------
+# 5.32.1 — Two visual-target refs: one proposed, one active
+# ---------------------------------------------------------------------------
+
+_PROPOSED_VT_SPEC_TEXT = (
+    "How the pieces fit together:\n"
+    "\n"
+    "## Purpose\n"
+    "A calculator app that supports graphing, unit conversions, "
+    "and scientific notation for everyday math tasks.\n"
+    "\n"
+    "## Architecture\n"
+    "macOS native app built with SwiftUI and Swift.\n"
+    "\n"
+    "## References\n"
+    "- ref/active_screenshot.png\n"
+    "  role: visual-target\n"
+    "- ref/proposed_mockup.png\n"
+    "  role: visual-target\n"
+    "  proposed: true\n"
+)
+
+
+def _setup_proposed_vt_tmpdir(tmp_path: Path) -> None:
+    """Create a project with two visual-target refs: one active, one proposed.
+
+    Writes SPEC.md, ref/active_screenshot.png, and
+    ref/proposed_mockup.png.
+    """
+    (tmp_path / "SPEC.md").write_text(_PROPOSED_VT_SPEC_TEXT, encoding="utf-8")
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "active_screenshot.png").write_bytes(_FIXTURE_PNG)
+    # Use a slightly different byte sequence so content hashes differ
+    (ref_dir / "proposed_mockup.png").write_bytes(_FIXTURE_PNG + b"\x00")
+
+
+class TestProposedVisualTargetFixture:
+    """Verify the proposed-visual-target fixture is well-formed."""
+
+    def test_spec_has_marker(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "How the pieces fit together:" in text
+
+    def test_spec_has_references_section(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert "## References" in text
+
+    def test_spec_has_two_visual_target_entries(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert text.count("role: visual-target") == 2
+
+    def test_spec_has_one_proposed_entry(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        assert text.count("proposed: true") == 1
+
+    def test_active_ref_file_exists(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        assert (tmp_path / "ref" / "active_screenshot.png").exists()
+
+    def test_proposed_ref_file_exists(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        assert (tmp_path / "ref" / "proposed_mockup.png").exists()
+
+    def test_active_ref_is_valid_png(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "active_screenshot.png").read_bytes()
+        assert data[:4] == b"\x89PNG"
+
+    def test_proposed_ref_is_valid_png(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        data = (tmp_path / "ref" / "proposed_mockup.png").read_bytes()
+        assert data[:4] == b"\x89PNG"
+
+    def test_files_have_different_content(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        active = (tmp_path / "ref" / "active_screenshot.png").read_bytes()
+        proposed = (tmp_path / "ref" / "proposed_mockup.png").read_bytes()
+        assert active != proposed
+
+    def test_spec_parses_two_references(self, tmp_path):
+        """read_spec returns two ReferenceEntry objects."""
+        from duplo.spec_reader import read_spec
+
+        _setup_proposed_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert len(spec.references) == 2
+
+    def test_spec_parses_proposed_flag(self, tmp_path):
+        """Only the proposed_mockup entry has proposed=True."""
+        from duplo.spec_reader import read_spec
+
+        _setup_proposed_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        by_name = {e.path.name: e for e in spec.references}
+        assert not by_name["active_screenshot.png"].proposed
+        assert by_name["proposed_mockup.png"].proposed
+
+    def test_format_visual_references_excludes_proposed(self, tmp_path):
+        """format_visual_references returns only the active entry."""
+        from duplo.spec_reader import format_visual_references, read_spec
+
+        _setup_proposed_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        result = format_visual_references(spec)
+        assert len(result) == 1
+        assert result[0].path.name == "active_screenshot.png"
+
+    def test_both_entries_have_visual_target_role(self, tmp_path):
+        """Both parsed entries have visual-target in their roles."""
+        from duplo.spec_reader import read_spec
+
+        _setup_proposed_vt_tmpdir(tmp_path)
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        for entry in spec.references:
+            assert "visual-target" in entry.roles
+
+    def test_purpose_over_50_chars(self, tmp_path):
+        _setup_proposed_vt_tmpdir(tmp_path)
+        text = (tmp_path / "SPEC.md").read_text(encoding="utf-8")
+        idx = text.index("## Purpose")
+        start = text.index("\n", idx) + 1
+        end = text.find("##", start)
+        assert len(text[start:end].strip()) > 50
