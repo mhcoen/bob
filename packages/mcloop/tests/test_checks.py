@@ -155,10 +155,11 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     )
     result = run_checks(tmp_path)
     assert result.passed
-    # run_checks is now side-effect-free: only the gate call, no autofix
-    assert mock_run.call_count == 1
-    called_cmd = mock_run.call_args_list[0][0][0]
-    assert called_cmd == ["ruff", "check", "."]
+    # run_checks is now side-effect-free: ruff check + ruff format --check, no autofix
+    assert mock_run.call_count == 2
+    calls = [c[0][0] for c in mock_run.call_args_list]
+    assert calls[0] == ["ruff", "check", "."]
+    assert calls[1] == ["ruff", "format", "--check", "."]
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -227,6 +228,7 @@ def test_run_checks_second_command_fails(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
     mock_run.side_effect = [
         subprocess.CompletedProcess(args="ruff check .", returncode=0, stdout="ok\n", stderr=""),
+        subprocess.CompletedProcess(args="ruff format --check .", returncode=0, stdout="ok\n", stderr=""),
         subprocess.CompletedProcess(args="pytest", returncode=1, stdout="FAILED\n", stderr=""),
     ]
     result = run_checks(tmp_path)
@@ -238,15 +240,14 @@ def test_run_checks_second_command_fails(mock_run, tmp_path):
 
 
 @patch("mcloop.checks.subprocess.run")
-def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
-    """run_autofix runs ruff check --fix and ruff format."""
+def test_run_autofix_calls_ruff_fix_only(mock_run, tmp_path):
+    """run_autofix runs ruff check --fix only (ruff format removed 2026-04-15)."""
     ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
     mock_run.return_value = ok
     run_autofix(tmp_path)
-    assert mock_run.call_count == 2
+    assert mock_run.call_count == 1
     cmds = [call[0][0] for call in mock_run.call_args_list]
     assert cmds[0] == ["ruff", "check", "--fix", "."]
-    assert cmds[1] == ["ruff", "format", "."]
 
 
 @patch("mcloop.checks.subprocess.run")

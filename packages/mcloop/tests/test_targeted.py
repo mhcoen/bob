@@ -124,10 +124,11 @@ def test_run_checks_with_targeted(tmp_path):
             tmp_path,
             changed_files=["mcloop/checks.py"],
         )
-        # run_checks is side-effect-free: no autofix, just ruff check + targeted pytest
+        # run_checks is side-effect-free: ruff check + ruff format --check + targeted pytest
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
-        assert calls[1] == ["pytest", "tests/test_checks.py"]
+        assert calls[1] == ["ruff", "format", "--check", "."]
+        assert calls[2] == ["pytest", "tests/test_checks.py"]
 
 
 def test_run_checks_targeted_only_test_files_changed(tmp_path):
@@ -151,11 +152,12 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
             tmp_path,
             changed_files=["tests/test_foo.py"],
         )
-        # Test file included directly — ruff check + targeted pytest
-        assert mock_run.call_count == 2
+        # Test file included directly — ruff check + ruff format --check + targeted pytest
+        assert mock_run.call_count == 3
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
-        assert calls[1] == ["pytest", "tests/test_foo.py"]
+        assert calls[1] == ["ruff", "format", "--check", "."]
+        assert calls[2] == ["pytest", "tests/test_foo.py"]
 
 
 def test_run_checks_targeted_no_matching_tests(tmp_path):
@@ -183,10 +185,11 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
             changed_files=["mcloop/main.py"],
         )
         # No test_main.py exists, but main.py is Python: fall back to full pytest
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 3
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
-        assert calls[1] == ["pytest"]
+        assert calls[1] == ["ruff", "format", "--check", "."]
+        assert calls[2] == ["pytest"]
 
 
 def test_run_checks_targeted_no_python_changes(tmp_path):
@@ -210,9 +213,10 @@ def test_run_checks_targeted_no_python_changes(tmp_path):
             changed_files=["README.md", "docs/guide.md"],
         )
         # Only docs changed, no Python: ruff runs, pytest skipped
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 2
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
+        assert calls[1] == ["ruff", "format", "--check", "."]
 
 
 def test_run_checks_no_changed_files_runs_full(tmp_path):
@@ -231,7 +235,8 @@ def test_run_checks_no_changed_files_runs_full(tmp_path):
             stderr="",
         )
         run_checks(tmp_path)
-        # Side-effect-free: ruff check + pytest (full), no autofix
+        # Side-effect-free: ruff check + ruff format --check + pytest (full), no autofix
         calls = [c[0][0] for c in mock_run.call_args_list]
         assert calls[0] == ["ruff", "check", "."]
-        assert calls[1] == ["pytest"]
+        assert calls[1] == ["ruff", "format", "--check", "."]
+        assert calls[2] == ["pytest"]
