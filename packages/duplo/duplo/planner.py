@@ -124,6 +124,17 @@ A brief bullet list of items deliberately deferred to later phases.
 
 _PLAN_FILENAME = "PLAN.md"
 
+_FENCE_RE = re.compile(
+    r"\A\s*```[\w]*\s*\n(.*?)\n\s*```\s*\Z",
+    re.DOTALL,
+)
+
+
+def _strip_fences(text: str) -> str:
+    """Remove outer triple-backtick fences if the LLM wrapped the plan."""
+    m = _FENCE_RE.match(text)
+    return m.group(1) if m else text
+
 
 @dataclasses.dataclass
 class CompletedTask:
@@ -231,7 +242,7 @@ User feedback:
 Generate Phase {next_phase} PLAN.md now.
 """
 
-    return query(prompt, system=_NEXT_PHASE_SYSTEM)
+    return _strip_fences(query(prompt, system=_NEXT_PHASE_SYSTEM))
 
 
 def generate_phase_plan(
@@ -328,7 +339,7 @@ Features for this phase:
 Generate the PLAN.md now.
 """
 
-    return query(prompt, system=_PHASE_SYSTEM)
+    return _strip_fences(query(prompt, system=_PHASE_SYSTEM))
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:

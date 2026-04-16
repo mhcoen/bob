@@ -17,6 +17,7 @@ from duplo.planner import (
     _PLAN_FILENAME,
     _detect_next_phase_number,
     _inject_bugs_section,
+    _strip_fences,
     append_test_tasks,
     generate_next_phase_plan,
     generate_phase_plan,
@@ -753,3 +754,49 @@ class TestSavePlanBugsSection:
         result = plan_path.read_text(encoding="utf-8")
         # No ## Bugs injected on append.
         assert "## Bugs" not in result
+
+
+class TestStripFences:
+    """Tests for _strip_fences() removing LLM code-fence wrapping."""
+
+    def test_strips_markdown_fence(self):
+        wrapped = "```markdown\n# Phase 1: Core\n\n- [ ] Task\n```"
+        assert _strip_fences(wrapped) == "# Phase 1: Core\n\n- [ ] Task"
+
+    def test_strips_bare_fence(self):
+        wrapped = "```\n# Phase 1: Core\n\n- [ ] Task\n```"
+        assert _strip_fences(wrapped) == "# Phase 1: Core\n\n- [ ] Task"
+
+    def test_strips_md_fence(self):
+        wrapped = "```md\n# Phase 1: Core\n```"
+        assert _strip_fences(wrapped) == "# Phase 1: Core"
+
+    def test_no_fence_unchanged(self):
+        plain = "# Phase 1: Core\n\n- [ ] Task"
+        assert _strip_fences(plain) == plain
+
+    def test_inner_fences_preserved(self):
+        content = "# Phase 1\n\n```python\nprint('hi')\n```\n\n- [ ] Task"
+        assert _strip_fences(content) == content
+
+    def test_leading_trailing_whitespace(self):
+        wrapped = "  ```markdown\n# Phase 1\n```  "
+        assert _strip_fences(wrapped) == "# Phase 1"
+
+    def test_generate_phase_plan_strips_fences(self):
+        fenced = "```markdown\n# MyApp — Phase 1: Core\n\n- [ ] Task\n```"
+        with patch("duplo.planner.query", return_value=fenced):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        assert not result.startswith("```")
+        assert result.startswith("# MyApp")
+
+    def test_generate_next_phase_plan_strips_fences(self):
+        fenced = "```markdown\n# Phase 2: Search\n\n- [ ] Task\n```"
+        with patch("duplo.planner.query", return_value=fenced):
+            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
+        assert not result.startswith("```")
+        assert result.startswith("# Phase 2")
