@@ -11819,3 +11819,126 @@ class TestSubsequentRunCounterExampleExcluded:
         # from scraping by scrapeable_sources).
         combined = " ".join(captured_features_text)
         assert "COUNTER_EXAMPLE" not in combined
+
+
+class TestSubsequentRunProductNameSync:
+    """product.json:product_name matches the plan heading after _subsequent_run."""
+
+    def test_product_name_matches_plan_heading(self, tmp_path, monkeypatch):
+        """After _subsequent_run generates a plan, product.json:product_name
+        matches the project_name passed to generate_phase_plan (which becomes
+        the app name in the PLAN.md H1 heading)."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=False)
+        duplo_dir = tmp_path / ".duplo"
+
+        # Add roadmap so _subsequent_run hits State 3 (generate plan) directly.
+        data = json.loads((duplo_dir / "duplo.json").read_text(encoding="utf-8"))
+        data["roadmap"] = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+        ]
+        data["current_phase"] = 0
+        (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+
+        # Simulate a first run that set app_name but left product_name empty
+        # (the bug scenario fixed in 5.37.3).
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "",
+                    "source_url": "https://numi.app",
+                    "app_name": "Numi",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: None)
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [])
+        monkeypatch.setattr(m, "_rescrape_product_url", lambda **kw: (0, 0, ""))
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
+        )
+        monkeypatch.setattr(m, "select_features", lambda feats, **kw: feats)
+        monkeypatch.setattr(m, "load_frame_descriptions", lambda: [])
+
+        # Capture what project_name is passed to generate_phase_plan.
+        captured = {}
+
+        def fake_generate(*args, **kwargs):
+            captured["project_name"] = kwargs.get("project_name", "")
+            return "# Numi — Phase 1: Scaffold\n- [ ] task"
+
+        monkeypatch.setattr(m, "generate_phase_plan", fake_generate)
+        monkeypatch.setattr(m, "save_plan", lambda c: tmp_path / "PLAN.md")
+        monkeypatch.setattr(m, "notify_phase_complete", lambda *a, **kw: None)
+
+        main()
+
+        # product.json:product_name must match the project_name used for the heading.
+        pdata = json.loads((duplo_dir / "product.json").read_text(encoding="utf-8"))
+        assert captured["project_name"] == pdata["product_name"]
+        assert pdata["product_name"] == "Numi"
+
+    def test_user_edited_product_name_survives_subsequent_run(self, tmp_path, monkeypatch):
+        """A user-edited product_name in product.json is not overwritten
+        by _subsequent_run."""
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+        duplo_dir = tmp_path / ".duplo"
+
+        # Simulate user editing product.json with a custom name.
+        (duplo_dir / "product.json").write_text(
+            json.dumps(
+                {
+                    "product_name": "My Custom Calculator",
+                    "source_url": "https://numi.app",
+                    "app_name": "My Custom Calculator",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(url="https://numi.app", role="product-reference", scrape="deep")
+        spec = ProductSpec(
+            raw="## Sources\n- https://numi.app\n",
+            purpose="A calculator",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="features",
+            product_ref_raw_pages={},
+        )
+
+        import duplo.main as m
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(m, "_scrape_declared_sources", MagicMock(return_value=scrape_result))
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        main()
+
+        # User-edited product_name must survive.
+        pdata = json.loads((duplo_dir / "product.json").read_text(encoding="utf-8"))
+        assert pdata["product_name"] == "My Custom Calculator"
+        assert pdata["app_name"] == "My Custom Calculator"
