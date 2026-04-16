@@ -125,7 +125,7 @@ A brief bullet list of items deliberately deferred to later phases.
 _PLAN_FILENAME = "PLAN.md"
 
 _FENCE_RE = re.compile(
-    r"\A\s*```[\w]*\s*\n(.*?)\n\s*```\s*\Z",
+    r"\A\s*(?:```|~~~)[\w]*\s*\n(.*?)\n\s*(?:```|~~~)\s*\Z",
     re.DOTALL,
 )
 

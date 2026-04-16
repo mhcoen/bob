@@ -779,6 +779,14 @@ class TestStripFences:
         content = "# Phase 1\n\n```python\nprint('hi')\n```\n\n- [ ] Task"
         assert _strip_fences(content) == content
 
+    def test_strips_tilde_fence(self):
+        wrapped = "~~~markdown\n# Phase 1: Core\n\n- [ ] Task\n~~~"
+        assert _strip_fences(wrapped) == "# Phase 1: Core\n\n- [ ] Task"
+
+    def test_strips_bare_tilde_fence(self):
+        wrapped = "~~~\n# Phase 1: Core\n~~~"
+        assert _strip_fences(wrapped) == "# Phase 1: Core"
+
     def test_leading_trailing_whitespace(self):
         wrapped = "  ```markdown\n# Phase 1\n```  "
         assert _strip_fences(wrapped) == "# Phase 1"
