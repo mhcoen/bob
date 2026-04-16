@@ -28,14 +28,6 @@ restructures the input contract so user intent lives in a typed,
 reviewable `SPEC.md` rather than in interactive prompts and ambient
 directory scanning.
 
-## Bugs
-
-<!-- Bugs here have absolute priority and run before any other phase
-     work. mcloop's bug-only mode picks these up first. -->
-
-
----
-
 # Phase 1: Bootstrapping (complete)
 
 - [x] Project scaffolding
@@ -701,11 +693,11 @@ The manual run of the URL-only scenario (against numi.app) before this rewrite s
   - [x] Fix: make the parser tolerant of common LLM output variations: strip code fences, strip leading/trailing prose, parse the first valid JSON object found. Alternatively, tighten the prompt to demand strict JSON output.
   - [x] Tests: parser handles JSON wrapped in fences; parser handles JSON preceded by prose; parser handles JSON with trailing whitespace; parser returns a useful error message when the LLM truly returned something unparseable.
 
-- [ ] Investigate why AUTO-GENERATED design block was not written to SPEC.md during the manual URL-only run
+- [x] Investigate why AUTO-GENERATED design block was not written to SPEC.md during the manual URL-only run
   - [x] During the manual run, design extraction appears to have completed (no error logged), but SPEC.md ended the run with no `## Design` section and no AUTO-GENERATED block.
   - [x] Investigate: in `_subsequent_run`, after `extract_design` is called, what happens with the result? Is `format_design_block(design)` producing a non-empty string? Is `update_design_autogen` being invoked? Is its result being written back? Add a diagnostic at each step if the chain breaks.
   - [x] Fix: ensure the write-back happens reliably whenever `extract_design` returns a non-empty result. The `test_autogen_design_block_present_skips_vision` test will catch this regression once the bug is fixed.
-  - [ ] Note: this bug may be entangled with the frame_describer bug — if the design extractor receives only "unknown" frame descriptions, it may produce empty or trivial output that legitimately doesn't merit a write-back. Investigate the relationship.
+  - [x] Note: this bug may be entangled with the frame_describer bug — if the design extractor receives only "unknown" frame descriptions, it may produce empty or trivial output that legitimately doesn't merit a write-back. Investigate the relationship.
 
 ---
 
