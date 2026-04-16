@@ -9298,6 +9298,77 @@ class TestAutogenBlockSkipsVision:
         updated = spec_path.read_text(encoding="utf-8")
         assert "AUTO-GENERATED" in updated
 
+    def test_autogen_design_block_present_skips_vision(self, tmp_path, monkeypatch):
+        """When extract_design succeeds and writes autogen block to SPEC.md,
+        a subsequent _analyze_new_files call skips Vision extraction because
+        the autogen block is now present in-memory."""
+        from duplo.spec_reader import DesignBlock, ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "ref" / "shot.png"
+        img.parent.mkdir()
+        img.write_bytes(b"PNG")
+
+        # First call: no autogen, extraction writes the block.
+        design = DesignRequirements(
+            colors={"primary": "#abc"},
+            source_images=["shot.png"],
+        )
+        spec_no_autogen = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated=""),
+            references=[
+                ReferenceEntry(path=Path("ref/shot.png"), roles=["visual-target"]),
+            ],
+        )
+        with (
+            patch("duplo.main.extract_design", return_value=design),
+            patch("duplo.main.collect_design_input", return_value=[img]),
+        ):
+            _analyze_new_files(["ref/shot.png"], spec=spec_no_autogen)
+
+        # SPEC.md should now have an autogen block.
+        spec_path = tmp_path / "SPEC.md"
+        assert spec_path.exists()
+        assert "AUTO-GENERATED" in spec_path.read_text(encoding="utf-8")
+
+        # Second call: autogen present in-memory, Vision should be skipped.
+        spec_with_autogen = ProductSpec(
+            raw="test",
+            design=DesignBlock(auto_generated="colors:\n  primary: #abc"),
+        )
+        with (
+            patch("duplo.main.extract_design") as mock_design2,
+            patch("duplo.main.collect_design_input", return_value=[img]),
+        ):
+            _analyze_new_files(["ref/shot.png"], spec=spec_with_autogen)
+
+        mock_design2.assert_not_called()
+
+    def test_writes_autogen_when_spec_absent(self, tmp_path, monkeypatch):
+        """Design write-back creates SPEC.md when the file does not exist."""
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        img = tmp_path / "ref" / "shot.png"
+        img.parent.mkdir()
+        img.write_bytes(b"PNG")
+
+        design = DesignRequirements(
+            colors={"bg": "#000"},
+            source_images=["shot.png"],
+        )
+        with (
+            patch("duplo.main.extract_design", return_value=design),
+        ):
+            _analyze_new_files(["ref/shot.png"])
+
+        spec_path = tmp_path / "SPEC.md"
+        assert spec_path.exists(), "SPEC.md should be created when absent"
+        content = spec_path.read_text(encoding="utf-8")
+        assert "AUTO-GENERATED" in content
+        assert "## Design" in content
+
     def test_analyze_new_files_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
         """_analyze_new_files skips extract_design when autogen exists."""
         from duplo.spec_reader import DesignBlock, ProductSpec
