@@ -1375,8 +1375,12 @@ def _first_run(*, url: str | None = None) -> None:
         print(f"Plan saved to {saved}")
         # Sync product.json so product_name matches the PLAN.md heading.
         # derive_app_name reads duplo.json (which save_selections just
-        # wrote with app_name) and populates product_name if empty.
-        derive_app_name(spec)
+        # wrote with app_name) and persists app_name to product.json.
+        # Then save_product overwrites product_name with the same value
+        # so it always matches the heading (first run only — subsequent
+        # runs preserve user-edited product_name via derive_app_name).
+        resolved_name = derive_app_name(spec)
+        save_product(resolved_name, source_url)
         _plan_ready(phase_label)
     else:
         print("Failed to generate roadmap.")
