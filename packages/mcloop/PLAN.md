@@ -11,9 +11,6 @@ pytest must both pass before a commit is made. Prefer small, focused changes
 per task. Write unit tests for new functionality. Keep modules short and avoid
 over-abstraction.
 
-## Bugs
-
-
 ## Stage 1: Core
 
 - [x] Project scaffolding (pyproject.toml, .gitignore, mcloop package, __main__.py)
@@ -428,7 +425,7 @@ The debugging playbook this enforces:
 ## Stage 8: Structured run artifacts
 
 - [x] [BATCH] Per-run structured summary written to disk
-   - [x] Define a run-summary schema covering: run start/end timestamps, total elapsed seconds, mode (plan, bug-only, maintain), per-task entries (label, text, outcome, elapsed, model, attempts, commit hash if any), per-check entries (command, passed, elapsed), full-suite check result, build result, audit result (if run), terminal status (success, failure, interrupted), failure detail string, and any stuck task list
+- [x] Define a run-summary schema covering: run start/end timestamps, total elapsed seconds, mode (plan, bug-only, maintain), per-task entries (label, text, outcome, elapsed, model, attempts, commit hash if any), per-check entries (command, passed, elapsed), full-suite check result, build result, audit result (if run), terminal status (success, failure, interrupted), failure detail string, and any stuck task list
    - [x] At the end of every run_loop() invocation, write a dated file to .mcloop/runs/YYYYMMDD_HHMMSS_run-summary.json containing the schema above. The file must be written on all exit paths: success, failure, interrupted, terminal failures from any source
    - [x] Also maintain .mcloop/runs/latest.json as a copy of the most recent summary, so automation has a stable filename to read
    - [x] Capture commit hashes for every commit produced during the run (per-task commits, batch commits, audit fix commits, maintain commits) by extending the existing _commit() flow to return the new HEAD hash
