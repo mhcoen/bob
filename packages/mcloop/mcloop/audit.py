@@ -87,10 +87,12 @@ def _run_audit_fix_cycle(
     any_fixed = False
     max_rounds = 2
     for round_num in range(1, max_rounds + 1):
-        print(
-            formatting.system_msg(f"Audit round {round_num}"),
-            flush=True,
+        label = (
+            f"Audit round {round_num} of {max_rounds}"
+            if round_num > 1
+            else f"Audit round {round_num}"
         )
+        print(formatting.system_msg(label), flush=True)
         round_result = _run_single_audit_round(
             project_dir,
             log_dir,
