@@ -39,8 +39,17 @@ between sessions:
 - **NOTES.md**: Observations, edge cases, and design decisions that
   sessions notice during tasks. Accumulates across sessions for you to
   review.
-- **BUGS.md**: Written by the audit cycle, lists confirmed defects for
-  the fix session to act on. Deleted after bugs are fixed.
+- **CURRENT_PLAN.md**: The active phase of PLAN.md, extracted automatically
+  at startup or at phase transitions. Each session works against this file
+  rather than the full master roadmap, which keeps per-session token usage
+  low. Do not edit it while mcloop is running.
+- **BUGS.md**: A standalone bug backlog with checkbox items, populated by
+  the reviewer (when enabled) and by the crash-handler diagnostic flow.
+  When BUGS.md has unchecked items, mcloop enters bug-only mode and works
+  those tasks before any feature work in CURRENT_PLAN.md.
+- **`.mcloop/audit-report.md`**: The structured prose output written by the
+  audit cycle for human review. Distinct from BUGS.md (the audit does not
+  use the checklist mechanism).
 - **IDEAS.md**: A flat scratchpad for ideas not yet ready to become
   PLAN.md tasks. Unlike the files above, McLoop never reads or modifies
   IDEAS.md during runs — it is purely human-owned state. Use
@@ -90,10 +99,12 @@ script. All state lives in the repository: PLAN.md, source code,
 documentation, configuration, and git history. If McLoop is interrupted,
 killed, or hits a rate limit, just run `mcloop` again. It finds the next
 
-**Do not edit PLAN.md while mcloop is running.** McLoop reads, modifies,
-and commits PLAN.md during execution (checking off tasks, auto-checking
-parents, safety checkpoints). Edits made while mcloop is running will be
-silently overwritten. Kill mcloop first, make your edits, then restart.
+**Do not edit CURRENT_PLAN.md or BUGS.md while mcloop is running.** McLoop
+reads, modifies, and commits these files during execution (checking off
+tasks, auto-checking parents, safety checkpoints). Edits made while mcloop
+is running will be silently overwritten. Kill mcloop first, make your
+edits, then restart. PLAN.md (the master roadmap) is safe to edit during
+a run; mcloop only writes to it at phase transitions.
 unchecked task and picks up exactly where it left off. No session files, no
 databases, nothing to reset.
 
@@ -296,8 +307,10 @@ You can manually edit any marker. To retry a failed task, change `[!]` back to
 
 ```
 1. Safety commit all tracked modified files (skipped if clean)
-while unchecked items remain:
-    2. Find next unchecked item (depth-first)
+   Extract the next unchecked phase from PLAN.md into CURRENT_PLAN.md
+   if not already present.
+while unchecked items remain in CURRENT_PLAN.md or BUGS.md:
+    2. Find next unchecked item (BUGS.md first, then CURRENT_PLAN.md)
     3. Launch a fresh CLI session with a clean context.
        The agent receives: project description + current task + your codebase.
        On retries, the previous error output is included so Claude can fix it.
@@ -308,8 +321,11 @@ while unchecked items remain:
     8. If retries exhausted -> mark [!], notify, stop
     9. If rate-limited -> pause, wait for reset, resume
        If session-limited -> poll every 10 minutes, resume when limit resets
-   10. At stage boundaries -> run full test suite
-11. Run bug audit/fix cycle (unless --no-audit)
+   10. At the phase boundary (CURRENT_PLAN.md fully checked):
+       run full test suite, run build, mark phase complete in PLAN.md,
+       extract the next phase into CURRENT_PLAN.md (or unlink it if no
+       phases remain), and break. Re-run mcloop to start the next phase.
+11. When all phases are complete, run bug audit/fix cycle (unless --no-audit)
 12. Print summary with elapsed time and whitelist suggestions
 ```
 
@@ -399,7 +415,9 @@ success instead of advancing to the next stage. Use this for overnight
 runs where you want to review the output of each stage before continuing,
 or to validate that a stage passes before committing to the next one.
 This flag is ignored in bug-only mode (no stages); mcloop prints a
-warning and proceeds normally.
+warning and proceeds normally. Note: every phase boundary now ends the
+run regardless of this flag (see [How McLoop works](#how-mcloop-works));
+the flag's only effect is the exit notification text.
 
 **`--stop-after-one`** runs exactly one checkable leaf task and exits.
 If the next task is part of a `[BATCH]` parent, the batching logic is
@@ -408,11 +426,13 @@ normally. Use this to inspect one change at a time, or to test that the
 first task in a plan works before letting mcloop run the rest. This flag
 works in all modes including bug-only and maintain.
 
-Both flags produce a distinct exit notification ("Stopped after stage as
-requested" or "Stopped after one task as requested") so you can
-distinguish a checkpoint exit from a normal completion or a failure. The
-stop check happens at a clean boundary: after a successful commit and
-check-off, before pulling the next task.
+Both flags produce a distinct exit notification. `--stop-after-one`
+emits "Stopped after one task as requested". A natural phase boundary
+(reached either by `--stop-after-stage` or by completing the last task
+of a phase normally) emits "{phase name} complete. Run mcloop again to
+start {next phase}." so you can distinguish a phase exit from a normal
+completion or a failure. The stop check happens at a clean boundary:
+after a successful commit and check-off, before pulling the next task.
 
 After each successful commit, McLoop pushes to the remote. If the
 push fails, McLoop stops immediately rather than continuing with
@@ -705,16 +725,16 @@ resumption prompt (see [Interrupting and resuming](#interrupting-and-resuming)).
 
 ## Bug audit
 
-After all checklist tasks complete, McLoop automatically runs two rounds
-of bug auditing (unless `--no-audit` is passed). Each round follows the
+After all phases complete, McLoop automatically runs two rounds of bug
+auditing (unless `--no-audit` is passed). Each round follows the
 same cycle:
 
-1. **Find bugs.** A session reads the entire codebase and
-   writes findings to `BUGS.md`. Only actual defects are included:
-   crashes, incorrect behavior, unhandled errors, and security issues.
-   Style issues and refactoring suggestions are excluded. If BUGS.md
-   already exists, new findings are appended rather than replacing
-   what's there.
+1. **Find bugs.** A session reads the entire codebase and writes
+   findings to `.mcloop/audit-report.md`. Only actual defects are
+   included: crashes, incorrect behavior, unhandled errors, and
+   security issues. Style issues and refactoring suggestions are
+   excluded. If the report already exists, new findings are appended
+   rather than replacing what's there.
 
 2. **Verify they are real.** A separate session reads each reported bug
    and checks it against the actual source code. Bugs that are incorrect
@@ -733,8 +753,14 @@ same cycle:
 The second round catches bugs introduced by the first round's fixes.
 After both rounds complete, the audit hash is saved.
 
-If McLoop starts and finds an existing `BUGS.md`, it skips the audit and
-resumes the fix cycle directly.
+If McLoop starts and finds an existing `.mcloop/audit-report.md`, it
+skips the audit and resumes the fix cycle directly.
+
+The audit report file is distinct from BUGS.md. BUGS.md is the
+checkbox-driven backlog the run loop pulls tasks from (populated by the
+reviewer and crash diagnostics); `.mcloop/audit-report.md` is the
+structured prose output the audit cycle produces and consumes
+internally.
 
 To prevent the audit from running on unchanged code, McLoop writes the
 current git hash to `.mcloop-last-audit` after a successful audit cycle.
@@ -848,18 +874,17 @@ Fix these bugs before continuing? [Y/n]
 ```
 
 If you say yes, McLoop runs a diagnostic session per error, inserts
-fix tasks into a `## Bugs` section in PLAN.md, and works only those
-tasks. It does not touch feature tasks, start the next stage, or run
-the audit cycle. It fixes, verifies (by relaunching the app to
-confirm the error no longer occurs), and exits. You run `mcloop`
-again for feature work once bugs are clear.
+fix tasks into BUGS.md, and works only those tasks. It does not touch
+feature tasks in CURRENT_PLAN.md, start the next phase, or run the
+audit cycle. It fixes, verifies (by relaunching the app to confirm the
+error no longer occurs), and exits. You run `mcloop` again for feature
+work once bugs are clear.
 
 If you say no, McLoop skips the bugs and continues with normal
 feature work. The bugs stay in `.mcloop/errors.json` for next time.
 
-The `## Bugs` section in PLAN.md has absolute priority. If it
-contains unchecked items, `find_next` returns those before any
-feature tasks.
+BUGS.md has absolute priority. If it contains unchecked items,
+`find_next` returns those before any feature tasks in CURRENT_PLAN.md.
 
 ### How it works
 
@@ -910,8 +935,8 @@ each loop iteration, McLoop collects any completed reviews. Low- and
 medium-confidence findings are added to the rolling session context so
 the next task is aware of them. If a single commit produces three or
 more high-confidence error-severity findings, McLoop escalates by
-inserting a fix task into the `## Bugs` section of PLAN.md, which has
-absolute priority over feature tasks.
+appending a fix task to BUGS.md, which has absolute priority over
+feature tasks in CURRENT_PLAN.md.
 
 The reviewer sends both the diff and the enclosing functions from
 each changed file (imports plus only the functions containing
