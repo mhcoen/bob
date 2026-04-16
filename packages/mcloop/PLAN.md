@@ -14,7 +14,7 @@ over-abstraction.
 ## Bugs
 
 - [ ] Fix misleading audit round banner in _run_audit_fix_cycle
-  - [ ] In mcloop/audit.py, the _run_audit_fix_cycle function prints a banner reading Audit round 1/2 and Audit round 2/2 before each round runs. This implies round 2 always runs, but the actual control flow skips round 2 when round 1 reports no bugs. The banner is misleading during normal successful runs.
+  - [x] In mcloop/audit.py, the _run_audit_fix_cycle function prints a banner reading Audit round 1/2 and Audit round 2/2 before each round runs. This implies round 2 always runs, but the actual control flow skips round 2 when round 1 reports no bugs. The banner is misleading during normal successful runs.
   - [ ] Change the banner so that the fraction is only printed when round 2 is actually about to execute. Acceptable fix: before round 1, print Audit round 1 with no fraction. Before round 2, print Audit round 2 of 2. Alternative acceptable fix: print Audit (max 2 rounds) once at the start of _run_audit_fix_cycle, then Round 1 and Round 2 without the fraction. Pick whichever reads more naturally in the surrounding log output.
   - [ ] Tests: capture stdout from _run_audit_fix_cycle in a test that stubs the round executor to report zero bugs on round 1, and assert that the captured output does not contain the string 2/2 and does not contain round 2 (case-insensitive). In a second test that stubs round 1 to report bugs and round 2 to report zero bugs, assert that the output does contain a mention of round 2.
 
