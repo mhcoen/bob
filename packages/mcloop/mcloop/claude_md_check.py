@@ -11,6 +11,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from mcloop.formatting import strip_code_fences
+
 
 class SyncResult(enum.Enum):
     """Outcome of a CLAUDE.md auto-update attempt."""
@@ -172,13 +174,7 @@ def _parse_llm_response(body: object) -> str | None:
     if not isinstance(content, str):
         return None
 
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines)
+    content = strip_code_fences(content)
 
     if not content or len(content) < 100:
         return None
@@ -246,13 +242,7 @@ def _call_sonnet_fallback(user_msg: str) -> str | None:
         print(f"  CLAUDE.md Sonnet fallback exited {result.returncode}", flush=True)
         return None
 
-    content = result.stdout.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines)
+    content = strip_code_fences(result.stdout)
 
     if not content or len(content) < 100:
         print("  CLAUDE.md Sonnet fallback: response too short", flush=True)

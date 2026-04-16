@@ -135,6 +135,18 @@ def summary_footer() -> str:
         return "=" * width
 
 
+def strip_code_fences(text: str) -> str:
+    """Strip wrapping markdown code fences from LLM responses."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+    return text
+
+
 def format_elapsed(seconds: float) -> str:
     """Format seconds into human-readable elapsed time."""
     if seconds < 60:

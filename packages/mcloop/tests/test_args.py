@@ -1979,8 +1979,8 @@ def test_run_audit_fix_cycle_with_bugs(tmp_path):
         result = _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
 
     mock_fix.assert_called_once()
-    # Fix had no meaningful changes so round returns False → no_bugs
-    assert result == AuditResult.no_bugs
+    # Fix had no meaningful changes — bugs found but unfixed → failed
+    assert result == AuditResult.failed
 
 
 def test_run_audit_fix_cycle_audit_failure(tmp_path):

@@ -340,4 +340,4 @@ def _run_single_audit_round(
             bugs_content + "\n\n## Post-fix check failure\n" + error_ctx,
         )
 
-    return False
+    return None

@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from mcloop.formatting import strip_code_fences
+
 _MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
 
 _SEVERITIES = frozenset({"error", "warning", "info"})
@@ -169,15 +171,7 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     if not isinstance(content, str):
         return []
 
-    # Strip markdown code fences if present
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        # Remove first and last lines (fences)
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines)
+    content = strip_code_fences(content)
     try:
         raw = json.loads(content)
     except json.JSONDecodeError:
