@@ -684,7 +684,7 @@ The manual run of the URL-only scenario (against numi.app) before this rewrite s
   - [x] Tests: planner output containing a fenced markdown block is written without the fences. Output without fences is written unchanged. Output with `~~~` fences is also handled.
 
 - [ ] Fix planner placing feature tasks under `## Bugs` heading
-  - [ ] The Phase 1 PLAN.md generated during the manual run had its feature implementation tasks placed UNDER the `## Bugs` heading instead of as the plan body. `## Bugs` should be empty initially. Feature tasks should be at the top level under the phase H1 heading.
+  - [x] The Phase 1 PLAN.md generated during the manual run had its feature implementation tasks placed UNDER the `## Bugs` heading instead of as the plan body. `## Bugs` should be empty initially. Feature tasks should be at the top level under the phase H1 heading.
   - [ ] Investigate `duplo/planner.py` (or saver.py's `save_plan`) to find where the structure is being assembled wrong.
   - [ ] Fix: ensure the planner's output has the correct structure: H1 phase heading, then feature tasks at top level, then `## Bugs` heading at the end with no tasks below it.
   - [ ] Tests: a generated PLAN.md has feature tasks at top level under the H1 heading. The `## Bugs` heading is present but contains no tasks. Mcloop's parser correctly identifies the feature tasks as Phase 1 work, not as bugs.
