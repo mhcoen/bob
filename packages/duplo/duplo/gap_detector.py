@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 
 from duplo.claude_cli import query
-from duplo.parsing import strip_fences
+from duplo.parsing import extract_json
 from duplo.doc_examples import CodeExample
 from duplo.extractor import Feature
 
@@ -144,10 +144,8 @@ def _parse_result(
     examples: list[CodeExample],
 ) -> GapResult:
     """Parse the JSON response into a :class:`GapResult`."""
-    text = strip_fences(raw)
-
     try:
-        data = json.loads(text)
+        data = json.loads(extract_json(raw))
     except json.JSONDecodeError:
         return GapResult(missing_features=[], missing_examples=[])
 
