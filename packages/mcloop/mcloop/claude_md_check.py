@@ -20,6 +20,7 @@ class SyncResult(enum.Enum):
     TRANSIENT_FAILED = "transient_failed"
     PERMANENT_FAILED = "permanent_failed"
 
+
 _SOURCE_EXTENSIONS = frozenset(
     (
         ".py",

@@ -27,7 +27,10 @@ class TestHandleSync:
         project = _setup_project(tmp_path)
         with (
             patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
-            patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.TRANSIENT_FAILED),
+            patch(
+                "mcloop.claude_md_sync.auto_update_claude_md",
+                return_value=SyncResult.TRANSIENT_FAILED,
+            ),
         ):
             result = handle_sync(project, "abc1234def", task_label="1.6")
 
@@ -43,7 +46,10 @@ class TestHandleSync:
         project = _setup_project(tmp_path)
         with (
             patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
-            patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.PERMANENT_FAILED),
+            patch(
+                "mcloop.claude_md_sync.auto_update_claude_md",
+                return_value=SyncResult.PERMANENT_FAILED,
+            ),
         ):
             result = handle_sync(project, "abc1234")
 
@@ -74,15 +80,22 @@ class TestHandleSync:
     def test_cap_exceeded_halts_and_notifies(self, tmp_path):
         project = _setup_project(tmp_path)
         pending = _pending_path(project)
-        pending.write_text(json.dumps({
-            "commit_sha": "first_sha",
-            "timestamp": "2026-04-11T00:00:00+00:00",
-            "attempts": 1,
-        }))
+        pending.write_text(
+            json.dumps(
+                {
+                    "commit_sha": "first_sha",
+                    "timestamp": "2026-04-11T00:00:00+00:00",
+                    "attempts": 1,
+                }
+            )
+        )
 
         with (
             patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
-            patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.TRANSIENT_FAILED),
+            patch(
+                "mcloop.claude_md_sync.auto_update_claude_md",
+                return_value=SyncResult.TRANSIENT_FAILED,
+            ),
             patch("mcloop.claude_md_sync.notify") as mock_notify,
         ):
             with pytest.raises(SystemExit) as exc_info:
@@ -102,11 +115,15 @@ class TestReconcilePending:
     def test_success_removes_entry_and_commits(self, tmp_path):
         project = _setup_project(tmp_path)
         pending = _pending_path(project)
-        pending.write_text(json.dumps({
-            "commit_sha": "abc1234",
-            "timestamp": "2026-04-11T00:00:00+00:00",
-            "attempts": 1,
-        }))
+        pending.write_text(
+            json.dumps(
+                {
+                    "commit_sha": "abc1234",
+                    "timestamp": "2026-04-11T00:00:00+00:00",
+                    "attempts": 1,
+                }
+            )
+        )
 
         with (
             patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.OK),
@@ -122,13 +139,20 @@ class TestReconcilePending:
     def test_transient_failure_increments_attempts(self, tmp_path):
         project = _setup_project(tmp_path)
         pending = _pending_path(project)
-        pending.write_text(json.dumps({
-            "commit_sha": "abc1234",
-            "timestamp": "2026-04-11T00:00:00+00:00",
-            "attempts": 1,
-        }))
+        pending.write_text(
+            json.dumps(
+                {
+                    "commit_sha": "abc1234",
+                    "timestamp": "2026-04-11T00:00:00+00:00",
+                    "attempts": 1,
+                }
+            )
+        )
 
-        with patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.TRANSIENT_FAILED):
+        with patch(
+            "mcloop.claude_md_sync.auto_update_claude_md",
+            return_value=SyncResult.TRANSIENT_FAILED,
+        ):
             reconcile_pending(project)
 
         assert pending.exists()
@@ -146,10 +170,14 @@ class TestReconcilePending:
     def test_no_work_removes_pending(self, tmp_path):
         project = _setup_project(tmp_path)
         pending = _pending_path(project)
-        pending.write_text(json.dumps({
-            "commit_sha": "abc1234",
-            "attempts": 1,
-        }))
+        pending.write_text(
+            json.dumps(
+                {
+                    "commit_sha": "abc1234",
+                    "attempts": 1,
+                }
+            )
+        )
 
         with patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.NO_WORK):
             reconcile_pending(project)

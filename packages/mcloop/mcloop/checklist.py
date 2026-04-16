@@ -126,9 +126,7 @@ def _check_structural_sanity(lines: list[str], path: str | Path) -> None:
     for title, line_nums in h1_titles.items():
         if len(line_nums) > 1:
             locs = ", ".join(str(n + 1) for n in line_nums)
-            problems.append(
-                f"duplicate top-level heading '# {title}' at lines {locs}"
-            )
+            problems.append(f"duplicate top-level heading '# {title}' at lines {locs}")
 
     if len(bugs_lines) > 1:
         locs = ", ".join(str(n + 1) for n in bugs_lines)
@@ -137,9 +135,7 @@ def _check_structural_sanity(lines: list[str], path: str | Path) -> None:
     for num, line_nums in stage_nums.items():
         if len(line_nums) > 1:
             locs = ", ".join(str(n + 1) for n in line_nums)
-            problems.append(
-                f"duplicate Phase/Stage {num} at lines {locs}"
-            )
+            problems.append(f"duplicate Phase/Stage {num} at lines {locs}")
 
     if problems:
         joined = "\n  - ".join(problems)
@@ -674,9 +670,7 @@ def purge_completed_bugs(path: str | Path) -> None:
     for i, line in enumerate(lines):
         if BUGS_RE.match(line.strip()):
             bugs_start = i
-        elif bugs_start is not None and (
-            STAGE_RE.match(line) or BUGS_RE.match(line.strip())
-        ):
+        elif bugs_start is not None and (STAGE_RE.match(line) or BUGS_RE.match(line.strip())):
             bugs_end = i
             break
 

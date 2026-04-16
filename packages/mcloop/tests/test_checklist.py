@@ -1609,12 +1609,7 @@ def test_purge_completed_bugs_preserves_h1_phase_section(tmp_path):
 
 def test_purge_completed_bugs_terminates_at_h2_stage(tmp_path):
     """Purge still terminates at the next H2 Stage header (regression check)."""
-    md = (
-        "## Bugs\n"
-        "- [x] Done bug\n"
-        "## Stage 2: Build\n"
-        "- [x] Done feature\n"
-    )
+    md = "## Bugs\n- [x] Done bug\n## Stage 2: Build\n- [x] Done feature\n"
     f = tmp_path / "tasks.md"
     f.write_text(md)
     purge_completed_bugs(f)
@@ -1628,12 +1623,7 @@ def test_purge_completed_bugs_terminates_at_h2_stage(tmp_path):
 
 def test_purge_completed_bugs_terminates_at_h1_stage(tmp_path):
     """Purge terminates at an H1 Stage header, not just H2."""
-    md = (
-        "## Bugs\n"
-        "- [x] Done bug\n"
-        "# Project Stage 5: Release\n"
-        "- [x] Done feature\n"
-    )
+    md = "## Bugs\n- [x] Done bug\n# Project Stage 5: Release\n- [x] Done feature\n"
     f = tmp_path / "tasks.md"
     f.write_text(md)
     purge_completed_bugs(f)
@@ -1829,12 +1819,7 @@ def test_parse_phase_header_does_not_count_as_h1_duplicate(tmp_path):
     classified as stage headers (not plain H1s) by the sanity check.
     Two phase headers with different numbers are normal structure.
     """
-    md = (
-        "# Phase 1: First\n"
-        "- [x] Done\n"
-        "# Phase 2: Second\n"
-        "- [ ] Pending\n"
-    )
+    md = "# Phase 1: First\n- [x] Done\n# Phase 2: Second\n- [ ] Pending\n"
     f = tmp_path / "PLAN.md"
     f.write_text(md)
     # Should not raise.
@@ -1844,12 +1829,7 @@ def test_parse_phase_header_does_not_count_as_h1_duplicate(tmp_path):
 
 def test_parse_single_bugs_section_passes(tmp_path):
     """Exactly one `## Bugs` section is normal and must pass."""
-    md = (
-        "## Bugs\n"
-        "- [ ] Open\n"
-        "# Phase 1: Work\n"
-        "- [ ] Task\n"
-    )
+    md = "## Bugs\n- [ ] Open\n# Phase 1: Work\n- [ ] Task\n"
     f = tmp_path / "PLAN.md"
     f.write_text(md)
     tasks = parse(f)
@@ -1868,4 +1848,3 @@ def test_parse_error_message_includes_path(tmp_path):
     with pytest.raises(PlanCorruptionError) as exc_info:
         parse(f)
     assert str(f) in str(exc_info.value)
-

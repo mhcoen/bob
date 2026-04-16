@@ -19,13 +19,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if "integration" in item.keywords:
             item.add_marker(skip)
 
+
 # mcloop:llm-guard
 # Auto-injected by mcloop. Blocks real claude/codex subprocess calls
 # during pytest so unmocked LLM paths fail fast instead of silently
 # burning 5-15 seconds per call. Opt out with @pytest.mark.llm.
-import subprocess as _mcloop_subprocess
-
-import pytest
+import subprocess as _mcloop_subprocess  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -52,4 +51,3 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
         return _real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(_mcloop_subprocess, "run", _guarded_run)
-

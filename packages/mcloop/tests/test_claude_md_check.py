@@ -1,8 +1,7 @@
 """Tests for mcloop.claude_md_check."""
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -215,11 +214,14 @@ class TestAutoUpdateClaudeMdTypeError:
         claude_md.write_text("# Project\n")
 
         with (
-            patch("mcloop.claude_md_check._load_update_config", return_value={
-                "base_url": "https://api.example.com/v1",
-                "model": "test-model",
-                "api_key": "sk-test",
-            }),
+            patch(
+                "mcloop.claude_md_check._load_update_config",
+                return_value={
+                    "base_url": "https://api.example.com/v1",
+                    "model": "test-model",
+                    "api_key": "sk-test",
+                },
+            ),
             patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
             patch("mcloop.claude_md_check._call_deepseek", return_value=None),
             patch("mcloop.claude_md_check._call_sonnet_fallback", return_value=None),
@@ -234,11 +236,14 @@ def test_auto_update_both_providers_fail_returns_transient(tmp_path):
     claude_md.write_text("# Project\n")
 
     with (
-        patch("mcloop.claude_md_check._load_update_config", return_value={
-            "base_url": "https://api.example.com/v1",
-            "model": "test-model",
-            "api_key": "sk-test",
-        }),
+        patch(
+            "mcloop.claude_md_check._load_update_config",
+            return_value={
+                "base_url": "https://api.example.com/v1",
+                "model": "test-model",
+                "api_key": "sk-test",
+            },
+        ),
         patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
         patch("mcloop.claude_md_check._call_deepseek", return_value=None),
         patch("mcloop.claude_md_check._call_sonnet_fallback", return_value=None),
