@@ -162,6 +162,37 @@ class TestParseResponse:
         assert result.preferences == ["macOS only", "minimal deps"]
 
 
+class TestParseResponseRobustness:
+    """Parser round-trips across fenced, prose-prefixed, and trailing-whitespace inputs."""
+
+    _PAYLOAD = {
+        "platform": "cli",
+        "language": "Rust",
+        "framework": "",
+        "dependencies": ["Tokio"],
+        "other_constraints": ["minimal deps"],
+    }
+
+    def _assert_round_trips(self, raw: str) -> None:
+        result = _parse_response(raw)
+        assert result.platform == "cli"
+        assert result.language == "Rust"
+        assert result.constraints == ["Tokio"]
+        assert result.preferences == ["minimal deps"]
+
+    def test_fenced_json_round_trips(self) -> None:
+        raw = f"```json\n{json.dumps(self._PAYLOAD)}\n```"
+        self._assert_round_trips(raw)
+
+    def test_prose_prefixed_round_trips(self) -> None:
+        raw = f"Sure, here are the extracted preferences:\n\n{json.dumps(self._PAYLOAD)}"
+        self._assert_round_trips(raw)
+
+    def test_trailing_whitespace_round_trips(self) -> None:
+        raw = f"{json.dumps(self._PAYLOAD)}\n  \t\n"
+        self._assert_round_trips(raw)
+
+
 class TestArchitectureHash:
     """Tests for architecture_hash()."""
 

@@ -434,6 +434,33 @@ class TestMatchesExcluded:
         assert "CLI" in mock_rf.call_args[0][2]
 
 
+class TestParseFeaturesRobustness:
+    """Parser round-trips across fenced, prose-prefixed, and trailing-whitespace inputs."""
+
+    _PAYLOAD = [
+        {"name": "Search", "description": "Full-text search.", "category": "core"},
+    ]
+
+    def _assert_round_trips(self, raw: str) -> None:
+        features = _parse_features(raw)
+        assert len(features) == 1
+        assert features[0].name == "Search"
+        assert features[0].description == "Full-text search."
+        assert features[0].category == "core"
+
+    def test_fenced_json_round_trips(self):
+        raw = f"```json\n{_json.dumps(self._PAYLOAD)}\n```"
+        self._assert_round_trips(raw)
+
+    def test_prose_prefixed_round_trips(self):
+        raw = f"Here are the features I extracted:\n\n{_json.dumps(self._PAYLOAD)}"
+        self._assert_round_trips(raw)
+
+    def test_trailing_whitespace_round_trips(self):
+        raw = f"{_json.dumps(self._PAYLOAD)}\n  \t\n"
+        self._assert_round_trips(raw)
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------

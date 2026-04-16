@@ -155,6 +155,33 @@ class TestParseResult:
         assert result.missing_examples == []
 
 
+class TestParseResultRobustness:
+    """Parser round-trips across fenced, prose-prefixed, and trailing-whitespace inputs."""
+
+    _PAYLOAD = {
+        "missing_features": [{"name": "Search", "reason": "Not in plan"}],
+        "missing_examples": [],
+    }
+
+    def _assert_round_trips(self, raw: str) -> None:
+        result = _parse_result(raw, [_feat("Search")], [])
+        assert len(result.missing_features) == 1
+        assert result.missing_features[0].name == "Search"
+        assert result.missing_features[0].reason == "Not in plan"
+
+    def test_fenced_json_round_trips(self):
+        raw = f"```json\n{json.dumps(self._PAYLOAD)}\n```"
+        self._assert_round_trips(raw)
+
+    def test_prose_prefixed_round_trips(self):
+        raw = f"Here is my assessment of the gaps:\n\n{json.dumps(self._PAYLOAD)}"
+        self._assert_round_trips(raw)
+
+    def test_trailing_whitespace_round_trips(self):
+        raw = f"{json.dumps(self._PAYLOAD)}\n  \t\n"
+        self._assert_round_trips(raw)
+
+
 # ---------------------------------------------------------------------------
 # format_gap_tasks
 # ---------------------------------------------------------------------------

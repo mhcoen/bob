@@ -97,6 +97,35 @@ class TestParseResult:
         assert result.unclear_boundaries is False
 
 
+class TestParseResultRobustness:
+    """Parser round-trips across fenced, prose-prefixed, and trailing-whitespace inputs."""
+
+    _PAYLOAD = {
+        "single_product": True,
+        "product_name": "Acme Widget",
+        "products": [],
+        "reason": "Page describes one product.",
+    }
+
+    def _assert_round_trips(self, raw: str) -> None:
+        result = _parse_result(raw)
+        assert result.single_product is True
+        assert result.product_name == "Acme Widget"
+        assert result.reason == "Page describes one product."
+
+    def test_fenced_json_round_trips(self):
+        raw = f"```json\n{json.dumps(self._PAYLOAD)}\n```"
+        self._assert_round_trips(raw)
+
+    def test_prose_prefixed_round_trips(self):
+        raw = f"Here is my analysis:\n\n{json.dumps(self._PAYLOAD)}"
+        self._assert_round_trips(raw)
+
+    def test_trailing_whitespace_round_trips(self):
+        raw = f"{json.dumps(self._PAYLOAD)}\n  \t\n"
+        self._assert_round_trips(raw)
+
+
 class TestValidateProductUrl:
     def test_calls_query_with_text(self):
         response = json.dumps(

@@ -2,6 +2,21 @@
 
 ## Observations
 
+### [1.6] `extract_json` preferred inner object over outer array — 2026-04-16
+
+Adding round-trip parser tests for the four migrated modules surfaced a latent
+bug in `duplo.parsing.extract_json`: for prose-prefixed input like
+`"Here are the features:\n[{...}]"`, the balanced-span scanner iterated `{...}`
+first and returned the first valid object (the inner dict), instead of the
+outer array. `_parse_features` then saw a dict, failed its `isinstance(data,
+list)` check, and returned `[]` — no round-trip. Fixed by switching
+`extract_json` from "first valid span wins" to "longest valid span wins": for
+arrays of objects the outer `[...]` is longer than any inner `{...}`, so the
+array is returned; for objects containing arrays the outer `{...}` is longer,
+so the object is returned. Existing tests in `test_parsing.py` (including
+`test_extract_json_multiple_objects`) continue to pass because their
+assertions are satisfied by either span.
+
 ### [1.5] `strip_fences` + `json.loads` migration is incomplete — 2026-04-16
 
 Phases 1.1–1.4 migrated `extractor.py`, `gap_detector.py`, `build_prefs.py`, and

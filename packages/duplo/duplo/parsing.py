@@ -31,7 +31,9 @@ def extract_json(text: str) -> str:
     """Extract a JSON object or array from LLM output.
 
     Tries ``strip_fences`` first.  If the result isn't valid JSON, scans
-    for the outermost ``{...}`` or ``[...]`` and returns that substring.
+    for balanced ``{...}`` and ``[...]`` spans and returns the longest
+    span that parses.  Preferring the longest span avoids returning an
+    inner object when the outer structure is an array of objects.
     Returns *text* unchanged when no JSON structure is found.
     """
     stripped = strip_fences(text)
@@ -41,18 +43,17 @@ def extract_json(text: str) -> str:
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Find balanced JSON objects/arrays by brace-counting.
-    # This handles output with multiple JSON objects (e.g. tool-use
-    # metadata interleaved with the actual response).
+    best: str = ""
     for open_ch, close_ch in (("{", "}"), ("[", "]")):
         for candidate in _balanced_spans(text, open_ch, close_ch):
             try:
                 json.loads(candidate)
-                return candidate
             except (json.JSONDecodeError, ValueError):
                 continue
+            if len(candidate) > len(best):
+                best = candidate
 
-    return text
+    return best if best else text
 
 
 def extract_all_json(text: str) -> list[str]:
