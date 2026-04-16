@@ -28,6 +28,7 @@ from mcloop.prompts import (
 from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"
+AUDIT_REPORT_FILE = ".mcloop/audit-report.md"
 
 
 class AuditResult(enum.Enum):
@@ -132,19 +133,20 @@ def _run_single_audit_round(
     Returns True if bugs were fixed, False if no bugs found, or None if the
     audit session failed (crashed, timed out, or BUGS.md not produced).
     """
-    bugs_path = project_dir / "BUGS.md"
+    bugs_path = project_dir / AUDIT_REPORT_FILE
+    bugs_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Resume from existing BUGS.md if present
+    # Resume from existing audit report if present
     if bugs_path.exists():
         bugs_content = bugs_path.read_text()
         if bugs_md_has_bugs(bugs_content):
             print(
-                formatting.system_msg("Found existing BUGS.md, resuming fix cycle..."),
+                formatting.system_msg("Found existing audit report, resuming fix cycle..."),
                 flush=True,
             )
         else:
             print(
-                formatting.system_msg("Existing BUGS.md has no bugs"),
+                formatting.system_msg("Existing audit report has no bugs"),
                 flush=True,
             )
             bugs_path.unlink()
@@ -168,7 +170,7 @@ def _run_single_audit_round(
 
         if not bugs_path.exists():
             print(
-                f"audit: BUGS.md not written, skipping fix [{_audit_el}]",
+                f"audit: audit report not written, skipping fix [{_audit_el}]",
                 flush=True,
             )
             return None

@@ -178,7 +178,9 @@ def test_build_audit_prompt_includes_code_quality():
 
 def test_build_audit_prompt_bugs_md_output():
     prompt = build_audit_prompt()
-    assert "BUGS.md" in prompt
+    # Audit report path moved to .mcloop/audit-report.md to avoid colliding
+    # with the standalone BUGS.md checklist file.
+    assert ".mcloop/audit-report.md" in prompt
 
 
 def test_build_audit_prompt_no_bugs_instruction():
@@ -261,7 +263,8 @@ def test_build_bug_fix_prompt_no_delete_instruction():
 
 def test_build_bug_fix_prompt_bugs_md_reference():
     prompt = build_bug_fix_prompt()
-    assert "BUGS.md" in prompt
+    # Audit report path moved from BUGS.md to .mcloop/audit-report.md
+    assert ".mcloop/audit-report.md" in prompt
 
 
 # --- build_post_fix_review_prompt ---

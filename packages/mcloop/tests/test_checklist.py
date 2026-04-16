@@ -1551,16 +1551,14 @@ def test_has_unchecked_bugs_with_h1_bugs_header(tmp_path):
 
 
 def test_purge_completed_bugs_basic(tmp_path):
-    """purge_completed_bugs removes checked items from the Bugs section."""
+    """purge_completed_bugs removes checked items from BUGS.md."""
     md = (
         "## Bugs\n"
         "- [x] Fixed crash A\n"
         "- [x] Fixed crash B\n"
         "- [ ] Unfixed bug\n"
-        "## Stage 1: Core\n"
-        "- [ ] Feature\n"
     )
-    f = tmp_path / "tasks.md"
+    f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)
 
@@ -1568,96 +1566,49 @@ def test_purge_completed_bugs_basic(tmp_path):
     assert "Fixed crash A" not in result
     assert "Fixed crash B" not in result
     assert "Unfixed bug" in result
-    assert "Feature" in result
-    assert "## Stage 1: Core" in result
+    assert "## Bugs" in result
 
 
-def test_purge_completed_bugs_preserves_h1_phase_section(tmp_path):
-    """Purge must NOT leak into an H1 Phase section following ## Bugs.
-
-    This is the duplo bug: an H1 section header after ## Bugs was not
-    recognized as a section boundary, so completed tasks under the H1
-    were erased.
-    """
+def test_purge_completed_bugs_all_done(tmp_path):
+    """When all bugs are fixed, only the header remains."""
     md = (
         "## Bugs\n"
-        "- [x] Fixed bug\n"
         "\n"
-        "# Duplo - Phase 1: Bootstrapping\n"
-        "\n"
-        "- [x] Project scaffolding\n"
-        "  - [x] Create duplo package\n"
-        "  - [x] Add CLI argument parser\n"
-        "- [x] Product scraping\n"
-        "  - [x] Fetch the product URL\n"
+        "- [x] Fixed bug 1\n"
+        "- [x] Fixed bug 2\n"
     )
-    f = tmp_path / "tasks.md"
+    f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)
 
     result = f.read_text()
-    # The Bugs section's checked item should be gone
+    assert "## Bugs" in result
     assert "Fixed bug" not in result
-    # But the H1 section and all its checked tasks must survive
-    assert "# Duplo - Phase 1: Bootstrapping" in result
-    assert "Project scaffolding" in result
-    assert "Create duplo package" in result
-    assert "Add CLI argument parser" in result
-    assert "Product scraping" in result
-    assert "Fetch the product URL" in result
 
 
-def test_purge_completed_bugs_terminates_at_h2_stage(tmp_path):
-    """Purge still terminates at the next H2 Stage header (regression check)."""
-    md = "## Bugs\n- [x] Done bug\n## Stage 2: Build\n- [x] Done feature\n"
-    f = tmp_path / "tasks.md"
-    f.write_text(md)
-    purge_completed_bugs(f)
-
-    result = f.read_text()
-    assert "Done bug" not in result
-    # Done feature is outside the Bugs section and must survive
-    assert "Done feature" in result
-    assert "## Stage 2: Build" in result
-
-
-def test_purge_completed_bugs_terminates_at_h1_stage(tmp_path):
-    """Purge terminates at an H1 Stage header, not just H2."""
-    md = "## Bugs\n- [x] Done bug\n# Project Stage 5: Release\n- [x] Done feature\n"
-    f = tmp_path / "tasks.md"
-    f.write_text(md)
-    purge_completed_bugs(f)
-
-    result = f.read_text()
-    assert "Done bug" not in result
-    assert "Done feature" in result
-    assert "# Project Stage 5: Release" in result
-
-
-def test_purge_completed_bugs_no_bugs_section(tmp_path):
-    """purge_completed_bugs is a no-op when there is no ## Bugs section."""
-    md = "# Duplo - Phase 1: Bootstrapping\n- [x] Task A\n- [x] Task B\n"
-    f = tmp_path / "tasks.md"
+def test_purge_completed_bugs_no_checked(tmp_path):
+    """purge_completed_bugs is a no-op when nothing is checked."""
+    md = "## Bugs\n\n- [ ] Open bug A\n- [ ] Open bug B\n"
+    f = tmp_path / "BUGS.md"
     f.write_text(md)
     before = f.read_text()
     purge_completed_bugs(f)
     after = f.read_text()
+    # Content preserved (trailing newline normalization is OK)
+    assert "Open bug A" in after
+    assert "Open bug B" in after
 
-    assert before == after
 
-
-def test_purge_completed_bugs_keeps_prose_in_bugs_section(tmp_path):
-    """Non-checkbox lines (prose, blank lines) inside Bugs section are kept."""
+def test_purge_completed_bugs_keeps_prose(tmp_path):
+    """Non-checkbox lines (prose, blank lines) in BUGS.md are kept."""
     md = (
         "## Bugs\n"
         "\n"
         "These are notes about bugs.\n"
         "- [x] Fixed one\n"
         "- [ ] Open one\n"
-        "# Phase 1: Next\n"
-        "- [ ] Feature\n"
     )
-    f = tmp_path / "tasks.md"
+    f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)
 
@@ -1665,8 +1616,26 @@ def test_purge_completed_bugs_keeps_prose_in_bugs_section(tmp_path):
     assert "These are notes about bugs." in result
     assert "Fixed one" not in result
     assert "Open one" in result
-    assert "# Phase 1: Next" in result
-    assert "Feature" in result
+
+
+def test_purge_completed_bugs_with_subtasks(tmp_path):
+    """Checked subtasks under a checked parent are all removed."""
+    md = (
+        "## Bugs\n"
+        "- [x] Fix crash group\n"
+        "   - [x] Fix part A\n"
+        "   - [x] Fix part B\n"
+        "- [ ] Unfixed bug\n"
+    )
+    f = tmp_path / "BUGS.md"
+    f.write_text(md)
+    purge_completed_bugs(f)
+
+    result = f.read_text()
+    assert "Fix crash group" not in result
+    assert "Fix part A" not in result
+    assert "Fix part B" not in result
+    assert "Unfixed bug" in result
 
 
 # ── structural sanity check (PlanCorruptionError) ──

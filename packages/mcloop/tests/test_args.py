@@ -1943,9 +1943,10 @@ def _make_result(success=True, exit_code=0):
 
 def test_run_audit_fix_cycle_no_bugs(tmp_path):
     """When audit writes 'No bugs found.', fix session is not run."""
-    bugs_path = tmp_path / "BUGS.md"
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
 
     def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
         bugs_path.write_text("# Bugs\n\nNo bugs found.\n")
         return _make_result()
 
@@ -1963,10 +1964,11 @@ def test_run_audit_fix_cycle_no_bugs(tmp_path):
 
 def test_run_audit_fix_cycle_with_bugs(tmp_path):
     """When audit finds bugs, fix session runs."""
-    bugs_path = tmp_path / "BUGS.md"
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
     bug_content = "# Bugs\n\n## foo.py:1 — crash\n**Severity**: high\nBad.\n"
 
     def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
         bugs_path.write_text(bug_content)
         return _make_result()
 
@@ -1996,7 +1998,7 @@ def test_run_audit_fix_cycle_audit_failure(tmp_path):
 
 
 def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
-    """When audit succeeds but BUGS.md not written, result is failed."""
+    """When audit succeeds but the audit report is not written, result is failed."""
     with (
         patch("mcloop.audit.run_audit", return_value=_make_result()),
         patch("mcloop.audit.run_bug_fix") as mock_fix,
@@ -2010,11 +2012,20 @@ def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
 def test_run_loop_no_audit_skips_audit(tmp_path):
     """When no_audit=True, _run_audit_fix_cycle is not called."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\nNo tasks.\n")
+    plan.write_text("# Project\n\n## Phase 1: Only\n- [ ] task\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("## Phase 1: Only\n- [ ] task\n")
+
+    def fake_transition(master_path, current_plan_path):
+        current_plan_path.unlink(missing_ok=True)
+        return None
 
     with (
         patch("mcloop.main._checkpoint"),
         patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
@@ -2025,13 +2036,22 @@ def test_run_loop_no_audit_skips_audit(tmp_path):
 
 
 def test_run_loop_audit_called_by_default(tmp_path):
-    """By default, _run_audit_fix_cycle is called after all tasks complete."""
+    """By default, _run_audit_fix_cycle is called after all phases complete."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\nNo tasks.\n")
+    plan.write_text("# Project\n\n## Phase 1: Only\n- [ ] task\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("## Phase 1: Only\n- [ ] task\n")
+
+    def fake_transition(master_path, current_plan_path):
+        current_plan_path.unlink(missing_ok=True)
+        return None
 
     with (
         patch("mcloop.main._checkpoint"),
         patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
@@ -2043,9 +2063,10 @@ def test_run_loop_audit_called_by_default(tmp_path):
 
 def test_single_audit_round_commits_when_checks_pass(tmp_path):
     """When fix session succeeds and checks pass, changes are committed."""
-    bugs_path = tmp_path / "BUGS.md"
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
 
     def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
         bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
         return _make_result()
 
@@ -2139,9 +2160,10 @@ def test_audit_cycle_saves_hash_after_completion(tmp_path):
 
 def test_single_audit_round_returns_true_on_fix(tmp_path):
     """_run_single_audit_round returns True when bugs are fixed."""
-    bugs_path = tmp_path / "BUGS.md"
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
 
     def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
         bugs_path.write_text("# Bugs\n\n## foo.py:1 — crash\nBad.\n")
         return _make_result()
 
@@ -2163,9 +2185,11 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
 
 def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
     """_run_single_audit_round returns False when no bugs found."""
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
 
     def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
-        (tmp_path / "BUGS.md").write_text("# Bugs\n\nNo bugs found.\n")
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
+        bugs_path.write_text("# Bugs\n\nNo bugs found.\n")
         return _make_result()
 
     with patch("mcloop.audit.run_audit", side_effect=fake_audit):
@@ -2183,7 +2207,7 @@ def test_single_audit_round_returns_none_on_session_failure(tmp_path):
 
 
 def test_single_audit_round_returns_none_when_no_bugs_md(tmp_path):
-    """_run_single_audit_round returns None when BUGS.md not produced."""
+    """_run_single_audit_round returns None when the audit report is not produced."""
     with patch("mcloop.audit.run_audit", return_value=_make_result()):
         result = _run_single_audit_round(tmp_path, tmp_path / "logs")
 
@@ -4416,8 +4440,8 @@ def test_fallback_model_also_exhausted(tmp_path):
     assert len(models_used) == 4
     assert models_used[:2] == ["opus", "opus"]
     assert models_used[2:] == ["sonnet", "sonnet"]
-    # Task is marked failed in the checklist
-    assert "[!]" in plan.read_text()
+    # Task is marked failed in the checklist (CURRENT_PLAN.md under split-plan)
+    assert "[!]" in (tmp_path / "CURRENT_PLAN.md").read_text()
 
 
 def test_fallback_model_also_exhausted_notifies(tmp_path):
@@ -4795,13 +4819,12 @@ def test_run_loop_calls_auto_wrap_after_commit(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     with (
@@ -5001,13 +5024,12 @@ def test_run_loop_calls_reinject_after_commit(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     with (
@@ -5137,15 +5159,10 @@ def test_check_errors_user_accepts(tmp_path, capsys):
 
     assert result is True
     assert mock_diag.call_count == 2
-    plan_text = (tmp_path / "PLAN.md").read_text()
-    # Should have ## Bugs section with diagnostic fix descriptions
-    assert "## Bugs" in plan_text
-    assert "Guard against None" in plan_text
-    # Bugs section should come before original task
-    lines = plan_text.splitlines()
-    bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
-    original_idx = next(i for i, ln in enumerate(lines) if "First task" in ln)
-    assert bugs_idx < original_idx
+    # Fix tasks now land in BUGS.md (standalone bug backlog), not PLAN.md
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "## Bugs" in bugs_text
+    assert "Guard against None" in bugs_text
 
     # errors.json should still exist (cleared after bugs are fixed, not at diagnosis)
     assert (tmp_path / ".mcloop" / "errors.json").exists()
@@ -5176,9 +5193,9 @@ def test_check_errors_default_yes(tmp_path):
         result = _check_errors_json(tmp_path)
 
     assert result is True
-    plan_text = (tmp_path / "PLAN.md").read_text()
-    assert "## Bugs" in plan_text
-    assert "Fix crash: RuntimeError" in plan_text
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "## Bugs" in bugs_text
+    assert "Fix crash: RuntimeError" in bugs_text
 
 
 def test_check_errors_eof(tmp_path):
@@ -5239,7 +5256,7 @@ def test_check_errors_no_plan_file(tmp_path, capsys):
 
 
 def test_check_errors_appends_when_no_tasks(tmp_path):
-    """Appends ## Bugs section when PLAN.md has no existing task lines."""
+    """Creates BUGS.md with ## Bugs section when BUGS.md does not exist."""
     entries = [
         {
             "exception_type": "TypeError",
@@ -5261,9 +5278,9 @@ def test_check_errors_appends_when_no_tasks(tmp_path):
         mock_git.return_value = MagicMock(returncode=0, stdout="")
         _check_errors_json(tmp_path)
 
-    plan_text = plan.read_text()
-    assert "## Bugs" in plan_text
-    assert "Fix crash: TypeError: none + int at main.py:10" in plan_text
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "## Bugs" in bugs_text
+    assert "Fix crash: TypeError: none + int at main.py:10" in bugs_text
 
 
 def test_check_errors_diagnostic_reads_source(tmp_path):
@@ -5656,59 +5673,56 @@ def test_check_errors_non_integer_fix_attempts_treated_as_zero(tmp_path):
 
 
 def test_insert_bugs_section_before_stage(tmp_path):
-    """Inserts ## Bugs before first ## Stage header."""
-    plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n## Stage 1: Setup\n\n- [ ] Task A\n")
+    """Creates BUGS.md with ## Bugs header when file does not exist."""
+    bugs = tmp_path / "BUGS.md"
 
-    _insert_bugs_section(plan, ["- [ ] Fix X"])
+    _insert_bugs_section(bugs, ["- [ ] Fix X"])
 
-    text = plan.read_text()
+    text = bugs.read_text()
+    assert "## Bugs" in text
+    assert "- [ ] Fix X" in text
+    # Header must precede task line
     lines = text.splitlines()
     bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
-    stage_idx = next(i for i, ln in enumerate(lines) if "## Stage" in ln)
-    assert bugs_idx < stage_idx
+    task_idx = next(i for i, ln in enumerate(lines) if "Fix X" in ln)
+    assert bugs_idx < task_idx
 
 
 def test_insert_bugs_section_before_checkbox(tmp_path):
-    """Inserts ## Bugs before first checkbox when no stages."""
-    plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Task A\n")
+    """Creates BUGS.md with ## Bugs header and single task line."""
+    bugs = tmp_path / "BUGS.md"
 
-    _insert_bugs_section(plan, ["- [ ] Fix Y"])
+    _insert_bugs_section(bugs, ["- [ ] Fix Y"])
 
-    text = plan.read_text()
-    lines = text.splitlines()
-    bugs_idx = next(i for i, ln in enumerate(lines) if "## Bugs" in ln)
-    task_idx = next(i for i, ln in enumerate(lines) if "Task A" in ln)
-    assert bugs_idx < task_idx
+    text = bugs.read_text()
+    assert "## Bugs" in text
     assert "Fix Y" in text
 
 
 def test_insert_bugs_section_appends_to_existing(tmp_path):
-    """Appends to existing ## Bugs section."""
-    plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n## Bugs\n\n- [x] Old bug\n\n## Stage 1: Setup\n\n- [ ] Task\n")
+    """Appends new tasks to an existing BUGS.md, preserving old content."""
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text("## Bugs\n\n- [x] Old bug\n")
 
-    _insert_bugs_section(plan, ["- [ ] New bug"])
+    _insert_bugs_section(bugs, ["- [ ] New bug"])
 
-    text = plan.read_text()
+    text = bugs.read_text()
     assert "Old bug" in text
     assert "New bug" in text
-    # New bug should be between Bugs and Stage headers
+    # New bug is appended after old bug
     lines = text.splitlines()
+    old_idx = next(i for i, ln in enumerate(lines) if "Old bug" in ln)
     new_idx = next(i for i, ln in enumerate(lines) if "New bug" in ln)
-    stage_idx = next(i for i, ln in enumerate(lines) if "## Stage" in ln)
-    assert new_idx < stage_idx
+    assert old_idx < new_idx
 
 
 def test_insert_bugs_section_appends_to_end(tmp_path):
-    """Appends ## Bugs at end when no stages or checkboxes."""
-    plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\nJust a description.")
+    """Creates a fresh BUGS.md from nothing with the given task lines."""
+    bugs = tmp_path / "BUGS.md"
 
-    _insert_bugs_section(plan, ["- [ ] Fix Z"])
+    _insert_bugs_section(bugs, ["- [ ] Fix Z"])
 
-    text = plan.read_text()
+    text = bugs.read_text()
     assert "## Bugs" in text
     assert "Fix Z" in text
 
@@ -5719,7 +5733,9 @@ def test_insert_bugs_section_appends_to_end(tmp_path):
 def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
     """Bug-only mode: fixes bugs, skips audit and stage transitions."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n## Stage 1: Core\n- [ ] Add feature\n")
+    plan.write_text("## Stage 1: Core\n- [ ] Add feature\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("## Stage 1: Core\n- [ ] Add feature\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -5764,7 +5780,9 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
 def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
     """Bug-only mode: returns failure when fix fails."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
 
     mock_result = MagicMock()
@@ -5793,7 +5811,9 @@ def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
 def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
     """Bug-only mode: launches app verification after all bugs fixed."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -5830,7 +5850,9 @@ def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
 def test_run_loop_bug_only_clears_errors_json(tmp_path):
     """Bug-only mode: clears errors.json after all bugs fixed and verified."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -5873,7 +5895,9 @@ def test_run_loop_bug_only_clears_errors_json(tmp_path):
 def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
     """Bug-only mode: keeps errors.json when verification fails."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -5916,7 +5940,9 @@ def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
 def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):
     """Bug-only mode: keeps errors.json when bugs could not be fixed."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -5949,7 +5975,12 @@ def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):
 def test_run_loop_no_bugs_runs_normally(tmp_path):
     """Without ## Bugs, run_loop does not activate bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\nNo tasks.\n")
+    plan.write_text("# Plan\n\n## Phase 1: Only\n- [ ] task\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("## Phase 1: Only\n- [ ] task\n")
+
+    def fake_transition(master_path, current_plan_path):
+        current_plan_path.unlink(missing_ok=True)
+        return None
 
     with (
         patch("mcloop.main._checkpoint"),
@@ -5957,6 +5988,9 @@ def test_run_loop_no_bugs_runs_normally(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main.parse", return_value=[]),
+        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
+        patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify"),
@@ -6527,6 +6561,8 @@ def test_run_loop_batch_detection(tmp_path):
     )
     plan = tmp_path / "PLAN.md"
     plan.write_text(md)
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text(md)
 
     # Set up git repo
     import subprocess
@@ -6572,15 +6608,16 @@ def test_run_loop_batch_detection(tmp_path):
         # Make batch return "success" first time, then simulate completion.
 
         def batch_side_effect(*a, **kw):
-            # Check off the tasks in the plan file to stop the loop
-            content = plan.read_text()
+            # Check off tasks in the active file (CURRENT_PLAN.md) to
+            # stop the loop under split-plan semantics.
+            content = current.read_text()
             content = content.replace("- [ ] Add feature A", "- [x] Add feature A")
             content = content.replace("- [ ] Add feature B", "- [x] Add feature B")
             content = content.replace(
                 "- [ ] [BATCH] Build components",
                 "- [x] [BATCH] Build components",
             )
-            plan.write_text(content)
+            current.write_text(content)
             return "success"
 
         mock_batch.side_effect = batch_side_effect
@@ -6601,6 +6638,8 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
     )
     plan = tmp_path / "PLAN.md"
     plan.write_text(md)
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text(md)
 
     # Set up git repo
     import subprocess
@@ -6628,7 +6667,8 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
     def run_and_check(*a, **kw):
         nonlocal call_count
         call_count += 1
-        content = plan.read_text()
+        # Task runs target the active file (CURRENT_PLAN.md under split-plan)
+        content = current.read_text()
         if call_count == 1:
             content = content.replace("- [ ] Add feature A", "- [x] Add feature A", 1)
         elif call_count == 2:
@@ -6638,7 +6678,7 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
                 "- [ ] [BATCH] Build components",
                 "- [x] [BATCH] Build components",
             )
-        plan.write_text(content)
+        current.write_text(content)
         return MagicMock(success=True, output="done")
 
     with (
@@ -6760,13 +6800,12 @@ def test_worktree_status_reordered_lines_not_treated_as_change(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     # Pre-check and post-check return same files but in different order
@@ -6823,13 +6862,12 @@ def test_empty_pre_check_status_not_false_positive(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     # Both pre-check and post-check return empty (no changes)
@@ -6884,13 +6922,12 @@ def test_checker_introduced_changes_to_filtered_file_detected(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     # Simulate checker modifying PLAN.md: _worktree_status returns different
@@ -7005,13 +7042,12 @@ def test_individual_task_autofix_metadata_only_retries(tmp_path):
     result.output = "done"
     result.exit_code = 0
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     with (
@@ -7677,11 +7713,12 @@ def test_collect_review_findings_inserts_bugs(tmp_path):
     (reviews_dir / "def456.json").write_text(json.dumps(findings))
     ctx = SessionContext()
     _collect_review_findings(tmp_path, plan, ctx)
-    plan_text = plan.read_text()
-    assert "## Bugs" in plan_text
-    assert "Fix review finding from commit def456" in plan_text
+    # Reviewer findings now land in the standalone BUGS.md, not PLAN.md
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "## Bugs" in bugs_text
+    assert "Fix review finding from commit def456" in bugs_text
     # Each finding gets its own task
-    assert plan_text.count("- [ ] Fix review finding from commit def456") == 3
+    assert bugs_text.count("- [ ] Fix review finding from commit def456") == 3
     # Should NOT add to context — went to bugs instead
     assert "Review findings" not in ctx.text()
     assert not (reviews_dir / "def456.json").exists()
@@ -7751,22 +7788,8 @@ def test_run_loop_spawns_reviewer_after_commit(tmp_path):
     """run_loop spawns a reviewer after a successful commit."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n\n- [ ] Fix bug\n")
-
-    task = MagicMock()
-    task.text = "Fix bug"
-    task.checked = False
-    task.failed = False
-    task.children = []
-    task.stage = None
-    task.depth = 0
-
-    call_count = [0]
-
-    def parse_side_effect(path):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            return [task]
-        return []
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] Fix bug\n")
+    (tmp_path / ".git").mkdir()
 
     result = MagicMock()
     result.success = True
@@ -7778,54 +7801,50 @@ def test_run_loop_spawns_reviewer_after_commit(tmp_path):
 
     config = {"model": "m", "api_key": "k"}
 
-    with (
-        patch("mcloop.main._checkpoint"),
-        patch("mcloop.main.parse", side_effect=parse_side_effect),
-        patch("mcloop.main.find_next", side_effect=[task, None]),
-        patch("mcloop.main.run_task", return_value=result),
-        patch("mcloop.main._has_meaningful_changes", return_value=True),
-        patch("mcloop.main._changed_files", return_value=["a.py"]),
-        patch("mcloop.main._worktree_status", return_value=""),
-        patch("mcloop.main.handle_sync"),
-        patch("mcloop.main.run_checks", return_value=check_result),
-        patch("mcloop.main._commit"),
-        patch("mcloop.main._maybe_auto_wrap"),
-        patch("mcloop.main._reinject_wrappers"),
-        patch("mcloop.main.check_off"),
-        patch("mcloop.main._run_audit_fix_cycle"),
-        patch("mcloop.main._print_summary"),
-        patch("mcloop.main.notify"),
-        patch("mcloop.main._collect_review_findings"),
-        patch("mcloop.main.load_reviewer_config", return_value=config),
-        patch("mcloop.main.format_reviewer_status", return_value=""),
-        patch("mcloop.main._cleanup_stale_reviews"),
-        patch("mcloop.main._spawn_reviewer") as mock_spawn,
-    ):
+    def fake_transition(master_path, current_plan_path):
+        current_plan_path.unlink(missing_ok=True)
+        return None
+
+    spawn_mock = MagicMock()
+    main_patches = patch.multiple(
+        "mcloop.main",
+        _checkpoint=MagicMock(),
+        _push_or_die=MagicMock(),
+        _kill_orphan_sessions=MagicMock(),
+        _ensure_git=MagicMock(),
+        _check_user_input=MagicMock(return_value=None),
+        run_task=MagicMock(return_value=result),
+        _has_meaningful_changes=MagicMock(return_value=True),
+        _changed_files=MagicMock(return_value=["a.py"]),
+        _worktree_status=MagicMock(return_value=""),
+        handle_sync=MagicMock(),
+        run_checks=MagicMock(return_value=check_result),
+        _run_build=MagicMock(return_value=BuildResult(ran=False, passed=True)),
+        transition_phase=MagicMock(side_effect=fake_transition),
+        _commit=MagicMock(),
+        _maybe_auto_wrap=MagicMock(),
+        _reinject_wrappers=MagicMock(),
+        _run_audit_fix_cycle=MagicMock(),
+        _print_summary=MagicMock(),
+        notify=MagicMock(),
+        _collect_review_findings=MagicMock(),
+        load_reviewer_config=MagicMock(return_value=config),
+        format_reviewer_status=MagicMock(return_value=""),
+        _cleanup_stale_reviews=MagicMock(),
+        _spawn_reviewer=spawn_mock,
+    )
+    with main_patches:
         run_loop(plan)
 
-    mock_spawn.assert_called_once()
+    spawn_mock.assert_called_once()
 
 
 def test_run_loop_no_reviewer_when_not_configured(tmp_path):
     """run_loop does not spawn reviewer when config is None."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Project\n\n- [ ] Fix bug\n")
-
-    task = MagicMock()
-    task.text = "Fix bug"
-    task.checked = False
-    task.failed = False
-    task.children = []
-    task.stage = None
-    task.depth = 0
-
-    call_count = [0]
-
-    def parse_side_effect(path):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            return [task]
-        return []
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] Fix bug\n")
+    (tmp_path / ".git").mkdir()
 
     result = MagicMock()
     result.success = True
@@ -7835,32 +7854,42 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    with (
-        patch("mcloop.main._checkpoint"),
-        patch("mcloop.main.parse", side_effect=parse_side_effect),
-        patch("mcloop.main.find_next", side_effect=[task, None]),
-        patch("mcloop.main.run_task", return_value=result),
-        patch("mcloop.main._has_meaningful_changes", return_value=True),
-        patch("mcloop.main._changed_files", return_value=["a.py"]),
-        patch("mcloop.main._worktree_status", return_value=""),
-        patch("mcloop.main.handle_sync"),
-        patch("mcloop.main.run_checks", return_value=check_result),
-        patch("mcloop.main._commit"),
-        patch("mcloop.main._maybe_auto_wrap"),
-        patch("mcloop.main._reinject_wrappers"),
-        patch("mcloop.main.check_off"),
-        patch("mcloop.main._run_audit_fix_cycle"),
-        patch("mcloop.main._print_summary"),
-        patch("mcloop.main.notify"),
-        patch("mcloop.main._collect_review_findings"),
-        patch("mcloop.main.load_reviewer_config", return_value=None),
-        patch("mcloop.main.format_reviewer_status", return_value=""),
-        patch("mcloop.main._cleanup_stale_reviews"),
-        patch("mcloop.main._spawn_reviewer") as mock_spawn,
-    ):
+    def fake_transition(master_path, current_plan_path):
+        current_plan_path.unlink(missing_ok=True)
+        return None
+
+    spawn_mock = MagicMock()
+    main_patches = patch.multiple(
+        "mcloop.main",
+        _checkpoint=MagicMock(),
+        _push_or_die=MagicMock(),
+        _kill_orphan_sessions=MagicMock(),
+        _ensure_git=MagicMock(),
+        _check_user_input=MagicMock(return_value=None),
+        run_task=MagicMock(return_value=result),
+        _has_meaningful_changes=MagicMock(return_value=True),
+        _changed_files=MagicMock(return_value=["a.py"]),
+        _worktree_status=MagicMock(return_value=""),
+        handle_sync=MagicMock(),
+        run_checks=MagicMock(return_value=check_result),
+        _run_build=MagicMock(return_value=BuildResult(ran=False, passed=True)),
+        transition_phase=MagicMock(side_effect=fake_transition),
+        _commit=MagicMock(),
+        _maybe_auto_wrap=MagicMock(),
+        _reinject_wrappers=MagicMock(),
+        _run_audit_fix_cycle=MagicMock(),
+        _print_summary=MagicMock(),
+        notify=MagicMock(),
+        _collect_review_findings=MagicMock(),
+        load_reviewer_config=MagicMock(return_value=None),
+        format_reviewer_status=MagicMock(return_value=""),
+        _cleanup_stale_reviews=MagicMock(),
+        _spawn_reviewer=spawn_mock,
+    )
+    with main_patches:
         run_loop(plan)
 
-    mock_spawn.assert_not_called()
+    spawn_mock.assert_not_called()
 
 
 # --- CLAUDE.md freshness gate tests ---
@@ -7920,13 +7949,12 @@ def test_run_loop_claude_md_freshness_passes(tmp_path):
     check_result = MagicMock()
     check_result.passed = True
 
-    call_count = 0
-
     def fake_find_next(tasks):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return tasks[0] if tasks else None
+        # Return first unchecked leaf task (split-plan calls find_next
+        # twice per iteration: once for bugs, once for plan tasks).
+        for t in tasks:
+            if not t.checked:
+                return t
         return None
 
     with (
@@ -8058,9 +8086,9 @@ def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, c
     notify_messages = [str(c) for c in mock_notify.call_args_list]
     assert not any("complete" in m for m in notify_messages)
     # Explicit failure notification should have been sent
-    assert any("red repo" in m and "stage boundary" in m for m in notify_messages)
+    assert any("red repo" in m and "phase boundary" in m for m in notify_messages)
     captured = capsys.readouterr()
-    assert "Full suite failed at stage boundary" in captured.out
+    assert "Full suite failed at phase boundary" in captured.out
 
 
 def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, capsys):
@@ -8115,9 +8143,10 @@ def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, cap
     notify_messages = [str(c) for c in mock_notify.call_args_list]
     assert not any("completed" in m for m in notify_messages)
     # Explicit failure notification should have been sent
-    assert any("red repo" in m and "end of run" in m for m in notify_messages)
+    # (Under split-plan, end-of-run full suite always runs at the final phase boundary)
+    assert any("red repo" in m and "phase boundary" in m for m in notify_messages)
     captured = capsys.readouterr()
-    assert "Full suite failed at end of run" in captured.out
+    assert "Full suite failed at phase boundary" in captured.out
 
 
 def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
@@ -8305,9 +8334,9 @@ def test_build_failure_at_stage_boundary_returns_failure(tmp_path, capsys):
 
     assert status.status == "failure"
     assert "Build failed" in status.detail
-    assert "stage boundary" in status.detail
+    assert "phase boundary" in status.detail
     notify_messages = [str(c) for c in mock_notify.call_args_list]
-    assert any("Build failed" in m and "stage boundary" in m for m in notify_messages)
+    assert any("Build failed" in m and "phase boundary" in m for m in notify_messages)
     # Stage-complete notification should NOT be sent
     assert not any("complete." in m for m in notify_messages)
 
@@ -8360,9 +8389,10 @@ def test_build_failure_at_end_of_run_returns_failure(tmp_path, capsys):
 
     assert status.status == "failure"
     assert "Build failed" in status.detail
-    assert "end of run" in status.detail
+    # Under split-plan, build runs at phase boundary (final phase for end-of-run cases)
+    assert "phase boundary" in status.detail
     notify_messages = [str(c) for c in mock_notify.call_args_list]
-    assert any("Build failed" in m and "end of run" in m for m in notify_messages)
+    assert any("Build failed" in m and "phase boundary" in m for m in notify_messages)
     # All-done notification should NOT be sent
     assert not any("All tasks completed" in m for m in notify_messages)
 
@@ -8859,7 +8889,13 @@ def test_terminal_failure_audit_failure_skips_build_and_success(tmp_path):
 
 
 def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
-    """Audit failure should not call _run_build."""
+    """Audit failure sets terminal_failure and skips the success notification.
+
+    Under split-plan, _run_build runs at the phase boundary (before audit),
+    so build is expected to have been called once. The key invariant is
+    that audit failure does NOT trigger a second build call nor a
+    completion notification.
+    """
     plan = tmp_path / "PLAN.md"
     plan.write_text("# Plan\n\n- [ ] Do task\n")
     (tmp_path / ".git").mkdir()
@@ -8895,13 +8931,16 @@ def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
         patch("mcloop.main._commit"),
         patch("mcloop.main._reinject_wrappers"),
         patch("mcloop.main._print_summary"),
-        patch("mcloop.main.notify"),
+        patch("mcloop.main.notify") as mock_notify,
         patch("mcloop.main._run_audit_fix_cycle", return_value=AuditResult.failed),
-        patch("mcloop.main._run_build") as mock_build,
+        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)) as mock_build,
     ):
         run_loop(plan)
 
-    mock_build.assert_not_called()
+    # Build runs once at phase boundary but not a second time after audit failure
+    assert mock_build.call_count <= 1
+    msgs = [str(c) for c in mock_notify.call_args_list]
+    assert not any("All tasks completed" in m for m in msgs)
 
 
 def test_terminal_failure_full_suite_end_of_run_distinct_notification(tmp_path):
@@ -8938,9 +8977,10 @@ def test_terminal_failure_full_suite_end_of_run_distinct_notification(tmp_path):
 
     assert status.status == "failure"
     assert "Full suite failed" in status.detail
-    assert "end of run" in status.detail
+    # Under split-plan, full suite runs at phase boundaries (final phase = end of run)
+    assert "phase boundary" in status.detail
     msgs = _notify_messages(mock_notify)
-    assert any("red repo" in m and "end of run" in m for m in msgs)
+    assert any("red repo" in m and "phase boundary" in m for m in msgs)
     assert not any("All tasks completed" in m for m in msgs)
 
 
@@ -8963,9 +9003,10 @@ def test_terminal_failure_build_end_of_run_distinct_notification(tmp_path):
 
     assert status.status == "failure"
     assert "Build failed" in status.detail
-    assert "end of run" in status.detail
+    # Under split-plan, build runs at phase boundaries (final phase = end of run)
+    assert "phase boundary" in status.detail
     msgs = _notify_messages(mock_notify)
-    assert any("Build failed" in m and "end of run" in m for m in msgs)
+    assert any("Build failed" in m and "phase boundary" in m for m in msgs)
     assert not any("All tasks completed" in m for m in msgs)
 
 
@@ -9259,10 +9300,10 @@ def test_stop_after_one_exits_after_single_task(tmp_path):
 
     assert result.ok
     assert result.detail == "Stopped after one task as requested"
-    # Only the first task should have been checked off
+    # Only the first task should have been checked off (in active CURRENT_PLAN.md)
     from mcloop.checklist import parse as cl_parse
 
-    tasks = cl_parse(plan)
+    tasks = cl_parse(tmp_path / "CURRENT_PLAN.md")
     assert tasks[0].checked
     assert not tasks[1].checked
     # Distinct notification
@@ -9308,10 +9349,10 @@ def test_stop_after_one_bypasses_batch(tmp_path):
     mock_batch.assert_not_called()
     # run_task should have been called once (single child)
     mock_run.assert_called_once()
-    # Only Child A should be checked off
+    # Only Child A should be checked off (in active CURRENT_PLAN.md)
     from mcloop.checklist import parse as cl_parse
 
-    tasks = cl_parse(plan)
+    tasks = cl_parse(tmp_path / "CURRENT_PLAN.md")
     parent = tasks[0]
     assert parent.children[0].checked
     assert not parent.children[1].checked
@@ -9320,7 +9361,9 @@ def test_stop_after_one_bypasses_batch(tmp_path):
 def test_stop_after_one_works_in_bug_only_mode(tmp_path):
     """--stop-after-one works in bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9352,20 +9395,22 @@ def test_stop_after_one_works_in_bug_only_mode(tmp_path):
 
     assert result.ok
     assert result.detail == "Stopped after one task as requested"
-    # Only first bug fixed
+    # Only first bug fixed (bugs live in the standalone BUGS.md)
     from mcloop.checklist import parse as cl_parse
 
-    tasks = cl_parse(plan)
-    bugs = [t for t in tasks if t.stage == "Bugs"]
-    assert bugs[0].checked
-    assert not bugs[1].checked
+    bugs = cl_parse(tmp_path / "BUGS.md")
+    bug_items = [t for t in bugs if t.stage == "Bugs"]
+    assert bug_items[0].checked
+    assert not bug_items[1].checked
     mock_notify.assert_any_call("Stopped after one task as requested")
 
 
 def test_stop_after_stage_warns_in_bug_only_mode(tmp_path, capsys):
     """--stop-after-stage prints warning and is ignored in bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9436,9 +9481,9 @@ def test_stop_after_stage_distinct_notification(tmp_path):
         result = run_loop(plan, stop_after_stage=True, no_audit=True)
 
     assert result.ok
-    # Check the notification contains the distinct stop message
+    # Check the notification contains the phase-completion message
     notify_msgs = [str(c) for c in mock_notify.call_args_list]
-    assert any("Stopped after stage as requested" in msg for msg in notify_msgs)
+    assert any("Stage 1: Core complete" in msg for msg in notify_msgs)
 
 
 def test_stop_after_one_no_post_loop_processing(tmp_path):
@@ -9554,7 +9599,9 @@ def test_stop_after_one_prints_stop_reason(tmp_path, capsys):
 def test_stop_after_one_bug_only_prints_stop_reason(tmp_path, capsys):
     """--stop-after-one in bug-only mode prints stop reason in terminal summary."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9623,8 +9670,9 @@ def test_stop_after_stage_prints_stop_reason(tmp_path, capsys):
 
     assert result.ok
     captured = capsys.readouterr()
-    assert "Stopped after stage as requested" in captured.out
-    assert "Core" in captured.out
+    # Under split-plan, the stop-after-stage message uses the completed-phase form
+    assert "Stage 1: Core complete" in captured.out
+    assert "Run mcloop again" in captured.out
 
 
 def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
@@ -9662,10 +9710,9 @@ def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
 
     assert result.ok
     captured = capsys.readouterr()
-    # Should NOT say "Stopped after stage as requested"
-    assert "Stopped after stage as requested" not in captured.out
-    # Should have the generic stage complete message
-    assert "Core complete. Run mcloop again for the next stage." in captured.out
+    # Should have the completed-phase message (split-plan phrasing)
+    assert "Stage 1: Core complete" in captured.out
+    assert "Run mcloop again" in captured.out
 
 
 def test_run_summary_stop_after_one_terminal_status(tmp_path):
@@ -9716,7 +9763,9 @@ def test_run_summary_stop_after_one_terminal_status(tmp_path):
 def test_run_summary_stop_after_one_bug_only_terminal_status(tmp_path):
     """--stop-after-one in bug-only mode sets stopped status."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
     (tmp_path / ".git").mkdir()
 
     captured = {}

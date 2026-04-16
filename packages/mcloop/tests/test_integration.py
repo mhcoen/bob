@@ -10,9 +10,16 @@ from mcloop.runner import RunResult
 
 
 def _make_project(tmp_path, checklist_text):
-    """Set up a minimal project dir with a checklist file."""
+    """Set up a minimal project dir with a checklist file.
+
+    Under the split-plan design, run_loop operates on CURRENT_PLAN.md
+    (the active phase); PLAN.md is the master roadmap. We pre-create
+    CURRENT_PLAN.md with the same content so tests can observe
+    check-offs and failure markers directly.
+    """
     md = tmp_path / "PLAN.md"
     md.write_text(checklist_text)
+    (tmp_path / "CURRENT_PLAN.md").write_text(checklist_text)
     (tmp_path / "logs").mkdir()
     return md
 
@@ -178,7 +185,8 @@ def test_max_retries_exhausted_stops_loop(
 
     assert not result.ok
     assert mock_run.call_count == 3
-    content = md.read_text()
+    # Under split-plan, task marker is written to CURRENT_PLAN.md (the active file)
+    content = (md.parent / "CURRENT_PLAN.md").read_text()
     assert "- [!] Hopeless task" in content
     assert "- [ ] Next task" in content
 
@@ -303,7 +311,7 @@ def test_noop_task_checks_fail_treated_as_failure(
     mock_commit.assert_not_called()
     # Checks run once on the no-changes path
     assert mock_checks.call_count == 1
-    content = md.read_text()
+    content = (md.parent / "CURRENT_PLAN.md").read_text()
     assert "- [!] Already done task" in content
 
     calls = _notify_calls(mock_notify)
@@ -360,7 +368,7 @@ def test_noop_then_checks_fail_is_terminal(
     assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    content = md.read_text()
+    content = (md.parent / "CURRENT_PLAN.md").read_text()
     assert "- [!] Retry task" in content
 
     calls = _notify_calls(mock_notify)
@@ -386,7 +394,7 @@ def test_noop_with_max_retries_one(
     assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    content = md.read_text()
+    content = (md.parent / "CURRENT_PLAN.md").read_text()
     assert "- [!] One-shot task" in content
 
     # Only "giving up" — no per-retry notifications
@@ -679,9 +687,12 @@ def test_audit_notifies_bugs_fixed(
     tmp_path,
 ):
     """Audit cycle notifies when bugs are found and fixed."""
-    bugs_path = tmp_path / "BUGS.md"
+    # Audit output file moved from BUGS.md to .mcloop/audit-report.md so it
+    # does not collide with the standalone BUGS.md bug-backlog checklist.
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
 
     def write_bugs(*args, **kwargs):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
         bugs_path.write_text("# Bugs\n\n## Bug 1\nSomething wrong\n")
         return _ok_run_result()
 

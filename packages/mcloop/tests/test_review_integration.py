@@ -172,7 +172,7 @@ def test_collect_review_findings_adds_to_context(tmp_path):
 
 
 def test_collect_review_findings_inserts_bugs(tmp_path):
-    """3+ high-confidence error findings insert bugs into PLAN.md."""
+    """3+ high-confidence error findings insert bugs into BUGS.md."""
     reviews_dir = tmp_path / ".mcloop" / "reviews"
     reviews_dir.mkdir(parents=True)
     findings = [
@@ -183,9 +183,9 @@ def test_collect_review_findings_inserts_bugs(tmp_path):
     plan.write_text("# P\n\n- [ ] task\n")
     ctx = SessionContext()
     _collect_review_findings(tmp_path, plan, ctx)
-    text = plan.read_text()
-    assert "## Bugs" in text
-    assert "bug 0" in text
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "## Bugs" in bugs_text
+    assert "bug 0" in bugs_text
 
 
 def test_collect_review_findings_skips_low_confidence(tmp_path):

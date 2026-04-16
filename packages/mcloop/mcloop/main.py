@@ -93,6 +93,14 @@ from mcloop.output import (
     _snapshot_notes,
     _tail,
 )
+from mcloop.plan_split import (
+    BUGS_FILE,
+    CURRENT_PLAN,
+    ensure_bugs_file,
+    ensure_current_plan,
+    get_current_phase_name,
+    transition_phase,
+)
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
     RateLimitState,
@@ -556,7 +564,12 @@ def run_loop(
     project_dir = checklist_path.parent
     _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
-    description = parse_description(checklist_path)
+
+    # Split-plan paths
+    master_path = checklist_path  # PLAN.md (the full roadmap)
+    current_plan_path = project_dir / CURRENT_PLAN
+    bugs_path = project_dir / BUGS_FILE
+    description = parse_description(master_path)
 
     # Check for interrupted state from a previous Ctrl-C
     interrupt_action = _check_interrupted(project_dir, checklist_path)
@@ -592,6 +605,9 @@ def run_loop(
         _checkpoint(project_dir)
 
     _push_or_die(project_dir)
+
+    # Split-plan: ensure BUGS.md exists before anything tries to write to it
+    ensure_bugs_file(bugs_path)
 
     # Check for crash errors from previous runs
     if not _check_errors_json(project_dir, model=model):
@@ -642,6 +658,7 @@ def run_loop(
     failed_reason: str = ""
     terminal_failure: str | None = None  # Set by any fatal failure; gates success path
     stopped_early: str = ""  # "stage" or "one" when a stop flag caused the exit
+    completed_stage: str = ""  # Set by phase transition when a phase completes
     batch_exhausted: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
     primary_model = current_model
@@ -649,7 +666,24 @@ def run_loop(
     if current_model:
         warn_unknown_model(cli, current_model)
 
-    # Bug-only mode: when ## Bugs has unchecked items, work only those
+    # Split-plan: extract current phase from master if needed
+    if not ensure_current_plan(master_path, current_plan_path):
+        # All phases already complete
+        total = time.monotonic() - run_start_mono
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=total,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="success",
+        )
+        notify("All phases already complete")
+        return RunStatus("success", detail="All phases already complete")
+
+    # Bug-only mode: when BUGS.md has unchecked items, work only those
     # tasks. Do not fall through to feature tasks, do not start the
     # next stage, do not run the audit cycle.
     def _has_any_failed(task_list: list[Task]) -> Task | None:
@@ -661,8 +695,9 @@ def run_loop(
                 return found
         return None
 
-    initial_tasks = parse(checklist_path)
-    bug_only = has_unchecked_bugs(initial_tasks)
+    initial_bug_tasks = parse(bugs_path)
+    initial_plan_tasks = parse(current_plan_path)
+    bug_only = has_unchecked_bugs(initial_bug_tasks)
     _run_mode = "bug-only" if bug_only else "plan"
     if bug_only:
         print(
@@ -678,20 +713,21 @@ def run_loop(
             )
             stop_after_stage = False
 
-    active_stage_at_start = current_stage(parse(checklist_path))
+    active_phase_name = get_current_phase_name(current_plan_path)
 
     # Count remaining tasks for the startup notification
-    remaining_count = count_unchecked(initial_tasks)
+    remaining_count = count_unchecked(initial_bug_tasks) + count_unchecked(initial_plan_tasks)
     start_msg = f"Starting: {remaining_count} task(s) remaining"
-    if active_stage_at_start:
-        start_msg += f" in {active_stage_at_start}"
+    if active_phase_name:
+        start_msg += f" in {active_phase_name}"
     if bug_only:
         start_msg = f"Starting: fixing bugs ({remaining_count} remaining)"
     notify(start_msg)
     print(
         formatting.system_msg(
-            "Do not edit PLAN.md while mcloop is running."
+            "Do not edit CURRENT_PLAN.md or BUGS.md while mcloop is running."
             " Kill mcloop first, make edits, then restart."
+            " PLAN.md (the master) is safe to edit during a run."
         ),
         flush=True,
     )
@@ -699,13 +735,15 @@ def run_loop(
     while True:
         # Check for completed reviews from background reviewer processes
         if reviewer_config:
-            _collect_review_findings(project_dir, checklist_path, ctx)
+            _collect_review_findings(project_dir, bugs_path, ctx)
 
-        tasks = parse(checklist_path)
+        # Parse both split-plan files
+        bug_tasks = parse(bugs_path)
+        plan_tasks = parse(current_plan_path)
 
         # If any task has failed, stop the entire run.
         # A failed task is fatal: do not attempt other tasks.
-        failed = _has_any_failed(tasks)
+        failed = _has_any_failed(bug_tasks) or _has_any_failed(plan_tasks)
         if failed:
             notify(
                 f"Fatal: previously failed task: {failed.text}",
@@ -716,7 +754,7 @@ def run_loop(
                 completed,
                 f"{failed.text}",
                 "Task failed in a prior attempt",
-                tasks,
+                bug_tasks + plan_tasks,
                 total,
                 project_dir,
                 notes_snapshot,
@@ -735,14 +773,73 @@ def run_loop(
             )
             return RunStatus("failure", detail=_detail)
 
-        if active_stage_at_start is not None:
-            now_stage = current_stage(tasks)
-            if now_stage != active_stage_at_start:
-                if stop_after_stage:
-                    stopped_early = "stage"
+        # Find next task: bugs have priority over plan tasks
+        task = find_next(bug_tasks)
+        if task is not None:
+            tasks = bug_tasks
+            active_file = bugs_path
+        else:
+            task = find_next(plan_tasks)
+            if task is not None:
+                tasks = plan_tasks
+                active_file = current_plan_path
+
+        # Phase transition: current plan fully checked, try next phase
+        if task is None and not bug_only:
+            # Run full test suite at phase boundary
+            print(
+                formatting.system_msg("Running full test suite (phase boundary)..."),
+                flush=True,
+            )
+            _full_suite_start = time.monotonic()
+            full_check = run_checks(project_dir)
+            _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
+            check_entries.append(
+                CheckEntry(
+                    command=full_check.command or "full-suite",
+                    passed=full_check.passed,
+                    elapsed=round(time.monotonic() - _full_suite_start, 2),
+                )
+            )
+            if not full_check.passed:
+                print(
+                    formatting.error_msg(
+                        f"Full suite failed at phase boundary: "
+                        f"{full_check.command} [{_full_suite_elapsed}]"
+                    ),
+                    flush=True,
+                )
+                _print_error_tail(full_check.output)
+                notify(
+                    "Run ended with red repo: full suite failed"
+                    f" at phase boundary ({full_check.command})",
+                    level="error",
+                )
+                terminal_failure = f"Full suite failed at phase boundary: {full_check.command}"
+                break
+            print(
+                formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
+                flush=True,
+            )
+            build_result = _run_build(project_dir)
+            if not build_result.passed:
+                notify(
+                    f"Build failed at phase boundary ({build_result.command})",
+                    level="error",
+                )
+                terminal_failure = f"Build failed at phase boundary: {build_result.command}"
                 break
 
-        task = find_next(tasks)
+            # Transition to next phase. Every phase boundary ends the
+            # run; the user re-runs mcloop to start the next phase.
+            completed_phase = active_phase_name
+            next_phase = transition_phase(master_path, current_plan_path)
+            completed_stage = completed_phase
+            if next_phase is not None and stop_after_stage:
+                stopped_early = "stage"
+                active_phase_name = next_phase
+            break
+
         if task is None:
             break
 
@@ -752,7 +849,7 @@ def run_loop(
 
         # If this is a parent with all children done, just check it off
         if task.children and all(c.checked for c in task.children):
-            check_off(checklist_path, task)
+            check_off(active_file, task)
             continue
 
         label = _task_label(tasks, task)
@@ -763,7 +860,7 @@ def run_loop(
             ctx.update_group(label, has_subtasks)
             action, args = parse_auto_task(task)
             response = _handle_auto_task(label, action, args)
-            check_off(checklist_path, task)
+            check_off(active_file, task)
             completed.append(f"{label}) {task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[AUTO:{action}] {args[:60]}")
@@ -779,7 +876,7 @@ def run_loop(
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
             response = _handle_user_task(label, instructions)
-            check_off(checklist_path, task)
+            check_off(active_file, task)
             completed.append(f"{label}) {task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[USER] {instructions[:80]}")
@@ -804,7 +901,7 @@ def run_loop(
                 batch_handled = _run_batch(
                     batch_children,
                     tasks,
-                    checklist_path,
+                    active_file,
                     project_dir,
                     log_dir,
                     description,
@@ -919,7 +1016,7 @@ def run_loop(
                             completed,
                             None,
                             "",
-                            parse(checklist_path),
+                            parse(bugs_path) + parse(current_plan_path),
                             total,
                             project_dir,
                             notes_snapshot,
@@ -1003,7 +1100,7 @@ def run_loop(
                     # Run checks: if they pass, auto-check the task.
                     noop_check = run_checks(project_dir)
                     if noop_check.passed:
-                        check_off(checklist_path, task)
+                        check_off(active_file, task)
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
@@ -1084,7 +1181,7 @@ def run_loop(
                         _spawn_reviewer(project_dir)
                     _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
-                    check_off(checklist_path, task)
+                    check_off(active_file, task)
                     elapsed = _format_elapsed(
                         time.monotonic() - task_start,
                     )
@@ -1147,7 +1244,7 @@ def run_loop(
                     attempts=max_retries,
                 )
             )
-            mark_failed(checklist_path, task)
+            mark_failed(active_file, task)
             failed_task = f"{label}) {task.text} [{elapsed}]"
             failed_reason = last_error
             notify(
@@ -1174,7 +1271,7 @@ def run_loop(
                 completed,
                 None,
                 "",
-                parse(checklist_path),
+                parse(bugs_path) + parse(current_plan_path),
                 total,
                 project_dir,
                 notes_snapshot,
@@ -1193,7 +1290,7 @@ def run_loop(
             )
             return RunStatus("success", detail=_stop_msg)
         if terminal_failure is None:
-            remaining_bugs = has_unchecked_bugs(parse(checklist_path))
+            remaining_bugs = has_unchecked_bugs(parse(bugs_path))
             if remaining_bugs:
                 print(
                     formatting.error_msg("Bug-only mode: some bugs could not be fixed"),
@@ -1204,7 +1301,7 @@ def run_loop(
                     formatting.system_msg("Bug-only mode: all bugs fixed"),
                     flush=True,
                 )
-                purge_completed_bugs(checklist_path)
+                purge_completed_bugs(bugs_path)
                 # Verify the fix by launching the app
                 failure = _launch_app_verification(project_dir)
                 if failure:
@@ -1226,7 +1323,7 @@ def run_loop(
             completed,
             failed_task,
             failed_reason,
-            parse(checklist_path),
+            parse(bugs_path) + parse(current_plan_path),
             total,
             project_dir,
             notes_snapshot,
@@ -1246,7 +1343,7 @@ def run_loop(
             return RunStatus("failure", detail=terminal_failure)
         stuck = [
             t.text
-            for t in parse(checklist_path)
+            for t in parse(bugs_path)
             if t.stage == "Bugs" and not t.checked and not t.failed
         ]
         if stuck:
@@ -1280,9 +1377,9 @@ def run_loop(
 
     # --- Post-loop processing ---
     # terminal_failure may already be set from a task/commit failure above.
-    # Each post-loop check sets terminal_failure and sends its own distinct
-    # notification on failure. The success path is gated on terminal_failure
-    # being None, so adding a new check cannot accidentally skip the gate.
+    # Phase-boundary full-suite and build checks are handled inside the
+    # loop's phase transition block. Post-loop only needs: audit (when
+    # all phases are done) and summary generation.
 
     # --stop-after-one: skip post-loop processing entirely
     if stopped_early == "one" and terminal_failure is None:
@@ -1293,7 +1390,7 @@ def run_loop(
             completed,
             None,
             "",
-            parse(checklist_path),
+            parse(bugs_path) + parse(current_plan_path),
             total,
             project_dir,
             notes_snapshot,
@@ -1313,190 +1410,79 @@ def run_loop(
         return RunStatus("success", detail=_stop_msg)
 
     summary_remaining_tasks: list[Task] = []
-    completed_stage: str = ""
     success_msg: str | None = None
     _summary_full_suite: bool | None = None
     _summary_build: bool | None = None
     _summary_audit: str | None = None
 
     if terminal_failure is None:
-        # Check if we stopped at a stage boundary
-        final_tasks = parse(checklist_path)
-        status = stage_status(final_tasks)
-
-        if status.startswith("stage_complete:"):
-            done_stage = status.split(":", 1)[1]
-            next_stg = current_stage(parse(checklist_path))
-            summary_remaining_tasks = final_tasks
-
-            print(
-                formatting.system_msg("Running full test suite (stage boundary)..."),
-                flush=True,
-            )
-            _full_suite_start = time.monotonic()
-            full_check = run_checks(project_dir)
-            _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
-            _summary_full_suite = full_check.passed
-            check_entries.append(
-                CheckEntry(
-                    command=full_check.command or "full-suite",
-                    passed=full_check.passed,
-                    elapsed=round(time.monotonic() - _full_suite_start, 2),
-                )
-            )
-            if not full_check.passed:
-                print(
-                    formatting.error_msg(
-                        f"Full suite failed at stage boundary: "
-                        f"{full_check.command} [{_full_suite_elapsed}]"
-                    ),
-                    flush=True,
-                )
-                _print_error_tail(full_check.output)
-                notify(
-                    "Run ended with red repo: full suite failed"
-                    f" at stage boundary ({full_check.command})",
-                    level="error",
-                )
-                terminal_failure = f"Full suite failed at stage boundary: {full_check.command}"
-            else:
-                print(
-                    formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
-                    flush=True,
-                )
-
-            if terminal_failure is None:
-                build_result = _run_build(project_dir)
-                _summary_build = build_result.passed
-                if not build_result.passed:
-                    notify(
-                        f"Build failed at stage boundary ({build_result.command})",
-                        level="error",
-                    )
-                    terminal_failure = f"Build failed at stage boundary: {build_result.command}"
-
-            if terminal_failure is None:
-                completed_stage = done_stage
-                if stopped_early == "stage":
-                    msg = f"Stopped after stage as requested ({done_stage} complete)."
-                else:
-                    msg = f"{done_stage} complete."
-                if next_stg:
-                    msg += f" Run mcloop again to start {next_stg}."
-                success_msg = msg
-
+        phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
+        if stopped_early == "stage" or phase_done_more_remain:
+            # Phase completed, full suite + build already ran in-loop.
+            summary_remaining_tasks = parse(bugs_path) + parse(current_plan_path)
+            _summary_full_suite = True  # Passed in-loop (otherwise terminal_failure would be set)
+            _summary_build = True
+            msg = f"{completed_stage} complete."
+            next_stg = get_current_phase_name(current_plan_path) if current_plan_path.exists() else None
+            if next_stg:
+                msg += f" Run mcloop again to start {next_stg}."
+            success_msg = msg
         else:
-            # Normal end of run (not a stage boundary)
-            summary_remaining_tasks = parse(checklist_path)
-            print(
-                formatting.system_msg("Running full test suite (end of run)..."),
-                flush=True,
-            )
-            _full_suite_start = time.monotonic()
-            full_check = run_checks(project_dir)
-            _full_suite_elapsed = _format_elapsed(time.monotonic() - _full_suite_start)
-            _summary_full_suite = full_check.passed
-            check_entries.append(
-                CheckEntry(
-                    command=full_check.command or "full-suite",
-                    passed=full_check.passed,
-                    elapsed=round(time.monotonic() - _full_suite_start, 2),
-                )
-            )
-            if not full_check.passed:
-                print(
-                    formatting.error_msg(
-                        f"Full suite failed at end of run: "
-                        f"{full_check.command} [{_full_suite_elapsed}]"
-                    ),
-                    flush=True,
-                )
-                _print_error_tail(full_check.output)
-                notify(
-                    "Run ended with red repo: full suite failed"
-                    f" at end of run ({full_check.command})",
-                    level="error",
-                )
-                terminal_failure = f"Full suite failed at end of run: {full_check.command}"
-            else:
-                print(
-                    formatting.system_msg(f"Full test suite passed [{_full_suite_elapsed}]"),
-                    flush=True,
-                )
+            # All phases done. Full suite + build already ran at last
+            # phase boundary. Run audit.
+            summary_remaining_tasks = parse(bugs_path) + parse(current_plan_path) if current_plan_path.exists() else parse(bugs_path)
+            _summary_full_suite = True
+            _summary_build = True
 
-            # Audit: only if every task in every stage is complete
-            if terminal_failure is None:
-                final_for_audit = parse(checklist_path)
+            # Audit: run if enabled
+            if not no_audit:
+                from mcloop.audit import AuditResult
 
-                def _any_unchecked(task_list: list[Task]) -> bool:
-                    for t in task_list:
-                        if not t.checked and not t.failed:
-                            return True
-                        if _any_unchecked(t.children):
-                            return True
-                    return False
-
-                has_unchecked = _any_unchecked(final_for_audit)
-                if has_unchecked:
+                _lifecycle._current_phase = "audit"
+                _lifecycle._phase_start_time = time.monotonic()
+                _audit_start = time.monotonic()
+                audit_result = _run_audit_fix_cycle(
+                    project_dir,
+                    log_dir,
+                    model=model,
+                )
+                _summary_audit = audit_result.value
+                _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
+                if audit_result == AuditResult.fixed:
+                    _audit_hash = _get_git_hash(project_dir)
+                    if _audit_hash:
+                        commit_hashes.append(_audit_hash)
+                if audit_result == AuditResult.failed:
                     print(
-                        formatting.system_msg("Audit skipped (unchecked tasks remain)"),
+                        formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
                         flush=True,
                     )
-                    _summary_audit = "skipped"
-                elif not no_audit:
-                    from mcloop.audit import AuditResult
-
-                    _lifecycle._current_phase = "audit"
-                    _lifecycle._phase_start_time = time.monotonic()
-                    _audit_start = time.monotonic()
-                    audit_result = _run_audit_fix_cycle(
-                        project_dir,
-                        log_dir,
-                        model=model,
-                    )
-                    _summary_audit = audit_result.value
-                    _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)
-                    # Capture audit fix commit hash if bugs were fixed
-                    if audit_result == AuditResult.fixed:
-                        _audit_hash = _get_git_hash(project_dir)
-                        if _audit_hash:
-                            commit_hashes.append(_audit_hash)
-                    if audit_result == AuditResult.failed:
-                        print(
-                            formatting.error_msg(f"Audit failed [{_audit_elapsed}]"),
-                            flush=True,
-                        )
-                        notify(
-                            "Run ended: audit session failed (crashed, timed out,"
-                            " or BUGS.md not produced). Build and completion skipped.",
-                            level="error",
-                        )
-                        terminal_failure = "Audit failed: session crashed or BUGS.md not produced"
-                    else:
-                        print(
-                            formatting.system_msg(f"Audit completed [{_audit_elapsed}]"),
-                            flush=True,
-                        )
-
-            if terminal_failure is None:
-                build_result = _run_build(project_dir)
-                _summary_build = build_result.passed
-                if not build_result.passed:
                     notify(
-                        f"Build failed at end of run ({build_result.command})",
+                        "Run ended: audit session failed (crashed, timed out,"
+                        " or audit report not produced). Completion skipped.",
                         level="error",
                     )
-                    terminal_failure = f"Build failed at end of run: {build_result.command}"
+                    terminal_failure = "Audit failed: session crashed or audit report not produced"
+                else:
+                    print(
+                        formatting.system_msg(f"Audit completed [{_audit_elapsed}]"),
+                        flush=True,
+                    )
 
             if terminal_failure is None:
                 success_msg = "All tasks completed!"
     else:
         # Task/commit failure: show remaining tasks in summary
-        summary_remaining_tasks = parse(checklist_path)
+        summary_remaining_tasks = parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else [])
 
     # --- Single exit point for all non-bug-only paths ---
     total = time.monotonic() - run_start
-    _stop_reason = success_msg if stopped_early == "stage" and success_msg else ""
+    _phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
+    _stop_reason = (
+        success_msg
+        if (stopped_early == "stage" or _phase_done_more_remain) and success_msg
+        else ""
+    )
     _print_summary(
         completed,
         failed_task,
@@ -1586,7 +1572,7 @@ def _parse_args() -> argparse.Namespace:
     sync_parser.add_argument(
         "--dry-run", action="store_true", help="Show changes without modifying PLAN.md"
     )
-    subparsers.add_parser("audit", help="Audit the codebase and write BUGS.md")
+    subparsers.add_parser("audit", help="Audit the codebase for bugs")
     subparsers.add_parser("wrap", help="Instrument source files with error-catching hooks")
     install_parser = subparsers.add_parser("install", help="Install mcloop into the project")
     install_parser.add_argument(
@@ -1621,22 +1607,24 @@ def _cmd_wrap(project_dir: Path) -> None:
 
 
 def _cmd_audit(checklist_path: Path, model: str | None = None) -> None:
-    """Launch a Claude Code session to audit the codebase and write BUGS.md."""
+    """Launch a Claude Code session to audit the codebase."""
+    from mcloop.audit import AUDIT_REPORT_FILE
+
     project_dir = checklist_path.parent
     _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     log_dir = project_dir / "logs"
-    bugs_path = project_dir / "BUGS.md"
-    existing = bugs_path.read_text() if bugs_path.exists() else ""
+    report_path = project_dir / AUDIT_REPORT_FILE
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = report_path.read_text() if report_path.exists() else ""
     result = run_audit(project_dir, log_dir, model=model, existing_bugs=existing)
     if not result.success:
         print(f"audit: session exited with code {result.exit_code}", file=sys.stderr)
         sys.exit(result.exit_code)
-    bugs_path = project_dir / "BUGS.md"
-    if bugs_path.exists():
-        print(bugs_path.read_text())
+    if report_path.exists():
+        print(report_path.read_text())
     else:
-        print("audit: BUGS.md was not written", file=sys.stderr)
+        print("audit: audit report was not written", file=sys.stderr)
 
 
 def _cmd_maintain(

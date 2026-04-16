@@ -134,7 +134,8 @@ def _collect_review_findings(
             for item in high_errors:
                 desc = item.get("description", "")
                 tasks.append(f"- [ ] Fix review finding from commit {commit[:8]}: {desc}")
-            _insert_bugs_section(checklist_path, tasks)
+            bugs_path = project_dir / "BUGS.md"
+            _insert_bugs_section(bugs_path, tasks)
             print(
                 formatting.system_msg(
                     f"Reviewer: {len(high_errors)} critical findings"

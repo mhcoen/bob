@@ -215,69 +215,31 @@ def _check_errors_json(
     except OSError:
         pass
 
-    # Insert tasks under ## Bugs section
-    _insert_bugs_section(plan_path, task_lines)
+    # Insert tasks into BUGS.md
+    bugs_path = project_dir / "BUGS.md"
+    _insert_bugs_section(bugs_path, task_lines)
 
     print(
-        formatting.system_msg(f"Added {len(resolvable)} fix task(s) to PLAN.md"),
+        formatting.system_msg(f"Added {len(resolvable)} fix task(s) to BUGS.md"),
         flush=True,
     )
     return True
 
 
-def _insert_bugs_section(plan_path: Path, task_lines: list[str]) -> None:
-    """Insert tasks into a ``## Bugs`` section of PLAN.md.
+def _insert_bugs_section(bugs_path: Path, task_lines: list[str]) -> None:
+    """Append tasks to BUGS.md.
 
-    If a ``## Bugs`` section already exists, appends tasks to it.
-    Otherwise, inserts a new section before the first ``## Stage``
-    header or the first checkbox line.
+    Creates the file with a ``## Bugs`` header if it does not exist.
+    Appends new tasks after any existing content.
     """
-    import re as _re
-
-    plan_text = plan_path.read_text()
-    lines = plan_text.splitlines(keepends=True)
     task_block = "\n".join(task_lines) + "\n"
 
-    # Check if ## Bugs section already exists
-    bugs_header_re = _re.compile(r"^##\s+Bugs\s*$", _re.IGNORECASE)
-    stage_header_re = _re.compile(r"^##\s+Stage\s+\d+", _re.IGNORECASE)
-    bugs_idx = None
-    for idx, raw_line in enumerate(lines):
-        if bugs_header_re.match(raw_line.strip()):
-            bugs_idx = idx
-            break
-
-    if bugs_idx is not None:
-        # Find end of Bugs section (next ## header or end of file)
-        insert_at = len(lines)
-        for idx in range(bugs_idx + 1, len(lines)):
-            if lines[idx].strip().startswith("## "):
-                insert_at = idx
-                break
-        lines.insert(insert_at, task_block)
-        plan_path.write_text("".join(lines))
+    if not bugs_path.exists():
+        bugs_path.write_text("## Bugs\n\n" + task_block)
         return
 
-    # No existing ## Bugs section — create one
-    bugs_section = f"## Bugs\n\n{task_block}\n"
-
-    # Insert before the first ## Stage header
-    for idx, raw_line in enumerate(lines):
-        if stage_header_re.match(raw_line.strip()):
-            lines.insert(idx, bugs_section)
-            plan_path.write_text("".join(lines))
-            return
-
-    # No stage headers — insert before the first checkbox
-    from mcloop.checklist import CHECKBOX_RE
-
-    for idx, raw_line in enumerate(lines):
-        if CHECKBOX_RE.match(raw_line):
-            lines.insert(idx, bugs_section)
-            plan_path.write_text("".join(lines))
-            return
-
-    # No checkboxes — append to end
-    if not plan_text.endswith("\n"):
-        plan_text += "\n"
-    plan_path.write_text(plan_text + bugs_section)
+    content = bugs_path.read_text()
+    if not content.endswith("\n"):
+        content += "\n"
+    content += task_block
+    bugs_path.write_text(content)

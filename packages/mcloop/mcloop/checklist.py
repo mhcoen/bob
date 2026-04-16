@@ -656,35 +656,24 @@ def parse_auto_task(task: Task) -> tuple[str, str]:
 
 
 def purge_completed_bugs(path: str | Path) -> None:
-    """Remove all checked-off items from the ## Bugs section.
+    """Remove all checked-off items from BUGS.md.
 
     Called after the last open bug is completed. Bug tasks are
-    generated noise from the reviewer, not design decisions
-    worth preserving.
+    generated noise from the reviewer or crash diagnostics, not
+    design decisions worth preserving.
+
+    Works for both standalone BUGS.md (entire file is bugs) and
+    legacy plans with an inline ``## Bugs`` section.
     """
     p = Path(path)
     lines = p.read_text().splitlines()
-    bugs_start = None
-    bugs_end = len(lines)
 
-    for i, line in enumerate(lines):
-        if BUGS_RE.match(line.strip()):
-            bugs_start = i
-        elif bugs_start is not None and (STAGE_RE.match(line) or BUGS_RE.match(line.strip())):
-            bugs_end = i
-            break
-
-    if bugs_start is None:
-        return
-
-    # Keep lines that are not checked-off tasks
-    new_lines = lines[: bugs_start + 1]
-    for line in lines[bugs_start + 1 : bugs_end]:
+    new_lines: list[str] = []
+    for line in lines:
         m = CHECKBOX_RE.match(line)
         if m and m.group(2) in ("x", "X"):
             continue
         new_lines.append(line)
-    new_lines.extend(lines[bugs_end:])
 
     p.write_text("\n".join(new_lines) + "\n")
 

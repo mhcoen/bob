@@ -134,7 +134,7 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
 
     if existing_bugs:
         parts.append(
-            "IMPORTANT: BUGS.md already exists with "
+            "IMPORTANT: .mcloop/audit-report.md already exists with "
             "previously reported bugs. Read it first. "
             "Do NOT report any bug that is already "
             "listed. Only add NEW findings that are not "
@@ -144,7 +144,7 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
         )
 
     parts.append(
-        "Write your findings to BUGS.md in this exact "
+        "Write your findings to .mcloop/audit-report.md in this exact "
         "format:\n"
         "# Bugs\n\n"
         "## <file>:<line> -- <short title>\n"
@@ -155,15 +155,15 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
 
     if existing_bugs:
         parts.append(
-            "Since BUGS.md already exists, keep its "
+            "Since .mcloop/audit-report.md already exists, keep its "
             "existing content and append any new bugs "
             "after the last entry. If you find no new "
             "bugs beyond what is already listed, do not "
-            "modify BUGS.md.\n"
+            "modify .mcloop/audit-report.md.\n"
         )
     else:
         parts.append(
-            "If no bugs are found, write BUGS.md containing only:\n# Bugs\n\nNo bugs found.\n"
+            "If no bugs are found, write .mcloop/audit-report.md containing only:\n# Bugs\n\nNo bugs found.\n"
         )
 
     return "\n".join(parts)
@@ -173,12 +173,12 @@ def build_bug_fix_prompt() -> str:
     """Build the prompt for the bug fix Claude session."""
 
     return (
-        "Read BUGS.md in this project. Fix ONLY the bugs "
+        "Read .mcloop/audit-report.md in this project. Fix ONLY the bugs "
         "listed there. Do not refactor, reformat, or "
         "change anything else. Each bug entry includes a "
         "file, line number, and description. Fix each bug "
         "with a minimal targeted change.\n\n"
-        "Do not delete BUGS.md. It will be deleted "
+        "Do not delete .mcloop/audit-report.md. It will be deleted "
         "automatically after this session."
     )
 
