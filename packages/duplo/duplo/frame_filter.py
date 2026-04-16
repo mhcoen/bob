@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
-from duplo.parsing import extract_json
+from duplo.parsing import extract_all_json, extract_json
 
 _SYSTEM = """\
 You are a UI screenshot quality filter. Given a batch of video frames,
@@ -80,24 +80,38 @@ def _filter_batch(frames: list[Path]) -> list[FilterDecision]:
     return _parse_decisions(raw, frames)
 
 
+def _find_decisions_object(raw: str) -> dict | None:
+    """Find a JSON object with a ``decisions`` list in *raw*."""
+    text = extract_json(raw)
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and isinstance(data.get("decisions"), list):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    for candidate in extract_all_json(raw):
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("decisions"), list):
+            return data
+
+    return None
+
+
 def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
     """Parse the JSON response into FilterDecision objects.
 
     Falls back to keeping all frames if parsing fails.
     """
-    text = extract_json(raw)
+    data = _find_decisions_object(raw)
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    if data is None:
         return [FilterDecision(path=f, keep=True, reason="parse error") for f in frames]
 
-    if not isinstance(data, dict):
-        return [FilterDecision(path=f, keep=True, reason="parse error") for f in frames]
-
-    raw_decisions = data.get("decisions", [])
-    if not isinstance(raw_decisions, list):
-        return [FilterDecision(path=f, keep=True, reason="parse error") for f in frames]
+    raw_decisions = data["decisions"]
 
     # Build a lookup by index.
     by_index: dict[int, dict] = {}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from duplo.parsing import extract_json, strip_fences
 
 
@@ -52,3 +54,37 @@ def test_extract_json_no_json():
 def test_extract_json_prefers_fenced_over_scan():
     raw = '```json\n{"a": 1}\n```\n\n{"b": 2}'
     assert extract_json(raw) == '{"a": 1}'
+
+
+def test_extract_json_multiple_objects():
+    """When output contains multiple JSON objects (e.g. tool-use metadata
+    followed by the actual response), return the first valid one."""
+    raw = (
+        '{"type": "tool_use", "name": "Read"}\n'
+        '{"descriptions": [{"index": 0, "state": "Main", "detail": "ok"}]}\n'
+    )
+    result = extract_json(raw)
+    # Should return the first valid JSON object, not span first-{ to last-}.
+    parsed = json.loads(result)
+    assert isinstance(parsed, dict)
+    assert "type" in parsed or "descriptions" in parsed
+
+
+def test_extract_json_multiple_objects_with_prose():
+    """Multiple JSON objects interleaved with prose text."""
+    raw = (
+        "Tool result:\n"
+        '{"status": "ok"}\n'
+        "Analysis complete.\n"
+        '{"descriptions": [{"index": 0, "state": "Login", "detail": "Form"}]}\n'
+        "Done."
+    )
+    result = extract_json(raw)
+    parsed = json.loads(result)
+    assert isinstance(parsed, dict)
+
+
+def test_extract_json_braces_in_strings():
+    """Braces inside JSON string values should not confuse the parser."""
+    raw = '{"key": "value with { and } inside"}'
+    assert extract_json(raw) == raw

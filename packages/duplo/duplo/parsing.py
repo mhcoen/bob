@@ -41,19 +41,77 @@ def extract_json(text: str) -> str:
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Find outermost JSON object or array.
+    # Find balanced JSON objects/arrays by brace-counting.
+    # This handles output with multiple JSON objects (e.g. tool-use
+    # metadata interleaved with the actual response).
     for open_ch, close_ch in (("{", "}"), ("[", "]")):
-        start = text.find(open_ch)
-        if start == -1:
-            continue
-        end = text.rfind(close_ch)
-        if end <= start:
-            continue
-        candidate = text[start : end + 1]
-        try:
-            json.loads(candidate)
-            return candidate
-        except (json.JSONDecodeError, ValueError):
-            continue
+        for candidate in _balanced_spans(text, open_ch, close_ch):
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                continue
 
     return text
+
+
+def extract_all_json(text: str) -> list[str]:
+    """Extract all valid JSON objects and arrays from *text*.
+
+    Returns a list of JSON-parseable strings found via balanced-brace
+    scanning.  Useful when output contains multiple JSON objects (e.g.
+    tool-use metadata interleaved with the response).
+    """
+    results: list[str] = []
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        for candidate in _balanced_spans(text, open_ch, close_ch):
+            try:
+                json.loads(candidate)
+                results.append(candidate)
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return results
+
+
+def _balanced_spans(text: str, open_ch: str, close_ch: str) -> list[str]:
+    """Yield substrings of *text* that are balanced ``open_ch…close_ch`` spans.
+
+    Skips characters inside JSON string literals so that braces within
+    strings don't confuse the count.
+    """
+    spans: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == open_ch:
+            depth = 0
+            in_string = False
+            escape = False
+            start = i
+            for j in range(i, len(text)):
+                ch = text[j]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    if in_string:
+                        escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == open_ch:
+                    depth += 1
+                elif ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        spans.append(text[start : j + 1])
+                        i = j + 1
+                        break
+            else:
+                # Unbalanced — skip this opening brace.
+                i += 1
+        else:
+            i += 1
+    return spans

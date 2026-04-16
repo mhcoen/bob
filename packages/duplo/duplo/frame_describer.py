@@ -8,7 +8,7 @@ from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
 from duplo.diagnostics import record_failure
-from duplo.parsing import extract_json
+from duplo.parsing import extract_all_json, extract_json
 
 _SYSTEM = """\
 You are a UI analyst. Given a batch of application screenshots, describe
@@ -77,42 +77,53 @@ def _describe_batch(frames: list[Path]) -> list[FrameDescription]:
     return _parse_descriptions(raw, frames)
 
 
+def _find_descriptions_object(raw: str) -> dict | None:
+    """Find a JSON object with a ``descriptions`` list in *raw*.
+
+    Tries ``extract_json`` first (fast path for clean output), then
+    falls back to scanning all JSON objects in the text.
+    """
+    text = extract_json(raw)
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and isinstance(data.get("descriptions"), list):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Scan all JSON objects for one with "descriptions".
+    for candidate in extract_all_json(raw):
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("descriptions"), list):
+            return data
+
+    return None
+
+
 def _parse_descriptions(raw: str, frames: list[Path]) -> list[FrameDescription]:
     """Parse the JSON response into FrameDescription objects.
 
     Falls back to "unknown" state if parsing fails.
     """
-    text = extract_json(raw)
+    # Try extract_json first (handles fences + single-object prose).
+    # If that doesn't yield a dict with "descriptions", scan all JSON
+    # objects in the raw output (handles tool-use metadata interleaved
+    # with the response).
+    data = _find_descriptions_object(raw)
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    if data is None:
         record_failure(
             "frame_describer:_parse_descriptions",
             "llm",
-            "json.loads failed after extract_json",
-            context={"raw_response": raw[:2000], "extracted": text[:2000]},
+            "no JSON object with 'descriptions' list found",
+            context={"raw_response": raw[:2000]},
         )
         return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
 
-    if not isinstance(data, dict):
-        record_failure(
-            "frame_describer:_parse_descriptions",
-            "llm",
-            f"parsed JSON is {type(data).__name__}, not dict",
-            context={"raw_response": raw[:2000], "parsed_type": type(data).__name__},
-        )
-        return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
-
-    raw_descs = data.get("descriptions", [])
-    if not isinstance(raw_descs, list):
-        record_failure(
-            "frame_describer:_parse_descriptions",
-            "llm",
-            f"descriptions field is {type(raw_descs).__name__}, not list",
-            context={"raw_response": raw[:2000], "data_keys": list(data.keys())},
-        )
-        return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
+    raw_descs = data["descriptions"]
 
     # Build a lookup by index.
     by_index: dict[int, dict] = {}

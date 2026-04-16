@@ -145,3 +145,20 @@ def test_describe_frames_api_error_returns_unknown(tmp_path):
         result = describe_frames(frames)
     assert len(result) == 1
     assert result[0].state == "unknown"
+
+
+def test_parse_descriptions_multi_object_tool_output(tmp_path):
+    """Simulates claude -p --tools Read output with tool-use JSON before the response."""
+    frames = [tmp_path / "a.png", tmp_path / "b.png"]
+    raw = (
+        '{"type": "tool_use", "name": "Read", "input": {"path": "/img/a.png"}}\n'
+        '{"type": "tool_result", "content": "image data"}\n'
+        '{"descriptions": ['
+        '{"index": 0, "state": "Settings", "detail": "Prefs panel"},'
+        '{"index": 1, "state": "Home", "detail": "Main screen"}'
+        "]}"
+    )
+    result = _parse_descriptions(raw, frames)
+    assert len(result) == 2
+    assert result[0].state == "Settings"
+    assert result[1].state == "Home"
