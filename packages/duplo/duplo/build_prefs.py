@@ -18,7 +18,7 @@ import json
 
 from duplo.claude_cli import ClaudeCliError, query
 from duplo.diagnostics import record_failure
-from duplo.parsing import strip_fences
+from duplo.parsing import extract_json
 from duplo.questioner import BuildPreferences
 
 _SYSTEM = """\
@@ -94,16 +94,8 @@ def architecture_hash(architecture_prose: str) -> str:
 
 def _parse_response(raw: str) -> BuildPreferences:
     """Parse the LLM JSON response into a BuildPreferences."""
-    text = strip_fences(raw)
-
-    # Try to extract a JSON object if there is surrounding text.
-    brace_start = text.find("{")
-    brace_end = text.rfind("}")
-    if brace_start != -1 and brace_end > brace_start:
-        text = text[brace_start : brace_end + 1]
-
     try:
-        data = json.loads(text)
+        data = json.loads(extract_json(raw))
     except (json.JSONDecodeError, ValueError):
         record_failure(
             "build_prefs:_parse_response",
