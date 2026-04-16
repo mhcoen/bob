@@ -1,6 +1,0 @@
-{
-  "input": "test",
-  "expected_output": "output",
-  "source_url": "http://test",
-  "language": "python"
-}

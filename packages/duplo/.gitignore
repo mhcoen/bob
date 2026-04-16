@@ -15,6 +15,7 @@ logs/
 \#*\#
 .#*
 CLAUDE.md
+.duplo/
 .mcloop/
 .mcloop-last-audit
 BUGS.md
