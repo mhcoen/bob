@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mcloop.claude_md_check import SyncResult, auto_update_claude_md, check_claude_md_freshness
-from mcloop.git_ops import _changed_files, _commit
+from mcloop.git_ops import _commit, _committed_files
 from mcloop.notify import notify
 
 _PENDING_FILENAME = "claude_md_pending.json"
@@ -31,11 +31,12 @@ def handle_sync(
     Returns the SyncResult from auto_update_claude_md, or NO_WORK if
     CLAUDE.md was already fresh.
     """
-    changed = _changed_files(project_dir)
+    sha = commit_sha if isinstance(commit_sha, str) else ""
+    changed = _committed_files(project_dir, sha) if sha else []
     if check_claude_md_freshness(changed, project_dir):
         return SyncResult.NO_WORK
 
-    result = auto_update_claude_md(project_dir)
+    result = auto_update_claude_md(project_dir, sha)
 
     if result is SyncResult.TRANSIENT_FAILED:
         pending = _pending_path(project_dir)
@@ -92,7 +93,7 @@ def reconcile_pending(project_dir: Path) -> None:
     short_sha = commit_sha[:7] if commit_sha else "unknown"
     print(f"  Reconciling deferred CLAUDE.md sync for {short_sha}...", flush=True)
 
-    result = auto_update_claude_md(project_dir)
+    result = auto_update_claude_md(project_dir, commit_sha)
 
     if result is SyncResult.OK:
         # Commit the CLAUDE.md update.

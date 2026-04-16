@@ -106,8 +106,17 @@ def check_claude_md_freshness(
     return has_claude_md
 
 
-def _get_diff_text(project_dir: Path) -> str:
-    """Return the combined diff of staged and unstaged changes."""
+def _get_diff_text(project_dir: Path, commit_sha: str = "") -> str:
+    """Return the diff to feed to the CLAUDE.md update LLM.
+
+    When *commit_sha* is provided, returns the diff of that commit
+    (for post-commit sync).  Otherwise falls back to uncommitted changes.
+    """
+    if commit_sha:
+        from mcloop.git_ops import _get_committed_diff
+
+        return _get_committed_diff(project_dir, commit_sha)
+
     from mcloop.git_ops import _get_diff
 
     return _get_diff(project_dir)
@@ -251,11 +260,14 @@ def _call_sonnet_fallback(user_msg: str) -> str | None:
     return content
 
 
-def auto_update_claude_md(project_dir: Path) -> SyncResult:
+def auto_update_claude_md(project_dir: Path, commit_sha: str = "") -> SyncResult:
     """Auto-update CLAUDE.md using a cheap LLM call with fallback.
 
     Tries DeepSeek via OpenRouter twice (with 5s sleep between attempts),
     then falls back to Claude Sonnet via ``claude -p`` subprocess.
+
+    When *commit_sha* is provided, uses the committed diff instead of
+    uncommitted working-tree changes.
 
     Returns a :class:`SyncResult` indicating the outcome.
     """
@@ -269,7 +281,7 @@ def auto_update_claude_md(project_dir: Path) -> SyncResult:
     if not config["base_url"] or not config["model"]:
         return SyncResult.PERMANENT_FAILED
 
-    diff_text = _get_diff_text(project_dir)
+    diff_text = _get_diff_text(project_dir, commit_sha)
     if not diff_text:
         return SyncResult.NO_WORK
 

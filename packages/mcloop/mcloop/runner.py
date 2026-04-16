@@ -142,64 +142,6 @@ def _build_session_env(
     return env
 
 
-# Commands to probe rtk rewrite with at prompt build time.
-# If rtk rewrites them, the agent should use the rewritten form.
-# If not, the agent should use rtk proxy.
-_RTK_PROBE_COMMANDS = [
-    "pytest",
-    "ruff check .",
-    "cargo test",
-    "cargo build",
-    "go test ./...",
-    "go build ./...",
-    "mypy .",
-    "pip list",
-    "git status",
-    "git diff",
-]
-
-
-def _build_rtk_instruction() -> str | None:
-    """Build an RTK instruction by probing rtk rewrite for each command.
-
-    Returns a prompt string listing the correct rtk invocation for
-    each command, or None if rtk is not available.
-    """
-    rewrites = []
-    for cmd in _RTK_PROBE_COMMANDS:
-        try:
-            result = subprocess.run(
-                ["rtk", "rewrite", cmd],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                rewrites.append((cmd, result.stdout.strip()))
-        except Exception:
-            pass
-    if not rewrites:
-        return None
-    lines = []
-    for original, rewritten in rewrites:
-        lines.append(f"  {original} [args] -> {rewritten} [args]")
-    mapping = "\n".join(lines)
-    return (
-        "IMPORTANT: `rtk` is installed and compresses tool output"
-        " to save tokens. Always prefix these commands with their"
-        " rtk equivalent, passing all arguments through:\n"
-        + mapping
-        + "\n\nFor example: `pytest tests/ -x -q` becomes"
-        " `rtk pytest tests/ -x -q`."
-        "\n\nFor tools not listed above, use `rtk proxy <command>`"
-        " (tracks usage, no compression)."
-        " Example: `rtk proxy swift build --disable-sandbox`."
-        "\nDo NOT prefix: cat, ls, head, echo, cd, mkdir, cp, mv, rm."
-        "\nSkip rtk only when debugging a failure and you need"
-        " full uncompressed output."
-    )
-
-
 def _build_shared_parts(
     task_text: str,
     task_label: str,

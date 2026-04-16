@@ -382,6 +382,35 @@ def _changed_files(project_dir: Path) -> list[str]:
     return files
 
 
+def _committed_files(project_dir: Path, commit_sha: str) -> list[str]:
+    """Return list of files changed in *commit_sha*, excluding logs and metadata."""
+    result = _git(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
+        cwd=project_dir,
+        label="committed files",
+        silent=True,
+    )
+    if result.returncode != 0:
+        return []
+    files = []
+    for f in result.stdout.strip().splitlines():
+        f = f.strip()
+        if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md":
+            files.append(f)
+    return files
+
+
+def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
+    """Return the diff introduced by *commit_sha*."""
+    result = _git(
+        ["git", "diff", f"{commit_sha}~1", commit_sha],
+        cwd=project_dir,
+        label="committed diff",
+        silent=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     """Snapshot modified and untracked files in the working tree.
 
