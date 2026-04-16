@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from duplo.claude_cli import ClaudeCliError, query
 from duplo.diagnostics import record_failure
-from duplo.parsing import strip_fences
+from duplo.parsing import extract_json
 
 _SYSTEM = """\
 You are a product analyst. Given text from product sources (websites,
@@ -173,10 +173,8 @@ def _parse_features(raw: str) -> list[Feature]:
     Tolerates markdown code fences (``` or ```json) wrapping the JSON.
     Returns an empty list if parsing fails.
     """
-    text = strip_fences(raw)
-
     try:
-        data = json.loads(text)
+        data = json.loads(extract_json(raw))
     except json.JSONDecodeError:
         return []
 
