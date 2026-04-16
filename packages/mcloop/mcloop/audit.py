@@ -88,7 +88,7 @@ def _run_audit_fix_cycle(
     max_rounds = 2
     for round_num in range(1, max_rounds + 1):
         print(
-            formatting.system_msg(f"Audit round {round_num}/{max_rounds}"),
+            formatting.system_msg(f"Audit round {round_num}"),
             flush=True,
         )
         round_result = _run_single_audit_round(
