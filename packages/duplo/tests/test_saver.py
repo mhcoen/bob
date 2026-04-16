@@ -1386,6 +1386,96 @@ class TestDeriveAppName:
         result = derive_app_name(spec, tmp_path)
         assert result == tmp_path.resolve().name
 
+    def test_duplo_json_app_name_used_when_product_json_empty(self, tmp_path):
+        """duplo.json app_name is used when product.json has no app_name."""
+        from duplo.spec_reader import ProductSpec
+
+        # product.json exists with empty product_name, no app_name.
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps({"product_name": "", "source_url": "https://numi.app"}) + "\n",
+            encoding="utf-8",
+        )
+        # duplo.json has app_name from save_selections.
+        (tmp_path / DUPLO_JSON).write_text(
+            json.dumps({"app_name": "Numi"}) + "\n",
+            encoding="utf-8",
+        )
+
+        result = derive_app_name(ProductSpec(), tmp_path)
+        assert result == "Numi"
+
+    def test_product_name_synced_when_empty(self, tmp_path):
+        """product_name in product.json is populated when empty."""
+        from duplo.spec_reader import ProductSpec
+
+        # product.json with empty product_name.
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps({"product_name": "", "source_url": "https://numi.app"}) + "\n",
+            encoding="utf-8",
+        )
+        # duplo.json has app_name.
+        (tmp_path / DUPLO_JSON).write_text(
+            json.dumps({"app_name": "Numi"}) + "\n",
+            encoding="utf-8",
+        )
+
+        derive_app_name(ProductSpec(), tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == "Numi"
+
+    def test_existing_product_name_not_overwritten(self, tmp_path):
+        """Non-empty product_name in product.json is preserved."""
+        from duplo.spec_reader import ProductSpec
+
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps(
+                {
+                    "product_name": "User Custom Name",
+                    "source_url": "https://numi.app",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (tmp_path / DUPLO_JSON).write_text(
+            json.dumps({"app_name": "Numi"}) + "\n",
+            encoding="utf-8",
+        )
+
+        derive_app_name(ProductSpec(), tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == "User Custom Name"
+
+    def test_app_name_in_product_json_syncs_product_name(self, tmp_path):
+        """When product.json has app_name but empty product_name, product_name is synced."""
+        (tmp_path / ".duplo").mkdir(parents=True)
+        (tmp_path / PRODUCT_JSON).write_text(
+            json.dumps(
+                {
+                    "product_name": "",
+                    "source_url": "https://numi.app",
+                    "app_name": "My App",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = derive_app_name(None, tmp_path)
+        assert result == "My App"
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == "My App"
+
+    def test_directory_name_populates_product_name(self, tmp_path):
+        """Directory-name fallback also populates product_name."""
+        derive_app_name(None, tmp_path)
+        data = json.loads((tmp_path / PRODUCT_JSON).read_text())
+        assert data["product_name"] == tmp_path.resolve().name
+        assert data["app_name"] == tmp_path.resolve().name
+
 
 class TestSaveFeatures:
     """Tests for save_features() merge behaviour."""

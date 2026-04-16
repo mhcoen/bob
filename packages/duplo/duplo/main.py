@@ -281,6 +281,7 @@ from duplo.saver import (
     advance_phase,
     append_phase_to_history,
     append_to_bugs_section,
+    derive_app_name,
     get_current_phase,
     load_examples,
     load_product,
@@ -1926,7 +1927,7 @@ def _subsequent_run() -> None:
         if spec_url:
             saved = load_product()
             if not saved or saved[1] != spec_url:
-                pname = saved[0] if saved else ""
+                pname = saved[0] if saved else derive_app_name(spec)
                 save_product(pname, spec_url)
     else:
         pages, examples, scraped_text = _rescrape_product_url(spec=spec)
@@ -2102,7 +2103,7 @@ def _subsequent_run() -> None:
     except json.JSONDecodeError:
         print(f"Error: {duplo_path} contains invalid JSON. Delete or fix it.")
         return
-    app_name = data.get("app_name", "")
+    app_name = derive_app_name(spec)
 
     plan_path = Path("PLAN.md")
 
@@ -2218,7 +2219,7 @@ def _subsequent_run() -> None:
         features,
         preferences,
         phase=phase_info,
-        project_name=data.get("app_name", ""),
+        project_name=app_name,
         design_section=design_section,
         phase_number=history_phase_number,
         spec_text=spec_prompt,

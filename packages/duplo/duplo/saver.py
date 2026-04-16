@@ -96,13 +96,17 @@ def derive_app_name(
 
     1. If ``.duplo/product.json`` already contains an ``app_name`` key
        with a non-empty value, return it unchanged (preserves user edits).
-    2. If *spec* has ``## Sources`` with a ``product-reference`` URL,
+    2. If ``duplo.json`` has a non-empty ``app_name`` (set during the
+       first run via ``save_selections``), use that.
+    3. If *spec* has ``## Sources`` with a ``product-reference`` URL,
        use the ``product_name`` stored in ``product.json`` (set by the
        validator during the first run).
-    3. Fall back to the project directory name.
+    4. Fall back to the project directory name.
 
     The result is saved back to ``product.json`` under ``app_name`` so
-    subsequent runs reuse it.
+    subsequent runs reuse it.  If ``product_name`` in ``product.json``
+    is empty, it is also populated with the resolved name so that
+    ``product.json`` stays in sync with the PLAN.md heading.
     """
     from duplo.spec_reader import ProductSpec
 
@@ -118,22 +122,38 @@ def derive_app_name(
     # 1. Existing app_name in product.json — user may have edited it.
     existing = data.get("app_name", "")
     if existing:
+        # Still sync product_name if empty.
+        if not data.get("product_name"):
+            data["product_name"] = existing
+            _ensure_duplo_dir(target_dir)
+            path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         return existing
 
     app_name = ""
 
-    # 2. Product-reference URL → use validated product_name.
-    if isinstance(spec, ProductSpec) and spec.sources:
+    # 2. duplo.json app_name (set during first run via save_selections).
+    duplo_path = (td / DUPLO_JSON).resolve()
+    if duplo_path.exists():
+        try:
+            duplo_data = json.loads(duplo_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            duplo_data = {}
+        app_name = duplo_data.get("app_name", "")
+
+    # 3. Product-reference URL → use validated product_name.
+    if not app_name and isinstance(spec, ProductSpec) and spec.sources:
         has_product_ref = any(s.role == "product-reference" for s in spec.sources)
         if has_product_ref:
             app_name = data.get("product_name", "")
 
-    # 3. Fallback: directory name.
+    # 4. Fallback: directory name.
     if not app_name:
         app_name = td.resolve().name
 
     # Persist so subsequent runs find it.
     data["app_name"] = app_name
+    if not data.get("product_name"):
+        data["product_name"] = app_name
     _ensure_duplo_dir(target_dir)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
