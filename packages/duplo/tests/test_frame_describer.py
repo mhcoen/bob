@@ -51,6 +51,22 @@ def test_parse_descriptions_with_code_fences(tmp_path):
     assert result[0].state == "Login"
 
 
+def test_parse_descriptions_json_wrapped_in_prose(tmp_path):
+    frames = [tmp_path / "a.png", tmp_path / "b.png"]
+    raw = (
+        "Here are the descriptions for each frame:\n\n"
+        '{"descriptions": ['
+        '{"index": 0, "state": "Settings panel", "detail": "Theme toggle"},'
+        '{"index": 1, "state": "Main view", "detail": "Dashboard with cards"}'
+        "]}\n\n"
+        "I've analyzed all frames and described the UI state of each one."
+    )
+    result = _parse_descriptions(raw, frames)
+    assert len(result) == 2
+    assert result[0].state == "Settings panel"
+    assert result[1].state == "Main view"
+
+
 def test_parse_descriptions_invalid_json(tmp_path):
     frames = [tmp_path / "a.png", tmp_path / "b.png"]
     result = _parse_descriptions("not json at all", frames)

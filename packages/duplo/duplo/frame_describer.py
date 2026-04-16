@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
-from duplo.parsing import strip_fences
+from duplo.parsing import extract_json
 
 _SYSTEM = """\
 You are a UI analyst. Given a batch of application screenshots, describe
@@ -81,7 +81,7 @@ def _parse_descriptions(raw: str, frames: list[Path]) -> list[FrameDescription]:
 
     Falls back to "unknown" state if parsing fails.
     """
-    text = strip_fences(raw)
+    text = extract_json(raw)
 
     try:
         data = json.loads(text)

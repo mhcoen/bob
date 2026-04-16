@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
-from duplo.parsing import strip_fences
+from duplo.parsing import extract_json
 
 _SYSTEM = """\
 You are a UI screenshot quality filter. Given a batch of video frames,
@@ -85,7 +85,7 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
 
     Falls back to keeping all frames if parsing fails.
     """
-    text = strip_fences(raw)
+    text = extract_json(raw)
 
     try:
         data = json.loads(text)
