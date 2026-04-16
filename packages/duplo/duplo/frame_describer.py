@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query_with_images
+from duplo.diagnostics import record_failure
 from duplo.parsing import extract_json
 
 _SYSTEM = """\
@@ -86,13 +87,31 @@ def _parse_descriptions(raw: str, frames: list[Path]) -> list[FrameDescription]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
+        record_failure(
+            "frame_describer:_parse_descriptions",
+            "llm",
+            "json.loads failed after extract_json",
+            context={"raw_response": raw[:2000], "extracted": text[:2000]},
+        )
         return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
 
     if not isinstance(data, dict):
+        record_failure(
+            "frame_describer:_parse_descriptions",
+            "llm",
+            f"parsed JSON is {type(data).__name__}, not dict",
+            context={"raw_response": raw[:2000], "parsed_type": type(data).__name__},
+        )
         return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
 
     raw_descs = data.get("descriptions", [])
     if not isinstance(raw_descs, list):
+        record_failure(
+            "frame_describer:_parse_descriptions",
+            "llm",
+            f"descriptions field is {type(raw_descs).__name__}, not list",
+            context={"raw_response": raw[:2000], "data_keys": list(data.keys())},
+        )
         return [FrameDescription(path=f, state="unknown", detail="parse error") for f in frames]
 
     # Build a lookup by index.
