@@ -340,6 +340,17 @@ def _build_normal_prompt(
         " additions (constants, dataclass fields, simple"
         " delegations) do not need tests."
     )
+    parts.append(
+        "Tests must NEVER make real subprocess calls to"
+        " claude, codex, or any LLM CLI. Any function"
+        " that transitively invokes an LLM must be mocked."
+        " Before writing a test that calls a function,"
+        " check its source to see if it reaches an LLM"
+        " call path. If it does, mock at the narrowest"
+        " point that eliminates the real call. Real LLM"
+        " round-trips cost 5-15 seconds each and will"
+        " make the test suite unusably slow."
+    )
     parts.extend(_build_shared_parts(task_text, task_label, check_commands))
     if eliminated:
         elim_text = "\n".join(eliminated)

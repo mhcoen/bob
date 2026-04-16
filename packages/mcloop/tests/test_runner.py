@@ -1452,7 +1452,9 @@ def test_run_task_uses_normal_prompt_without_prior_errors(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "Task: Add a feature" in prompt
-        assert "Write unit tests where they make sense" in prompt
+        # Test-writing guidance softened 2026-04-15 (was "Write unit
+        # tests where they make sense").
+        assert "Write unit tests only when the change introduces" in prompt
         # Normal prompt should NOT have bug investigation framing
         assert "BUG INVESTIGATION" not in prompt
         assert "ERRORS FROM PREVIOUS ATTEMPT" not in prompt
@@ -1492,7 +1494,7 @@ def test_run_task_uses_bug_prompt_with_prior_errors(tmp_path):
 
 
 def test_normal_prompt_includes_only_run_check_commands(tmp_path):
-    """Normal prompt includes the 'only run exact check commands' instruction."""
+    """Normal prompt includes the softer test-writing guidance."""
     log_dir = tmp_path / "logs"
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -1507,7 +1509,10 @@ def test_normal_prompt_includes_only_run_check_commands(tmp_path):
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
-        assert "ABSOLUTELY FORBIDDEN" in prompt
+        # ABSOLUTELY FORBIDDEN paragraph removed 2026-04-15. The new
+        # test-writing guidance is softer.
+        assert "ABSOLUTELY FORBIDDEN" not in prompt
+        assert "Write unit tests only when the change introduces" in prompt
 
 
 def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
@@ -1528,7 +1533,9 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "ABSOLUTELY FORBIDDEN" not in prompt
-        # But check commands section is still present when provided
+        # CHECK COMMANDS block disabled 2026-04-15 (in runner.py).
+        # Even when check_commands is provided, the block is no longer
+        # added to the prompt.
     with patch("mcloop.runner._run_session") as mock_session:
         mock_session.return_value = ("output", 0)
         run_task(
@@ -1542,7 +1549,7 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "ABSOLUTELY FORBIDDEN" not in prompt
-        assert "CHECK COMMANDS" in prompt
+        assert "CHECK COMMANDS" not in prompt
 
 
 def test_bug_prompt_errors_before_task(tmp_path):
@@ -1568,7 +1575,7 @@ def test_bug_prompt_errors_before_task(tmp_path):
 
 
 def test_bug_prompt_includes_shared_instructions(tmp_path):
-    """Bug prompt includes shared safety instructions (check commands, etc.)."""
+    """Bug prompt includes shared safety instructions (mcloop:wrap, NOTES.md, etc.)."""
     log_dir = tmp_path / "logs"
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -1585,8 +1592,9 @@ def test_bug_prompt_includes_shared_instructions(tmp_path):
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
-        # Shared instructions are present
-        assert "CHECK COMMANDS" in prompt
+        # CHECK COMMANDS block disabled 2026-04-15 (in runner.py); no
+        # longer appears in prompts. Other shared instructions remain.
+        assert "CHECK COMMANDS" not in prompt
         assert "mcloop:wrap" in prompt
         assert "accessibility" in prompt.lower()
         assert "NOTES.md" in prompt
