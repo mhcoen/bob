@@ -228,7 +228,9 @@ def test_run_checks_second_command_fails(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
     mock_run.side_effect = [
         subprocess.CompletedProcess(args="ruff check .", returncode=0, stdout="ok\n", stderr=""),
-        subprocess.CompletedProcess(args="ruff format --check .", returncode=0, stdout="ok\n", stderr=""),
+        subprocess.CompletedProcess(
+            args="ruff format --check .", returncode=0, stdout="ok\n", stderr=""
+        ),
         subprocess.CompletedProcess(args="pytest", returncode=1, stdout="FAILED\n", stderr=""),
     ]
     result = run_checks(tmp_path)

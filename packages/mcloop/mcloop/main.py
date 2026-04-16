@@ -40,11 +40,9 @@ from mcloop.checklist import (
     task_label as _task_label,
 )
 from mcloop.checks import detect_build, detect_run, get_check_commands, run_autofix, run_checks
-from mcloop.claude_md_check import (
-    check_claude_md_freshness,
-)
 from mcloop.claude_md_sync import handle_sync, reconcile_pending
 from mcloop.config import format_reviewer_status, load_reviewer_config
+from mcloop.conftest_guard import ensure_conftest_guard
 from mcloop.errors import (
     _check_errors_json,
 )
@@ -586,6 +584,13 @@ def run_loop(
     _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)
     _checkpoint(project_dir, verbose=True)
+
+    # Ensure the target project has a conftest.py guard that blocks
+    # real claude/codex subprocess calls during pytest. Idempotent.
+    if ensure_conftest_guard(project_dir):
+        _stage_safe(project_dir)
+        _checkpoint(project_dir)
+
     _push_or_die(project_dir)
 
     # Check for crash errors from previous runs
