@@ -68,6 +68,21 @@ class TestParseDesign:
         result = _parse_design(raw)
         assert result.colors["bg"] == "#fff"
 
+    def test_extracts_json_preceded_by_prose(self):
+        raw = "Here is the design analysis:\n\n" + json.dumps(_sample_response())
+        result = _parse_design(raw)
+        assert result.colors["primary"] == "#1a73e8"
+        assert result.layout["navigation"] == "top"
+
+    def test_extracts_json_with_prose_and_fences(self):
+        raw = (
+            "Here is the analysis:\n\n```json\n"
+            + json.dumps(_sample_response())
+            + "\n```\n\nLet me know if you need more."
+        )
+        result = _parse_design(raw)
+        assert result.colors["primary"] == "#1a73e8"
+
     def test_returns_empty_on_invalid_json(self):
         result = _parse_design("not json at all")
         assert result.colors == {}
