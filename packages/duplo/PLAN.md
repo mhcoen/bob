@@ -689,11 +689,11 @@ The manual run of the URL-only scenario (against numi.app) before this rewrite s
   - [x] Fix: ensure the planner's output has the correct structure: H1 phase heading, then feature tasks at top level, then `## Bugs` heading at the end with no tasks below it.
   - [x] Tests: a generated PLAN.md has feature tasks at top level under the H1 heading. The `## Bugs` heading is present but contains no tasks. Mcloop's parser correctly identifies the feature tasks as Phase 1 work, not as bugs.
 
-- [ ] Fix `derive_app_name` not writing `product_name` to product.json
+- [x] Fix `derive_app_name` not writing `product_name` to product.json
   - [x] During the manual run, the PLAN.md heading correctly read `# numi — Phase 1: Scaffold` (so the app name was derived as "numi" somewhere), but `.duplo/product.json` had `product_name: ""` (empty string).
   - [x] Investigate `duplo/orchestrator.py:derive_app_name` and its callers. Either the function isn't writing `product_name` (only writing `app_name`), or `product.json` is initialized with empty `product_name` and never updated.
   - [x] Fix: ensure `product.json` ends up with `product_name` populated to the same value used in the PLAN.md heading. Backward-compat: if `product.json` already has a non-empty `product_name` (user-edited), do not overwrite.
-  - [ ] Tests: after `_subsequent_run`, `product.json:product_name` matches the value used in PLAN.md's H1 heading. User-edited `product_name` survives a subsequent run.
+  - [x] Tests: after `_subsequent_run`, `product.json:product_name` matches the value used in PLAN.md's H1 heading. User-edited `product_name` survives a subsequent run.
 
 - [ ] Fix `frame_describer` parse-error on every video frame
   - [ ] During the manual run, all 17 video frames extracted from a demo video were stored with `state: "unknown"`, `detail: "parse error"` in `.duplo/duplo.json` `frame_descriptions`. The frame describer's LLM call is returning output that the parser cannot handle. Pre-existing behavior, not caused by Phase 5, but surfaced clearly during Phase 5 verification.
