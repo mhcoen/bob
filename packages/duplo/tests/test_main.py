@@ -11689,3 +11689,133 @@ class TestSourcesFieldPopulated:
         save_sources(records, target_dir=tmp_path)
         second = load_sources(target_dir=tmp_path)
         assert first == second
+
+
+class TestSubsequentRunCounterExampleExcluded:
+    """_subsequent_run excludes counter-example refs from design input
+    and feature extraction."""
+
+    def test_design_input_excludes_counter_example(self, tmp_path, monkeypatch):
+        """extract_design receives the visual-target path but NOT the
+        counter-example path.  extract_features input does NOT contain
+        counter-example content."""
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        monkeypatch.chdir(tmp_path)
+
+        # Create ref/ directory with both image types.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        vt_img = ref_dir / "good_design.png"
+        vt_img.write_bytes(b"VISUAL_TARGET_BYTES")
+        ce_img = ref_dir / "bad_design.png"
+        ce_img.write_bytes(b"COUNTER_EXAMPLE_BYTES")
+
+        # duplo.json and file_hashes.json for subsequent-run detection.
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+        src = SourceEntry(
+            url="https://prod.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test spec",
+            sources=[src],
+            design=DesignBlock(),
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/good_design.png"),
+                    roles=["visual-target"],
+                ),
+                ReferenceEntry(
+                    path=Path("ref/bad_design.png"),
+                    roles=["counter-example"],
+                ),
+            ],
+        )
+        scrape_result = ScrapeResult(
+            combined_text="product features text",
+            product_ref_raw_pages={},
+        )
+
+        captured_design_input: list[Path] = []
+        captured_features_text: list[str] = []
+
+        def fake_extract_design(images):
+            captured_design_input.extend(images)
+            return DesignRequirements()
+
+        def fake_extract_features(text, **kwargs):
+            captured_features_text.append(text)
+            return []
+
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.scrapeable_sources",
+                return_value=[src],
+            ),
+            patch(
+                "duplo.main._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch("duplo.main._persist_scrape_result"),
+            patch(
+                "duplo.main.format_behavioral_references",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.extract_design",
+                side_effect=fake_extract_design,
+            ),
+            patch(
+                "duplo.main.extract_features",
+                side_effect=fake_extract_features,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n",
+            ),
+            patch(
+                "duplo.main.save_plan",
+                return_value=tmp_path / "PLAN.md",
+            ),
+        ):
+            main()
+
+        # Design input should contain the visual-target image.
+        design_names = [p.name for p in captured_design_input]
+        assert "good_design.png" in design_names
+        # Design input must NOT contain the counter-example image.
+        assert "bad_design.png" not in design_names
+
+        # Feature extraction text must not contain counter-example
+        # file content (counter-example is an image, so it wouldn't
+        # contribute text; and counter-example sources are excluded
+        # from scraping by scrapeable_sources).
+        combined = " ".join(captured_features_text)
+        assert "COUNTER_EXAMPLE" not in combined

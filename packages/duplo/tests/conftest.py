@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import subprocess as _mcloop_subprocess
 from unittest.mock import patch
 
 import pytest
@@ -40,13 +41,11 @@ def _no_real_llm_calls():
     with patch("subprocess.run", side_effect=_fake_subprocess_run):
         yield
 
+
 # mcloop:llm-guard
 # Auto-injected by mcloop. Blocks real claude/codex subprocess calls
 # during pytest so unmocked LLM paths fail fast instead of silently
 # burning 5-15 seconds per call. Opt out with @pytest.mark.llm.
-import subprocess as _mcloop_subprocess
-
-import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -73,4 +72,3 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
         return _real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(_mcloop_subprocess, "run", _guarded_run)
-
