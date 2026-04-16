@@ -678,10 +678,10 @@ The earlier USER verification block was authored incorrectly: every scenario in 
 
 The manual run of the URL-only scenario (against numi.app) before this rewrite surfaced real bugs. Queued here so they don't get lost.
 
-- [ ] Fix planner output wrapped in markdown code fences
+- [x] Fix planner output wrapped in markdown code fences
   - [x] When duplo's planner generates a PLAN.md via `claude -p` and the LLM returns the markdown wrapped in triple-backtick fences, duplo writes the wrapped text verbatim. The resulting file is unparseable by mcloop because the H1 heading is buried inside a code fence.
   - [x] Fix: in `duplo/planner.py` (or wherever the planner output is written), strip leading/trailing fences before writing. Use the existing `strip_fences` helper from `duplo/parsing.py` if it covers this case; if not, extend it.
-  - [ ] Tests: planner output containing a fenced markdown block is written without the fences. Output without fences is written unchanged. Output with `~~~` fences is also handled.
+  - [x] Tests: planner output containing a fenced markdown block is written without the fences. Output without fences is written unchanged. Output with `~~~` fences is also handled.
 
 - [ ] Fix planner placing feature tasks under `## Bugs` heading
   - [ ] The Phase 1 PLAN.md generated during the manual run had its feature implementation tasks placed UNDER the `## Bugs` heading instead of as the plan body. `## Bugs` should be empty initially. Feature tasks should be at the top level under the phase H1 heading.
