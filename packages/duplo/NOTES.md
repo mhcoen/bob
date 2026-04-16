@@ -6,6 +6,22 @@
 
 Added `record_failure` calls to all three parse-error exit paths in `_parse_descriptions`. Each records the raw LLM response (first 2000 chars) and the extracted text to `.duplo/errors.jsonl`. The next manual run with video frames will capture the actual response that the parser is choking on. No existing `frame_describer` entries were found in `errors.jsonl` because the logging wasn't present during the [5.38.1] manual run.
 
+### [5.39.2] Design extraction chain had silent failure paths — 2026-04-16
+
+Traced the full chain in `_subsequent_run` after `extract_design` is called. Four
+places in `main.py` run the extract→format→update pipeline. Two of them
+(`_subsequent_run`'s spec_sources path and `_rescrape_product_url`) were missing
+the `else` branch for when `design.colors/fonts/layout` are all empty — extraction
+would fail silently with no message or diagnostic. All four paths were missing
+diagnostics for two inner steps: `format_design_block` returning empty despite
+non-empty design fields, and `update_design_autogen` returning unchanged text.
+Added `record_failure` calls at both inner failure points in all four paths, and
+added the missing "Could not extract" messages in the two paths that lacked them.
+The most likely cause of the [5.39.1] issue: `extract_design` returned a
+`DesignRequirements` with populated `source_images` but empty colors/fonts/layout
+(from a `ClaudeCliError` or parse failure), and `_subsequent_run` silently skipped
+writing to SPEC.md because there was no else branch.
+
 ### [5.39.1] design_extractor had the same strip_fences fragility — 2026-04-16
 
 `design_extractor._parse_design` used `strip_fences` + `json.loads`, the same pattern fixed in `frame_describer`/`frame_filter` during [5.38.3]. When the Vision LLM returned JSON preceded by prose (e.g. "Here is the design analysis:\n\n{...}"), `strip_fences` was a no-op, `json.loads` raised `JSONDecodeError`, and `_parse_design` returned an empty `DesignRequirements`. The caller in `main.py` then skipped writing `## Design` to SPEC.md because `design.colors` was empty. No diagnostic was logged because the error path returns silently. Fixed by switching to `extract_json`. This was noted as a latent risk in [5.38.1] ("Other modules using `strip_fences` + `json.loads` … have the same latent vulnerability").

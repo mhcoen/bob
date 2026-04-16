@@ -1268,6 +1268,20 @@ def _first_run(*, url: str | None = None) -> None:
                     modified = update_design_autogen(existing, body)
                     if modified != existing:
                         spec_path.write_text(modified, encoding="utf-8")
+                    else:
+                        record_failure(
+                            "orchestrator:design_autogen",
+                            "io",
+                            "update_design_autogen returned unchanged text;"
+                            " SPEC.md was not modified.",
+                        )
+                else:
+                    record_failure(
+                        "orchestrator:design_format",
+                        "io",
+                        "format_design_block returned empty despite"
+                        " non-empty colors/fonts/layout.",
+                    )
             save_design_requirements(dataclasses.asdict(design))
         else:
             print("Could not extract design details from images.")
@@ -1458,6 +1472,20 @@ def _analyze_new_files(
                     modified = update_design_autogen(existing, body)
                     if modified != existing:
                         spec_path.write_text(modified, encoding="utf-8")
+                    else:
+                        record_failure(
+                            "orchestrator:design_autogen",
+                            "io",
+                            "update_design_autogen returned unchanged text;"
+                            " SPEC.md was not modified.",
+                        )
+                else:
+                    record_failure(
+                        "orchestrator:design_format",
+                        "io",
+                        "format_design_block returned empty despite"
+                        " non-empty colors/fonts/layout.",
+                    )
             save_design_requirements(dataclasses.asdict(design))
             print(f"  Updated design requirements from {len(design.source_images)} image(s).")
             summary.images_analyzed = len(design.source_images)
@@ -1691,8 +1719,24 @@ def _rescrape_product_url(
                         modified = update_design_autogen(existing, body)
                         if modified != existing:
                             spec_path.write_text(modified, encoding="utf-8")
+                        else:
+                            record_failure(
+                                "orchestrator:design_autogen",
+                                "io",
+                                "update_design_autogen returned unchanged text;"
+                                " SPEC.md was not modified.",
+                            )
+                    else:
+                        record_failure(
+                            "orchestrator:design_format",
+                            "io",
+                            "format_design_block returned empty despite"
+                            " non-empty colors/fonts/layout.",
+                        )
                 save_design_requirements(dataclasses.asdict(design))
                 print(f"  Updated design from {len(design.source_images)} image(s).")
+            else:
+                print("  Could not extract design details from images.")
         elif design_input:
             record_failure(
                 "orchestrator:design_extraction",
@@ -2071,8 +2115,24 @@ def _subsequent_run() -> None:
                         modified = update_design_autogen(existing, body)
                         if modified != existing:
                             spec_path.write_text(modified, encoding="utf-8")
+                        else:
+                            record_failure(
+                                "orchestrator:design_autogen",
+                                "io",
+                                "update_design_autogen returned unchanged text;"
+                                " SPEC.md was not modified.",
+                            )
+                    else:
+                        record_failure(
+                            "orchestrator:design_format",
+                            "io",
+                            "format_design_block returned empty despite"
+                            " non-empty colors/fonts/layout.",
+                        )
                 save_design_requirements(dataclasses.asdict(design))
                 print(f"  Updated design from {len(design.source_images)} image(s).")
+            else:
+                print("  Could not extract design details from images.")
         elif design_input:
             record_failure(
                 "orchestrator:design_extraction",
