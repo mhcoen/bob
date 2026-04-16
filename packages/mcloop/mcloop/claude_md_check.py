@@ -46,16 +46,25 @@ You maintain a project manifest file called CLAUDE.md. You will receive
 the current CLAUDE.md and a git diff showing what changed. Update ONLY
 the entries affected by the diff:
 
-- New source file created: add a descriptive entry in the appropriate section
-- Source file deleted: remove its entry
-- File renamed or moved: update the path in its entry
-- Functions moved between files: update both source and destination entries
-- File purpose changed significantly: update the description
-- New test file: add a brief entry listing what it tests
+- New source file created: add a ONE-LINE entry in the appropriate section.
+- Source file deleted: remove its entry.
+- File renamed or moved: update the path in its entry.
+- Functions moved between files: update both source and destination entries.
+- File purpose changed significantly: update the description (still one line).
+- New test file: add a brief one-line entry.
+
+Absolute length rule (non-negotiable): every source-file entry is at most
+TWO lines. Most are one line. If an entry in the current CLAUDE.md is
+longer than two lines, you may shorten it while editing; never lengthen.
+Never add implementation details (parameter lists, class names, test
+enumerations, etc.) to an entry. That is what docstrings and code are
+for. CLAUDE.md is a manifest: its job is to tell a new session which
+file to open, not to describe the file's contents.
 
 Do NOT rewrite entries that are unrelated to the diff.
 Do NOT change formatting, ordering, or wording of unaffected entries.
 Do NOT add commentary or explanation outside the file content.
+Do NOT expand entries beyond two lines under any circumstances.
 
 Respond with the complete updated CLAUDE.md file content and nothing else.
 No markdown fences, no preamble, no explanation."""
