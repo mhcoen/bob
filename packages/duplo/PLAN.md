@@ -661,7 +661,7 @@ The earlier USER verification block was authored incorrectly: every scenario in 
   - [x] Programmatically edit SPEC.md to remove `proposed: true` from the previously-proposed entry. Run `_subsequent_run` again. Assert: this time `extract_design` was called with both reference paths in `design_input`.
   - [x] Repeat the same pattern for a `behavioral-target` reference: assert that with `proposed: true`, `extract_all_videos` is NOT called for that path; without the flag, it IS called.
 
-- [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
+- [x] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
   - [x] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
   - [x] Mock `extract_design` and `extract_features` and capture their inputs.
   - [x] Run `_subsequent_run`. Assert: `extract_design`'s `design_input` contains the visual-target path but NOT the counter-example path. The features list does NOT mention counter-example content.
