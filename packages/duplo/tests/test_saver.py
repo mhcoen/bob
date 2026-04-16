@@ -1251,6 +1251,22 @@ class TestSaveProduct:
         save_product("Acme App", "https://acme.com", target_dir=tmp_path)
         assert (tmp_path / ".duplo").is_dir()
 
+    def test_preserves_existing_keys(self, tmp_path):
+        """save_product does read-modify-write, preserving keys like app_name."""
+        path = tmp_path / PRODUCT_JSON
+        (tmp_path / ".duplo").mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {"product_name": "Old", "source_url": "https://old.com", "app_name": "my-app"}
+            )
+            + "\n",
+        )
+        save_product("New", "https://new.com", target_dir=tmp_path)
+        data = json.loads(path.read_text())
+        assert data["product_name"] == "New"
+        assert data["source_url"] == "https://new.com"
+        assert data["app_name"] == "my-app"
+
 
 class TestLoadProduct:
     def test_loads_saved_product(self, tmp_path):

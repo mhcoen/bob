@@ -62,7 +62,9 @@ def save_product(
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / PRODUCT_JSON).resolve()
-    data = {"product_name": product_name, "source_url": source_url}
+    data = _safe_read_json(path)
+    data["product_name"] = product_name
+    data["source_url"] = source_url
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 

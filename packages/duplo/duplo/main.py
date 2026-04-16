@@ -1373,6 +1373,10 @@ def _first_run(*, url: str | None = None) -> None:
                 print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
         saved = save_plan(content)
         print(f"Plan saved to {saved}")
+        # Sync product.json so product_name matches the PLAN.md heading.
+        # derive_app_name reads duplo.json (which save_selections just
+        # wrote with app_name) and populates product_name if empty.
+        derive_app_name(spec)
         _plan_ready(phase_label)
     else:
         print("Failed to generate roadmap.")
