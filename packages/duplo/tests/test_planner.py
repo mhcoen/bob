@@ -707,7 +707,7 @@ Web app built with Python/FastAPI.
 class TestInjectBugsSection:
     """Tests for _inject_bugs_section()."""
 
-    def test_inserts_before_checklist(self):
+    def test_bugs_after_checklist(self):
         content = (
             "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project\n- [ ] Add login\n"
         )
@@ -715,19 +715,20 @@ class TestInjectBugsSection:
         assert "## Bugs" in result
         bugs_pos = result.index("## Bugs")
         task_pos = result.index("- [ ] Set up project")
-        assert bugs_pos < task_pos
+        assert bugs_pos > task_pos
 
-    def test_inserts_between_heading_and_second_heading(self):
+    def test_bugs_after_second_heading(self):
         content = "# MyApp — Phase 1: Core\n\nBuild the app.\n\n## Implementation\n\n- [ ] Task\n"
         result = _inject_bugs_section(content)
         bugs_pos = result.index("## Bugs")
         impl_pos = result.index("## Implementation")
-        assert bugs_pos < impl_pos
+        assert bugs_pos > impl_pos
 
     def test_no_heading(self):
         content = "Just some text\n- [ ] Task\n"
         result = _inject_bugs_section(content)
-        assert result.startswith("## Bugs")
+        assert result.endswith("## Bugs\n")
+        assert "Just some text" in result
 
     def test_preserves_all_content(self):
         content = "# MyApp — Phase 1: Core\n\nDescription.\n\n- [ ] First\n- [ ] Second\n"

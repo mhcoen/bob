@@ -367,38 +367,12 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
 def _inject_bugs_section(content: str) -> str:
     """Insert an empty ``## Bugs`` section into plan content.
 
-    Places it after the intro prose (description paragraph after the
-    first ``#`` heading) and before any checklist items or second
-    heading.  If no heading is found, prepends it.
+    Places it after all checklist items so feature tasks remain under
+    the phase H1 heading.  The ``## Bugs`` section is empty on first
+    write; mcloop inserts runtime-bug fix tasks into it later.
     """
-    lines = content.split("\n")
-    # Find the first heading.
-    first_heading: int | None = None
-    for i, line in enumerate(lines):
-        if line.startswith("# "):
-            first_heading = i
-            break
-
-    if first_heading is None:
-        # No heading — prepend the section.
-        return "## Bugs\n\n" + content
-
-    # Walk past the heading and its following prose until we hit either
-    # a checklist item (``- [ ]``), another heading, or EOF.
-    insert_at = first_heading + 1
-    for i in range(first_heading + 1, len(lines)):
-        stripped = lines[i].lstrip()
-        if stripped.startswith("- [") or stripped.startswith("## "):
-            insert_at = i
-            break
-    else:
-        insert_at = len(lines)
-
-    block = ["", "## Bugs", ""]
-    for idx, bline in enumerate(block):
-        lines.insert(insert_at + idx, bline)
-
-    return "\n".join(lines)
+    trimmed = content.rstrip("\n")
+    return trimmed + "\n\n## Bugs\n"
 
 
 def save_plan(
@@ -412,8 +386,9 @@ def save_plan(
     line so that existing checked and unchecked items are preserved.
 
     On first write (file does not exist), an empty ``## Bugs`` section
-    is injected after the intro prose and before the first checklist
-    item, so mcloop can insert runtime-bug fix tasks into it.
+    is appended after all checklist items, so feature tasks remain
+    under the phase H1 heading and mcloop can insert bug fix tasks
+    into the Bugs section later.
 
     Returns the path.
     """
