@@ -2,6 +2,19 @@
 
 ## Observations
 
+### [1.5] `strip_fences` + `json.loads` migration is incomplete — 2026-04-16
+
+Phases 1.1–1.4 migrated `extractor.py`, `gap_detector.py`, `build_prefs.py`, and
+`validator.py` to use `extract_json`. Five modules still contain the old
+pattern and are allow-listed in `tests/test_parsing_invariant.py`
+(`ALLOWED_UNMIGRATED`): `roadmap.py`, `verification_extractor.py`,
+`investigator.py`, `task_matcher.py`, `saver.py` (3 occurrences in saver).
+The regression test catches reintroduction into migrated files today; when
+each remaining module is migrated, its entry should be removed from
+`ALLOWED_UNMIGRATED` so the guard covers it too. A companion test
+(`test_allowed_unmigrated_list_is_accurate`) fails loudly if a file is
+migrated without removing its allowlist entry.
+
 ### [5.38.2] Diagnostic logging added to frame_describer — 2026-04-16
 
 Added `record_failure` calls to all three parse-error exit paths in `_parse_descriptions`. Each records the raw LLM response (first 2000 chars) and the extracted text to `.duplo/errors.jsonl`. The next manual run with video frames will capture the actual response that the parser is choking on. No existing `frame_describer` entries were found in `errors.jsonl` because the logging wasn't present during the [5.38.1] manual run.
