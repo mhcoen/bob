@@ -775,6 +775,106 @@ class TestSavePlanBugsSection:
         assert "## Bugs" not in result
 
 
+class TestPlanStructureForMcloop:
+    """Verify that save_plan produces PLAN.md with correct structure for mcloop.
+
+    Mcloop treats tasks under the H1 phase heading as feature work and
+    tasks under ## Bugs as bug-fix work.  The regression was: LLM output
+    placed feature tasks under ## Bugs, so mcloop saw zero feature tasks.
+    """
+
+    # Realistic LLM output: feature tasks under H1, no ## Bugs heading.
+    _LLM_GOOD = (
+        "# MyApp — Phase 1: Core\n"
+        "\n"
+        "Python/FastAPI web app with PostgreSQL.\n"
+        "\n"
+        '- [ ] Set up project structure [feat: "User auth"]\n'
+        '- [ ] Add login form [feat: "User auth"]\n'
+        '- [ ] Build dashboard [feat: "Dashboard"]\n'
+    )
+
+    # Broken LLM output: feature tasks placed under ## Bugs.
+    _LLM_BAD = (
+        "# MyApp — Phase 1: Core\n"
+        "\n"
+        "Python/FastAPI web app with PostgreSQL.\n"
+        "\n"
+        "## Bugs\n"
+        "\n"
+        '- [ ] Set up project structure [feat: "User auth"]\n'
+        '- [ ] Add login form [feat: "User auth"]\n'
+        '- [ ] Build dashboard [feat: "Dashboard"]\n'
+    )
+
+    def _bugs_section_tasks(self, text: str) -> list[str]:
+        """Return task lines that appear under the ## Bugs heading."""
+        lines = text.splitlines()
+        in_bugs = False
+        tasks: list[str] = []
+        for line in lines:
+            if line.strip().lower() == "## bugs":
+                in_bugs = True
+                continue
+            if in_bugs and re.match(r"^#{1,2}\s", line):
+                break
+            if in_bugs and line.lstrip().startswith("- ["):
+                tasks.append(line)
+        return tasks
+
+    def _feature_section_tasks(self, text: str) -> list[str]:
+        """Return task lines that appear between the H1 heading and ## Bugs."""
+        lines = text.splitlines()
+        past_h1 = False
+        tasks: list[str] = []
+        for line in lines:
+            if line.startswith("# "):
+                past_h1 = True
+                continue
+            if past_h1 and line.strip().lower() == "## bugs":
+                break
+            if past_h1 and line.lstrip().startswith("- ["):
+                tasks.append(line)
+        return tasks
+
+    def test_good_llm_output_has_feature_tasks_above_bugs(self, tmp_path):
+        save_plan(self._LLM_GOOD, target_dir=tmp_path)
+        text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert len(self._feature_section_tasks(text)) == 3
+        assert self._bugs_section_tasks(text) == []
+
+    def test_bad_llm_output_rescued_by_inject(self, tmp_path):
+        """When LLM puts tasks under ## Bugs, save_plan moves them above."""
+        save_plan(self._LLM_BAD, target_dir=tmp_path)
+        text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert len(self._feature_section_tasks(text)) == 3
+        assert self._bugs_section_tasks(text) == []
+
+    def test_parse_completed_tasks_sees_feature_work(self, tmp_path):
+        """After save_plan, checked tasks are parsed as feature work."""
+        save_plan(self._LLM_GOOD, target_dir=tmp_path)
+        text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        # Simulate mcloop checking off tasks.
+        checked = text.replace("- [ ]", "- [x]")
+        tasks = parse_completed_tasks(checked)
+        assert len(tasks) == 3
+        feat_names = [n for t in tasks for n in t.features]
+        assert "User auth" in feat_names
+        assert "Dashboard" in feat_names
+        # None are parsed as fixes (bugs).
+        assert all(t.fixes == [] for t in tasks)
+
+    def test_bugs_section_empty_after_first_write(self, tmp_path):
+        """First write always produces an empty ## Bugs section at the end."""
+        save_plan(self._LLM_GOOD, target_dir=tmp_path)
+        text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "## Bugs" in text
+        bugs_idx = text.index("## Bugs")
+        after_bugs = text[bugs_idx + len("## Bugs") :].strip()
+        # Nothing after ## Bugs except whitespace.
+        assert after_bugs == ""
+
+
 class TestStripFences:
     """Tests for _strip_fences() removing LLM code-fence wrapping."""
 
