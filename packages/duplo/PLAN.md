@@ -664,15 +664,15 @@ The earlier USER verification block was authored incorrectly: every scenario in 
 - [ ] Add `test_counter_example_reference_excluded_from_extraction_and_appears_in_investigator`
   - [x] Construct a tmpdir with SPEC.md containing one ref/ entry with `role: counter-example` and one ref/ entry with `role: visual-target`.
   - [x] Mock `extract_design` and `extract_features` and capture their inputs.
-  - [ ] Run `_subsequent_run`. Assert: `extract_design`'s `design_input` contains the visual-target path but NOT the counter-example path. The features list does NOT mention counter-example content.
-  - [ ] Programmatically invoke `duplo fix "sample bug"`. Mock the investigator LLM call and capture the prompt.
-  - [ ] Assert: the captured investigator prompt contains the counter-example reference's path or notes content, framed under an explicit "AVOID" label.
-  - [ ] If the spec has counter-example SOURCES (URLs with `role: counter-example`), assert: the URL appears in the investigator prompt under the same AVOID framing, AND `fetch_site` was NOT called against that URL.
+  - [x] Run `_subsequent_run`. Assert: `extract_design`'s `design_input` contains the visual-target path but NOT the counter-example path. The features list does NOT mention counter-example content.
+  - [x] Programmatically invoke `duplo fix "sample bug"`. Mock the investigator LLM call and capture the prompt.
+  - [x] Assert: the captured investigator prompt contains the counter-example reference's path or notes content, framed under an explicit "AVOID" label.
+  - [x] If the spec has counter-example SOURCES (URLs with `role: counter-example`), assert: the URL appears in the investigator prompt under the same AVOID framing, AND `fetch_site` was NOT called against that URL.
 
-- [ ] Run the full test suite and confirm Phase 5 closes cleanly
-  - [ ] Execute `pytest -x` against the duplo repo.
-  - [ ] Assert: all pre-existing tests still pass; all seven new Phase 5 integration tests pass.
-  - [ ] If any test fails, the task fails and mcloop will retry. The retry should investigate the failure (read pytest output, identify the failing assertion, locate the responsible code, fix it). Phase 5 is not complete until this task passes.
+- [x] Run the full test suite and confirm Phase 5 closes cleanly
+  - [x] Execute `pytest -x` against the duplo repo.
+  - [x] Assert: all pre-existing tests still pass; all seven new Phase 5 integration tests pass.
+  - [x] If any test fails, the task fails and mcloop will retry. The retry should investigate the failure (read pytest output, identify the failing assertion, locate the responsible code, fix it). Phase 5 is not complete until this task passes.
 
 ## Followup: bugs surfaced during the manual run of the URL-only scenario
 
