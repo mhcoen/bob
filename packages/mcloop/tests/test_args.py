@@ -2241,6 +2241,51 @@ def test_audit_cycle_no_bugs_sends_no_bugs_notification(tmp_path):
     assert "no bugs found" in mock_notify.call_args[0][0].lower()
 
 
+def test_audit_cycle_no_bugs_banner_omits_round_2(tmp_path, capsys):
+    """When round 1 finds no bugs, output should not mention '2/2' or 'round 2'."""
+    with (
+        patch("mcloop.audit._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.audit._run_single_audit_round",
+            return_value=False,
+        ),
+        patch("mcloop.audit._save_audit_hash"),
+        patch("mcloop.audit.notify"),
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    captured = capsys.readouterr().out
+    assert "2/2" not in captured
+    assert "round 2" not in captured.lower()
+
+
+def test_audit_cycle_round2_banner_mentions_round_2(tmp_path, capsys):
+    """When round 1 finds bugs and round 2 runs, output should mention round 2."""
+    call_count = 0
+
+    def fake_round(project_dir, log_dir, model=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return True  # bugs found and fixed
+        return False  # no bugs on round 2
+
+    with (
+        patch("mcloop.audit._should_skip_audit", return_value=False),
+        patch(
+            "mcloop.audit._run_single_audit_round",
+            side_effect=fake_round,
+        ),
+        patch("mcloop.audit._save_audit_hash"),
+        patch("mcloop.audit.notify"),
+    ):
+        _run_audit_fix_cycle(tmp_path, tmp_path / "logs")
+
+    captured = capsys.readouterr().out
+    assert call_count == 2
+    assert "round 2" in captured.lower()
+
+
 # --- _find_recent_crash_report ---
 
 
