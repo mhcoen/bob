@@ -5594,3 +5594,178 @@ class TestCounterVtMockedExtractors:
         self._setup(tmp_path, monkeypatch)
         self._run_with_mocks()
         assert (tmp_path / "PLAN.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 5.33.3 — Run _subsequent_run with counter-example + visual-target
+# ---------------------------------------------------------------------------
+
+
+def _setup_counter_vt_subsequent_tmpdir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Create a project for _subsequent_run with counter-example + VT refs.
+
+    Writes SPEC.md (## References only, no ## Sources), ref/ images,
+    .duplo/duplo.json (prior first run state), empty .duplo/file_hashes.json
+    (triggers file change detection so _analyze_new_files runs),
+    and .duplo/product.json.
+    """
+    _setup_counter_vt_tmpdir(tmp_path)
+
+    arch_text = "macOS native app built with SwiftUI and Swift."
+    _write_duplo_json(
+        tmp_path,
+        {
+            "app_name": "CalcApp",
+            "source_url": "",
+            "features": [
+                {
+                    "name": f.name,
+                    "description": f.description,
+                    "category": f.category,
+                    "status": "pending",
+                    "implemented_in": "",
+                }
+                for f in _COUNTER_VT_FEATURES
+            ],
+            "preferences": {
+                "platform": "macOS",
+                "language": "Swift",
+                "constraints": [],
+                "preferences": [],
+            },
+            "architecture_hash": hashlib.sha256(arch_text.encode()).hexdigest(),
+        },
+    )
+
+    duplo_dir = tmp_path / ".duplo"
+    # Empty file_hashes so ref/ files are detected as new, triggering
+    # _analyze_new_files which runs design extraction via
+    # collect_design_input.
+    (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+
+    (duplo_dir / "product.json").write_text(
+        json.dumps({"product_name": "CalcApp", "source_url": ""}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["duplo"])
+    monkeypatch.setattr(
+        "duplo.main._check_migration",
+        lambda target_dir: None,
+    )
+
+
+class TestCounterVtSubsequentRun:
+    """Run _subsequent_run with counter-example + visual-target refs.
+
+    The SPEC has no ## Sources so the ref-only path is taken.  File
+    hashes are empty so both ref/ files appear as new, triggering
+    ``_analyze_new_files`` which runs design extraction via
+    ``collect_design_input``.
+
+    Asserts:
+    - extract_design's design_input contains the visual-target path
+      but NOT the counter-example path.
+    - extract_features receives text that does NOT mention
+      counter-example content (counter-example images are excluded
+      from feature extraction input).
+    """
+
+    def _run(self, tmp_path, monkeypatch):
+        """Set up and run _subsequent_run, return mocks dict."""
+        _setup_counter_vt_subsequent_tmpdir(tmp_path, monkeypatch)
+
+        mock_extract_design = MagicMock(
+            return_value=_COUNTER_VT_DESIGN,
+        )
+        mock_extract_features = MagicMock(
+            return_value=_COUNTER_VT_FEATURES,
+        )
+
+        with (
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch(
+                "duplo.main.extract_design",
+                new=mock_extract_design,
+            ),
+            patch("duplo.main.save_design_requirements"),
+            patch(
+                "duplo.main.extract_features",
+                new=mock_extract_features,
+            ),
+            patch("duplo.main.save_features"),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_COUNTER_VT_ROADMAP,
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_COUNTER_VT_PLAN,
+            ),
+            patch(
+                "duplo.main.load_frame_descriptions",
+                return_value=[],
+            ),
+            patch(
+                "duplo.main.fetch_site",
+                side_effect=RuntimeError("fetch_site should not be called"),
+            ),
+        ):
+            main()
+
+        return {
+            "extract_design": mock_extract_design,
+            "extract_features": mock_extract_features,
+        }
+
+    def test_extract_design_called(self, tmp_path, monkeypatch):
+        """extract_design is called during _subsequent_run."""
+        mocks = self._run(tmp_path, monkeypatch)
+        mocks["extract_design"].assert_called_once()
+
+    def test_design_input_contains_visual_target(self, tmp_path, monkeypatch):
+        """The visual-target ref reaches extract_design."""
+        mocks = self._run(tmp_path, monkeypatch)
+        design_input = mocks["extract_design"].call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "target_screenshot.png" in names
+
+    def test_design_input_excludes_counter_example(self, tmp_path, monkeypatch):
+        """The counter-example ref is excluded from design input."""
+        mocks = self._run(tmp_path, monkeypatch)
+        design_input = mocks["extract_design"].call_args[0][0]
+        names = [p.name for p in design_input]
+        assert "bad_example.png" not in names
+
+    def test_features_no_counter_example_content(self, tmp_path, monkeypatch):
+        """extract_features input text does not mention
+        counter-example file content."""
+        mocks = self._run(tmp_path, monkeypatch)
+        if mocks["extract_features"].called:
+            combined_text = mocks["extract_features"].call_args[0][0]
+            # Counter-example images produce no text, so the
+            # combined text should not reference the filename.
+            assert "bad_example" not in combined_text.lower()
+
+    def test_plan_md_generated(self, tmp_path, monkeypatch):
+        """PLAN.md is generated at the end of the run."""
+        self._run(tmp_path, monkeypatch)
+        assert (tmp_path / "PLAN.md").exists()
+
+    def test_design_input_all_paths(self, tmp_path, monkeypatch):
+        """All design_input elements are Path objects."""
+        mocks = self._run(tmp_path, monkeypatch)
+        design_input = mocks["extract_design"].call_args[0][0]
+        for item in design_input:
+            assert isinstance(item, Path)
