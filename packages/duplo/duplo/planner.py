@@ -364,13 +364,26 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
     return "\n".join(lines) + "\n" + "\n".join(test_tasks) + "\n"
 
 
+_BUGS_HEADING_RE = re.compile(r"^## Bugs\s*$", re.MULTILINE)
+
+
 def _inject_bugs_section(content: str) -> str:
     """Insert an empty ``## Bugs`` section into plan content.
 
     Places it after all checklist items so feature tasks remain under
     the phase H1 heading.  The ``## Bugs`` section is empty on first
     write; mcloop inserts runtime-bug fix tasks into it later.
+
+    If the LLM already generated a ``## Bugs`` heading, it is removed
+    and any tasks that were placed under it are moved above the new
+    canonical ``## Bugs`` section at the end.
     """
+    m = _BUGS_HEADING_RE.search(content)
+    if m:
+        before = content[: m.start()]
+        after = content[m.end() :]
+        # Move any content that was under the LLM's ## Bugs back up.
+        content = before.rstrip("\n") + "\n" + after.strip("\n")
     trimmed = content.rstrip("\n")
     return trimmed + "\n\n## Bugs\n"
 

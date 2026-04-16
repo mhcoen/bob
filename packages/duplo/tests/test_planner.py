@@ -738,6 +738,24 @@ class TestInjectBugsSection:
         assert "# MyApp — Phase 1: Core" in result
         assert "Description." in result
 
+    def test_llm_bugs_heading_removed_tasks_moved_above(self):
+        content = "# MyApp — Phase 1: Core\n\n## Bugs\n\n- [ ] Set up project\n- [ ] Add login\n"
+        result = _inject_bugs_section(content)
+        # Only one ## Bugs heading, at the end.
+        assert result.count("## Bugs") == 1
+        assert result.endswith("## Bugs\n")
+        # Feature tasks are above ## Bugs.
+        bugs_pos = result.index("## Bugs")
+        assert result.index("- [ ] Set up project") < bugs_pos
+        assert result.index("- [ ] Add login") < bugs_pos
+
+    def test_llm_bugs_heading_empty_section(self):
+        content = "# MyApp — Phase 1: Core\n\n- [ ] Task\n\n## Bugs\n"
+        result = _inject_bugs_section(content)
+        assert result.count("## Bugs") == 1
+        assert result.endswith("## Bugs\n")
+        assert result.index("- [ ] Task") < result.index("## Bugs")
+
 
 class TestSavePlanBugsSection:
     """Tests that save_plan injects ## Bugs on first write."""
