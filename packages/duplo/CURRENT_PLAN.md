@@ -217,7 +217,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [ ] Run the full test suite and confirm Phase 6 closes cleanly
   - [x] Execute pytest -x against the duplo repo.
-  - [ ] Assert: all pre-existing tests still pass; all new Phase 6 tests pass.
+  - [x] Assert: all pre-existing tests still pass; all new Phase 6 tests pass.
   - [ ] If any test fails, the task fails and mcloop will retry.
 
 ---
