@@ -75,6 +75,92 @@ duplo                        # Detect gaps, generate next phase
 mcloop                       # Build the next phase
 ```
 
+## `duplo init` reference
+
+`duplo init` is the one-time setup command. It creates a starter
+`SPEC.md` in the current directory and a `ref/` directory (with a
+README explaining what belongs there). It never does feature
+extraction, plan generation, or deep crawling — those happen on
+later `duplo` runs against the edited SPEC.md.
+
+### Command surface
+
+```
+duplo init                                  # template only, no inputs
+duplo init <url>                            # pre-fill from a shallow scrape
+duplo init --from-description PATH          # pre-fill from a prose file
+duplo init --from-description -             # pre-fill from prose on stdin
+duplo init <url> --from-description PATH    # combine URL and prose
+```
+
+All forms accept the `--deep` and `--force` flags below.
+
+### Arguments
+
+- `<url>` *(optional, positional)* — Product URL to pre-fill
+  `## Sources` and (when the validator identifies the product)
+  `## Purpose`. Must start with `http://` or `https://`. Anything
+  else is rejected before any network call.
+
+### Flags
+
+- `--from-description PATH` — Path to a prose file describing what
+  you want. Pass `-` to read from stdin (useful for piping or quick
+  one-liners: `echo "A Markdown-first note app" | duplo init --from-description -`).
+  The drafter merges prose with any URL scrape; on conflicts, prose
+  wins — in particular, `## Architecture` is taken only from prose.
+  The verbatim prose is preserved under `## Notes`.
+- `--deep` — Opt in to a deep crawl during `init`. Default is a
+  shallow scrape, which is enough to identify the product and
+  pre-fill Sources; the full deep crawl is deferred to the next
+  `duplo` run so you can review `## Sources` first (add URLs, set
+  `scrape: none`, etc.). Use `--deep` when you already know you
+  want the full crawl up front.
+- `--force` — Overwrite an existing `SPEC.md`. Without this flag,
+  `duplo init` refuses to run when `SPEC.md` already exists, to
+  avoid destroying a spec you've been editing.
+
+### What gets written
+
+- `SPEC.md` in the project root. The content depends on inputs:
+  - No inputs: a blank template with `<FILL IN>` markers.
+  - URL only, product identified: `## Purpose` and `## Sources`
+    pre-filled; other sections left as `<FILL IN>` / empty.
+  - URL only, product not identified or fetch failed: `## Sources`
+    pre-filled (with `scrape: none` on fetch failure so you can
+    re-enable scraping later); rest is template.
+  - `--from-description` only: drafter populates `## Purpose`,
+    `## Architecture` (if the prose states a stack), `## Design`
+    (if the prose mentions visual direction), and `## Behavior`
+    (any `input → expected` pairs). Verbatim prose goes under
+    `## Notes`.
+  - Combined: drafter merges URL scrape and prose; prose wins on
+    conflicts.
+- `ref/` (created if absent) and `ref/README.md` (written once,
+  never modified afterward).
+- If files already exist under `ref/`, each one is inspected by
+  Vision and a proposed role is written into `## References` as
+  a `proposed:` entry for you to confirm or edit.
+
+### Exit behavior
+
+- Exits `0` on success.
+- Exits `1` if `SPEC.md` already exists and `--force` was not
+  passed, or if `--from-description` points at a missing file.
+- Exits `2` on an invalid URL (not `http://` or `https://`).
+- If both the URL and the description file are invalid, both
+  errors are printed before exit so you don't have to fix them
+  one at a time.
+
+### What `duplo init` does not do
+
+- No feature extraction, roadmap, or `PLAN.md` — those land on
+  the next `duplo` run.
+- No deep crawl by default (use `--deep` to opt in).
+- No interactive prompts. You edit SPEC.md in your editor.
+- No project directory creation. You `cd` into the directory
+  first; `duplo init` operates on the current directory.
+
 ## What Duplo does on first run
 
 1. **Scans reference materials.** Enumerates files under `ref/`:
