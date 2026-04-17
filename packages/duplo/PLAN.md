@@ -933,73 +933,110 @@ Design reference: REDESIGN-overview.md section "Implementation phasing" Phase 5 
 
 This phase is entirely about deletion, simplification, and documentation. No new features. Every removal must be preceded by a caller audit to confirm no live code path depends on the removed code.
 
-## Legacy _first_run removal
+Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code generation. Ruff for linting, pytest for tests.
+
+## _first_run removal
 
 - [ ] Audit all callers of _first_run in duplo/main.py
-  - [ ] Grep the codebase for references to _first_run. Identify every call site. Per PIPELINE-design.md: _first_run removal is deferred to cleanup because the new code needs time to prove itself.
-  - [ ] Confirm that duplo init fully replaces _first_run for new projects: _first_run handled URL input, interactive feature selection, and first PLAN.md generation. duplo init handles URL input and SPEC.md generation; _subsequent_run handles feature extraction and PLAN.md generation from SPEC.md.
-  - [ ] Confirm that the migration gate (Phase 4) prevents any old-format project from reaching _first_run. If a code path can still reach _first_run, document it and decide whether to gate or remove it.
-  - [ ] Document findings in a comment block at the removal site.
+  - [ ] Grep the codebase for references to _first_run. Identify every call site. The only known call is in main() dispatch: when .duplo/duplo.json does not exist the code calls _first_run(url=args.url).
+  - [ ] Confirm that duplo init fully replaces _first_run for new projects. _first_run handled URL input, interactive feature selection, and first PLAN.md generation. duplo init handles URL input and SPEC.md generation; _subsequent_run handles feature extraction and PLAN.md generation from SPEC.md.
+  - [ ] Confirm that the migration gate prevents any old-format project from reaching _first_run.
 
-- [ ] Remove _first_run and its direct dependencies from duplo/main.py
+- [ ] Remove _first_run and its helper functions from duplo/main.py
   - [ ] Delete the _first_run function.
-  - [ ] Delete any helper functions in main.py that are ONLY called by _first_run (audit each helper for other callers before removing).
-  - [ ] Update the no-subcommand dispatch in main() to remove the _first_run branch. After migration check passes and SPEC.md exists, always go to _subsequent_run. If SPEC.md does not exist and .duplo/duplo.json does not exist (fresh directory, not an old project), print a message directing the user to run duplo init and exit 0.
-  - [ ] Tests: duplo in a fresh directory (no .duplo/, no SPEC.md) prints "run duplo init" message and exits 0; duplo in a directory with SPEC.md proceeds to _subsequent_run; no test references _first_run.
+  - [ ] Delete _confirm_product (interactive product confirmation prompt, only called by _first_run).
+  - [ ] Delete _validate_url (interactive URL disambiguation prompt, only called by _first_run).
+  - [ ] Delete _init_project (saves selections, generates tests, writes CLAUDE.md, builds roadmap for first run, only called by _first_run).
+  - [ ] For each deletion, audit callers first. If any live code path calls the function, do not delete it.
+  - [ ] Tests: no test references _first_run, _confirm_product, _validate_url, or _init_project.
 
-## Legacy interactive prompts removal
+- [ ] Update the no-subcommand dispatch in main() to remove the _first_run branch
+  - [ ] After migration check passes: if SPEC.md exists, go to _subsequent_run. If SPEC.md does not exist and .duplo/duplo.json does not exist (fresh directory, not an old project), print a message directing the user to run duplo init and exit 0.
+  - [ ] Remove the import of ask_preferences from duplo.questioner in main.py (only used by _first_run).
+  - [ ] Tests: duplo in a fresh directory (no .duplo/, no SPEC.md) prints "run duplo init" message and exits 0; duplo in a directory with SPEC.md proceeds to _subsequent_run.
 
-- [ ] Remove interactive feature selection from the pipeline entry path
-  - [ ] Audit callers of questioner.ask_preferences and questioner.select_features in main.py.
-  - [ ] The new model: BuildPreferences come from spec.architecture via build_prefs.parse_build_preferences (Phase 5). Feature selection for phase planning uses the existing selector.select_features in the next-phase flow, which is NOT being removed.
-  - [ ] Remove any call to questioner.ask_preferences from the pipeline. BuildPreferences are now derived from SPEC.md, not from interactive prompts.
-  - [ ] If questioner.select_features is still called during _first_run only, its removal is covered by the _first_run removal above. If it is called elsewhere, leave it.
-  - [ ] Tests: no import of ask_preferences remains in main.py or orchestrator.py; pipeline runs without interactive prompts when given a valid SPEC.md.
+## BuildPreferences migration
 
-- [ ] Evaluate questioner.py for removal
-  - [ ] Audit all imports of questioner across the codebase.
-  - [ ] If ask_preferences has no remaining callers after _first_run removal, and select_features is only used via selector.py (or the next-phase flow), determine whether questioner.py can be deleted entirely or whether select_features should be migrated to selector.py.
-  - [ ] If questioner.py can be deleted: delete it and tests/test_questioner.py.
-  - [ ] If select_features is still needed: keep the function, move it to selector.py (or leave in questioner.py), remove only the dead code.
-  - [ ] Tests: no remaining imports of deleted functions; existing next-phase flow tests still pass.
+- [ ] Move BuildPreferences dataclass from duplo/questioner.py to duplo/build_prefs.py
+  - [ ] The BuildPreferences dataclass is used by _prefs_from_dict and _load_preferences in main.py, both called from _subsequent_run (live code). It must NOT be deleted with questioner.py.
+  - [ ] Move the dataclass definition to build_prefs.py where parse_build_preferences already lives.
+  - [ ] Update all imports across the codebase: main.py, build_prefs.py, any test files that reference BuildPreferences.
+  - [ ] Tests: all existing tests that use BuildPreferences still pass; no import of BuildPreferences from questioner remains.
 
-## Legacy initializer removal
+## questioner.py removal
+
+- [ ] Delete duplo/questioner.py after BuildPreferences migration
+  - [ ] After BuildPreferences is moved to build_prefs.py and _first_run is deleted, audit all remaining imports of questioner across the codebase.
+  - [ ] ask_preferences should have no callers. select_features in the next-phase flow is imported from duplo.selector, not duplo.questioner.
+  - [ ] Delete duplo/questioner.py and tests/test_questioner.py.
+  - [ ] Tests: no remaining imports of duplo.questioner anywhere in the codebase; pytest -x passes.
+
+## initializer.py removal
 
 - [ ] Evaluate duplo/initializer.py for removal
   - [ ] Audit all callers of initializer.create_project_dir and initializer.project_name_from_url.
-  - [ ] _first_run used initializer to create a target project directory and git init it. Under the new model, the user creates their own project directory and runs duplo init from it. duplo init does NOT call create_project_dir.
+  - [ ] _first_run used initializer to create a target project directory and git init it. Under the new model, the user creates their own project directory and runs duplo init.
+  - [ ] If project_name_from_url is used by derive_app_name (in saver.py) or another live path, keep only that function and delete the rest.
   - [ ] If no remaining callers exist after _first_run removal: delete duplo/initializer.py and tests/test_initializer.py.
-  - [ ] If project_name_from_url is used by derive_app_name or another live path, keep only that function and delete the rest.
   - [ ] Tests: no remaining imports of deleted functions.
 
-## Legacy scanner heuristics removal
+## _rescrape_product_url legacy fallback
+
+- [ ] Remove _rescrape_product_url from duplo/main.py
+  - [ ] _subsequent_run has two branches for scraping: if spec has scrapeable sources, use _scrape_declared_sources; otherwise fall back to _rescrape_product_url which reads source_url from duplo.json directly.
+  - [ ] After _first_run removal, no new project can write source_url to duplo.json without SPEC.md. The only projects hitting _rescrape_product_url are pre-migration projects, but those are blocked by the migration gate.
+  - [ ] Confirm that every path reaching _subsequent_run has a SPEC.md (migration gate guarantees this). If confirmed, delete _rescrape_product_url and its else branch in _subsequent_run.
+  - [ ] If a path can still reach _subsequent_run without SPEC.md (e.g. .duplo/duplo.json exists but SPEC.md was deleted post-migration), keep the fallback and add a diagnostic instead.
+  - [ ] Tests: _subsequent_run with a valid SPEC.md never calls _rescrape_product_url; _subsequent_run without SPEC.md either errors or uses the fallback (whichever behavior is chosen).
+
+## Design-data redundancy simplification
+
+- [ ] Simplify _detect_and_append_gaps to read design data from SPEC.md only
+  - [ ] _detect_and_append_gaps currently merges design data from both duplo.json design_requirements AND SPEC.md AUTO-GENERATED block via _merge_design_dicts. Source code comment says "redundant during transition; can simplify in Phase 7."
+  - [ ] After the new model is the only path, SPEC.md AUTO-GENERATED block is the canonical source. Remove the duplo.json design_requirements merge and read only from spec.design.auto_generated.
+  - [ ] Remove the _merge_design_dicts call at the gap-detection site. If _merge_design_dicts has no other callers, delete it from gap_detector.py.
+  - [ ] Tests: gap detection produces the same results when design data is only in SPEC.md; no regression in existing gap-detection tests.
+
+## Scanner heuristics removal
 
 - [ ] Remove file-relevance scoring from duplo/scanner.py
-  - [ ] Phase 5 already changed scan_directory to point at ref/ and drop relevance heuristics. Confirm that no legacy scoring code remains (image dimension checks, file size thresholds, etc.).
+  - [ ] Phase 5 changed scan_directory to point at ref/ and drop relevance heuristics. Confirm that no legacy scoring code remains (image dimension checks, file size thresholds, etc.).
   - [ ] If any legacy scoring functions or constants remain in scanner.py that are no longer called, delete them.
   - [ ] Tests: no reference to removed scoring functions; scan_directory works purely on ref/ file inventory.
 
-## Legacy URL-in-text-file scanning removal
+## URL-in-text-file scanning removal
 
 - [ ] Remove URL extraction from arbitrary text files in the project directory
   - [ ] Under the old model, duplo scanned the project root for text files containing URLs and used them as scrape targets. Under the new model, URLs live exclusively in SPEC.md Sources section.
   - [ ] Audit main.py and any other module for code that scans the project root for text files containing URLs. Remove that code.
-  - [ ] Confirm that _subsequent_run reads URLs only from format_scrapeable_sources(spec), not from file scanning.
+  - [ ] Confirm that _subsequent_run reads URLs only from scrapeable_sources(spec), not from file scanning.
   - [ ] Tests: placing a text file containing a URL in the project root does NOT cause duplo to scrape that URL; URLs come only from SPEC.md.
 
 ## Compatibility layer removal
 
-- [ ] Remove Phase 3 compatibility shims for spec.references and spec.design string access
-  - [ ] Phase 3 changed spec.references from str to list[ReferenceEntry] and spec.design from str to DesignBlock. If any compatibility properties or helper methods were added to ProductSpec to support old-style string access, remove them now.
+- [ ] Remove any compatibility shims for spec.references and spec.design string access
+  - [ ] Phase 3 changed spec.references from str to list of ReferenceEntry and spec.design from str to DesignBlock. If any compatibility properties or helper methods were added to ProductSpec to support old-style string access, remove them now.
   - [ ] Grep for any call site that accesses spec.references as a string or spec.design as a string. If found, update to use the structured types.
-  - [ ] Tests: no string-access patterns remain; all callers use list[ReferenceEntry] and DesignBlock.
+  - [ ] Tests: no string-access patterns remain; all callers use list of ReferenceEntry and DesignBlock.
 
 ## Dead code audit
 
-- [ ] [BATCH] Run a dead-code audit across the duplo package
-  - [ ] Use ruff or manual grep to identify functions, classes, and module-level constants that are never imported or called from any live code path.
-  - [ ] For each candidate: confirm it is truly dead (not used by tests that test the function itself, not used by external scripts). If dead, delete it.
-  - [ ] Pay special attention to: functions in saver.py that were only used by _first_run; functions in fetcher.py that were only used by the old URL-in-text-file scanning; functions in extractor.py that were only used by the old first-run feature selection flow.
+- [ ] Audit duplo/saver.py for dead code
+  - [ ] Identify functions and constants that were only used by _first_run: save_selections, save_screenshot_feature_map, move_references, write_claude_md, and any others that have no remaining callers after _first_run removal.
+  - [ ] For each candidate: grep the codebase for all call sites. If only called from _first_run or deleted test code, delete it.
+  - [ ] Tests: pytest -x passes after deletions.
+
+- [ ] Audit duplo/screenshotter.py and duplo/comparator.py for dead code
+  - [ ] map_screenshots_to_features and save_reference_screenshots in screenshotter.py were used by _init_project. Check for remaining callers.
+  - [ ] compare_screenshots in comparator.py is used by _compare_with_references in main.py. _compare_with_references is called from _complete_phase which is live code, so comparator.py likely stays.
+  - [ ] Tests: pytest -x passes after deletions.
+
+- [ ] [BATCH] Audit remaining modules for dead code
+  - [ ] Check duplo/fetcher.py for functions only used by URL-in-text-file scanning.
+  - [ ] Check duplo/extractor.py for functions only used by the old first-run feature selection flow.
+  - [ ] Check duplo/collector.py for functions with no remaining callers.
+  - [ ] Check duplo/notifier.py, duplo/issuer.py, duplo/doc_tables.py for dead exports.
+  - [ ] For each dead function: delete it and remove its import from any __init__.py or other module.
   - [ ] Tests: pytest -x passes after all deletions.
 
 ## Documentation updates
@@ -1017,10 +1054,13 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [ ] Document the module inventory: spec_reader.py (parser), spec_writer.py (drafter), init.py (duplo init), orchestrator.py (pipeline helpers), migration.py (migration gate).
   - [ ] Document the safety invariant: no raw SPEC.md text in LLM prompts.
 
-- [ ] [BATCH] Remove or archive stale design documents
-  - [ ] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Now that all phases are shipped, decide whether to keep them as historical reference or move them to a docs/ subdirectory.
-  - [ ] Do NOT delete them without confirming with the user. Propose the archival strategy and wait for confirmation.
-  - [ ] If archiving: create docs/design/ directory and move all design docs there. Update any remaining cross-references.
+- [USER] Decide on design document archival strategy
+  - [ ] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Options: (a) move to docs/design/ as historical reference, (b) keep in place, (c) delete. User decides.
+
+- [ ] Execute the design document archival strategy decided above
+  - [ ] If archiving: create docs/design/ directory and move all design docs there. Update any remaining cross-references in CLAUDE.md or README.md.
+  - [ ] If keeping in place: no action needed.
+  - [ ] If deleting: remove the files. Confirm no remaining cross-references.
 
 ## Automated integration tests
 
