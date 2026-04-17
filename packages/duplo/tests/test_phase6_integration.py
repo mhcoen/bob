@@ -620,3 +620,73 @@ class TestInitUrlFetchFailureWritesScrapeNone:
         assert (tmp_path / "SPEC.md").is_file()
         assert (tmp_path / "ref").is_dir()
         assert (tmp_path / "ref" / "README.md").is_file()
+
+    def test_run_init_fetch_failure_writes_template_with_scrape_none(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Assert exit 0, SPEC.md written, URL in Sources with ``scrape: none``,
+        Purpose keeps its ``FILL IN`` marker.
+
+        Content-level check for the URL-fetch-failure flow: after
+        ``run_init`` runs under a ``fetch_site`` that raises
+        :class:`ConnectionError`, :func:`_run_url` must fall through to
+        the template-only branch.  The function returns normally (no
+        ``SystemExit(1)``) — the fetch failure is recoverable: the URL
+        is recorded in ``## Sources`` with ``scrape: none`` so the user
+        can re-enable scraping after fixing the network, and
+        ``## Purpose`` keeps its ``FILL IN`` marker so the user knows
+        the drafter had no scraped content to work from.  The test
+        also confirms the architecture FILL IN is preserved (the
+        template branch does not draft anything from the URL alone).
+        """
+        import pytest
+
+        from duplo.init import run_init
+        from duplo.spec_reader import read_spec
+
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "duplo.init.fetch_site",
+            side_effect=_fetch_site_network_error,
+        ):
+            # run_init returns None on the recoverable fetch-failure
+            # path; a SystemExit would mean exit code 1 (the path
+            # guarded by the existing-SPEC.md / force check, or an
+            # unrelated failure), which is NOT what this path should
+            # produce.
+            result = run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+            assert result is None
+
+        capsys.readouterr()
+
+        spec_path = tmp_path / "SPEC.md"
+        assert spec_path.is_file()
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+
+        source_urls = [s.url for s in spec.sources]
+        assert _IDENTIFIED_FIXTURE_URL in source_urls
+        matching = [s for s in spec.sources if s.url == _IDENTIFIED_FIXTURE_URL]
+        assert len(matching) == 1
+        entry = matching[0]
+        assert entry.scrape == "none"
+
+        assert spec.fill_in_purpose is True
+        assert spec.fill_in_architecture is True
+
+        # Sanity: run_init must not raise SystemExit on this path even
+        # when called a second time with --force (the file exists now,
+        # so without --force it WOULD exit 1; that confirms the exit-0
+        # behavior above was about the fetch-failure branch, not about
+        # a missing SPEC.md).
+        with patch(
+            "duplo.init.fetch_site",
+            side_effect=_fetch_site_network_error,
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+            assert excinfo.value.code == 1
+
+        capsys.readouterr()
