@@ -147,6 +147,23 @@ def _fetch_site_identified_fixture() -> tuple:
     )
 
 
+_NETWORK_ERROR_MESSAGE = "Network is unreachable"
+
+
+def _fetch_site_network_error(*_args, **_kwargs):
+    """Stand-in for :func:`duplo.fetcher.fetch_site` that raises a network error.
+
+    Used as a ``side_effect`` when patching ``duplo.init.fetch_site``
+    so tests can exercise the URL-flow branch where the fetch itself
+    aborts with an exception (as opposed to returning an empty
+    ``records`` tuple, which covers the "fetched but got nothing"
+    branch).  Raises :class:`ConnectionError` — a builtin that reads
+    cleanly as "network error" and doesn't require importing a
+    third-party exception hierarchy.
+    """
+    raise ConnectionError(_NETWORK_ERROR_MESSAGE)
+
+
 class TestInitNoArgsProducesTemplate:
     """Per PLAN.md § 'Automated integration tests':
     ``test_init_no_args_produces_template``.
@@ -536,3 +553,35 @@ class TestInitWithExistingRefFilesProposesRoles:
 
         assert image_entry.roles == [_IMAGE_VISION_ROLE]
         assert pdf_entry.roles == ["docs"]
+
+
+class TestInitUrlFetchFailureWritesScrapeNone:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_url_fetch_failure_writes_scrape_none``.
+    """
+
+    def test_fetch_site_mocked_to_raise_network_error(self, tmp_path, monkeypatch):
+        """Mock ``fetch_site`` to raise an exception (network error).
+
+        Stages the URL-fetch-failure integration test: confirms that
+        patching ``duplo.init.fetch_site`` with a ``side_effect`` that
+        raises :class:`ConnectionError` routes the exception to callers
+        (rather than e.g. swallowing it or returning ``None``).  Later
+        subtasks call ``run_init`` under this mock and assert on the
+        template-with-``scrape: none`` SPEC.md that the URL-flow
+        produces when the fetch aborts.
+        """
+        import pytest
+
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "duplo.init.fetch_site",
+            side_effect=_fetch_site_network_error,
+        ) as mock_fetch:
+            from duplo.init import fetch_site as patched_fetch_site
+
+            with pytest.raises(ConnectionError, match=_NETWORK_ERROR_MESSAGE):
+                patched_fetch_site(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
+
+        mock_fetch.assert_called_once_with(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
