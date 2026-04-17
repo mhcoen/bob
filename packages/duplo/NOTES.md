@@ -525,6 +525,38 @@ Conclusion: the three responsibilities named in the plan (URL input, feature
 extraction, PLAN.md generation) are fully covered by the split
 `duplo init` + `_subsequent_run`. The claim is accurate.
 
+### [7.5.1] Audit of initializer callers — 2026-04-17
+
+`initializer.create_project_dir`:
+- Defined in `duplo/initializer.py:20`.
+- Zero production callers. Grep confirms no imports of
+  `create_project_dir` in `duplo/**/*.py` (only `duplo/initializer.py`
+  itself).
+- Test callers in `tests/test_initializer.py` only (lines 10, 35, 44,
+  52, 61, 68, 74, 86, 92, 99, 106).
+
+`initializer.project_name_from_url`:
+- Defined in `duplo/initializer.py:10`.
+- Zero production callers. `saver.derive_app_name` does NOT use it:
+  its fallback (`saver.py:151-153`) is `td.resolve().name` (directory
+  name), not a URL-derived hostname. The resolution order
+  (1 product.json `app_name` → 2 duplo.json `app_name` →
+  3 product.json `product_name` for product-reference sources →
+  4 directory name) never calls `project_name_from_url`.
+- Test callers in `tests/test_initializer.py` only (lines 10, 15, 18,
+  21, 24, 27).
+
+No remaining production callers for either function after the
+`_first_run` removal in 7.2.1. The CURRENT_PLAN.md branch at line 45
+("If project_name_from_url is used by derive_app_name or another live
+path, keep only that function and delete the rest") is not triggered —
+neither function is in a live path.
+
+Next checkbox (CURRENT_PLAN.md line 44) calls for deleting
+`duplo/initializer.py` and `tests/test_initializer.py`. Per the "never
+delete any file" project rule, this is flagged here for the user to
+decide. Leaving both files in place until explicitly directed.
+
 ## Hypotheses
 
 ### [7.1.2] Dispatch and _subsequent_run assumptions block _first_run removal — 2026-04-17
