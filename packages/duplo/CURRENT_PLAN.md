@@ -79,7 +79,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 - [ ] Update README.md to reflect the new project setup flow
   - [x] Remove any references to the old implicit first-run behavior (duplo auto-detecting a fresh directory and running interactively).
-  - [ ] Document the new flow: duplo init to create SPEC.md, edit SPEC.md, run duplo.
+  - [x] Document the new flow: duplo init to create SPEC.md, edit SPEC.md, run duplo.
   - [ ] Document the three input channels: URL in Sources, files in ref/, prose in Purpose/Architecture/Design/Behavior/Notes.
   - [ ] Document duplo init command surface and flags.
   - [ ] Keep existing documentation for duplo fix and duplo investigate unchanged.
