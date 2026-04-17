@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from duplo import scanner
 from duplo.scanner import (
     ScanResult,
     check_unlisted_ref_files,
@@ -608,3 +609,67 @@ class TestScanFilesRoleLookupIntegration:
         result = scan_files([listed, orphan], references=refs)
         assert listed in result.roles
         assert orphan not in result.roles
+
+
+class TestNoRemovedScoringSymbols:
+    """Pin that the scoring symbols removed in commit ffc66ea stay gone.
+
+    Mirrors the ``hasattr``-style invariant test added in 7.5.5
+    (``TestNoInitializerImportsInPipeline``). If any of these names
+    reappears in ``duplo.scanner`` the suite fails, flagging a
+    regression toward the pre-SPEC relevance-scoring model.
+    """
+
+    def test_no_file_relevance_dataclass(self):
+        assert not hasattr(scanner, "FileRelevance")
+
+    def test_no_assess_image_function(self):
+        assert not hasattr(scanner, "_assess_image")
+
+    def test_no_assess_video_function(self):
+        assert not hasattr(scanner, "_assess_video")
+
+    def test_no_assess_pdf_function(self):
+        assert not hasattr(scanner, "_assess_pdf")
+
+    def test_no_assess_text_function(self):
+        assert not hasattr(scanner, "_assess_text")
+
+    def test_no_min_image_bytes_constant(self):
+        assert not hasattr(scanner, "_MIN_IMAGE_BYTES")
+
+    def test_scan_result_has_no_relevance_field(self):
+        fields = {f for f in ScanResult.__dataclass_fields__}
+        assert "relevance" not in fields
+
+
+class TestScanDirectoryRefInventoryOnly:
+    """scan_directory is a pure file-inventory walk of ref/ — no scoring."""
+
+    def test_output_fields_are_inventory_only(self, tmp_path: Path):
+        """ScanResult exposes only file lists, urls, and roles — no scores."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "a.png").write_bytes(b"PNG")
+        result = scan_directory(ref)
+        expected_fields = {"images", "videos", "pdfs", "text_files", "urls", "roles"}
+        assert set(ScanResult.__dataclass_fields__) == expected_fields
+        assert result.images[0].name == "a.png"
+
+    def test_inventory_independent_of_file_size(self, tmp_path: Path):
+        """A 1-byte image and a large image both land in scan.images."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "tiny.png").write_bytes(b"P")
+        (ref / "big.png").write_bytes(b"PNG" * 100_000)
+        result = scan_directory(ref)
+        assert {p.name for p in result.images} == {"tiny.png", "big.png"}
+
+    def test_inventory_independent_of_text_length(self, tmp_path: Path):
+        """An empty text file and a long one both land in scan.text_files."""
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "empty.txt").write_text("")
+        (ref / "long.md").write_text("x" * 10_000)
+        result = scan_directory(ref)
+        assert {p.name for p in result.text_files} == {"empty.txt", "long.md"}
