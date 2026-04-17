@@ -82,7 +82,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Step 3: add SourceEntry for the URL (if any) with role product-reference and scrape deep. No proposed/discovered flag (user provided the URL explicitly).
   - [x] Step 4: add ReferenceEntry for each existing ref/ file with proposed: true and the role from inputs.vision_proposals.
   - [x] Step 5: call format_spec(spec) to serialize.
-  - [ ] Step 6: return the resulting string.
+  - [x] Step 6: return the resulting string.
   - [ ] Tests: URL-only inputs produce SPEC.md with Sources entry and pre-filled Purpose; prose-only inputs produce SPEC.md with Notes containing verbatim prose; both inputs produce merged SPEC.md; existing ref/ files produce References entries with proposed: true; vision_proposals roles appear on the entries; format_spec output passes parser round-trip.
 
 ## Drafter: error handling
