@@ -1146,6 +1146,148 @@ class TestRoundTrip:
         assert parsed.dropped_references == []
 
 
+# --------------------------------------------------------------------------
+# Edit-safety property tests
+# --------------------------------------------------------------------------
+#
+# Per DRAFTER-design.md section "Round-trip testing":
+#
+#   For any well-formed ProductSpec and any new SourceEntry,
+#   append_sources(format_spec(spec), [new_entry]) produces a spec
+#   where every field other than sources is unchanged after re-parsing.
+
+
+_EDIT_SAFETY_APPEND_SOURCES_EXCLUDED_FIELDS = _ROUND_TRIP_EXCLUDED_FIELDS | {"sources"}
+
+
+def _spec_equal_except_sources(a: ProductSpec, b: ProductSpec) -> bool:
+    """Same as ``_spec_equal_for_round_trip`` but also ignores ``sources``."""
+    for f in dataclasses.fields(ProductSpec):
+        if f.name in _EDIT_SAFETY_APPEND_SOURCES_EXCLUDED_FIELDS:
+            continue
+        av = getattr(a, f.name)
+        bv = getattr(b, f.name)
+        if f.name == "design":
+            if not _design_blocks_equal_for_round_trip(av, bv):
+                return False
+        else:
+            if av != bv:
+                return False
+    return True
+
+
+_NEW_SOURCE_ENTRIES: list[tuple[str, SourceEntry]] = [
+    (
+        "plain",
+        SourceEntry(
+            url="https://new-edit-safety.example",
+            role="product-reference",
+            scrape="deep",
+        ),
+    ),
+    (
+        "with_notes",
+        SourceEntry(
+            url="https://new-with-notes.example",
+            role="docs",
+            scrape="shallow",
+            notes="appended by edit-safety test",
+        ),
+    ),
+    (
+        "proposed",
+        SourceEntry(
+            url="https://new-proposed.example",
+            role="docs",
+            scrape="none",
+            proposed=True,
+        ),
+    ),
+    (
+        "discovered",
+        SourceEntry(
+            url="https://new-discovered.example",
+            role="docs",
+            scrape="none",
+            discovered=True,
+        ),
+    ),
+    (
+        "counter_example",
+        SourceEntry(
+            url="https://new-counter.example",
+            role="counter-example",
+            scrape="none",
+            notes="avoid this layout",
+        ),
+    ),
+]
+
+
+class TestEditSafetyAppendSources:
+    """append_sources preserves every non-sources field through a round-trip.
+
+    Property: for any well-formed ProductSpec and any new SourceEntry,
+    ``append_sources(format_spec(spec), [new_entry])`` produces a spec
+    where every field other than ``sources`` is unchanged after re-parsing.
+    """
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _ROUND_TRIP_FIXTURES],
+        ids=[f[0] for f in _ROUND_TRIP_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "new_entry",
+        [e[1] for e in _NEW_SOURCE_ENTRIES],
+        ids=[e[0] for e in _NEW_SOURCE_ENTRIES],
+    )
+    def test_append_sources_preserves_non_sources_fields(
+        self, spec: ProductSpec, new_entry: SourceEntry
+    ):
+        serialized = format_spec(spec)
+        modified = append_sources(serialized, [new_entry])
+        parsed = _parse_spec(modified)
+
+        # The new entry actually landed in sources (guards against a
+        # silent dedup false-positive that would trivially satisfy the
+        # property).
+        assert any(s.url == new_entry.url for s in parsed.sources), (
+            f"new entry {new_entry.url!r} not found in parsed.sources; "
+            f"got urls: {[s.url for s in parsed.sources]}"
+        )
+
+        # All non-sources fields round-trip unchanged.
+        assert _spec_equal_except_sources(parsed, spec), (
+            f"edit-safety mismatch; parsed=\n{parsed}\n\nexpected=\n{spec}"
+        )
+
+    def test_comparator_ignores_sources_difference(self):
+        """Guards the comparator itself: differing ``sources`` must compare
+        equal so the property isolates edits to that section.
+        """
+        a = ProductSpec(
+            purpose="x",
+            architecture="y",
+            sources=[SourceEntry(url="https://a.example", role="docs", scrape="none")],
+        )
+        b = ProductSpec(
+            purpose="x",
+            architecture="y",
+            sources=[
+                SourceEntry(url="https://a.example", role="docs", scrape="none"),
+                SourceEntry(url="https://b.example", role="docs", scrape="none"),
+            ],
+        )
+        assert _spec_equal_except_sources(a, b)
+
+    def test_comparator_detects_non_sources_difference(self):
+        """Complement: a difference in any non-sources field is still caught."""
+        a = ProductSpec(purpose="x", architecture="y")
+        b = ProductSpec(purpose="x", architecture="z")
+        assert not _spec_equal_except_sources(a, b)
+
+
 class TestInferUrlRole:
     """Tests for ``_infer_url_role`` (regex-based role inference)."""
 
