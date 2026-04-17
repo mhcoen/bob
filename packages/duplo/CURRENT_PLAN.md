@@ -149,7 +149,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Build DraftInputs with description populated. Call draft_spec(inputs).
   - [x] Per DRAFTER-design.md: if prose mentions a URL, extract it and add to Sources with proposed: true and role inferred via _infer_url_role.
   - [x] Write SPEC.md, create ref/, write ref/README.md.
-  - [ ] Print output per INIT-design.md (character count, pre-filled sections, next steps).
+  - [x] Print output per INIT-design.md (character count, pre-filled sections, next steps).
   - [ ] Tests: description from file read correctly; description from stdin (mocked) read correctly; file not found exits 1; URL extracted from prose added to Sources with proposed: true; inferred role correct; Notes section contains verbatim prose.
 
 - [ ] Implement run_init for the combined URL + --from-description case

@@ -1009,3 +1009,39 @@ class TestRunInitDescriptionBullets:
 
         out = capsys.readouterr().out
         assert "Pre-filled ## Purpose, ## Design from prose." in out
+
+
+class TestRunInitDescriptionOutputOrdering:
+    """Per INIT-design.md § 'duplo init --from-description description.txt':
+    lock the output layout so future edits do not drift from the design
+    doc's example shape (character count → drafted → ref/ scaffolding →
+    Wrote SPEC.md → bullets → next steps)."""
+
+    def test_description_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "Build a SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(
+                purpose="A calculator.",
+                architecture="SwiftUI on macOS.",
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        idx_read = out.index(f"Read {len(prose)} chars of description from {desc_path}.")
+        idx_drafted = out.index("Drafted SPEC.md from description.")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_bullet = out.index("Pre-filled ## Purpose from prose.")
+        idx_next = out.index(_DESCRIPTION_NEXT_STEPS)
+        assert idx_read < idx_drafted < idx_ref < idx_readme < idx_spec < idx_bullet < idx_next
+        # Blank line separates "Wrote SPEC.md." from the bullets.
+        assert "\n\n" in out[idx_spec:idx_bullet]
+        # Blank line separates the last bullet from "Next steps:".
+        assert "\n\n" in out[idx_bullet:idx_next]
