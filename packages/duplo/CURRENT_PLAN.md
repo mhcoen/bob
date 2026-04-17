@@ -207,7 +207,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [ ] Add test_init_force_overwrites_existing_spec
   - [x] Create a tmpdir with an existing SPEC.md containing custom content.
-  - [ ] Run run_init with --force. Assert: SPEC.md overwritten with new content.
+  - [x] Run run_init with --force. Assert: SPEC.md overwritten with new content.
   - [ ] Run run_init without --force. Assert: exits 1 with error message; SPEC.md unchanged.
 
 - [ ] Add test_init_then_duplo_run_works_end_to_end

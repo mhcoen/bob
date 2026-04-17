@@ -745,3 +745,37 @@ class TestInitForceOverwritesExistingSpec:
         assert spec_path.is_file()
         assert spec_path.read_text() == _CUSTOM_SPEC_CONTENT
         assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
+
+    def test_run_init_with_force_overwrites_existing_spec(self, tmp_path, capsys, monkeypatch):
+        """Run ``run_init`` with ``--force``; assert SPEC.md overwritten
+        with new content.
+
+        Content-level check for the force-overwrite flow: after a
+        hand-authored SPEC.md (carrying :data:`_CUSTOM_SPEC_MARKER`) is
+        in place, invoking ``run_init`` under the no-args flow with
+        ``force=True`` must replace the file with the no-args template
+        output.  The marker must be gone and the template's
+        distinguishing ``"How the pieces fit together:"`` header must
+        be present — that combination proves the file was rewritten
+        rather than merely appended to.  The no-args flow is used
+        here because it is the simplest path that exercises
+        :func:`_run_no_args` (which holds one of the ``force`` guards);
+        the URL and description flows have their own ``force`` guards
+        verified indirectly by the existing subtasks plus this one.
+        """
+        from duplo.init import run_init
+
+        monkeypatch.chdir(tmp_path)
+
+        spec_path = _write_custom_spec_fixture(tmp_path)
+        assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
+
+        run_init(_make_args(force=True))
+
+        capsys.readouterr()
+
+        assert spec_path.is_file()
+        new_text = spec_path.read_text()
+        assert _CUSTOM_SPEC_MARKER not in new_text
+        assert "How the pieces fit together:" in new_text
+        assert "<FILL IN: one or two sentences describing what you're building>" in new_text
