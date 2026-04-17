@@ -112,6 +112,6 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] This is a smoke test to catch stale imports that the individual deletion tests might miss.
 
 - [ ] Run the full test suite and confirm Phase 7 closes cleanly
-  - [ ] Execute pytest -x against the duplo repo.
+  - [x] Execute pytest -x against the duplo repo.
   - [ ] Assert: all tests pass; no test file references deleted modules or functions.
   - [ ] If any test fails, the task fails and mcloop will retry.
