@@ -175,3 +175,22 @@ class TestInitUrlProducesPrefilledSpec:
         assert (tmp_path / "SPEC.md").is_file()
         assert (tmp_path / "ref").is_dir()
         assert (tmp_path / "ref" / "README.md").is_file()
+
+        from duplo.spec_reader import read_spec
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+
+        assert spec.purpose
+        assert "FILL IN" not in spec.purpose
+        assert spec.fill_in_purpose is False
+
+        source_urls = [s.url for s in spec.sources]
+        assert _IDENTIFIED_FIXTURE_URL in source_urls
+        matching = [s for s in spec.sources if s.url == _IDENTIFIED_FIXTURE_URL]
+        assert len(matching) == 1
+        entry = matching[0]
+        assert entry.role == "product-reference"
+        assert entry.scrape == "deep"
+
+        assert spec.fill_in_architecture is True
