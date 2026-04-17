@@ -21,7 +21,7 @@ from duplo.diagnostics import record_failure
 from duplo.fetcher import fetch_site
 from duplo.scanner import scan_directory  # noqa: F401
 from duplo.spec_reader import ProductSpec, SourceEntry
-from duplo.spec_writer import DraftInputs, draft_spec, format_spec
+from duplo.spec_writer import DraftInputs, _propose_file_role, draft_spec, format_spec
 from duplo.url_canon import canonicalize_url
 from duplo.validator import validate_product_url
 
@@ -189,6 +189,41 @@ def _identify_product(canonical_url: str, text: str) -> tuple[str, bool]:
     return ("", False)
 
 
+def _scan_existing_ref_files(cwd: Path) -> tuple[list[Path], dict[Path, str]]:
+    """Inventory user files in ``ref/`` and propose a role for each.
+
+    Per INIT-design.md § "ref/ already exists with files": when the
+    user has dropped reference material into ``ref/`` before running
+    ``duplo init``, we call :func:`_propose_file_role` on each file so
+    the resulting SPEC.md can pre-fill ``## References`` with
+    ``proposed: true`` entries.
+
+    Returns ``(paths, proposals)`` where *paths* are ``ref/<name>``
+    relative to the project root (matching :class:`ReferenceEntry`
+    path convention) and *proposals* maps each path to the role
+    :func:`_propose_file_role` returned.  Skips hidden files and
+    ``README.md`` (duplo-owned).  Returns empty lists when ``ref/``
+    does not exist or contains no eligible files.
+    """
+    ref_dir = cwd / "ref"
+    if not ref_dir.is_dir():
+        return ([], {})
+    paths: list[Path] = []
+    proposals: dict[Path, str] = {}
+    for entry in sorted(ref_dir.iterdir()):
+        if not entry.is_file():
+            continue
+        if entry.name.startswith("."):
+            continue
+        if entry.name == "README.md":
+            continue
+        _, role = _propose_file_role(entry)
+        rel = Path("ref") / entry.name
+        paths.append(rel)
+        proposals[rel] = role
+    return (paths, proposals)
+
+
 def _run_url(args: argparse.Namespace, url: str) -> None:
     """Handle ``duplo init <url>`` per INIT-design.md § "duplo init <url>".
 
@@ -224,13 +259,20 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
     if fetch_ok and text:
         product_name, identified = _identify_product(canonical, text)
 
+    existing_refs, vision_proposals = _scan_existing_ref_files(cwd)
+
     if fetch_ok:
         if identified:
             print(f"Fetched {canonical} ({depth_label} for product identity).")
             print(f"  → Identified product: {product_name}")
             print("  → Pre-filled ## Purpose, ## Sources")
             print()
-            inputs = DraftInputs(url=canonical, url_scrape=text)
+            inputs = DraftInputs(
+                url=canonical,
+                url_scrape=text,
+                existing_ref_files=existing_refs,
+                vision_proposals=vision_proposals,
+            )
             content = draft_spec(inputs)
         else:
             print(f"Fetched {canonical}.")
