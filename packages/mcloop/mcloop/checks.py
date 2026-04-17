@@ -56,20 +56,23 @@ def get_check_commands(project_dir: str | Path) -> list[str]:
 
 
 def run_autofix(project_dir: str | Path) -> None:
-    """Run ruff check --fix to auto-fix lint issues.
+    """Run ruff auto-fixers to clear style issues before verification.
 
-    This is a separate step from verification so that callers can choose
-    whether to allow side effects.  Read-only paths (no-op detection,
-    full-suite, stage-boundary) should skip this.
+    Runs ``ruff check --fix`` (fixes lint violations) and ``ruff format``
+    (reformats to the configured style, which also splits long lines and
+    strings where possible). This is a separate step from verification
+    so that callers can choose whether to allow side effects. Read-only
+    paths (no-op detection, full-suite, stage-boundary) should skip this.
 
-    Note: ruff format is NOT run here. It was removed 2026-04-15
-    because it mutates committed files after the task commit,
-    causing mcloop to detect a dirty worktree and fail BATCH
-    tasks. Format checking is handled read-only by run_checks
-    via "ruff format --check ." in mcloop.json or _detect_commands.
+    Both commands are safe to run here: the pipeline snapshots the
+    worktree *after* autofix and *before* run_checks, so any changes
+    they make are folded into the pending commit. The dirty-worktree
+    guard only fires if run_checks itself mutates files, which is
+    prevented by using ``ruff format --check .`` (read-only) in the
+    check commands.
     """
     project_dir = Path(project_dir)
-    for fix_cmd in ["ruff check --fix ."]:
+    for fix_cmd in ["ruff check --fix .", "ruff format ."]:
         try:
             subprocess.run(
                 shlex.split(fix_cmd),
