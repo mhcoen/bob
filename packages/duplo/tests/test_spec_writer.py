@@ -1982,3 +1982,46 @@ class TestDraftSpec:
         assert spec.scope_exclude == ["exc"]
         assert len(spec.behavior_contracts) == 1
         assert spec.behavior_contracts[0].input == "in"
+
+    def test_step2_copies_description_verbatim_into_notes_with_header(self, monkeypatch):
+        """Pin Step 2 of draft_spec: if inputs.description is provided, copy
+        the original prose verbatim into spec.notes under the labeled header
+        'Original description provided to `duplo init`:'. The LLM does not
+        write notes. Per DRAFTER-design.md § draft_spec step 2."""
+        # Sentinel returned by step 1 has pre-existing notes content; step 2
+        # must replace it with the header + verbatim description so the LLM
+        # never gets to author ## Notes.
+        sentinel = ProductSpec(purpose="p", architecture="a", notes="LLM WROTE THIS")
+
+        def fake_draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
+            return sentinel
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            fake_draft_from_inputs,
+        )
+
+        prose = "Build a calculator.\n\n  With  weird   whitespace.\nAnd `backticks` & <brackets>."
+        text = draft_spec(DraftInputs(description=prose))
+        spec = _parse_spec(text)
+
+        # Header precedes the prose, prose is verbatim, LLM-authored notes gone.
+        assert "LLM WROTE THIS" not in spec.notes
+        assert spec.notes.startswith("Original description provided to `duplo init`:")
+        assert prose in spec.notes
+        header_idx = spec.notes.index("Original description provided to `duplo init`:")
+        prose_idx = spec.notes.index(prose)
+        assert header_idx < prose_idx
+
+    def test_step2_no_description_leaves_notes_from_step1_intact(self, monkeypatch):
+        """When inputs.description is None, step 2 is a no-op — notes from
+        step 1 (empty, per DRAFTER-design.md) are not touched."""
+        sentinel = ProductSpec(purpose="p", architecture="a", notes="")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        text = draft_spec(DraftInputs(url="https://example.com"))
+        assert "Original description provided" not in text
