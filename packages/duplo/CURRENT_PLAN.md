@@ -120,7 +120,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per INIT-design.md section "Implementation shape". New module with a single run_init entry point.
   - [x] Dependencies: duplo.spec_writer (for draft_spec, format_spec), duplo.fetcher (for fetch_site with scrape_depth), duplo.validator (for validate_product_url), duplo.scanner (for scan_directory on ref/).
 
-- [ ] Implement run_init for the no-arguments case
+- [x] Implement run_init for the no-arguments case
   - [x] Per INIT-design.md section "duplo init (no arguments)".
   - [x] Check for existing SPEC.md: if present and --force not set, print error message per INIT-design.md and exit 1.
   - [x] Create ref/ directory if it does not exist.
@@ -128,7 +128,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Write SPEC.md with the static SPEC-template.md content (via format_spec on an empty ProductSpec).
   - [x] Print the output message per INIT-design.md: "Created ref/...", "Wrote SPEC.md (template, no inputs).", and the "Next steps:" block.
   - [x] Exit 0.
-  - [ ] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
+  - [x] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
 
 - [ ] Implement run_init for the URL-only case
   - [ ] Per INIT-design.md section "duplo init URL".
