@@ -2,6 +2,22 @@
 
 ## Observations
 
+### [6.15.8] Description-flow test coverage already in place — 2026-04-17
+
+All six test cases called out in 6.15.8 were added incrementally during
+6.15.1-6.15.7 and pass. Mapping:
+
+- description read from file: `TestRunInitDescriptionFile::test_reads_description_from_file_and_writes_spec`
+- description read from stdin (mocked): `TestRunInitDescriptionStdin::test_reads_description_from_stdin_pipe`
+- file not found exits 1: `TestRunInitDescriptionFile::test_missing_file_prints_error_and_exits_1`
+- URL extracted with `proposed: true`: `TestRunInitDescriptionUrlExtraction::test_like_url_in_prose_becomes_proposed_product_reference`
+- inferred role correct: same test (product-reference) + `test_unlike_url_in_prose_becomes_proposed_counter_example_scrape_none` (counter-example)
+- Notes section contains verbatim prose: asserted inside `test_reads_description_from_file_and_writes_spec`
+
+No new tests were written for this subphase because adding redundant
+assertions would duplicate the existing coverage. All 48 tests in
+`tests/test_init.py` pass.
+
 ### [6.15.5] URL-from-prose extraction already in place — 2026-04-17
 
 Task 6.15.5 asks for URL extraction from the prose description, with role
