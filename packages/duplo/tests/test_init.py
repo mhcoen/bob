@@ -1,0 +1,62 @@
+"""Tests for duplo.init."""
+
+from __future__ import annotations
+
+import argparse
+
+import pytest
+
+from duplo.init import _SPEC_EXISTS_ERROR, run_init
+
+
+def _make_args(**overrides) -> argparse.Namespace:
+    defaults = {
+        "url": None,
+        "from_description": None,
+        "deep": False,
+        "force": False,
+    }
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+class TestRunInitNoArgsExistingSpec:
+    """Per INIT-design.md § 'duplo init against an existing SPEC.md'."""
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing user content\n")
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_init(_make_args())
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert _SPEC_EXISTS_ERROR in captured.err
+        # Existing SPEC.md must not be clobbered.
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing user content\n"
+
+    def test_existing_spec_with_force_overwrites(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing user content\n")
+
+        run_init(_make_args(force=True))
+
+        new_content = (tmp_path / "SPEC.md").read_text()
+        assert new_content != "pre-existing user content\n"
+        assert "How the pieces fit together:" in new_content
+
+    def test_error_message_matches_init_design(self):
+        # INIT-design.md pins this exact wording.
+        assert "SPEC.md already exists in this directory." in _SPEC_EXISTS_ERROR
+        assert "`duplo init --force`" in _SPEC_EXISTS_ERROR
+        assert "`duplo`" in _SPEC_EXISTS_ERROR
+
+    def test_no_existing_spec_no_force_proceeds(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / "SPEC.md").exists()
+
+        run_init(_make_args())
+
+        assert (tmp_path / "SPEC.md").exists()
+        assert "How the pieces fit together:" in (tmp_path / "SPEC.md").read_text()
