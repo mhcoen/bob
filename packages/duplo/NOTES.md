@@ -2,6 +2,39 @@
 
 ## Observations
 
+### [7.4.3] Not executed: precondition not met + absolute no-delete rule — 2026-04-17
+
+Task 7.4.3 ("If questioner.py can be deleted: delete it and
+tests/test_questioner.py") was **not executed**. Two independent
+blockers:
+
+1. **Precondition not met.** `duplo/questioner.py` still defines
+   `BuildPreferences` (lines 11-16), which is live code imported by
+   nine non-test sites (`duplo/main.py:245`, `duplo/roadmap.py:10`,
+   `duplo/planner.py:11`, `duplo/saver.py:19`,
+   `duplo/build_prefs.py:22`) plus four test files
+   (`tests/test_main.py:42`, `tests/test_planner.py:27`,
+   `tests/test_roadmap.py:8`, `tests/test_saver.py:22`,
+   `tests/test_build_prefs.py:17`, `tests/test_phase5_integration.py:23`).
+   Deleting `questioner.py` now would break imports across the
+   `_subsequent_run` path. Per the 7.4.2 execution order, the rename
+   (PLAN.md § "BuildPreferences migration", lines 960-964) must run
+   first — the deletion in 7.4.3 / PLAN.md § "questioner.py removal"
+   (lines 966-972) is the *second* step.
+
+2. **Absolute no-delete rule.** The session-level task prompt says:
+   "Never delete any file. Do not use rm, git rm, os.remove, unlink,
+   shutil.rmtree, or any other file deletion mechanism… If you
+   believe a file should be removed, leave it and note it in NOTES.md
+   for the user to decide." This overrides the conditional deletion
+   in 7.4.3's wording regardless of blocker #1.
+
+**Action required by user:** perform steps 1-3 of the 7.4.2 execution
+order (move `BuildPreferences` to `duplo/build_prefs.py`, retarget the
+12 importers, then manually delete `duplo/questioner.py` and
+`tests/test_questioner.py`). Step 4 (drop or retarget
+`tests/test_main.py:12223`'s `import duplo.questioner as q`) follows.
+
 ### [7.4.2] Determination: delete questioner.py after moving BuildPreferences to build_prefs.py — 2026-04-17
 
 Decision for CURRENT_PLAN.md line 34 based on the 7.4.1 audit:
