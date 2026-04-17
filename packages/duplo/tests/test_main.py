@@ -12171,3 +12171,91 @@ class TestInitSubcommand:
         with patch("duplo.init.run_init"):
             main()
         assert called == []
+
+
+class TestNoAskPreferencesInPipeline:
+    """Phase 7.3.5: after removing ``_first_run``, the pipeline must no
+    longer touch ``questioner.ask_preferences``. Two checks:
+
+    1. ``ask_preferences`` is not imported into ``duplo.main`` or
+       ``duplo.orchestrator`` module namespaces.
+    2. A full ``main()`` run against a valid SPEC.md does not invoke
+       ``questioner.ask_preferences``.
+    """
+
+    def test_main_module_has_no_ask_preferences(self):
+        import duplo.main
+
+        assert not hasattr(duplo.main, "ask_preferences")
+
+    def test_orchestrator_module_has_no_ask_preferences(self):
+        import duplo.orchestrator
+
+        assert not hasattr(duplo.orchestrator, "ask_preferences")
+
+    def test_pipeline_does_not_call_ask_preferences(self, tmp_path, monkeypatch):
+        """Running ``main()`` with a valid SPEC.md never reaches
+        ``questioner.ask_preferences``. BuildPreferences come from
+        ``spec.architecture`` via ``build_prefs.parse_build_preferences``.
+        """
+        _setup_subsequent_run(tmp_path, monkeypatch, with_plan=True)
+
+        from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
+
+        src = SourceEntry(
+            url="https://example.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="## Purpose\nA thing.\n## Architecture\nWeb.\n## Sources\n- https://example.com\n",
+            purpose="A valid product purpose statement.",
+            architecture="Web app using React.",
+            sources=[src],
+            design=DesignBlock(),
+        )
+        scrape_result = ScrapeResult(
+            combined_text="features",
+            product_ref_raw_pages={},
+        )
+
+        import duplo.main as m
+        import duplo.questioner as q
+
+        monkeypatch.setattr(m, "read_spec", lambda: spec)
+        monkeypatch.setattr(
+            m,
+            "validate_for_run",
+            lambda s: MagicMock(warnings=[], errors=[]),
+        )
+        monkeypatch.setattr(m, "scrapeable_sources", lambda s: [src])
+        monkeypatch.setattr(
+            m,
+            "_scrape_declared_sources",
+            MagicMock(return_value=scrape_result),
+        )
+        monkeypatch.setattr(m, "_persist_scrape_result", lambda r: None)
+        monkeypatch.setattr(m, "format_doc_references", lambda s: [])
+        monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
+        monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
+        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "load_hashes", lambda *a: {})
+        monkeypatch.setattr(
+            m,
+            "diff_hashes",
+            lambda *a: MagicMock(added=[], changed=[], removed=[]),
+        )
+        monkeypatch.setattr(m, "_download_site_media", lambda rp: ([], []))
+        monkeypatch.setattr(m, "format_behavioral_references", lambda s: [])
+        monkeypatch.setattr(m, "collect_design_input", lambda *a, **kw: [])
+
+        ap_mock = MagicMock(
+            side_effect=AssertionError(
+                "ask_preferences must not be called; prefs come from SPEC.md"
+            )
+        )
+        monkeypatch.setattr(q, "ask_preferences", ap_mock)
+
+        main()
+
+        ap_mock.assert_not_called()
