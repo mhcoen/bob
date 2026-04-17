@@ -2,6 +2,20 @@
 
 ## Observations
 
+### [7.3.3] No-op: no `ask_preferences` call to remove — 2026-04-17
+
+Grep across `duplo/` for `ask_preferences(` returns only two hits:
+the definition in `duplo/questioner.py:19` and a docstring mention
+in `duplo/build_prefs.py:3` (module-header prose, not a call).
+Zero call sites in `duplo/main.py`, `duplo/orchestrator.py`, or any
+other pipeline module. The last caller was `_first_run`, deleted in
+7.2.1. All remaining `duplo.questioner` imports across the package
+(`main.py:245`, `build_prefs.py:22`, `saver.py:19`, `planner.py:11`,
+`roadmap.py:10`) bring in only the `BuildPreferences` dataclass.
+Nothing to remove for this checkbox; whether `questioner.py` itself
+(and the `BuildPreferences` home) should move is tracked by
+CURRENT_PLAN.md § "Evaluate questioner.py for removal".
+
 ### [7.3.2] New-model wiring is already live in main.py — 2026-04-17
 
 Confirmed the model statement on CURRENT_PLAN.md line 27 matches the
