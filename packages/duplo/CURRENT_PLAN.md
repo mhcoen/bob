@@ -102,7 +102,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Assert: prints a message directing user to run duplo init; exits 0 (not 1); does NOT attempt _first_run behavior (no interactive prompts, no directory creation).
 
 - [ ] Add test_old_project_still_blocked_by_migration
-  - [ ] Create a tmpdir with .duplo/duplo.json but no SPEC.md.
+  - [x] Create a tmpdir with .duplo/duplo.json but no SPEC.md.
   - [ ] Run duplo (no subcommand).
   - [ ] Assert: migration message printed (now referencing duplo init); exits 1.
 
