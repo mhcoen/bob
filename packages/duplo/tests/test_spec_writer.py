@@ -319,6 +319,22 @@ class TestFormatSpec:
         assert "<FILL IN: one or two sentences describing what you're building>" in result
         assert "<FILL IN: language, framework, platform, constraints>" in result
 
+    def test_required_fill_in_markers_match_template(self):
+        """FILL IN markers for empty Purpose/Architecture must match SPEC-template.md."""
+        template = (Path(__file__).resolve().parent.parent / "SPEC-template.md").read_text()
+        result = format_spec(ProductSpec())
+        # Pull each required section's body out of the template and
+        # confirm format_spec emits the exact same FILL IN line.
+        for heading in ("## Purpose", "## Architecture"):
+            t_start = template.index(heading) + len(heading)
+            t_end = template.index("## ", t_start)
+            template_marker = next(
+                line.strip()
+                for line in template[t_start:t_end].splitlines()
+                if line.strip().startswith("<FILL IN")
+            )
+            assert template_marker in result
+
     def test_empty_spec_has_comment_hints_on_optional_sections(self):
         result = format_spec(ProductSpec())
         assert "URLs duplo should scrape" in result
