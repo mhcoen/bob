@@ -14,6 +14,7 @@ from duplo.spec_reader import (
     _parse_spec,
 )
 from duplo.spec_writer import (
+    _infer_url_role,
     append_references,
     append_sources,
     format_spec,
@@ -1134,3 +1135,58 @@ class TestRoundTrip:
         parsed = _parse_spec(format_spec(with_dropped))
         assert parsed.dropped_sources == []
         assert parsed.dropped_references == []
+
+
+class TestInferUrlRole:
+    """Tests for ``_infer_url_role`` (regex-based role inference)."""
+
+    def test_like_returns_product_reference(self):
+        assert _infer_url_role("like numi at https://numi.app") == "product-reference"
+
+    def test_such_as_returns_product_reference(self):
+        assert _infer_url_role("a calculator such as https://numi.app") == "product-reference"
+
+    def test_inspired_by_returns_product_reference(self):
+        assert _infer_url_role("inspired by https://numi.app") == "product-reference"
+
+    def test_see_also_returns_docs(self):
+        assert _infer_url_role("see also https://example.com/spec") == "docs"
+
+    def test_for_reference_returns_docs(self):
+        assert _infer_url_role("https://example.com/spec for reference") == "docs"
+
+    def test_not_like_returns_counter_example(self):
+        assert _infer_url_role("not like https://bad.example") == "counter-example"
+
+    def test_unlike_returns_counter_example(self):
+        assert _infer_url_role("unlike https://bad.example") == "counter-example"
+
+    def test_avoid_returns_counter_example(self):
+        assert _infer_url_role("avoid https://bad.example") == "counter-example"
+
+    def test_default_when_no_pattern_matches(self):
+        assert _infer_url_role("check out https://numi.app today") == "product-reference"
+
+    def test_empty_context_returns_default(self):
+        assert _infer_url_role("") == "product-reference"
+
+    def test_case_insensitive_like(self):
+        assert _infer_url_role("LIKE https://numi.app") == "product-reference"
+
+    def test_case_insensitive_see_also(self):
+        assert _infer_url_role("See Also https://example.com") == "docs"
+
+    def test_case_insensitive_unlike(self):
+        assert _infer_url_role("UNLIKE https://bad.example") == "counter-example"
+
+    def test_first_match_wins_not_like_before_like(self):
+        # ``not like`` starts at 0, plain ``like`` starts at 4 — earliest wins.
+        assert _infer_url_role("not like https://bad.example") == "counter-example"
+
+    def test_first_match_wins_earlier_like_beats_later_unlike(self):
+        # Two patterns in one context: ``like`` at 0 beats ``unlike`` later.
+        assert _infer_url_role("like this, unlike https://x") == "product-reference"
+
+    def test_word_boundary_dislike_does_not_match_like(self):
+        # ``like`` inside ``dislike`` must not trigger product-reference.
+        assert _infer_url_role("I dislike https://bad.example") == "product-reference"

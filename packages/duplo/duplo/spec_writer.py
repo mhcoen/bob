@@ -50,6 +50,44 @@ _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$", re.MULTILINE)
 # construct we care about.
 _REFERENCE_ENTRY_START = re.compile(r"^-\s+(?!https?://)(\S+)\s*$", re.MULTILINE)
 
+# Ordered list of (pattern, role) pairs used by ``_infer_url_role``.
+# The role is chosen by the earliest-starting match across all
+# patterns; ties break by list order, so counter-example patterns
+# precede product-reference patterns that share a keyword (e.g.
+# ``not like`` vs ``like``).
+_URL_ROLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bnot\s+like\b", re.IGNORECASE), "counter-example"),
+    (re.compile(r"\bunlike\b", re.IGNORECASE), "counter-example"),
+    (re.compile(r"\bavoid\b", re.IGNORECASE), "counter-example"),
+    (re.compile(r"\bsee\s+also\b", re.IGNORECASE), "docs"),
+    (re.compile(r"\bfor\s+reference\b", re.IGNORECASE), "docs"),
+    (re.compile(r"\blike\b", re.IGNORECASE), "product-reference"),
+    (re.compile(r"\bsuch\s+as\b", re.IGNORECASE), "product-reference"),
+    (re.compile(r"\binspired\s+by\b", re.IGNORECASE), "product-reference"),
+]
+
+
+def _infer_url_role(context: str) -> str:
+    """Infer a ``## Sources`` role from prose surrounding a URL.
+
+    Light heuristic per DRAFTER-design.md § "Inferring URL roles":
+    "like"/"such as"/"inspired by" → ``product-reference``;
+    "see also"/"for reference" → ``docs``;
+    "not like"/"unlike"/"avoid" → ``counter-example``. Falls back to
+    ``product-reference`` when nothing matches. When multiple
+    patterns match, the one starting earliest in *context* wins.
+    """
+    earliest_pos: int | None = None
+    earliest_role = "product-reference"
+    for pattern, role in _URL_ROLE_PATTERNS:
+        m = pattern.search(context)
+        if m is None:
+            continue
+        if earliest_pos is None or m.start() < earliest_pos:
+            earliest_pos = m.start()
+            earliest_role = role
+    return earliest_role
+
 
 def _extract_existing_urls(sources_body: str) -> set[str]:
     """Return the set of canonical URLs already present in a Sources body."""
