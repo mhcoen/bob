@@ -277,3 +277,35 @@ class TestInitDescriptionProducesNotesWithVerbatimProse:
         assert result.purpose == _DESCRIPTION_FIXTURE_PURPOSE
         assert result.architecture == _DESCRIPTION_FIXTURE_ARCHITECTURE
         assert result.notes == ""
+
+    def test_run_init_with_from_description_argument(self, tmp_path, capsys, monkeypatch):
+        """Run ``run_init`` with ``--from-description`` pointing to the fixture.
+
+        Stages the description-flow integration path: writes the prose
+        fixture, patches ``duplo.spec_writer._draft_from_inputs`` (the
+        single LLM call on this code path — :func:`_build_draft_spec`
+        delegates to it), and invokes ``run_init`` with
+        ``args.from_description`` set to the fixture path.  This
+        subtask only confirms the description flow runs to completion
+        under the mock and lays down SPEC.md / ref/; the content-level
+        assertions on ``## Notes`` verbatim prose and Purpose arrive
+        in the next subtask.
+        """
+        from duplo.init import run_init
+
+        monkeypatch.chdir(tmp_path)
+
+        desc_path = _write_description_fixture(tmp_path)
+
+        with patch(
+            "duplo.spec_writer._draft_from_inputs",
+            side_effect=_stub_draft_from_inputs,
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        # Drain captured output so it does not bleed into later tests.
+        capsys.readouterr()
+
+        assert (tmp_path / "SPEC.md").is_file()
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").is_file()
