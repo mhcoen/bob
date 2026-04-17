@@ -130,7 +130,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Exit 0.
   - [x] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
 
-- [ ] Implement run_init for the URL-only case
+- [x] Implement run_init for the URL-only case
   - [x] Per INIT-design.md section "duplo init URL".
   - [x] Canonicalize URL via url_canon.canonicalize_url before any use (per INIT-design.md error cases).
   - [x] Call fetch_site(url, scrape_depth="shallow") for product identity. If --deep flag set, use scrape_depth="deep" instead.
@@ -140,7 +140,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Scan existing ref/ files (if ref/ exists and has files): call _propose_file_role for each image, use extension defaults for non-images. Populate DraftInputs.vision_proposals. Per INIT-design.md section "ref/ already exists with files".
   - [x] Write SPEC.md from draft_spec output. Create ref/ and ref/README.md as in the no-arguments case.
   - [x] Print output per INIT-design.md (shallow scrape message, product identity, pre-filled sections, next steps).
-  - [ ] Tests (all with mocked fetch_site and claude -p): successful scrape produces pre-filled Purpose and Sources; failed scrape writes URL with scrape: none and exits 0; unidentified product fills Sources only; existing ref/ files get role proposals with proposed: true; --deep flag passes scrape_depth="deep" to fetch_site; --force overwrites existing SPEC.md; URL canonicalized before writing to Sources.
+  - [x] Tests (all with mocked fetch_site and claude -p): successful scrape produces pre-filled Purpose and Sources; failed scrape writes URL with scrape: none and exits 0; unidentified product fills Sources only; existing ref/ files get role proposals with proposed: true; --deep flag passes scrape_depth="deep" to fetch_site; --force overwrites existing SPEC.md; URL canonicalized before writing to Sources.
 
 - [ ] Implement run_init for the --from-description case
   - [ ] Per INIT-design.md section "duplo init --from-description description.txt".
