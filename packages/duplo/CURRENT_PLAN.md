@@ -185,10 +185,10 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Run run_init with no URL, no description in a tmpdir.
   - [x] Assert: SPEC.md exists and contains the marker string "How the pieces fit together:"; SPEC.md contains FILL IN markers for Purpose and Architecture; ref/ directory exists; ref/README.md exists and matches INIT-design.md content; needs_migration returns False for this directory.
 
-- [ ] Add test_init_url_produces_prefilled_spec
+- [x] Add test_init_url_produces_prefilled_spec
   - [x] Mock fetch_site to return a fixture scrape with identifiable product name.
   - [x] Run run_init with a URL argument.
-  - [ ] Assert: SPEC.md has pre-filled Purpose (non-empty, no FILL IN); Sources section contains the URL with role: product-reference and scrape: deep; Architecture still has FILL IN; SPEC.md round-trips through the parser without errors.
+  - [x] Assert: SPEC.md has pre-filled Purpose (non-empty, no FILL IN); Sources section contains the URL with role: product-reference and scrape: deep; Architecture still has FILL IN; SPEC.md round-trips through the parser without errors.
 
 - [ ] Add test_init_description_produces_notes_with_verbatim_prose
   - [ ] Write a description.txt fixture. Mock the LLM call in _draft_from_inputs.
