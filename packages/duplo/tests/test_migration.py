@@ -12,13 +12,9 @@ from duplo.migration import _MIGRATION_MESSAGE, _check_migration, needs_migratio
 class TestMigrationMessage:
     """Tests for _MIGRATION_MESSAGE constant."""
 
-    def test_mentions_spec_template(self) -> None:
-        """Message tells the user to author SPEC.md from the template."""
-        assert "SPEC-template.md" in _MIGRATION_MESSAGE
-
-    def test_does_not_mention_duplo_init(self) -> None:
-        """Phase 2 message must NOT reference `duplo init` (ships in Phase 4)."""
-        assert "duplo init" not in _MIGRATION_MESSAGE
+    def test_mentions_duplo_init(self) -> None:
+        """Phase 4 message instructs the user to run `duplo init`."""
+        assert "duplo init" in _MIGRATION_MESSAGE
 
     def test_mentions_ref_directory(self) -> None:
         """Message instructs the user to create ref/ and move files."""
@@ -36,16 +32,12 @@ class TestMigrationMessage:
         """Message reassures the user nothing was moved or modified."""
         assert "Nothing has been moved or modified" in _MIGRATION_MESSAGE
 
-    def test_lists_four_numbered_steps(self) -> None:
-        """Phase 2 message has exactly four numbered steps."""
+    def test_lists_five_numbered_steps(self) -> None:
+        """Phase 4 message has exactly five numbered steps."""
         import re
 
         steps = re.findall(r"^\s+\d+\.", _MIGRATION_MESSAGE, re.MULTILINE)
-        assert len(steps) == 4
-
-    def test_minimum_field_purpose(self) -> None:
-        """Message lists Purpose as a minimum SPEC.md field."""
-        assert "## Purpose" in _MIGRATION_MESSAGE
+        assert len(steps) == 5
 
     def test_minimum_field_architecture(self) -> None:
         """Message lists Architecture as a minimum SPEC.md field."""
@@ -341,7 +333,7 @@ class TestCheckMigration:
             _check_migration(tmp_path)
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "SPEC-template.md" in captured.out
+        assert "duplo init" in captured.out
         assert "mkdir ref" in captured.out
 
     def test_no_exit_on_new_format(self, tmp_path: Path, capsys) -> None:
@@ -372,7 +364,7 @@ class TestCheckMigration:
             _check_migration(tmp_path)
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "SPEC-template.md" in captured.out
+        assert "duplo init" in captured.out
 
     def test_prints_full_message(self, tmp_path: Path, capsys) -> None:
         """Printed output matches _MIGRATION_MESSAGE exactly."""
