@@ -1552,12 +1552,7 @@ def test_has_unchecked_bugs_with_h1_bugs_header(tmp_path):
 
 def test_purge_completed_bugs_basic(tmp_path):
     """purge_completed_bugs removes checked items from BUGS.md."""
-    md = (
-        "## Bugs\n"
-        "- [x] Fixed crash A\n"
-        "- [x] Fixed crash B\n"
-        "- [ ] Unfixed bug\n"
-    )
+    md = "## Bugs\n- [x] Fixed crash A\n- [x] Fixed crash B\n- [ ] Unfixed bug\n"
     f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)
@@ -1571,12 +1566,7 @@ def test_purge_completed_bugs_basic(tmp_path):
 
 def test_purge_completed_bugs_all_done(tmp_path):
     """When all bugs are fixed, only the header remains."""
-    md = (
-        "## Bugs\n"
-        "\n"
-        "- [x] Fixed bug 1\n"
-        "- [x] Fixed bug 2\n"
-    )
+    md = "## Bugs\n\n- [x] Fixed bug 1\n- [x] Fixed bug 2\n"
     f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)
@@ -1602,13 +1592,7 @@ def test_purge_completed_bugs_no_checked(tmp_path):
 
 def test_purge_completed_bugs_keeps_prose(tmp_path):
     """Non-checkbox lines (prose, blank lines) in BUGS.md are kept."""
-    md = (
-        "## Bugs\n"
-        "\n"
-        "These are notes about bugs.\n"
-        "- [x] Fixed one\n"
-        "- [ ] Open one\n"
-    )
+    md = "## Bugs\n\nThese are notes about bugs.\n- [x] Fixed one\n- [ ] Open one\n"
     f = tmp_path / "BUGS.md"
     f.write_text(md)
     purge_completed_bugs(f)

@@ -19,7 +19,6 @@ from mcloop.checklist import (
     Task,
     check_off,
     count_unchecked,
-    current_stage,
     find_next,
     find_parent,
     get_batch_children,
@@ -33,7 +32,6 @@ from mcloop.checklist import (
     parse_auto_task,
     parse_description,
     purge_completed_bugs,
-    stage_status,
     user_task_instructions,
 )
 from mcloop.checklist import (
@@ -440,10 +438,7 @@ def _run_batch(
         )
         if salvaged:
             print(
-                formatting.system_msg(
-                    "Salvaged minor style failures in: "
-                    + ", ".join(patched)
-                ),
+                formatting.system_msg("Salvaged minor style failures in: " + ", ".join(patched)),
                 flush=True,
             )
             # Add patched files to the pre-batch snapshot so the
@@ -997,9 +992,7 @@ def run_loop(
                 # batch body is written as a coherent unit where some
                 # subtasks may be context-only and cannot stand alone.
                 print(
-                    formatting.error_msg(
-                        f"Batch failed after {max_retries} attempts"
-                    ),
+                    formatting.error_msg(f"Batch failed after {max_retries} attempts"),
                     flush=True,
                 )
                 batch_exhausted.add(parent_label)
@@ -1241,8 +1234,7 @@ def run_loop(
                     if salvaged:
                         print(
                             formatting.system_msg(
-                                "Salvaged minor style failures in: "
-                                + ", ".join(patched)
+                                "Salvaged minor style failures in: " + ", ".join(patched)
                             ),
                             flush=True,
                         )
@@ -1436,8 +1428,7 @@ def run_loop(
             completed,
             failed_task,
             failed_reason,
-            parse(bugs_path)
-            + (parse(current_plan_path) if current_plan_path.exists() else []),
+            parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -1504,8 +1495,7 @@ def run_loop(
             completed,
             None,
             "",
-            parse(bugs_path)
-            + (parse(current_plan_path) if current_plan_path.exists() else []),
+            parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -1540,14 +1530,18 @@ def run_loop(
             _summary_full_suite = True  # Passed in-loop (otherwise terminal_failure would be set)
             _summary_build = True
             msg = f"{completed_stage} complete."
-            next_stg = get_current_phase_name(current_plan_path) if current_plan_path.exists() else None
+            next_stg = (
+                get_current_phase_name(current_plan_path) if current_plan_path.exists() else None
+            )
             if next_stg:
                 msg += f" Run mcloop again to start {next_stg}."
             success_msg = msg
         else:
             # All phases done. Full suite + build already ran at last
             # phase boundary. Run audit.
-            summary_remaining_tasks = parse(bugs_path) + parse(current_plan_path) if current_plan_path.exists() else parse(bugs_path)
+            summary_remaining_tasks = parse(bugs_path) + (
+                parse(current_plan_path) if current_plan_path.exists() else []
+            )
             _summary_full_suite = True
             _summary_build = True
 
@@ -1590,7 +1584,9 @@ def run_loop(
                 success_msg = "All tasks completed!"
     else:
         # Task/commit failure: show remaining tasks in summary
-        summary_remaining_tasks = parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else [])
+        summary_remaining_tasks = parse(bugs_path) + (
+            parse(current_plan_path) if current_plan_path.exists() else []
+        )
 
     # --- Single exit point for all non-bug-only paths ---
     total = time.monotonic() - run_start

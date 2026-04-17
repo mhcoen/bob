@@ -188,9 +188,7 @@ def try_salvage_style_failures(
             m = noqa_re.search(body)
             if m:
                 existing_codes = m.group(1) or ""
-                existing_set = {
-                    c.strip() for c in existing_codes.split(",") if c.strip()
-                }
+                existing_set = {c.strip() for c in existing_codes.split(",") if c.strip()}
                 if code in existing_set:
                     continue
                 # Extend the existing noqa list.

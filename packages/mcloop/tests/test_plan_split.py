@@ -20,7 +20,6 @@ from mcloop.plan_split import (
     transition_phase,
 )
 
-
 # ---------------------------------------------------------------------------
 # extract_next_phase
 # ---------------------------------------------------------------------------
@@ -60,12 +59,7 @@ def test_extract_next_phase_skips_fully_checked_phases(tmp_path: Path) -> None:
     """Phases with all tasks checked are skipped."""
     master = tmp_path / "PLAN.md"
     master.write_text(
-        "## Phase 1: Done\n"
-        "- [x] A\n"
-        "## Phase 2: Also done\n"
-        "- [x] B\n"
-        "## Phase 3: Active\n"
-        "- [ ] C\n"
+        "## Phase 1: Done\n- [x] A\n## Phase 2: Also done\n- [x] B\n## Phase 3: Active\n- [ ] C\n"
     )
     result = extract_next_phase(master)
     assert result is not None
@@ -75,22 +69,14 @@ def test_extract_next_phase_skips_fully_checked_phases(tmp_path: Path) -> None:
 def test_extract_next_phase_all_complete_returns_none(tmp_path: Path) -> None:
     """When every phase is fully checked, returns None."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n- [x] task\n## Phase 2: B\n- [x] task\n"
-    )
+    master.write_text("## Phase 1: A\n- [x] task\n## Phase 2: B\n- [x] task\n")
     assert extract_next_phase(master) is None
 
 
 def test_extract_next_phase_excludes_bugs_section(tmp_path: Path) -> None:
     """The Bugs section is not treated as a phase and is excluded."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: Active\n"
-        "- [ ] real task\n"
-        "\n"
-        "## Bugs\n"
-        "- [ ] bug item\n"
-    )
+    master.write_text("## Phase 1: Active\n- [ ] real task\n\n## Bugs\n- [ ] bug item\n")
     result = extract_next_phase(master)
     assert result is not None
     name, content = result
@@ -102,13 +88,7 @@ def test_extract_next_phase_excludes_bugs_section(tmp_path: Path) -> None:
 def test_extract_next_phase_flat_plan_returns_empty_name(tmp_path: Path) -> None:
     """A plan with no phase/stage headers returns ('', content)."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "# Project\n"
-        "\n"
-        "- [x] Already done\n"
-        "- [ ] Still to do\n"
-        "- [ ] Also pending\n"
-    )
+    master.write_text("# Project\n\n- [x] Already done\n- [ ] Still to do\n- [ ] Also pending\n")
     result = extract_next_phase(master)
     assert result is not None
     name, content = result
@@ -134,9 +114,7 @@ def test_extract_next_phase_no_tasks_returns_none(tmp_path: Path) -> None:
 def test_extract_next_phase_stage_keyword_also_recognized(tmp_path: Path) -> None:
     """Stage N headers behave the same as Phase N headers."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Stage 1: Foundation\n- [x] done\n## Stage 2: Build\n- [ ] todo\n"
-    )
+    master.write_text("## Stage 1: Foundation\n- [x] done\n## Stage 2: Build\n- [ ] todo\n")
     result = extract_next_phase(master)
     assert result is not None
     assert result[0] == "Stage 2: Build"
@@ -150,13 +128,7 @@ def test_extract_next_phase_stage_keyword_also_recognized(tmp_path: Path) -> Non
 def test_mark_phase_complete_bulk_checks_target_phase(tmp_path: Path) -> None:
     """All [ ] in the named phase become [x]; other phases untouched."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n"
-        "- [ ] a1\n"
-        "- [ ] a2\n"
-        "## Phase 2: B\n"
-        "- [ ] b1\n"
-    )
+    master.write_text("## Phase 1: A\n- [ ] a1\n- [ ] a2\n## Phase 2: B\n- [ ] b1\n")
     mark_phase_complete(master, "Phase 1: A")
     text = master.read_text()
     assert "- [x] a1" in text
@@ -167,12 +139,7 @@ def test_mark_phase_complete_bulk_checks_target_phase(tmp_path: Path) -> None:
 def test_mark_phase_complete_does_not_touch_bugs_section(tmp_path: Path) -> None:
     """Bugs section after target phase is preserved."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n"
-        "- [ ] task\n"
-        "## Bugs\n"
-        "- [ ] bug\n"
-    )
+    master.write_text("## Phase 1: A\n- [ ] task\n## Bugs\n- [ ] bug\n")
     mark_phase_complete(master, "Phase 1: A")
     text = master.read_text()
     assert "- [x] task" in text
@@ -201,12 +168,7 @@ def test_mark_phase_complete_unknown_phase_is_noop(tmp_path: Path) -> None:
 def test_mark_phase_complete_flat_plan_checks_all(tmp_path: Path) -> None:
     """For phase_name='', every non-bug task is checked."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "- [ ] one\n"
-        "- [ ] two\n"
-        "## Bugs\n"
-        "- [ ] bug\n"
-    )
+    master.write_text("- [ ] one\n- [ ] two\n## Bugs\n- [ ] bug\n")
     mark_phase_complete(master, "")
     text = master.read_text()
     assert "- [x] one" in text
@@ -222,9 +184,7 @@ def test_mark_phase_complete_flat_plan_checks_all(tmp_path: Path) -> None:
 def test_get_current_phase_name_reads_first_stage_header(tmp_path: Path) -> None:
     """Returns the stage/phase header text from the file."""
     plan = tmp_path / "CURRENT_PLAN.md"
-    plan.write_text(
-        "## Phase 2: Core\n- [ ] task\n"
-    )
+    plan.write_text("## Phase 2: Core\n- [ ] task\n")
     assert get_current_phase_name(plan) == "Phase 2: Core"
 
 
@@ -238,9 +198,7 @@ def test_get_current_phase_name_empty_for_flat_plan(tmp_path: Path) -> None:
 def test_get_current_phase_name_uses_first_header_only(tmp_path: Path) -> None:
     """When multiple stage headers exist, the first is returned."""
     plan = tmp_path / "CURRENT_PLAN.md"
-    plan.write_text(
-        "## Phase 1: First\n- [ ] a\n## Phase 2: Second\n- [ ] b\n"
-    )
+    plan.write_text("## Phase 1: First\n- [ ] a\n## Phase 2: Second\n- [ ] b\n")
     assert get_current_phase_name(plan) == "Phase 1: First"
 
 
@@ -252,9 +210,7 @@ def test_get_current_phase_name_uses_first_header_only(tmp_path: Path) -> None:
 def test_ensure_current_plan_extracts_when_missing(tmp_path: Path) -> None:
     """Missing CURRENT_PLAN.md is created from master's next unchecked phase."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n- [x] done\n## Phase 2: B\n- [ ] todo\n"
-    )
+    master.write_text("## Phase 1: A\n- [x] done\n## Phase 2: B\n- [ ] todo\n")
     current = tmp_path / "CURRENT_PLAN.md"
     assert not current.exists()
 
@@ -297,13 +253,7 @@ def test_ensure_current_plan_returns_false_when_master_complete(tmp_path: Path) 
 def test_transition_phase_marks_complete_and_extracts_next(tmp_path: Path) -> None:
     """Current phase is bulk-checked in master; next phase written to current."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n"
-        "- [ ] a1\n"
-        "- [ ] a2\n"
-        "## Phase 2: B\n"
-        "- [ ] b1\n"
-    )
+    master.write_text("## Phase 1: A\n- [ ] a1\n- [ ] a2\n## Phase 2: B\n- [ ] b1\n")
     current = tmp_path / "CURRENT_PLAN.md"
     current.write_text("## Phase 1: A\n- [x] a1\n- [x] a2\n")
 
@@ -380,11 +330,7 @@ def test_ensure_bugs_file_preserves_existing(tmp_path: Path) -> None:
 def test_full_lifecycle_three_phases(tmp_path: Path) -> None:
     """Walk through three phases by repeated ensure + transition cycles."""
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n- [ ] a\n"
-        "## Phase 2: B\n- [ ] b\n"
-        "## Phase 3: C\n- [ ] c\n"
-    )
+    master.write_text("## Phase 1: A\n- [ ] a\n## Phase 2: B\n- [ ] b\n## Phase 3: C\n- [ ] c\n")
     current = tmp_path / "CURRENT_PLAN.md"
 
     # Cycle 1: extract phase 1
@@ -436,8 +382,6 @@ def test_extract_next_phase_raises_on_corrupted_master(tmp_path: Path) -> None:
     from mcloop.checklist import PlanCorruptionError
 
     master = tmp_path / "PLAN.md"
-    master.write_text(
-        "## Phase 1: A\n- [ ] a\n## Phase 1: A duplicate\n- [ ] b\n"
-    )
+    master.write_text("## Phase 1: A\n- [ ] a\n## Phase 1: A duplicate\n- [ ] b\n")
     with pytest.raises(PlanCorruptionError):
         extract_next_phase(master)

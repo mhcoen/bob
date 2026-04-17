@@ -2023,7 +2023,10 @@ def test_run_loop_no_audit_skips_audit(tmp_path):
     with (
         patch("mcloop.main._checkpoint"),
         patch("mcloop.main.parse", return_value=[]),
-        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=MagicMock(passed=True, command="", output=""),
+        ),
         patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
         patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
@@ -2049,7 +2052,10 @@ def test_run_loop_audit_called_by_default(tmp_path):
     with (
         patch("mcloop.main._checkpoint"),
         patch("mcloop.main.parse", return_value=[]),
-        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=MagicMock(passed=True, command="", output=""),
+        ),
         patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
         patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
@@ -5988,7 +5994,10 @@ def test_run_loop_no_bugs_runs_normally(tmp_path):
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._ensure_git"),
         patch("mcloop.main.parse", return_value=[]),
-        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True, command="", output="")),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=MagicMock(passed=True, command="", output=""),
+        ),
         patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)),
         patch("mcloop.main.transition_phase", side_effect=fake_transition),
         patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
@@ -8933,7 +8942,9 @@ def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
         patch("mcloop.main._print_summary"),
         patch("mcloop.main.notify") as mock_notify,
         patch("mcloop.main._run_audit_fix_cycle", return_value=AuditResult.failed),
-        patch("mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)) as mock_build,
+        patch(
+            "mcloop.main._run_build", return_value=BuildResult(ran=False, passed=True)
+        ) as mock_build,
     ):
         run_loop(plan)
 

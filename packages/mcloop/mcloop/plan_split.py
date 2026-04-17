@@ -59,9 +59,7 @@ def extract_next_phase(master_path: Path) -> tuple[str, str] | None:
     return None
 
 
-def _extract_stage_content(
-    master_path: Path, target_stage: str
-) -> tuple[str, str]:
+def _extract_stage_content(master_path: Path, target_stage: str) -> tuple[str, str]:
     """Extract the raw lines for one stage from the master file."""
     lines = master_path.read_text().splitlines()
     start: int | None = None
@@ -80,9 +78,7 @@ def _extract_stage_content(
             break
 
     if start is None:
-        raise ValueError(
-            f"Stage '{target_stage}' not found in {master_path}"
-        )
+        raise ValueError(f"Stage '{target_stage}' not found in {master_path}")
 
     content = "\n".join(lines[start:end]).rstrip() + "\n"
     return (target_stage, content)
