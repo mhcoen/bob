@@ -13,6 +13,10 @@ from duplo.init import (
     _NO_ARGS_NEXT_STEPS,
     _REF_README_CONTENT,
     _SPEC_EXISTS_ERROR,
+    _URL_FETCH_FAILED_PRELUDE,
+    _URL_NEXT_STEPS_FETCH_FAILED,
+    _URL_NEXT_STEPS_IDENTIFIED,
+    _URL_NEXT_STEPS_UNIDENTIFIED,
     run_init,
 )
 from duplo.spec_reader import ProductSpec
@@ -470,6 +474,129 @@ class TestRunInitUrlFetchFailure:
         # Canonical form (lowercase host, trailing slash stripped).
         assert "- https://numi.app" in written
         assert "- https://Numi.App/" not in written
+
+
+class TestRunInitUrlOutputOrdering:
+    """Per INIT-design.md § 'Output discipline' and § 'duplo init <url>':
+    lock the output layout for each URL-flow outcome so future edits do
+    not drift from the design doc's example shapes."""
+
+    def test_identified_flow_ordering_matches_init_design(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nNumi.\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        out = capsys.readouterr().out
+        idx_fetched = out.index(
+            "Fetched https://numi.app (shallow scrape for product identity)."
+        )
+        idx_identified = out.index("→ Identified product: Numi")
+        idx_prefilled = out.index("→ Pre-filled ## Purpose, ## Sources")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_next = out.index(_URL_NEXT_STEPS_IDENTIFIED)
+        idx_note = out.index("Note: duplo will deep-crawl https://numi.app")
+        assert (
+            idx_fetched
+            < idx_identified
+            < idx_prefilled
+            < idx_ref
+            < idx_readme
+            < idx_spec
+            < idx_next
+            < idx_note
+        )
+        # Blank line separates the pre-filled sub-results from the
+        # "Created ref/" block, matching INIT-design.md.
+        assert "\n\n" in out[idx_prefilled:idx_ref]
+        # Blank line separates "Wrote SPEC.md." from "Next steps:".
+        assert "\n\n" in out[idx_spec:idx_next]
+        # Blank line separates "Next steps:" block from the deferred-deep note.
+        assert "\n\n" in out[idx_next:idx_note]
+
+    def test_unidentified_flow_ordering_matches_init_design(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        out = capsys.readouterr().out
+        idx_fetched = out.index("Fetched https://example.com.")
+        idx_reason = out.index("→ Could not identify a specific product")
+        idx_sources = out.index("→ Pre-filled ## Sources only.")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_next = out.index(_URL_NEXT_STEPS_UNIDENTIFIED)
+        assert (
+            idx_fetched
+            < idx_reason
+            < idx_sources
+            < idx_ref
+            < idx_readme
+            < idx_spec
+            < idx_next
+        )
+        assert "\n\n" in out[idx_sources:idx_ref]
+        assert "\n\n" in out[idx_spec:idx_next]
+
+    def test_fetch_failure_flow_ordering_matches_init_design(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        out = capsys.readouterr().out
+        idx_fetching = out.index("Fetching https://does-not-exist.invalid ...")
+        idx_failed = out.index("→ Failed:")
+        idx_prelude = out.index(_URL_FETCH_FAILED_PRELUDE)
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md (template).")
+        idx_next = out.index(_URL_NEXT_STEPS_FETCH_FAILED)
+        assert (
+            idx_fetching
+            < idx_failed
+            < idx_prelude
+            < idx_ref
+            < idx_readme
+            < idx_spec
+            < idx_next
+        )
+        assert "\n\n" in out[idx_failed:idx_prelude]
+        assert "\n\n" in out[idx_prelude:idx_ref]
+        assert "\n\n" in out[idx_spec:idx_next]
 
 
 class TestRunInitUrlRefScaffolding:
