@@ -20,10 +20,53 @@ declared in SPEC.md to pick up site changes, re-extracts features
 from the updated content, and appends tasks to the plan for anything
 that was missed.
 
-The cycle is: run duplo to generate the plan, run mcloop to build
-it, test, add more reference material if needed, run duplo again.
+## Getting started
+
+New projects follow three steps: create SPEC.md with `duplo init`,
+edit SPEC.md to describe what you're building, then run `duplo`.
+
+1. **Create a project directory** and `cd` into it. Duplo operates
+   on the current directory; it does not create one for you.
+
+2. **Run `duplo init`** to create a starter `SPEC.md` in the project
+   root. It also creates `ref/` with a short README explaining what
+   belongs there. Three input modes:
+
+   ```bash
+   duplo init                            # Blank template with <FILL IN> markers
+   duplo init https://numi.app           # Pre-fill sections from a live URL
+   duplo init --from-description app.md  # Pre-fill sections from a prose file
+   ```
+
+   You can combine a URL with `--from-description`. `duplo init`
+   will refuse to overwrite an existing SPEC.md unless you pass
+   `--force`.
+
+3. **Edit `SPEC.md`** in your editor. Replace any remaining
+   `<FILL IN>` markers. At minimum, fill in `## Purpose` and
+   `## Architecture`. Add URLs under `## Sources` and list any
+   files you dropped into `ref/` under `## References` with a
+   role. See [Product specification](#product-specification-specmd)
+   below for the full structure.
+
+4. **(Optional) Drop reference files into `ref/`** — screenshots,
+   videos, PDFs, design mockups. On the next `duplo` run, any file
+   not yet listed in `## References` will be surfaced so you can
+   assign it a role.
+
+5. **Run `duplo`** to scrape the declared sources, analyze
+   references, extract features and visual design, and generate
+   `PLAN.md`.
+
+6. **Run `mcloop`** (a separate tool) to build against the plan.
+   Test the result, add more reference material if needed, edit
+   SPEC.md if your intent changed, and re-run `duplo` to append
+   tasks for anything that was missed.
 
 ```bash
+duplo init [url]             # One-time: create SPEC.md + ref/
+# ... edit SPEC.md, optionally add files to ref/ ...
+duplo                        # Generate the build plan
 mcloop                       # Build it (runs until all tasks complete)
 # ... test the result ...
 duplo fix "bug description"  # Diagnose bugs and append fix tasks
@@ -31,9 +74,6 @@ duplo investigate "bug"      # Alias for `duplo fix` (explicit naming)
 duplo                        # Detect gaps, generate next phase
 mcloop                       # Build the next phase
 ```
-
-See [Product specification](#product-specification-specmd) below
-for the structure of `SPEC.md`.
 
 ## What Duplo does on first run
 
