@@ -381,6 +381,30 @@ Create a `SPEC.md` file in the project root to express your intent
 and constraints. Duplo reads it on every run and injects its
 content into all LLM calls that shape the build.
 
+### Three input channels
+
+SPEC.md gives you three ways to tell Duplo what to build. Use any
+combination — the channels are complementary, not redundant:
+
+- **URLs under `## Sources`.** Live product sites and documentation
+  that Duplo should scrape. Each entry can declare a role
+  (`product-reference`, `docs-reference`, `counter-example`) and a
+  scrape depth. These drive feature extraction, code-example
+  mining, and embedded-media download.
+- **Files in `ref/`.** Screenshots, videos, PDFs, design mockups,
+  and text files you drop into the `ref/` directory. Declare each
+  one under `## References` with a role (`visual-target`,
+  `behavioral-reference`, `docs`, `counter-example`) so Duplo
+  knows how to use it. Images feed design extraction; videos are
+  frame-extracted; PDFs and text files feed feature analysis.
+- **Prose in `## Purpose`, `## Architecture`, `## Design`,
+  `## Behavior`, `## Notes`.** Freeform intent and constraints
+  that no scraper or reference file can supply. `## Purpose`
+  anchors every LLM call; `## Architecture` is parsed into build
+  preferences; `## Design` supplements the design extractor;
+  `## Behavior` `` `input` → `expected` `` pairs become
+  verification tasks; `## Notes` is open-ended guidance.
+
 A spec can be as minimal as a single paragraph or as detailed as
 you want. Recognised headings (all optional):
 
