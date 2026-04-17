@@ -51,18 +51,25 @@ RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
 # --- Session memory ---
 
 
+_SHELL_SUFFIX = ";&|"
+
+
 def _bash_prefix(cmd):
     """Extract the command prefix (executable + subcommand) from a Bash command.
 
     Returns the first two tokens unless the second token starts with '-',
-    in which case only the executable is returned.
+    in which case only the executable is returned. Trailing shell
+    metacharacters (;, &, |) glued to a token are stripped so a compound
+    command like 'pytest; echo done' yields 'pytest echo', not 'pytest;
+    echo'. If stripping leaves a token empty (e.g. standalone '&&'), the
+    prefix stops at the previous token.
     Examples: 'git add a.py' -> 'git add', 'ls -la' -> 'ls',
-              'ruff check .' -> 'ruff check'.
+              'ruff check .' -> 'ruff check', 'pytest;' -> 'pytest'.
     """
-    parts = cmd.split(None, 2)
-    if not parts:
+    parts = [p.rstrip(_SHELL_SUFFIX) for p in cmd.split(None, 2)]
+    if not parts or not parts[0]:
         return ""
-    if len(parts) >= 2 and not parts[1].startswith("-"):
+    if len(parts) >= 2 and parts[1] and not parts[1].startswith("-"):
         return f"{parts[0]} {parts[1]}"
     return parts[0]
 
@@ -88,8 +95,8 @@ def _load_session():
     """Load session-approved patterns from temp file."""
     try:
         data = json.loads(SESSION_FILE.read_text())
-        # Expire after 24 hours
         if data.get("created", 0) < time.time() - 86400:
+            SESSION_FILE.unlink(missing_ok=True)
             return set()
         return set(data.get("patterns", []))
     except (OSError, json.JSONDecodeError, KeyError):

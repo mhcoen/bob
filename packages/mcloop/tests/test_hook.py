@@ -86,6 +86,51 @@ class TestBashPrefix:
         """python -m is a flag, so only 'python' is the prefix."""
         assert _hook._bash_prefix("python -m mcloop") == "python"
 
+    def test_trailing_semicolon_on_first_token(self):
+        """Compound 'pytest; echo done' — ';' on the first token is stripped."""
+        assert _hook._bash_prefix("pytest; echo done") == "pytest echo"
+
+    def test_trailing_semicolon_single_token(self):
+        """Single command with trailing ';' — ';' is stripped."""
+        assert _hook._bash_prefix("pytest;") == "pytest"
+
+    def test_standalone_separator_ends_prefix(self):
+        """Standalone '&&' between commands stops the prefix at the first token."""
+        assert _hook._bash_prefix("pytest && echo done") == "pytest"
+
+    def test_trailing_pipe(self):
+        """Trailing '|' on a token is stripped."""
+        assert _hook._bash_prefix("pytest| tee out.log") == "pytest tee"
+
+
+# --- _load_session tests ---
+
+
+class TestLoadSession:
+    """Tests for _load_session: expiry and file self-clean."""
+
+    def test_expired_session_deletes_file(self, tmp_path, monkeypatch):
+        """Expired sessions (>24h) return empty AND delete the stale file."""
+        session_file = tmp_path / "session.json"
+        session_file.write_text(
+            json.dumps({"created": 0, "patterns": ["Bash:pytest"]})
+        )
+        monkeypatch.setattr(_hook, "SESSION_FILE", session_file)
+        assert _hook._load_session() == set()
+        assert not session_file.exists()
+
+    def test_fresh_session_preserves_file(self, tmp_path, monkeypatch):
+        """Fresh sessions (<24h) return patterns and keep the file."""
+        import time as _time
+
+        session_file = tmp_path / "session.json"
+        session_file.write_text(
+            json.dumps({"created": _time.time(), "patterns": ["Bash:pytest"]})
+        )
+        monkeypatch.setattr(_hook, "SESSION_FILE", session_file)
+        assert _hook._load_session() == {"Bash:pytest"}
+        assert session_file.exists()
+
 
 # --- _tool_pattern tests ---
 
