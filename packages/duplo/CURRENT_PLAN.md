@@ -20,7 +20,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Render sections in canonical order: Purpose, Sources, References, Architecture, Design, Scope, Behavior, Notes.
   - [x] For empty required sections (Purpose, Architecture): write the FILL IN marker from the template.
   - [x] For empty optional sections (Design, Scope, Behavior, Notes): write just the heading and the comment hint from the template. No FILL IN marker.
-  - [ ] For filled sections: write heading and content. Omit comment hints when content is present.
+  - [x] For filled sections: write heading and content. Omit comment hints when content is present.
   - [ ] Sources entries: serialize each SourceEntry with one blank line between entries, using the same format as _format_entry.
   - [ ] References entries: serialize each ReferenceEntry with one blank line between entries, including roles (comma-separated), notes, and proposed flag.
   - [ ] Design section: if DesignBlock has user_prose, write it first. If auto_generated is present, write the AUTO-GENERATED block after user_prose using the same markers the parser expects.
