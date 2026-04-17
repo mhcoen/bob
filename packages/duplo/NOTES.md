@@ -2,7 +2,91 @@
 
 ## Observations
 
-### [6.15.8] Description-flow test coverage already in place — 2026-04-17
+### [7.1.2] duplo init + _subsequent_run coverage of _first_run — 2026-04-17
+
+Confirmed the coverage claim in CURRENT_PLAN.md line 13.
+
+**URL input** (was `_first_run(url=args.url)` at main.py:1035, 1050-1053, and the
+`_validate_url` interactive disambiguation at 1141-1143). `duplo init` accepts the URL
+at `args.url` (init.py:155) and dispatches to `_run_url` (init.py:261) which
+canonicalizes (url_canon.canonicalize_url) and fetches shallow-by-default via
+`fetch_site`. Disambiguation is replaced by a non-interactive `validate_product_url`
+call inside `_identify_product` (init.py:203-223) — unidentified products fall back to
+a pre-filled `## Sources` entry without prompting. `duplo init <url>
+--from-description PATH` (combined) and `--from-description PATH` alone are also
+handled. Equivalent or stronger than `_first_run` URL handling.
+
+**SPEC.md generation** (new; `_first_run` never wrote SPEC.md — it consumed one
+if present and wrote an autogen design block). `duplo init` always writes
+SPEC.md via `format_spec(_build_draft_spec(...))` (init.py:197, 321, 331, 340,
+473, and the combined path). Existing files in `ref/` are inventoried by
+`_scan_existing_ref_files` and each gets a role via `_propose_file_role`, so the
+drafted `## References` is pre-filled for the user to confirm.
+
+**Feature extraction** (was in `_first_run` at main.py:1194-1207 via
+`extract_features` followed by interactive `select_features`). `_subsequent_run`
+calls `extract_features` at main.py:2060-2066 with the same `spec_text`,
+`scope_include`, `scope_exclude` arguments, then merges new features into
+duplo.json via `save_features` (2078). The per-phase interactive
+`select_features` at 2294 still runs before phase PLAN.md generation — the only
+change is it runs per-phase, not once at bootstrap.
+
+**PLAN.md generation from SPEC.md** (was in `_first_run` at main.py:1412-1438,
+generating Phase 1 from the fresh roadmap). `_subsequent_run`'s State 3 branch
+(main.py:2246-2349) generates a PLAN.md for the current phase: regenerates a
+roadmap if none exists (2252-2276), runs `generate_phase_plan` (2330-2339), and
+appends verification cases from both video frames (2340-2348) and behavior
+contracts (same structure as `_first_run`).
+
+Conclusion: the three responsibilities named in the plan (URL input, feature
+extraction, PLAN.md generation) are fully covered by the split
+`duplo init` + `_subsequent_run`. The claim is accurate.
+
+## Hypotheses
+
+### [7.1.2] Dispatch and _subsequent_run assumptions block _first_run removal — 2026-04-17
+
+Coverage confirmed above is prospective — the next checkbox (CURRENT_PLAN.md
+line 20) must flip the dispatch. Gaps to resolve when that lands:
+
+1. **Dispatch still routes to `_first_run`.** main.py:797-799 calls
+   `_first_run(url=args.url)` whenever `.duplo/duplo.json` is absent.
+   `duplo init` writes SPEC.md but NOT `.duplo/duplo.json`, so
+   `duplo init` followed by `duplo` still hits `_first_run`, not
+   `_subsequent_run`. Until the dispatch is updated, the coverage above is only
+   latent.
+
+2. **`_subsequent_run` assumes duplo.json exists in several places.** After the
+   dispatch flips, the first `duplo` run against a fresh `duplo init` directory
+   will have no `.duplo/duplo.json`. Spots that need hardening (FileNotFoundError
+   paths not yet guarded):
+   - main.py:2056 `old_data = json.loads(Path(_DUPLO_JSON).read_text(...))` —
+     except clause catches only `JSONDecodeError`.
+   - main.py:2073 same pattern, same gap.
+   - main.py:2079 `updated_data = json.loads(...)` — relies on `save_features`
+     having created the file, which it does, but worth verifying for the
+     feature-less fresh-init case.
+   - main.py:2213-2218 outer `data` reload — same `except json.JSONDecodeError`
+     only.
+   - The top-level read at 1973-1976 DOES catch `OSError`, so that one is fine.
+
+3. **Three `_first_run` responsibilities not in either replacement:**
+   - Interactive app_name prompt for appshot (main.py:1360-1363). No
+     equivalent in `duplo init` or `_subsequent_run`. `derive_app_name(spec)` is
+     used in `_subsequent_run` at 2219, which reads from duplo.json then
+     directory name — so `app_name` ends up as the sanitized directory name by
+     default. If the old interactive prompt is deemed dead, this is already
+     covered; if it's meant to stay, it needs a home.
+   - `ask_preferences()` fallback when `spec.architecture` is empty
+     (main.py:1355-1356). `validate_for_run` should reject a spec with an
+     unfilled `## Architecture` before this point, making the fallback
+     unreachable. Worth asserting that fact before deleting `ask_preferences`.
+   - Interactive roadmap approval prompt (main.py:1400-1405). `_subsequent_run`
+     State 3 saves the new roadmap without a confirmation prompt (2272-2273).
+     This is a behavior change, not a gap — worth calling out so it is an
+     explicit decision rather than a silent drop.
+
+
 
 All six test cases called out in 6.15.8 were added incrementally during
 6.15.1-6.15.7 and pass. Mapping:

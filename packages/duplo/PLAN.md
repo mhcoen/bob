@@ -939,7 +939,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 - [ ] Audit all callers of _first_run in duplo/main.py
   - [ ] Grep the codebase for references to _first_run. Identify every call site. The only known call is in main() dispatch: when .duplo/duplo.json does not exist the code calls _first_run(url=args.url).
-  - [ ] Confirm that duplo init fully replaces _first_run for new projects. _first_run handled URL input, interactive feature selection, and first PLAN.md generation. duplo init handles URL input and SPEC.md generation; _subsequent_run handles feature extraction and PLAN.md generation from SPEC.md.
+  - [x] Confirm that duplo init fully replaces _first_run for new projects. _first_run handled URL input, interactive feature selection, and first PLAN.md generation. duplo init handles URL input and SPEC.md generation; _subsequent_run handles feature extraction and PLAN.md generation from SPEC.md.
   - [ ] Confirm that the migration gate prevents any old-format project from reaching _first_run.
 
 - [ ] Remove _first_run and its helper functions from duplo/main.py
