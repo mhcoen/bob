@@ -16,14 +16,19 @@ _original_subprocess_run = subprocess.run
 def _fake_subprocess_run(*args, **kwargs):
     """Return a fake CompletedProcess that mimics claude -p output.
 
-    Returns ``"[]"`` on stdout — a minimal valid JSON response that all
-    callers handle gracefully via their fallback/parse-error paths.
-    Non-claude subprocesses (ffmpeg, etc.) are passed through to the
-    real ``subprocess.run``.
+    Returns ``"[]"`` on stdout for claude — a minimal valid JSON response
+    that all callers handle gracefully via their fallback/parse-error
+    paths. Short-circuits appshot to a not-found exit so tests don't
+    launch real macOS apps. Other subprocesses (ffmpeg, etc.) are passed
+    through to the real ``subprocess.run``.
     """
     cmd = args[0] if args else kwargs.get("args", [])
-    if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "claude":
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="[]", stderr="")
+    if isinstance(cmd, (list, tuple)) and cmd:
+        head = cmd[0]
+        if head == "claude":
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="[]", stderr="")
+        if isinstance(head, str) and head.rsplit("/", 1)[-1] == "appshot":
+            return subprocess.CompletedProcess(args=cmd, returncode=-1, stdout="", stderr="")
     return _original_subprocess_run(*args, **kwargs)
 
 
