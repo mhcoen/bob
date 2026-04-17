@@ -28,12 +28,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Behavior section: serialize behavior_contracts as input/output pairs in the template format.
   - [x] Tests: empty ProductSpec produces template-like output with FILL IN markers on required sections; fully populated ProductSpec serializes all sections; Sources and References entries formatted correctly with flags; Design section with user_prose and auto_generated renders both in order; Scope include/exclude rendered; Behavior contracts rendered; empty optional sections get heading and comment only.
 
-- [ ] Implement round-trip property test for format_spec
+- [x] Implement round-trip property test for format_spec
   - [x] Per DRAFTER-design.md section "Round-trip testing". Property: parse(format_spec(spec)) equals spec for all surviving fields.
   - [x] Implement _spec_equal_for_round_trip comparator that excludes raw, dropped_sources, and dropped_references fields per DRAFTER-design.md.
   - [x] Use hand-rolled fixture generation (not Hypothesis) to cover: empty spec, spec with all sections filled, spec with mixed filled/empty sections, spec with Sources and References containing proposed/discovered flags, spec with DesignBlock containing both user_prose and auto_generated, spec with scope_include and scope_exclude, spec with behavior_contracts.
   - [x] Add a separate test pinning that dropped_sources and dropped_references round-trip as empty lists (documenting the asymmetry per DRAFTER-design.md).
-  - [ ] Tests: each fixture round-trips; dropped fields excluded from comparison; round-tripped spec has empty dropped lists.
+  - [x] Tests: each fixture round-trips; dropped fields excluded from comparison; round-tripped spec has empty dropped lists.
 
 ## Drafter: append_references
 
