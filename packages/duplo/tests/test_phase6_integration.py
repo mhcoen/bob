@@ -8,16 +8,59 @@ mocked so tests do not depend on claude -p availability or network.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from unittest.mock import patch
 
 from duplo.doc_tables import DocStructures
 from duplo.fetcher import PageRecord
+from duplo.spec_reader import DesignBlock, ProductSpec
 
 
 _IDENTIFIED_FIXTURE_URL = "https://numi.app"
 _IDENTIFIED_FIXTURE_TEXT = (
     "=== https://numi.app ===\nNumi — a calculator app that shows answers inline as you type."
 )
+
+_DESCRIPTION_FIXTURE_PROSE = (
+    "Build a tiny SwiftUI calculator app that shows answers inline as you type, "
+    "similar to Numi. The app keeps a history of recent calculations and supports "
+    'unit conversions like "3 miles in km".\n'
+)
+_DESCRIPTION_FIXTURE_PURPOSE = (
+    "A SwiftUI calculator that shows answers inline as you type, with history and unit conversion."
+)
+_DESCRIPTION_FIXTURE_ARCHITECTURE = "Swift 5.9, SwiftUI, iOS 17+."
+
+
+def _write_description_fixture(tmp_path: Path) -> Path:
+    """Drop a ``description.txt`` fixture into *tmp_path* and return its path.
+
+    Centralized here so later subtasks that run ``run_init`` under
+    ``--from-description`` reuse the same prose.  The prose is written
+    byte-for-byte so the "verbatim in ## Notes" assertion in the parent
+    test can compare against the same constant the fixture wrote.
+    """
+    path = tmp_path / "description.txt"
+    path.write_text(_DESCRIPTION_FIXTURE_PROSE)
+    return path
+
+
+def _stub_draft_from_inputs(inputs):
+    """Stand-in for :func:`duplo.spec_writer._draft_from_inputs`.
+
+    Returns a :class:`ProductSpec` that mimics what a well-behaved
+    drafter LLM would produce for :data:`_DESCRIPTION_FIXTURE_PROSE`:
+    Purpose populated; Architecture populated (the prose explicitly
+    names a stack); optional sections left empty.  ``notes`` stays
+    empty here — :func:`_build_draft_spec` copies the verbatim prose
+    into ``## Notes`` after this call, which is what the parent test
+    is verifying.
+    """
+    return ProductSpec(
+        purpose=_DESCRIPTION_FIXTURE_PURPOSE,
+        architecture=_DESCRIPTION_FIXTURE_ARCHITECTURE,
+        design=DesignBlock(),
+    )
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -194,3 +237,43 @@ class TestInitUrlProducesPrefilledSpec:
         assert entry.scrape == "deep"
 
         assert spec.fill_in_architecture is True
+
+
+class TestInitDescriptionProducesNotesWithVerbatimProse:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_description_produces_notes_with_verbatim_prose``.
+    """
+
+    def test_description_fixture_and_draft_from_inputs_mock(self, tmp_path, monkeypatch):
+        """Write a ``description.txt`` fixture and mock the LLM call in
+        ``_draft_from_inputs``.
+
+        Stages the description-flow integration test: writes the prose
+        fixture to ``tmp_path/description.txt`` and confirms that
+        patching ``duplo.spec_writer._draft_from_inputs`` (the only
+        LLM call on the description-flow path — :func:`_build_draft_spec`
+        delegates to it, and :func:`draft_spec` wraps that) routes a
+        deterministic :class:`ProductSpec` to callers.  Later subtasks
+        call ``run_init`` under this mock and assert on the resulting
+        SPEC.md.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        desc_path = _write_description_fixture(tmp_path)
+        assert desc_path.is_file()
+        assert desc_path.read_text() == _DESCRIPTION_FIXTURE_PROSE
+
+        from duplo.spec_writer import DraftInputs
+
+        with patch(
+            "duplo.spec_writer._draft_from_inputs",
+            side_effect=_stub_draft_from_inputs,
+        ) as mock_draft:
+            from duplo.spec_writer import _draft_from_inputs as patched
+
+            result = patched(DraftInputs(description=desc_path.read_text()))
+
+        mock_draft.assert_called_once()
+        assert result.purpose == _DESCRIPTION_FIXTURE_PURPOSE
+        assert result.architecture == _DESCRIPTION_FIXTURE_ARCHITECTURE
+        assert result.notes == ""
