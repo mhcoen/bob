@@ -84,11 +84,11 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Document duplo init command surface and flags.
   - [x] Keep existing documentation for duplo fix and duplo investigate unchanged.
 
-- [ ] Update CLAUDE.md to reflect the current architecture
+- [x] Update CLAUDE.md to reflect the current architecture
   - [x] Remove any references to _first_run, interactive prompts, or URL-in-text-file scanning.
   - [x] Document that SPEC.md is the input contract and all pipeline stages consume role-filtered input from the parser.
   - [x] Document the module inventory: spec_reader.py (parser), spec_writer.py (drafter), init.py (duplo init), orchestrator.py (pipeline helpers), migration.py (migration gate).
-  - [ ] Document the safety invariant: no raw SPEC.md text in LLM prompts.
+  - [x] Document the safety invariant: no raw SPEC.md text in LLM prompts.
 
 - [ ] [BATCH] Remove or archive stale design documents
   - [ ] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Now that all phases are shipped, decide whether to keep them as historical reference or move them to a docs/ subdirectory.
