@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import argparse
 
+from duplo.fetcher import fetch_site  # noqa: F401
+from duplo.scanner import scan_directory  # noqa: F401
+from duplo.spec_writer import draft_spec, format_spec  # noqa: F401
+from duplo.validator import validate_product_url  # noqa: F401
+
 
 def run_init(args: argparse.Namespace) -> None:
     """Run the ``duplo init`` flow.
