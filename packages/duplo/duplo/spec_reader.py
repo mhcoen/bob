@@ -881,7 +881,7 @@ def validate_for_run(spec: ProductSpec) -> ValidationResult:
     # Check the "too sparse to plan" condition: no scrapeable sources,
     # no non-ignore references, and purpose is too short.
     has_scrapeable = bool(scrapeable_sources(spec))
-    non_ignore_refs = [r for r in spec.references if r.roles != ["ignore"] and not r.proposed]
+    non_ignore_refs = [r for r in spec.references if "ignore" not in r.roles and not r.proposed]
     has_refs = bool(non_ignore_refs)
     purpose_sparse = len(spec.purpose) < 50
     if not has_scrapeable and not has_refs and purpose_sparse:
