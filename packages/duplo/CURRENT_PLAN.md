@@ -121,7 +121,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Dependencies: duplo.spec_writer (for draft_spec, format_spec), duplo.fetcher (for fetch_site with scrape_depth), duplo.validator (for validate_product_url), duplo.scanner (for scan_directory on ref/).
 
 - [ ] Implement run_init for the no-arguments case
-  - [ ] Per INIT-design.md section "duplo init (no arguments)".
+  - [x] Per INIT-design.md section "duplo init (no arguments)".
   - [ ] Check for existing SPEC.md: if present and --force not set, print error message per INIT-design.md and exit 1.
   - [ ] Create ref/ directory if it does not exist.
   - [ ] Write ref/README.md with the static content from INIT-design.md section "ref/README.md content". Write-once: do not overwrite if ref/README.md already exists.
