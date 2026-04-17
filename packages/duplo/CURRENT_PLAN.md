@@ -76,7 +76,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
 
 - [ ] Implement draft_spec(inputs: DraftInputs) -> str in duplo/spec_writer.py
-  - [ ] Per DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
+  - [x] Per DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
   - [ ] Step 1: call _draft_from_inputs(inputs) to get a ProductSpec.
   - [ ] Step 2: if inputs.description was provided, copy the original prose verbatim into spec.notes under a labeled header per DRAFTER-design.md: "Original description provided to duplo init:" followed by the verbatim prose. The LLM does NOT write notes.
   - [ ] Step 3: add SourceEntry for the URL (if any) with role product-reference and scrape deep. No proposed/discovered flag (user provided the URL explicitly).
