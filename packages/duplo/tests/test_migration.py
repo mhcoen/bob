@@ -63,6 +63,15 @@ class TestMigrationMessage:
         """Message instructs moving reference files into ref/."""
         assert "Move reference files into ref/" in _MIGRATION_MESSAGE
 
+    def test_recommends_duplo_init(self) -> None:
+        """Step 3 presents `duplo init` as the recommended path (Phase 6.18.3)."""
+        assert "The recommended path is `duplo init`" in _MIGRATION_MESSAGE
+
+    def test_keeps_manual_authoring_alternative(self) -> None:
+        """Step 3 preserves hand-authoring as an alternative (Phase 6.18.3)."""
+        assert "Alternatively, author one by hand" in _MIGRATION_MESSAGE
+        assert "SPEC-template.md" in _MIGRATION_MESSAGE
+
     def test_snapshot_matches_fixture(self) -> None:
         """Pin exact message content against fixture file."""
         fixture = Path(__file__).parent / "fixtures" / "migration_message.txt"
