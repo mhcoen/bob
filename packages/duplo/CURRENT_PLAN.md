@@ -131,7 +131,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
 
 - [ ] Implement run_init for the URL-only case
-  - [ ] Per INIT-design.md section "duplo init URL".
+  - [x] Per INIT-design.md section "duplo init URL".
   - [ ] Canonicalize URL via url_canon.canonicalize_url before any use (per INIT-design.md error cases).
   - [ ] Call fetch_site(url, scrape_depth="shallow") for product identity. If --deep flag set, use scrape_depth="deep" instead.
   - [ ] On fetch success: extract product identity from scraped content. Build DraftInputs with url and url_scrape populated. Call draft_spec(inputs).
