@@ -470,3 +470,108 @@ class TestRunInitUrlFetchFailure:
         # Canonical form (lowercase host, trailing slash stripped).
         assert "- https://numi.app" in written
         assert "- https://Numi.App/" not in written
+
+
+class TestRunInitUrlRefScaffolding:
+    """Per INIT-design.md § 'duplo init <url>': the URL flow must create
+    ref/ and ref/README.md the same way as the no-arguments case, and
+    write SPEC.md from draft_spec output (task 6.14.8)."""
+
+    def test_identified_flow_writes_draft_spec_output_verbatim(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        drafted = "## Purpose\n\nNumi — a calculator.\n\n## Sources\n\n- https://numi.app\n"
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=drafted),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        assert (tmp_path / "SPEC.md").read_text() == drafted
+
+    def test_identified_flow_creates_ref_dir_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        ref_dir = tmp_path / "ref"
+        readme = ref_dir / "README.md"
+        assert ref_dir.is_dir()
+        assert readme.read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." in out
+        assert "Created ref/README.md." in out
+
+    def test_unidentified_flow_creates_ref_dir_and_readme(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+
+    def test_fetch_failure_flow_creates_ref_dir_and_readme(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+
+    def test_url_flow_preserves_existing_ref_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        existing = "user-authored README\n"
+        (ref_dir / "README.md").write_text(existing)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        assert (ref_dir / "README.md").read_text() == existing
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." not in out
+        assert "Created ref/README.md." not in out
