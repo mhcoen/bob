@@ -1416,6 +1416,141 @@ class TestEditSafetyAppendReferences:
         assert not _spec_equal_except_references(a, b)
 
 
+def _design_blocks_equal_except_autogen(a: DesignBlock, b: DesignBlock) -> bool:
+    """Compare DesignBlock ignoring ``auto_generated`` (and parser-only
+    ``has_fill_in_marker``).
+    """
+    return a.user_prose == b.user_prose
+
+
+def _spec_equal_except_design_autogen(a: ProductSpec, b: ProductSpec) -> bool:
+    """Same as ``_spec_equal_for_round_trip`` but also ignores
+    ``design.auto_generated``.  All other ``design`` fields (notably
+    ``user_prose``) and every other ProductSpec field must match.
+    """
+    for f in dataclasses.fields(ProductSpec):
+        if f.name in _ROUND_TRIP_EXCLUDED_FIELDS:
+            continue
+        av = getattr(a, f.name)
+        bv = getattr(b, f.name)
+        if f.name == "design":
+            if not _design_blocks_equal_except_autogen(av, bv):
+                return False
+        else:
+            if av != bv:
+                return False
+    return True
+
+
+def _clear_auto_generated(spec: ProductSpec) -> ProductSpec:
+    """Return a copy of ``spec`` with ``design.auto_generated`` cleared.
+
+    ``update_design_autogen`` has write-once semantics: a non-empty
+    existing auto-generated block is preserved.  The edit-safety
+    property exercises the write path, so fixtures must not already
+    carry an auto-generated body.
+    """
+    return dataclasses.replace(
+        spec,
+        design=dataclasses.replace(spec.design, auto_generated=""),
+    )
+
+
+_UPDATE_DESIGN_AUTOGEN_FIXTURES: list[tuple[str, ProductSpec]] = [
+    (name, _clear_auto_generated(spec)) for name, spec in _ROUND_TRIP_FIXTURES
+]
+
+
+_NEW_DESIGN_AUTOGEN_BODIES: list[tuple[str, str]] = [
+    ("plain", "Colors: teal on ivory."),
+    (
+        "multiline",
+        "Colors: teal on ivory.\nTypography: Inter 14/20.\nSpacing: 8px grid.",
+    ),
+    (
+        "markdown_like",
+        "- primary: #0a7\n- secondary: #fafafa\n- radius: 6px",
+    ),
+]
+
+
+class TestEditSafetyUpdateDesignAutogen:
+    """update_design_autogen preserves every field other than
+    ``design.auto_generated`` through a round-trip.
+
+    Property: for any well-formed ProductSpec with an empty
+    ``design.auto_generated`` and any new body,
+    ``update_design_autogen(format_spec(spec), body)`` produces a spec
+    where every field other than ``design.auto_generated`` is
+    unchanged after re-parsing.
+    """
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _UPDATE_DESIGN_AUTOGEN_FIXTURES],
+        ids=[f[0] for f in _UPDATE_DESIGN_AUTOGEN_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "body",
+        [b[1] for b in _NEW_DESIGN_AUTOGEN_BODIES],
+        ids=[b[0] for b in _NEW_DESIGN_AUTOGEN_BODIES],
+    )
+    def test_update_design_autogen_preserves_non_autogen_fields(
+        self, spec: ProductSpec, body: str
+    ):
+        serialized = format_spec(spec)
+        modified = update_design_autogen(serialized, body)
+        parsed = _parse_spec(modified)
+
+        # The body actually landed (guards against a silent write-once
+        # pass-through that would trivially satisfy the property).
+        assert parsed.design.auto_generated == body, (
+            f"body did not round-trip into design.auto_generated; "
+            f"got {parsed.design.auto_generated!r}, expected {body!r}"
+        )
+
+        # All non-autogen fields round-trip unchanged.
+        assert _spec_equal_except_design_autogen(parsed, spec), (
+            f"edit-safety mismatch; parsed=\n{parsed}\n\nexpected=\n{spec}"
+        )
+
+    def test_comparator_ignores_design_autogen_difference(self):
+        """Guards the comparator itself: differing ``design.auto_generated``
+        must compare equal so the property isolates edits to that field.
+        """
+        a = ProductSpec(
+            purpose="x",
+            architecture="y",
+            design=DesignBlock(user_prose="same prose", auto_generated="aaa"),
+        )
+        b = ProductSpec(
+            purpose="x",
+            architecture="y",
+            design=DesignBlock(user_prose="same prose", auto_generated="bbb"),
+        )
+        assert _spec_equal_except_design_autogen(a, b)
+
+    def test_comparator_detects_design_user_prose_difference(self):
+        """``design.user_prose`` is NOT excluded — a change there is caught."""
+        a = ProductSpec(
+            purpose="x",
+            architecture="y",
+            design=DesignBlock(user_prose="prose one", auto_generated="aaa"),
+        )
+        b = ProductSpec(
+            purpose="x",
+            architecture="y",
+            design=DesignBlock(user_prose="prose two", auto_generated="aaa"),
+        )
+        assert not _spec_equal_except_design_autogen(a, b)
+
+    def test_comparator_detects_non_design_difference(self):
+        """Complement: a difference in any non-design field is still caught."""
+        a = ProductSpec(purpose="x", architecture="y")
+        b = ProductSpec(purpose="x", architecture="z")
+        assert not _spec_equal_except_design_autogen(a, b)
+
+
 class TestInferUrlRole:
     """Tests for ``_infer_url_role`` (regex-based role inference)."""
 

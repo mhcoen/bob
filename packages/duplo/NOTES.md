@@ -135,6 +135,22 @@ writing to SPEC.md because there was no else branch.
 
 `saver.py:save_raw_content` uses `target_dir: Path = Path.cwd()` as a default argument (line 1213). Unlike every other function in `saver.py` which uses `target_dir: Path | str = "."`, this one evaluates `Path.cwd()` at import time, not call time. In production this works because duplo's cwd doesn't change between import and use. In tests using `monkeypatch.chdir(tmp_path)`, the default points to the original cwd instead of `tmp_path`. Integration tests must either pass `target_dir` explicitly or call `save_raw_content` directly rather than through `_persist_scrape_result`. Consider aligning with the `"."` convention used everywhere else.
 
+### [6.10.3] `## ` inside AUTO-GENERATED design body is read as a new section — 2026-04-17
+
+While adding the edit-safety property test for `update_design_autogen`, a
+body containing a literal `## swatches` line mid-content did not round-trip
+through `_parse_spec` — everything from that line onward was treated as a
+new section heading, truncating `design.auto_generated`. The parser is
+line-based on `^## ` and does not recognize the `<!-- BEGIN/END
+AUTO-GENERATED -->` markers as an opaque region. In practice design
+auto-generation never emits `## ` lines (bodies are bullet lists and
+simple `key: value` pairs), so this is a latent edge case rather than a
+live bug. If the Vision extractor starts producing Markdown headings in
+bodies, either the parser needs to respect the AUTO-GENERATED markers or
+the writer must escape `## ` on emit. The pathological body was removed
+from `_NEW_DESIGN_AUTOGEN_BODIES` to keep the property test focused on
+edit-safety rather than parser limits.
+
 ### [4.4.5] `## Sources` false positive in fenced code blocks — 2026-04-13
 
 The multiline regex `^## Sources\s*$` in `needs_migration()` matches even when `## Sources` appears inside a fenced code block (e.g. a Markdown example in the SPEC.md top-matter comment). This is a known false positive, accepted as intentional: a file containing `## Sources` in an example is close enough to new-format that force-migrating it would be worse than letting it through. Pinned with `test_sources_inside_fenced_code_block`. If fence-aware parsing is added later, the test will break to flag the behavior change.
