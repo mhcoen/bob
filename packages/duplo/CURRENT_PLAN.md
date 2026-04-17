@@ -14,7 +14,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Add DraftInputs dataclass with fields: url (str or None), url_scrape (str or None), description (str or None), existing_ref_files (list[Path], default empty), vision_proposals (dict[Path, str], default empty). Per DRAFTER-design.md section DraftInputs.
   - [x] Tests: dataclass construction with all fields; default values for optional fields; field types enforced.
 
-- [ ] Implement format_spec(spec: ProductSpec) -> str in duplo/spec_writer.py
+- [x] Implement format_spec(spec: ProductSpec) -> str in duplo/spec_writer.py
   - [x] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per DRAFTER-design.md section format_spec.
   - [x] Start with the standard top-matter comment block (the same block from SPEC-template.md, including the "How the pieces fit together:" marker string).
   - [x] Render sections in canonical order: Purpose, Sources, References, Architecture, Design, Scope, Behavior, Notes.
@@ -26,7 +26,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Design section: if DesignBlock has user_prose, write it first. If auto_generated is present, write the AUTO-GENERATED block after user_prose using the same markers the parser expects.
   - [x] Scope section: serialize scope_include and scope_exclude lists in the template format (include:/exclude: with indented list items).
   - [x] Behavior section: serialize behavior_contracts as input/output pairs in the template format.
-  - [ ] Tests: empty ProductSpec produces template-like output with FILL IN markers on required sections; fully populated ProductSpec serializes all sections; Sources and References entries formatted correctly with flags; Design section with user_prose and auto_generated renders both in order; Scope include/exclude rendered; Behavior contracts rendered; empty optional sections get heading and comment only.
+  - [x] Tests: empty ProductSpec produces template-like output with FILL IN markers on required sections; fully populated ProductSpec serializes all sections; Sources and References entries formatted correctly with flags; Design section with user_prose and auto_generated renders both in order; Scope include/exclude rendered; Behavior contracts rendered; empty optional sections get heading and comment only.
 
 - [ ] Implement round-trip property test for format_spec
   - [ ] Per DRAFTER-design.md section "Round-trip testing". Property: parse(format_spec(spec)) equals spec for all surviving fields.
