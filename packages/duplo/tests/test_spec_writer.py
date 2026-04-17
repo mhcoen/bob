@@ -13,7 +13,12 @@ from duplo.spec_reader import (
     SourceEntry,
     _parse_spec,
 )
-from duplo.spec_writer import append_sources, format_spec, update_design_autogen
+from duplo.spec_writer import (
+    append_references,
+    append_sources,
+    format_spec,
+    update_design_autogen,
+)
 
 
 class TestAppendSources:
@@ -214,6 +219,133 @@ class TestAppendSources:
         sources_pos = result.index("## Sources")
         design_pos = result.index("## Design")
         assert arch_pos < sources_pos < design_pos
+
+
+class TestAppendReferences:
+    """Tests for append_references."""
+
+    def test_append_single_entry(self):
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        entry = ReferenceEntry(path=Path("ref/b.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        assert "- ref/b.png" in result
+        assert "  role: visual-target" in result
+        # Original entry still present.
+        assert "- ref/a.png" in result
+
+    def test_append_multiple_entries(self):
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        entries = [
+            ReferenceEntry(path=Path("ref/b.png"), roles=["visual-target"]),
+            ReferenceEntry(path=Path("ref/c.pdf"), roles=["docs"]),
+        ]
+        result = append_references(spec, entries)
+        assert "- ref/b.png" in result
+        assert "- ref/c.pdf" in result
+
+    def test_dedup_existing_path(self):
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["docs"])
+        result = append_references(spec, [entry])
+        assert result == spec
+
+    def test_dedup_is_path_only_ignores_role(self):
+        """Same path with a different role still deduplicates."""
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        entry = ReferenceEntry(
+            path=Path("ref/a.png"),
+            roles=["behavioral-target", "docs"],
+        )
+        result = append_references(spec, [entry])
+        assert result == spec
+
+    def test_dedup_trailing_slash(self):
+        spec = "## References\n\n- ref/dir\n  role: docs\n"
+        entry = ReferenceEntry(path=Path("ref/dir/"), roles=["docs"])
+        result = append_references(spec, [entry])
+        assert result == spec
+
+    def test_idempotent_double_call(self):
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        entry = ReferenceEntry(path=Path("ref/new.png"), roles=["visual-target"])
+        first = append_references(spec, [entry])
+        second = append_references(first, [entry])
+        assert first == second
+
+    def test_empty_new_entries_returns_unchanged(self):
+        spec = "## References\n\n- ref/a.png\n  role: visual-target\n"
+        result = append_references(spec, [])
+        assert result == spec
+
+    def test_missing_references_section_created(self):
+        spec = "## Purpose\n\nBuild a calculator.\n"
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        assert "## References" in result
+        assert "- ref/a.png" in result
+        assert "  role: visual-target" in result
+
+    def test_missing_references_placed_after_sources(self):
+        spec = (
+            "## Purpose\n\nBuild it.\n\n"
+            "## Sources\n\n- https://example.com\n  role: docs\n  scrape: shallow\n"
+        )
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        sources_pos = result.index("## Sources")
+        references_pos = result.index("## References")
+        assert references_pos > sources_pos
+
+    def test_missing_references_placed_after_purpose_when_no_sources(self):
+        spec = "## Purpose\n\nBuild a calculator.\n\n## Architecture\n\nSwiftUI.\n"
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        purpose_pos = result.index("## Purpose")
+        references_pos = result.index("## References")
+        arch_pos = result.index("## Architecture")
+        assert purpose_pos < references_pos < arch_pos
+
+    def test_missing_references_at_end_when_no_purpose_or_sources(self):
+        spec = "## Architecture\n\nSwiftUI.\n"
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        assert "## References" in result
+        assert result.index("## Architecture") < result.index("## References")
+
+    def test_proposed_flag_written(self):
+        spec = "## References\n\n"
+        entry = ReferenceEntry(
+            path=Path("ref/new.png"),
+            roles=["visual-target"],
+            proposed=True,
+        )
+        result = append_references(spec, [entry])
+        assert "  proposed: true" in result
+
+    def test_no_proposed_when_false(self):
+        spec = "## References\n\n"
+        entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])
+        result = append_references(spec, [entry])
+        assert "proposed" not in result
+
+    def test_multiple_roles_serialized_comma_separated(self):
+        spec = "## References\n\n"
+        entry = ReferenceEntry(
+            path=Path("ref/a.png"),
+            roles=["visual-target", "behavioral-target"],
+        )
+        result = append_references(spec, [entry])
+        assert "  role: visual-target, behavioral-target" in result
+
+    def test_notes_included(self):
+        spec = "## References\n\n"
+        entry = ReferenceEntry(
+            path=Path("ref/a.png"),
+            roles=["visual-target"],
+            notes="main hero shot",
+        )
+        result = append_references(spec, [entry])
+        assert "  notes: main hero shot" in result
 
 
 class TestUpdateDesignAutogen:

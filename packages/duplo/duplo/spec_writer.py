@@ -20,6 +20,12 @@ from duplo.url_canon import canonicalize_url
 # Matches a ``## Sources`` heading (exactly level 2).
 _SOURCES_HEADING = re.compile(r"^## Sources\s*$", re.MULTILINE)
 
+# Matches a ``## References`` heading (exactly level 2).
+_REFERENCES_HEADING = re.compile(r"^## References\s*$", re.MULTILINE)
+
+# Matches a ``## Purpose`` heading (exactly level 2).
+_PURPOSE_HEADING = re.compile(r"^## Purpose\s*$", re.MULTILINE)
+
 # Matches a ``## Architecture`` heading.
 _ARCHITECTURE_HEADING = re.compile(r"^## Architecture\s*$", re.MULTILINE)
 
@@ -37,6 +43,12 @@ _END_MARKER = "<!-- END AUTO-GENERATED -->"
 
 # Matches a source entry start line: ``- <url>``
 _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$", re.MULTILINE)
+
+# Matches a reference entry start line: ``- <path>``.  The path is
+# anything on the same line that is not an HTTP(S) URL (Sources own
+# those) and is not the start of a comment or another Markdown list
+# construct we care about.
+_REFERENCE_ENTRY_START = re.compile(r"^-\s+(?!https?://)(\S+)\s*$", re.MULTILINE)
 
 
 def _extract_existing_urls(sources_body: str) -> set[str]:
@@ -145,6 +157,134 @@ def append_sources(
             )
         else:
             return existing_spec_text.rstrip("\n") + "\n" + new_section
+
+
+def _normalize_ref_path(path: str) -> str:
+    """Compare-as-is with trailing slash stripped."""
+    return path.rstrip("/")
+
+
+def _references_section_range(text: str) -> tuple[int, int] | None:
+    """Find the start and end offsets of ``## References`` body.
+
+    Same semantics as :func:`_sources_section_range`.
+    """
+    m = _REFERENCES_HEADING.search(text)
+    if m is None:
+        return None
+    body_start = m.end()
+    next_heading = re.search(r"^## ", text[body_start:], re.MULTILINE)
+    if next_heading:
+        body_end = body_start + next_heading.start()
+    else:
+        body_end = len(text)
+    return body_start, body_end
+
+
+def _extract_existing_reference_paths(references_body: str) -> set[str]:
+    """Return the set of normalized paths already present in References."""
+    paths: set[str] = set()
+    for m in _REFERENCE_ENTRY_START.finditer(references_body):
+        paths.add(_normalize_ref_path(m.group(1)))
+    return paths
+
+
+def _purpose_section_end(text: str) -> int | None:
+    """Return the end offset of the ``## Purpose`` section body."""
+    m = _PURPOSE_HEADING.search(text)
+    if m is None:
+        return None
+    body_start = m.end()
+    next_heading = re.search(r"^## ", text[body_start:], re.MULTILINE)
+    if next_heading:
+        return body_start + next_heading.start()
+    return len(text)
+
+
+def append_references(
+    existing_spec_text: str,
+    new_entries: list[ReferenceEntry],
+) -> str:
+    """Append new reference entries to ``## References``, deduplicating by path.
+
+    Deduplication is path-only: two entries with the same path (after
+    stripping trailing slash) are duplicates regardless of role.
+    First-write-wins — the existing entry is kept and the incoming
+    entry is skipped.
+
+    If ``## References`` does not exist, creates it after ``## Sources``
+    (if present), else after ``## Purpose`` (if present), else at the
+    end of the file.
+
+    Side-effect-free: takes existing content as a string, returns the
+    modified string.
+    """
+    if not new_entries:
+        return existing_spec_text
+
+    section_range = _references_section_range(existing_spec_text)
+
+    if section_range is not None:
+        body_start, body_end = section_range
+        references_body = existing_spec_text[body_start:body_end]
+        existing_paths = _extract_existing_reference_paths(references_body)
+
+        to_add: list[ReferenceEntry] = []
+        seen_in_batch: set[str] = set()
+        for e in new_entries:
+            key = _normalize_ref_path(str(e.path))
+            if key in existing_paths or key in seen_in_batch:
+                continue
+            seen_in_batch.add(key)
+            to_add.append(e)
+        if not to_add:
+            return existing_spec_text
+
+        formatted = "\n".join(_format_reference_entry(e) for e in to_add)
+
+        body_text = existing_spec_text[body_start:body_end]
+        stripped = body_text.rstrip("\n")
+        insert_at = body_start + len(stripped)
+
+        return (
+            existing_spec_text[:insert_at]
+            + "\n"
+            + formatted
+            + "\n"
+            + existing_spec_text[body_end:]
+        )
+
+    # No ## References section — create one.
+    # Dedup within the incoming batch (first-write-wins).
+    seen: set[str] = set()
+    deduped: list[ReferenceEntry] = []
+    for e in new_entries:
+        key = _normalize_ref_path(str(e.path))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(e)
+    formatted = "\n".join(_format_reference_entry(e) for e in deduped)
+    new_section = f"\n## References\n\n{formatted}\n"
+
+    # Placement: after ## Sources if present, else after ## Purpose,
+    # else at end of file.
+    sources_end = _sources_section_end(existing_spec_text)
+    if sources_end is not None:
+        insert_at = sources_end
+    else:
+        purpose_end = _purpose_section_end(existing_spec_text)
+        if purpose_end is not None:
+            insert_at = purpose_end
+        else:
+            return existing_spec_text.rstrip("\n") + "\n" + new_section
+
+    return (
+        existing_spec_text[:insert_at].rstrip("\n")
+        + "\n"
+        + new_section
+        + existing_spec_text[insert_at:]
+    )
 
 
 def _design_section_range(text: str) -> tuple[int, int] | None:
