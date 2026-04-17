@@ -201,7 +201,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Assert: SPEC.md References section contains entries for both files; both have proposed: true; image has Vision-inferred role; PDF has role: docs (extension default).
 
 - [ ] Add test_init_url_fetch_failure_writes_scrape_none
-  - [ ] Mock fetch_site to raise an exception (network error).
+  - [x] Mock fetch_site to raise an exception (network error).
   - [ ] Run run_init with a URL argument.
   - [ ] Assert: exit code 0 (not 1); SPEC.md written; Sources contains the URL with scrape: none; Purpose has FILL IN marker.
 
