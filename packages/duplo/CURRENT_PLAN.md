@@ -182,7 +182,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 All Phase 6 end-to-end behaviors are verified by automated pytest integration tests, not by manual user runs. Each test constructs a fixture in a tmpdir, runs duplo init programmatically, and asserts on the output state. LLM calls must be mocked so tests do not depend on claude -p availability or network. All tests live in tests/test_phase6_integration.py (new file).
 
 - [ ] Add tests/test_phase6_integration.py with test_init_no_args_produces_template
-  - [ ] Run run_init with no URL, no description in a tmpdir.
+  - [x] Run run_init with no URL, no description in a tmpdir.
   - [ ] Assert: SPEC.md exists and contains the marker string "How the pieces fit together:"; SPEC.md contains FILL IN markers for Purpose and Architecture; ref/ directory exists; ref/README.md exists and matches INIT-design.md content; needs_migration returns False for this directory.
 
 - [ ] Add test_init_url_produces_prefilled_spec
