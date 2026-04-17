@@ -2,6 +2,36 @@
 
 ## Observations
 
+### [7.5.3] Initializer deletion blocked by no-delete rule — 2026-04-17
+
+The deletion prerequisite ("no remaining callers exist after _first_run
+removal") is satisfied. Re-verified today:
+
+- `create_project_dir` and `project_name_from_url` have zero importers
+  in `duplo/**/*.py`. Only remaining references are the definitions in
+  `duplo/initializer.py` (lines 10, 20) and test callers in
+  `tests/test_initializer.py`.
+- `AGENTS.md:356` mentions `project_name_from_url()` in prose only; no
+  code reference.
+- `PLAN.md:977-979` and `CURRENT_PLAN.md:42-45` reference the function
+  names inside the plan checklist text; not executable code.
+
+Per the project's absolute no-delete rule (CLAUDE.md: "Never delete any
+file"), I cannot execute `duplo/initializer.py` or
+`tests/test_initializer.py` deletion. Both files are dead and safe to
+remove; leaving in place for the user to delete manually.
+
+Suggested user actions when ready:
+
+```
+git rm duplo/initializer.py tests/test_initializer.py
+```
+
+After deletion, `CURRENT_PLAN.md` line 44 can be checked off. Lines
+45-46 are already satisfied (line 45's branch is not triggered —
+`project_name_from_url` is not in any live path per 7.5.1; line 46 is
+covered by the existing grep showing no remaining production imports).
+
 ### [7.5.2] Confirmed: duplo init does not call create_project_dir — 2026-04-17
 
 Verification of the model statement on CURRENT_PLAN.md line 43. Two
