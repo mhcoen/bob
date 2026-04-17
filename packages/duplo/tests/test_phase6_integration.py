@@ -31,6 +31,16 @@ _DESCRIPTION_FIXTURE_PURPOSE = (
 )
 _DESCRIPTION_FIXTURE_ARCHITECTURE = "Swift 5.9, SwiftUI, iOS 17+."
 
+_IMAGE_REF_FILENAME = "mockup.png"
+_PDF_REF_FILENAME = "manual.pdf"
+# PNG / PDF magic byte stubs — enough to look like the right type on
+# disk; the image Vision call is mocked, and the PDF path does not
+# involve an LLM, so no real decoding ever happens.
+_IMAGE_REF_BYTES = b"\x89PNG\r\n\x1a\n"
+_PDF_REF_BYTES = b"%PDF-1.4\n"
+_IMAGE_VISION_DESCRIPTION = "Screenshot of the calculator UI showing inline answers."
+_IMAGE_VISION_ROLE = "visual-target"
+
 
 def _write_description_fixture(tmp_path: Path) -> Path:
     """Drop a ``description.txt`` fixture into *tmp_path* and return its path.
@@ -43,6 +53,45 @@ def _write_description_fixture(tmp_path: Path) -> Path:
     path = tmp_path / "description.txt"
     path.write_text(_DESCRIPTION_FIXTURE_PROSE)
     return path
+
+
+def _write_ref_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """Drop a .png and a .pdf into ``tmp_path/ref`` and return their paths.
+
+    Centralized here so later subtasks that run ``run_init`` against a
+    ``ref/`` pre-populated with user files reuse the same fixture.
+    The file bodies are just magic-byte stubs — the image goes through
+    a mocked :func:`_propose_file_role` (see
+    :func:`_stub_propose_file_role`) and the PDF takes the
+    extension-default ``docs`` path in the real function, which does
+    not call an LLM.
+    """
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    image_path = ref_dir / _IMAGE_REF_FILENAME
+    image_path.write_bytes(_IMAGE_REF_BYTES)
+    pdf_path = ref_dir / _PDF_REF_FILENAME
+    pdf_path.write_bytes(_PDF_REF_BYTES)
+    return (image_path, pdf_path)
+
+
+def _stub_propose_file_role(path: Path) -> tuple[str, str]:
+    """Stand-in for :func:`duplo.spec_writer._propose_file_role`.
+
+    Returns a deterministic Vision-inferred ``(description, role)``
+    pair for ``.png`` images so tests avoid a real
+    ``query_with_images`` call.  For ``.pdf`` files it reproduces the
+    real extension-default branch (``("", "docs")``, no LLM involved)
+    so callers can patch a single function and still see the PDF
+    proposal come through correctly.  Unexpected extensions fail
+    loudly — the fixture contains only the two file types above.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".png":
+        return (_IMAGE_VISION_DESCRIPTION, _IMAGE_VISION_ROLE)
+    if suffix == ".pdf":
+        return ("", "docs")
+    raise AssertionError(f"unexpected fixture extension {suffix!r}")
 
 
 def _stub_draft_from_inputs(inputs):
@@ -346,3 +395,46 @@ class TestInitDescriptionProducesNotesWithVerbatimProse:
         assert spec.purpose == _DESCRIPTION_FIXTURE_PURPOSE
         assert "FILL IN" not in spec.purpose
         assert spec.fill_in_purpose is False
+
+
+class TestInitWithExistingRefFilesProposesRoles:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_with_existing_ref_files_proposes_roles``.
+    """
+
+    def test_ref_fixture_and_propose_file_role_mock(self, tmp_path, monkeypatch):
+        """Create a tmpdir with ref/ containing a .png and a .pdf; mock
+        ``_propose_file_role`` for the image.
+
+        Stages the existing-ref-files integration test: drops one
+        image and one PDF into ``tmp_path/ref`` and confirms that
+        patching ``duplo.init._propose_file_role`` (the name
+        :func:`_scan_existing_ref_files` sees after its top-level
+        import from ``duplo.spec_writer``) routes the Vision-inferred
+        role to the image while the PDF falls to the extension-default
+        ``docs`` — all without any real ``claude -p`` call.  Later
+        subtasks call ``run_init`` under this mock and assert on
+        SPEC.md ``## References``.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        image_path, pdf_path = _write_ref_fixture(tmp_path)
+        assert image_path.is_file()
+        assert image_path.suffix == ".png"
+        assert pdf_path.is_file()
+        assert pdf_path.suffix == ".pdf"
+        assert image_path.parent == tmp_path / "ref"
+        assert pdf_path.parent == tmp_path / "ref"
+
+        with patch(
+            "duplo.init._propose_file_role",
+            side_effect=_stub_propose_file_role,
+        ) as mock_propose:
+            from duplo.init import _propose_file_role as patched
+
+            image_result = patched(image_path)
+            pdf_result = patched(pdf_path)
+
+        assert mock_propose.call_count == 2
+        assert image_result == (_IMAGE_VISION_DESCRIPTION, _IMAGE_VISION_ROLE)
+        assert pdf_result == ("", "docs")
