@@ -2,6 +2,32 @@
 
 ## Observations
 
+### [7.5.2] Confirmed: duplo init does not call create_project_dir — 2026-04-17
+
+Verification of the model statement on CURRENT_PLAN.md line 43. Two
+independent checks:
+
+1. Grep for `create_project_dir` and `project_name_from_url` across
+   `duplo/` returns only the definitions at `duplo/initializer.py:10,20`.
+   No importer anywhere in `duplo/`. `duplo/init.py` does not import
+   from `duplo.initializer` at all.
+2. `duplo/init.py` uses `Path.cwd()` at every entry point
+   (`_run_no_args` at 178, `_run_url` at 275, `_run_description` at 451,
+   combined-flow at 516) — the user's existing working directory. No
+   directory creation, no `git init`, no hostname-derived naming.
+
+Consistent with the 7.5.1 audit (NOTES.md above): both functions are
+dead in production after the 7.2.1 `_first_run` deletion. Their only
+remaining references are inside `tests/test_initializer.py` (which
+tests the functions themselves) and `duplo/initializer.py`'s own
+definitions.
+
+No code change required for this checkbox — it is a confirmation step
+asserting the new-model invariant is already in effect. The next
+checkbox (CURRENT_PLAN.md line 44, deletion of `duplo/initializer.py`
+and `tests/test_initializer.py`) remains blocked by the project's
+absolute no-delete rule and must be executed by the user.
+
 ### [7.4.4] Removed dead interactive-prompt code from questioner.py — 2026-04-17
 
 The conditional ("If select_features is still needed") is vacuously
