@@ -113,5 +113,5 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 - [ ] Run the full test suite and confirm Phase 7 closes cleanly
   - [x] Execute pytest -x against the duplo repo.
-  - [ ] Assert: all tests pass; no test file references deleted modules or functions.
+  - [x] Assert: all tests pass; no test file references deleted modules or functions.
   - [ ] If any test fails, the task fails and mcloop will retry.
