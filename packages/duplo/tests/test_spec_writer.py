@@ -344,6 +344,24 @@ class TestFormatSpec:
         assert "Input → output pairs become verification tasks." in result
         assert "Optional. Free-form context for duplo." in result
 
+    def test_optional_comment_hints_match_template(self):
+        """Leading comment hint for empty optional sections must come from SPEC-template.md verbatim."""
+        import re as _re
+
+        template = (Path(__file__).resolve().parent.parent / "SPEC-template.md").read_text()
+        result = format_spec(ProductSpec())
+        # For each optional section, pull the first <!-- ... --> block
+        # from the template's section body and confirm format_spec emits it.
+        for heading in ("## Design", "## Scope", "## Behavior", "## Notes"):
+            t_start = template.index(f"{heading}\n") + len(heading)
+            next_hdr = _re.search(r"^## ", template[t_start:], _re.MULTILINE)
+            t_end = t_start + next_hdr.start() if next_hdr else len(template)
+            body = template[t_start:t_end]
+            open_at = body.index("<!--")
+            close_at = body.index("-->", open_at) + len("-->")
+            first_comment = body[open_at:close_at]
+            assert first_comment in result, f"{heading} comment hint not found in output"
+
     def test_empty_spec_does_not_have_fill_in_on_optional_sections(self):
         result = format_spec(ProductSpec())
         # Only Purpose and Architecture get FILL IN markers. The top

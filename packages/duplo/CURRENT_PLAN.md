@@ -19,7 +19,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Start with the standard top-matter comment block (the same block from SPEC-template.md, including the "How the pieces fit together:" marker string).
   - [x] Render sections in canonical order: Purpose, Sources, References, Architecture, Design, Scope, Behavior, Notes.
   - [x] For empty required sections (Purpose, Architecture): write the FILL IN marker from the template.
-  - [ ] For empty optional sections (Design, Scope, Behavior, Notes): write just the heading and the comment hint from the template. No FILL IN marker.
+  - [x] For empty optional sections (Design, Scope, Behavior, Notes): write just the heading and the comment hint from the template. No FILL IN marker.
   - [ ] For filled sections: write heading and content. Omit comment hints when content is present.
   - [ ] Sources entries: serialize each SourceEntry with one blank line between entries, using the same format as _format_entry.
   - [ ] References entries: serialize each ReferenceEntry with one blank line between entries, including roles (comma-separated), notes, and proposed flag.
