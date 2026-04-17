@@ -2025,3 +2025,68 @@ class TestDraftSpec:
 
         text = draft_spec(DraftInputs(url="https://example.com"))
         assert "Original description provided" not in text
+
+    def test_step3_url_added_as_source_entry_with_product_reference_deep_no_flags(
+        self, monkeypatch
+    ):
+        """Pin Step 3 of draft_spec: when inputs.url is provided, a
+        SourceEntry is added with role=product-reference, scrape=deep,
+        and no proposed/discovered flag. The user provided the URL
+        explicitly, so it is not marked proposed or discovered. Per
+        DRAFTER-design.md § draft_spec step 3."""
+        sentinel = ProductSpec(purpose="p", architecture="a")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        text = draft_spec(DraftInputs(url="https://numi.app"))
+        spec = _parse_spec(text)
+
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        assert entry.url == "https://numi.app"
+        assert entry.role == "product-reference"
+        assert entry.scrape == "deep"
+        assert entry.proposed is False
+        assert entry.discovered is False
+
+    def test_step3_no_url_adds_no_source_entry(self, monkeypatch):
+        """When inputs.url is None, Step 3 is a no-op — the Sources
+        list from step 1 (empty) stays empty, so format_spec renders
+        the template comment hint rather than a user entry."""
+        sentinel = ProductSpec(purpose="p", architecture="a")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        text = draft_spec(DraftInputs(description="Build a calculator."))
+        assert "## Sources\n\n<!-- URLs duplo should scrape." in text
+
+    def test_step3_url_prepended_before_existing_sources(self, monkeypatch):
+        """The URL SourceEntry is inserted at position 0 so the user's
+        primary URL appears first, ahead of any sources that step 1
+        might already have placed on the returned ProductSpec."""
+        existing = SourceEntry(
+            url="https://other.example",
+            role="docs",
+            scrape="shallow",
+        )
+        sentinel = ProductSpec(purpose="p", architecture="a", sources=[existing])
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        text = draft_spec(DraftInputs(url="https://numi.app"))
+        spec = _parse_spec(text)
+
+        assert len(spec.sources) == 2
+        assert spec.sources[0].url == "https://numi.app"
+        assert spec.sources[0].role == "product-reference"
+        assert spec.sources[0].scrape == "deep"
+        assert spec.sources[1].url == "https://other.example"
