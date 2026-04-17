@@ -1525,6 +1525,48 @@ class TestDraftFromInputs:
         assert "SCRAPE_BODY" in prompt
         assert "PROSE_BODY" in prompt
 
+    def test_url_and_prose_merged_response_flows_through(self, monkeypatch):
+        """Per INIT-design.md § `duplo init <url> --from-description`:
+        URL scrape provides purpose, prose provides design/architecture,
+        and prose wins on conflicts. ``_draft_from_inputs`` delegates the
+        actual merge to the LLM; this test pins that both inputs reach
+        the prompt AND that the merged response flows through to the
+        returned ProductSpec intact (so the prose-winning design/arch the
+        LLM chose are what callers see).
+        """
+        captured = self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    # From URL scrape: product identity / base purpose.
+                    "purpose": "A text calculator like Numi.",
+                    # From prose: explicit stack statement.
+                    "architecture": "SwiftUI on macOS 14+.",
+                    # Conflict: scrape suggests light theme, prose says
+                    # dark — prose wins.
+                    "design": "Dark theme, monospaced typography.",
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        inputs = DraftInputs(
+            url="https://numi.app",
+            url_scrape="Numi is a text calculator. Light theme by default.",
+            description=("Build a SwiftUI text calculator like Numi, but with a dark theme."),
+        )
+
+        spec = _draft_from_inputs(inputs)
+
+        prompt = captured[0]
+        assert "Numi is a text calculator" in prompt
+        assert "dark theme" in prompt
+        # Merged values flow through verbatim.
+        assert spec.purpose == "A text calculator like Numi."
+        assert spec.architecture == "SwiftUI on macOS 14+."
+        assert spec.design.user_prose == "Dark theme, monospaced typography."
+
     def test_prompt_lists_all_schema_fields(self, monkeypatch):
         captured = self._mock_query(
             monkeypatch,
