@@ -1551,6 +1551,209 @@ class TestEditSafetyUpdateDesignAutogen:
         assert not _spec_equal_except_design_autogen(a, b)
 
 
+# --------------------------------------------------------------------------
+# Custom/unrecognized section preservation
+# --------------------------------------------------------------------------
+#
+# Per DRAFTER-design.md section "Round-trip testing": modify operations
+# must preserve unrecognized (custom) sections byte-for-byte.  The
+# modify helpers operate on text at specific section offsets; any
+# ``##`` heading they do not recognize is treated purely as a boundary
+# marker.  The test below verifies that the exact byte sequence of the
+# custom section — heading, blank lines, and body — survives each
+# modify operation unchanged, across multiple fixture and placement
+# combinations.
+
+
+_CUSTOM_SECTION_BLOCKS: list[tuple[str, str]] = [
+    (
+        "simple_faq",
+        "## FAQ\n\nQ: What is this?\nA: A spec.\n",
+    ),
+    (
+        "two_custom_sections",
+        "## Acknowledgments\n\nThanks to everyone.\n\n## Changelog\n\n- v0.1: initial\n",
+    ),
+    (
+        "markdown_body_with_code_fence",
+        "## Internal Notes\n\n```\nverbatim code\n```\n\n- item 1\n- item 2\n",
+    ),
+    (
+        "heading_only",
+        "## TBD\n",
+    ),
+]
+
+
+_EDIT_SAFETY_CUSTOM_SPEC_FIXTURES: list[tuple[str, ProductSpec]] = [
+    ("minimal", _fixture_minimal()),
+    ("all_sections_filled", _fixture_all_sections_filled()),
+    ("mixed_filled_empty", _fixture_mixed_filled_empty()),
+]
+
+
+_PLACEMENT_BEFORE_HEADINGS: list[str] = [
+    "## Sources",
+    "## References",
+    "## Scope",
+    "## Notes",
+]
+
+
+def _insert_before_heading(text: str, heading: str, custom: str) -> str:
+    """Insert *custom* immediately before the first line whose stripped
+    content equals *heading*.
+
+    The surrounding newlines are normalized (one blank line before the
+    injected block, one blank line after) so the result is a well-formed
+    SPEC.md.  The *custom* block itself is inserted verbatim — the
+    assertions check that its exact bytes survive the subsequent modify
+    operation.
+    """
+    idx = text.find(heading + "\n")
+    if idx == -1:
+        raise ValueError(f"heading {heading!r} not found in text")
+    prefix = text[:idx].rstrip("\n") + "\n\n"
+    block = custom if custom.endswith("\n") else custom + "\n"
+    suffix = "\n" + text[idx:]
+    return prefix + block + suffix
+
+
+class TestEditSafetyCustomSectionsPreserved:
+    """Custom/unrecognized sections survive modify operations byte-for-byte.
+
+    Each test injects a custom section block into a well-formed
+    ``format_spec`` output at a canonical insertion point, runs one of
+    the modify helpers, and asserts the custom block's exact byte
+    sequence is present in the output.  Parametrization covers multiple
+    ProductSpec fixtures and multiple custom-section contents so the
+    property is exercised with multiple fixture combinations.
+    """
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+        ids=[f[0] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "custom",
+        [c[1] for c in _CUSTOM_SECTION_BLOCKS],
+        ids=[c[0] for c in _CUSTOM_SECTION_BLOCKS],
+    )
+    @pytest.mark.parametrize("placement", _PLACEMENT_BEFORE_HEADINGS)
+    def test_append_sources_preserves_custom_section(
+        self, spec: ProductSpec, custom: str, placement: str
+    ):
+        base = _insert_before_heading(format_spec(spec), placement, custom)
+        # Precondition: the custom block is present in the un-modified input.
+        assert custom in base, "fixture setup: custom block missing from base"
+
+        new_entry = SourceEntry(
+            url="https://custom-preservation.example",
+            role="product-reference",
+            scrape="deep",
+        )
+        modified = append_sources(base, [new_entry])
+
+        # The new source entry actually landed (guards against a silent
+        # no-op that would trivially preserve everything).
+        assert "https://custom-preservation.example" in modified
+        # The custom block's exact byte sequence is preserved.
+        assert custom in modified, (
+            f"custom block not preserved byte-for-byte after append_sources; "
+            f"placement={placement!r}"
+        )
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+        ids=[f[0] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "custom",
+        [c[1] for c in _CUSTOM_SECTION_BLOCKS],
+        ids=[c[0] for c in _CUSTOM_SECTION_BLOCKS],
+    )
+    @pytest.mark.parametrize("placement", _PLACEMENT_BEFORE_HEADINGS)
+    def test_append_references_preserves_custom_section(
+        self, spec: ProductSpec, custom: str, placement: str
+    ):
+        base = _insert_before_heading(format_spec(spec), placement, custom)
+        assert custom in base, "fixture setup: custom block missing from base"
+
+        new_entry = ReferenceEntry(
+            path=Path("ref/custom-preservation.png"),
+            roles=["visual-target"],
+        )
+        modified = append_references(base, [new_entry])
+
+        assert "ref/custom-preservation.png" in modified
+        assert custom in modified, (
+            f"custom block not preserved byte-for-byte after append_references; "
+            f"placement={placement!r}"
+        )
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+        ids=[f[0] for f in _EDIT_SAFETY_CUSTOM_SPEC_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "custom",
+        [c[1] for c in _CUSTOM_SECTION_BLOCKS],
+        ids=[c[0] for c in _CUSTOM_SECTION_BLOCKS],
+    )
+    @pytest.mark.parametrize("placement", _PLACEMENT_BEFORE_HEADINGS)
+    def test_update_design_autogen_preserves_custom_section(
+        self, spec: ProductSpec, custom: str, placement: str
+    ):
+        # Clear any existing auto_generated so update_design_autogen
+        # actually writes (write-once semantics would otherwise make the
+        # call a no-op for the all_sections_filled fixture).
+        cleared = _clear_auto_generated(spec)
+        base = _insert_before_heading(format_spec(cleared), placement, custom)
+        assert custom in base, "fixture setup: custom block missing from base"
+
+        body = "Colors: teal on ivory."
+        modified = update_design_autogen(base, body)
+
+        assert body in modified, "update_design_autogen did not write the body"
+        assert custom in modified, (
+            f"custom block not preserved byte-for-byte after update_design_autogen; "
+            f"placement={placement!r}"
+        )
+
+    def test_custom_section_at_end_of_file_preserved_across_all_ops(self):
+        """End-of-file placement: a custom section with no following
+        canonical heading must still survive each modify operation.
+        Exercises the boundary case where the custom heading is the
+        final ``## `` in the file (there is no subsequent canonical
+        heading to act as a delimiter).
+        """
+        spec = _fixture_minimal()
+        custom = "## Appendix\n\nExtra material that is not part of any canonical section.\n"
+        base = format_spec(spec).rstrip("\n") + "\n\n" + custom
+        assert custom in base
+
+        after_sources = append_sources(
+            base,
+            [SourceEntry(url="https://end.example", role="docs", scrape="none")],
+        )
+        assert custom in after_sources, "append_sources corrupted trailing custom section"
+
+        after_refs = append_references(
+            base,
+            [ReferenceEntry(path=Path("ref/end.png"), roles=["visual-target"])],
+        )
+        assert custom in after_refs, "append_references corrupted trailing custom section"
+
+        after_autogen = update_design_autogen(
+            format_spec(_clear_auto_generated(spec)).rstrip("\n") + "\n\n" + custom,
+            "Colors: teal on ivory.",
+        )
+        assert custom in after_autogen, "update_design_autogen corrupted trailing custom section"
+
+
 class TestInferUrlRole:
     """Tests for ``_infer_url_role`` (regex-based role inference)."""
 
