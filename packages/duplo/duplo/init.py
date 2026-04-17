@@ -229,13 +229,19 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
             print(f"Fetched {canonical} ({depth_label} for product identity).")
             print(f"  → Identified product: {product_name}")
             print("  → Pre-filled ## Purpose, ## Sources")
+            print()
+            inputs = DraftInputs(url=canonical, url_scrape=text)
+            content = draft_spec(inputs)
         else:
             print(f"Fetched {canonical}.")
             print("  → Could not identify a specific product from the page content.")
             print("  → Pre-filled ## Sources only.")
-        print()
-        inputs = DraftInputs(url=canonical, url_scrape=text)
-        content = draft_spec(inputs)
+            print()
+            spec = ProductSpec()
+            spec.sources.append(
+                SourceEntry(url=canonical, role="product-reference", scrape="deep")
+            )
+            content = format_spec(spec)
     else:
         print(f"Fetching {canonical} ...")
         print("  → Failed: could not fetch URL.")

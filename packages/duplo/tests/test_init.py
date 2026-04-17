@@ -382,7 +382,7 @@ class TestRunInitUrlSuccess:
 class TestRunInitUrlUnidentified:
     """Per INIT-design.md § 'URL fetch succeeds but identifies nothing'."""
 
-    def test_unidentified_prints_fallback_message_and_drafts_spec(
+    def test_unidentified_prefills_sources_only_and_leaves_purpose_fill_in(
         self, tmp_path, capsys, monkeypatch
     ):
         monkeypatch.chdir(tmp_path)
@@ -398,19 +398,25 @@ class TestRunInitUrlUnidentified:
                     unclear_boundaries=True,
                 ),
             ),
-            patch(
-                "duplo.init.draft_spec",
-                return_value="## Purpose\n\n<FILL IN: ...>\n",
-            ) as mock_draft,
+            patch("duplo.init.draft_spec") as mock_draft,
         ):
             run_init(_make_args(url="https://example.com"))
 
-        mock_draft.assert_called_once()  # draft still runs; LLM may still pre-fill
+        # Per INIT-design.md: when URL fetch succeeds but no product is
+        # identified, skip the drafter entirely — Purpose stays FILL IN.
+        mock_draft.assert_not_called()
         out = capsys.readouterr().out
         assert "Fetched https://example.com." in out
         assert "Could not identify a specific product" in out
         assert "Pre-filled ## Sources only." in out
         assert "Wrote SPEC.md." in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "https://example.com" in written
+        assert "scrape: deep" in written
+        # Purpose must remain a FILL IN marker (not pre-filled from the scrape).
+        purpose_block = written.split("## Purpose", 1)[1].split("##", 1)[0]
+        assert "FILL IN" in purpose_block
 
 
 class TestRunInitUrlFetchFailure:
