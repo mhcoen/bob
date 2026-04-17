@@ -1032,6 +1032,29 @@ def _fix_mode(args: argparse.Namespace) -> None:
         print("Run mcloop to start fixing.")
 
 
+# Removal audit (Phase 7.1, 2026-04-17) — see NOTES.md [7.1.1]-[7.1.3].
+#
+# Coverage: `duplo init` (URL input, SPEC.md generation) and
+# `_subsequent_run` (feature extraction, PLAN.md generation) fully replace
+# this function's responsibilities. Called from exactly one site — the
+# default-command dispatch in `main()` when `.duplo/duplo.json` is absent.
+#
+# Reachability: the migration gate (`_check_migration`) blocks every
+# old-format project before dispatch, so `_first_run` runs only when
+# `.duplo/duplo.json` is absent — by definition a new or manually-reset
+# directory, never an old-format project.
+#
+# Before deleting (tracked in NOTES.md [7.1.2] Hypotheses):
+#   1. Dispatch still routes here when `duplo.json` is absent; must
+#      switch to a message-and-exit when `SPEC.md` is also absent,
+#      otherwise fall through to `_subsequent_run`.
+#   2. `_subsequent_run` reads `duplo.json` in several spots without
+#      `FileNotFoundError` handling; must be hardened against the
+#      freshly-initialized case.
+#   3. Three `_first_run`-only behaviors need a home or a decision
+#      record: interactive `app_name` prompt, `ask_preferences`
+#      fallback when `spec.architecture` is empty, and the roadmap
+#      approval prompt.
 def _first_run(*, url: str | None = None) -> None:
     """Scan reference materials in the current directory and bootstrap the project."""
     spec = read_spec()
