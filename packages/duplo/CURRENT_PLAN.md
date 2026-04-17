@@ -195,10 +195,10 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Run run_init with --from-description pointing to the fixture.
   - [x] Assert: SPEC.md Notes section contains "Original description provided to duplo init:" followed by the exact prose from description.txt byte-for-byte; Purpose section populated from LLM output.
 
-- [ ] Add test_init_with_existing_ref_files_proposes_roles
+- [x] Add test_init_with_existing_ref_files_proposes_roles
   - [x] Create a tmpdir with ref/ containing a .png and a .pdf. Mock _propose_file_role for the image.
   - [x] Run run_init.
-  - [ ] Assert: SPEC.md References section contains entries for both files; both have proposed: true; image has Vision-inferred role; PDF has role: docs (extension default).
+  - [x] Assert: SPEC.md References section contains entries for both files; both have proposed: true; image has Vision-inferred role; PDF has role: docs (extension default).
 
 - [ ] Add test_init_url_fetch_failure_writes_scrape_none
   - [ ] Mock fetch_site to raise an exception (network error).
