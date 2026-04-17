@@ -309,3 +309,40 @@ class TestInitDescriptionProducesNotesWithVerbatimProse:
         assert (tmp_path / "SPEC.md").is_file()
         assert (tmp_path / "ref").is_dir()
         assert (tmp_path / "ref" / "README.md").is_file()
+
+    def test_run_init_from_description_notes_and_purpose(self, tmp_path, capsys, monkeypatch):
+        """Assert SPEC.md Notes has the header + byte-for-byte prose; Purpose is populated.
+
+        Content-level check for the description flow: after
+        ``run_init`` completes under the mocked
+        ``_draft_from_inputs``, SPEC.md's ``## Notes`` section must
+        contain the labeled header followed immediately by the exact
+        bytes of ``description.txt`` (no reflow, no trimming), and
+        ``## Purpose`` must carry the drafter's LLM output rather than
+        a ``FILL IN`` marker.
+        """
+        from duplo.init import run_init
+        from duplo.spec_reader import read_spec
+        from duplo.spec_writer import _NOTES_DESCRIPTION_HEADER
+
+        monkeypatch.chdir(tmp_path)
+
+        desc_path = _write_description_fixture(tmp_path)
+
+        with patch(
+            "duplo.spec_writer._draft_from_inputs",
+            side_effect=_stub_draft_from_inputs,
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        capsys.readouterr()
+
+        spec_text = (tmp_path / "SPEC.md").read_text()
+        expected_notes_block = f"{_NOTES_DESCRIPTION_HEADER}\n\n{_DESCRIPTION_FIXTURE_PROSE}"
+        assert expected_notes_block in spec_text
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+        assert spec.purpose == _DESCRIPTION_FIXTURE_PURPOSE
+        assert "FILL IN" not in spec.purpose
+        assert spec.fill_in_purpose is False
