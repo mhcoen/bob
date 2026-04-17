@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from unittest.mock import patch
 
 import pytest
 
+from duplo.doc_tables import DocStructures
+from duplo.fetcher import PageRecord
 from duplo.init import (
     _NO_ARGS_NEXT_STEPS,
     _REF_README_CONTENT,
@@ -14,6 +17,7 @@ from duplo.init import (
 )
 from duplo.spec_reader import ProductSpec
 from duplo.spec_writer import format_spec
+from duplo.validator import ValidationResult
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -219,3 +223,244 @@ class TestRunInitNoArgsOutputMessage:
         # Blank line separates the "Wrote SPEC.md" line from "Next steps:".
         between = out[idx_spec:idx_next]
         assert "\n\n" in between
+
+
+def _fetch_site_success(
+    text: str = "=== https://numi.app ===\nNumi — a calculator.",
+    url: str = "https://numi.app",
+):
+    """Build a fetch_site return tuple that looks like a successful shallow fetch."""
+    record = PageRecord(
+        url=url,
+        fetched_at="2026-04-17T00:00:00+00:00",
+        content_hash="deadbeef",
+    )
+    return (text, [], DocStructures(), [record], {url: "<html></html>"})
+
+
+_FETCH_SITE_FAILURE = ("", [], DocStructures(), [], {})
+
+
+class TestRunInitUrlSuccess:
+    """Per INIT-design.md § 'duplo init <url>' happy path."""
+
+    def test_identified_product_prints_identity_and_drafts_spec(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                    unclear_boundaries=False,
+                ),
+            ) as mock_val,
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nNumi.\n## Sources\n\n- https://numi.app\n",
+            ) as mock_draft,
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="shallow")
+        mock_val.assert_called_once()
+        mock_draft.assert_called_once()
+        inputs = mock_draft.call_args.args[0]
+        assert inputs.url == "https://numi.app"
+        assert inputs.url_scrape  # non-empty
+
+        out = capsys.readouterr().out
+        assert "Fetched https://numi.app (shallow scrape for product identity)." in out
+        assert "→ Identified product: Numi" in out
+        assert "→ Pre-filled ## Purpose, ## Sources" in out
+        assert "Wrote SPEC.md." in out  # no "(template)" suffix
+        assert "deep-crawl https://numi.app on the next run" in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "Numi" in written
+
+    def test_deep_flag_passes_deep_depth(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app", deep=True))
+
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="deep")
+        out = capsys.readouterr().out
+        assert "deep scrape for product identity" in out
+        # --deep means the scrape is already done; the deferred-deep note
+        # should not be printed.
+        assert "deep-crawl" not in out
+
+    def test_url_canonicalized_before_fetch_and_write(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_success(url="https://Numi.App/"),
+            ) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nX\n## Sources\n\n- https://numi.app\n",
+            ) as mock_draft,
+        ):
+            run_init(_make_args(url="https://Numi.App/"))
+
+        # fetch_site gets the canonical form, not the raw trailing-slash input.
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="shallow")
+        inputs = mock_draft.call_args.args[0]
+        assert inputs.url == "https://numi.app"
+
+    def test_force_overwrites_existing_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nNumi.\n",
+            ),
+        ):
+            run_init(_make_args(url="https://numi.app", force=True))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "pre-existing" not in written
+        assert "Numi" in written
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init.draft_spec") as mock_draft,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_init(_make_args(url="https://numi.app"))
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_draft.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        # Existing SPEC.md must not be clobbered.
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+
+class TestRunInitUrlUnidentified:
+    """Per INIT-design.md § 'URL fetch succeeds but identifies nothing'."""
+
+    def test_unidentified_prints_fallback_message_and_drafts_spec(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\n<FILL IN: ...>\n",
+            ) as mock_draft,
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        mock_draft.assert_called_once()  # draft still runs; LLM may still pre-fill
+        out = capsys.readouterr().out
+        assert "Fetched https://example.com." in out
+        assert "Could not identify a specific product" in out
+        assert "Pre-filled ## Sources only." in out
+        assert "Wrote SPEC.md." in out
+
+
+class TestRunInitUrlFetchFailure:
+    """Per INIT-design.md § 'URL fetch fails'."""
+
+    def test_fetch_failure_writes_template_with_scrape_none(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch("duplo.init.draft_spec") as mock_draft,
+        ):
+            # Must not raise; exit 0 (normal return).
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        # Fetch failure → no validator call, no drafter call.
+        mock_val.assert_not_called()
+        mock_draft.assert_not_called()
+
+        out = capsys.readouterr().out
+        assert "Fetching https://does-not-exist.invalid ..." in out
+        assert "Failed" in out
+        assert "template-only setup" in out
+        assert "Wrote SPEC.md (template)." in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # URL is in Sources with scrape: none and product-reference role.
+        assert "- https://does-not-exist.invalid" in written
+        assert "role: product-reference" in written
+        assert "scrape: none" in written
+        # No proposed/discovered flag on the entry — user provided the URL.
+        # (The template top-matter mentions "proposed: true" as example
+        # text, so check the entry itself.)
+        entry_start = written.index("- https://does-not-exist.invalid")
+        next_heading = written.index("\n## ", entry_start)
+        entry_block = written[entry_start:next_heading]
+        assert "proposed:" not in entry_block
+        assert "discovered:" not in entry_block
+        # Required sections left as FILL IN markers.
+        assert "<FILL IN: one or two sentences" in written
+        assert "<FILL IN: language, framework, platform, constraints>" in written
+
+    def test_fetch_failure_canonicalizes_url_before_writing(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://Numi.App/"))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Canonical form (lowercase host, trailing slash stripped).
+        assert "- https://numi.app" in written
+        assert "- https://Numi.App/" not in written
