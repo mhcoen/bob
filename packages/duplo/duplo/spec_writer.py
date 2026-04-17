@@ -10,18 +10,38 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from duplo.claude_cli import ClaudeCliError, query_with_images
+from duplo.claude_cli import ClaudeCliError, query, query_with_images
 from duplo.diagnostics import record_failure
 from duplo.parsing import extract_json
 from duplo.spec_reader import (
+    BehaviorContract,
     DesignBlock,
     ProductSpec,
     ReferenceEntry,
     SourceEntry,
 )
 from duplo.url_canon import canonicalize_url
+
+
+@dataclass
+class DraftInputs:
+    """Inputs consumed by :func:`draft_spec` / :func:`_draft_from_inputs`.
+
+    Per DRAFTER-design.md § "API → draft_spec".  ``vision_proposals``
+    maps ref/ paths to role strings already proposed by
+    :func:`_propose_file_role`; ``draft_spec`` uses them to construct
+    ``ReferenceEntry`` objects with ``proposed: true``.
+    """
+
+    url: str | None = None
+    url_scrape: str | None = None
+    description: str | None = None
+    existing_ref_files: list[Path] = field(default_factory=list)
+    vision_proposals: dict[Path, str] = field(default_factory=dict)
+
 
 # Matches a ``## Sources`` heading (exactly level 2).
 _SOURCES_HEADING = re.compile(r"^## Sources\s*$", re.MULTILINE)
@@ -767,3 +787,181 @@ def _propose_image_role(path: Path) -> tuple[str, str]:
         )
         return (description, "ignore")
     return (description, role)
+
+
+# --------------------------------------------------------------------------
+# _draft_from_inputs — the only LLM call in the drafter
+# --------------------------------------------------------------------------
+#
+# Per DRAFTER-design.md § "Drafting from inputs".  Calls claude -p with
+# a structured-output prompt, parses the JSON response, and constructs
+# a ProductSpec.  On LLM failure or JSON parse error, retries up to
+# _DRAFT_RETRIES times with exponential backoff; after exhausting
+# retries returns an empty ProductSpec and logs a diagnostic.
+
+_DRAFT_RETRIES = 2
+_DRAFT_BACKOFF = 1.0
+
+_DRAFT_PROMPT_HEADER = (
+    "You are drafting a SPEC.md for a software project.\n"
+    "Given the inputs below, produce a JSON object with these fields:\n"
+    "\n"
+    "- purpose: one or two sentences describing what to build, or null\n"
+    "  if you can't determine it from inputs.\n"
+    "- architecture: language/framework/platform constraints, ONLY IF\n"
+    "  the description prose explicitly states a stack, platform, or\n"
+    "  language. Do NOT infer architecture from scraped product pages\n"
+    "  or from product identity. Return null otherwise.\n"
+    "- design: visual direction (colors, typography, aesthetic), or\n"
+    "  null if not specified.\n"
+    "- behavior_contracts: list of {input, expected} pairs extracted\n"
+    "  from inputs, or an empty list.\n"
+    "- scope_include: list of feature names the user explicitly wants,\n"
+    "  or an empty list.\n"
+    "- scope_exclude: list of feature names the user explicitly does\n"
+    "  NOT want, or an empty list.\n"
+    "\n"
+    "Return ONLY the JSON object — no prose, no code fences.\n"
+)
+
+
+def _format_draft_inputs_for_prompt(inputs: DraftInputs) -> str:
+    """Render *inputs* as the "Inputs:" block of the drafter prompt."""
+    parts: list[str] = []
+    if inputs.url:
+        parts.append(f"URL: {inputs.url}")
+    if inputs.url_scrape:
+        parts.append(f"URL scrape:\n{inputs.url_scrape}")
+    if inputs.description:
+        parts.append(f"Description prose:\n{inputs.description}")
+    if inputs.existing_ref_files:
+        inventory = "\n".join(f"- {p}" for p in inputs.existing_ref_files)
+        parts.append(f"ref/ file inventory:\n{inventory}")
+    if not parts:
+        return "(no inputs provided)"
+    return "\n\n".join(parts)
+
+
+def _build_draft_prompt(inputs: DraftInputs) -> str:
+    """Build the full drafter prompt: header + Inputs block."""
+    return f"{_DRAFT_PROMPT_HEADER}\nInputs:\n{_format_draft_inputs_for_prompt(inputs)}\n"
+
+
+def _parse_behavior_contracts(raw: object) -> list[BehaviorContract]:
+    """Extract ``BehaviorContract`` pairs from a JSON list element."""
+    if not isinstance(raw, list):
+        return []
+    contracts: list[BehaviorContract] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        inp = str(item.get("input", "")).strip()
+        expected = str(item.get("expected", "")).strip()
+        if inp and expected:
+            contracts.append(BehaviorContract(input=inp, expected=expected))
+    return contracts
+
+
+def _parse_string_list(raw: object) -> list[str]:
+    """Extract a list of non-empty strings from a JSON list element."""
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _construct_spec_from_draft_json(data: dict) -> ProductSpec:
+    """Build a :class:`ProductSpec` from the drafter's JSON response.
+
+    Fields the LLM returned as ``null`` / missing become empty strings
+    or empty lists — :func:`format_spec` emits the template ``<FILL IN>``
+    marker or the optional-section comment hint on the next write.
+    """
+    purpose_raw = data.get("purpose")
+    purpose = str(purpose_raw).strip() if purpose_raw else ""
+
+    arch_raw = data.get("architecture")
+    architecture = str(arch_raw).strip() if arch_raw else ""
+
+    design_raw = data.get("design")
+    design_prose = str(design_raw).strip() if design_raw else ""
+
+    return ProductSpec(
+        purpose=purpose,
+        architecture=architecture,
+        design=DesignBlock(user_prose=design_prose),
+        behavior_contracts=_parse_behavior_contracts(data.get("behavior_contracts")),
+        scope_include=_parse_string_list(data.get("scope_include")),
+        scope_exclude=_parse_string_list(data.get("scope_exclude")),
+    )
+
+
+def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
+    """Draft a :class:`ProductSpec` from *inputs* via a single LLM call.
+
+    Per DRAFTER-design.md § "Drafting from inputs".  This is the only
+    place in the drafter that calls an LLM.  The function:
+
+    1. Builds a structured-output prompt asking for a JSON object with
+       ``purpose``, ``architecture``, ``design``, ``behavior_contracts``,
+       ``scope_include``, and ``scope_exclude``.  ``notes`` is
+       deliberately NOT in the schema — :func:`draft_spec` populates
+       ``## Notes`` from the raw description prose (see design doc).
+    2. Calls ``claude -p`` via :func:`duplo.claude_cli.query`, retrying
+       up to ``_DRAFT_RETRIES`` times with exponential backoff on
+       :class:`~duplo.claude_cli.ClaudeCliError`.
+    3. Parses the JSON response (stripping code fences if present).
+    4. Constructs a ``ProductSpec`` with filled fields from JSON and
+       empty content where the LLM returned ``null``.
+
+    On LLM failure after retries, or on unrecoverable JSON parse
+    errors after retries, returns an empty ``ProductSpec`` and logs a
+    diagnostic via :func:`~duplo.diagnostics.record_failure`.  Callers
+    serialize the result with :func:`format_spec`, which emits the
+    template ``<FILL IN>`` markers for empty required sections.
+    """
+    prompt = _build_draft_prompt(inputs)
+
+    last_error: str = ""
+    for attempt in range(_DRAFT_RETRIES + 1):
+        try:
+            raw = query(prompt)
+        except ClaudeCliError as exc:
+            last_error = f"ClaudeCliError: {exc}"
+            if attempt >= _DRAFT_RETRIES:
+                record_failure(
+                    "spec_writer:_draft_from_inputs",
+                    "llm",
+                    f"Draft LLM call failed after {attempt + 1} attempts: {last_error}",
+                )
+                return ProductSpec()
+            time.sleep(_DRAFT_BACKOFF * (2**attempt))
+            continue
+
+        try:
+            data = json.loads(extract_json(raw))
+        except (json.JSONDecodeError, ValueError) as exc:
+            last_error = f"JSON parse error: {exc}"
+            if attempt >= _DRAFT_RETRIES:
+                record_failure(
+                    "spec_writer:_draft_from_inputs",
+                    "llm",
+                    f"Draft JSON parse failed after {attempt + 1} attempts: {last_error}",
+                    context={"raw": raw[:2000]},
+                )
+                return ProductSpec()
+            time.sleep(_DRAFT_BACKOFF * (2**attempt))
+            continue
+
+        if not isinstance(data, dict):
+            record_failure(
+                "spec_writer:_draft_from_inputs",
+                "llm",
+                "Draft response was not a JSON object",
+                context={"raw": raw[:2000]},
+            )
+            return ProductSpec()
+
+        return _construct_spec_from_draft_json(data)
+
+    # Unreachable: every branch in the loop either returns or continues.
+    return ProductSpec()

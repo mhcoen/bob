@@ -2,6 +2,28 @@
 
 ## Observations
 
+### [6.7.1] DraftInputs added in this task, not in 6.1.1-6.1.2 — 2026-04-17
+
+Task 6.7.1 implements `_draft_from_inputs(inputs: DraftInputs)` whose first
+argument type was supposed to be defined by tasks 6.1.1-6.1.2. git log shows a
+checkpoint commit `b64753b` (next: 6.1.1-6.1.2) followed directly by `a743f64`
+(next: 6.2.1) — no "Complete: [BATCH] 6.1.1-6.1.2" commit between them — yet
+CURRENT_PLAN.md marks 6.1.1-6.1.2 as `[x]` done. The DraftInputs dataclass was
+never actually written. Added it in this task so `_draft_from_inputs` has its
+parameter type. If the workflow runs 6.1.1-6.1.2 again it will find DraftInputs
+already present; tests pass either way.
+
+### [6.7.1] Error-handling discrepancy between plan and design doc — 2026-04-17
+
+CURRENT_PLAN.md bullet 6.7.7 says `_draft_from_inputs` should "fall back to
+empty ProductSpec (template-only draft) with a diagnostic" after retries.
+DRAFTER-design.md § "Error handling" says the function should raise
+`DraftingFailed` and the caller (`draft_spec`) catches it. Tasks 6.9-6.10
+plan to add `DraftingFailed` and catch it in `draft_spec`. Implemented per
+the plan for now (return empty ProductSpec + record_failure); if 6.9/6.10
+migrate to exception-based handling, `_draft_from_inputs` will need to be
+refactored to raise instead of return, and tests updated.
+
 ### [6.3.1] Parser re-ingests content from format_spec comment hints — 2026-04-17
 
 Round-trip testing revealed that `_parse_spec` picks up "example" content

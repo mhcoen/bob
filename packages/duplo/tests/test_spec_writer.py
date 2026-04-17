@@ -1,6 +1,7 @@
 """Tests for duplo.spec_writer."""
 
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ from duplo.spec_reader import (
     _parse_spec,
 )
 from duplo.spec_writer import (
+    DraftInputs,
+    _draft_from_inputs,
     _infer_url_role,
     _propose_file_role,
     append_references,
@@ -1378,3 +1381,336 @@ class TestProposeFileRole:
         description, role = _propose_file_role(path)
         assert description == "UI"
         assert role == "visual-target"
+
+
+class TestDraftInputs:
+    """Tests for the ``DraftInputs`` dataclass."""
+
+    def test_all_fields_default_to_empty(self):
+        inputs = DraftInputs()
+        assert inputs.url is None
+        assert inputs.url_scrape is None
+        assert inputs.description is None
+        assert inputs.existing_ref_files == []
+        assert inputs.vision_proposals == {}
+
+    def test_construct_with_all_fields(self, tmp_path):
+        p = tmp_path / "ref" / "x.png"
+        inputs = DraftInputs(
+            url="https://numi.app",
+            url_scrape="scraped text",
+            description="like numi",
+            existing_ref_files=[p],
+            vision_proposals={p: "visual-target"},
+        )
+        assert inputs.url == "https://numi.app"
+        assert inputs.url_scrape == "scraped text"
+        assert inputs.description == "like numi"
+        assert inputs.existing_ref_files == [p]
+        assert inputs.vision_proposals == {p: "visual-target"}
+
+    def test_independent_default_lists_between_instances(self):
+        """Mutable defaults must not leak across instances."""
+        a = DraftInputs()
+        a.existing_ref_files.append(Path("ref/x.png"))
+        a.vision_proposals[Path("ref/y.png")] = "docs"
+        b = DraftInputs()
+        assert b.existing_ref_files == []
+        assert b.vision_proposals == {}
+
+
+class TestDraftFromInputs:
+    """Tests for ``_draft_from_inputs`` (the single LLM call)."""
+
+    def _mock_query(self, monkeypatch, response: str) -> list[str]:
+        """Replace ``duplo.spec_writer.query`` with a capturing stub."""
+        captured: list[str] = []
+
+        def fake_query(prompt, **kwargs):
+            captured.append(prompt)
+            return response
+
+        monkeypatch.setattr("duplo.spec_writer.query", fake_query)
+        return captured
+
+    def test_url_only_fills_purpose_leaves_architecture_null(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": "A calculator like Numi.",
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        inputs = DraftInputs(url="https://numi.app", url_scrape="Numi is a calculator.")
+
+        spec = _draft_from_inputs(inputs)
+
+        assert spec.purpose == "A calculator like Numi."
+        assert spec.architecture == ""
+        assert spec.design.user_prose == ""
+        assert spec.behavior_contracts == []
+        assert spec.scope_include == []
+        assert spec.scope_exclude == []
+
+    def test_prose_with_stack_fills_architecture(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": "A text calculator.",
+                    "architecture": "SwiftUI on macOS 14+.",
+                    "design": "Monospaced, minimal chrome.",
+                    "behavior_contracts": [{"input": "2 + 3", "expected": "5"}],
+                    "scope_include": ["Unit conversion"],
+                    "scope_exclude": ["Plugin API"],
+                }
+            ),
+        )
+        inputs = DraftInputs(description="Build a SwiftUI text calculator like Numi.")
+
+        spec = _draft_from_inputs(inputs)
+
+        assert spec.purpose == "A text calculator."
+        assert spec.architecture == "SwiftUI on macOS 14+."
+        assert spec.design.user_prose == "Monospaced, minimal chrome."
+        assert len(spec.behavior_contracts) == 1
+        assert spec.behavior_contracts[0].input == "2 + 3"
+        assert spec.behavior_contracts[0].expected == "5"
+        assert spec.scope_include == ["Unit conversion"]
+        assert spec.scope_exclude == ["Plugin API"]
+
+    def test_prose_without_stack_leaves_architecture_null(self, monkeypatch):
+        """When the LLM returns null for architecture, spec.architecture stays empty."""
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": "A calculator.",
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        inputs = DraftInputs(description="Build a calculator. Nothing else.")
+
+        spec = _draft_from_inputs(inputs)
+
+        assert spec.architecture == ""
+
+    def test_both_url_and_prose_are_included_in_prompt(self, monkeypatch):
+        captured = self._mock_query(
+            monkeypatch,
+            '{"purpose": null, "architecture": null, "design": null, '
+            '"behavior_contracts": [], "scope_include": [], "scope_exclude": []}',
+        )
+        inputs = DraftInputs(
+            url="https://numi.app",
+            url_scrape="SCRAPE_BODY",
+            description="PROSE_BODY",
+        )
+
+        _draft_from_inputs(inputs)
+
+        prompt = captured[0]
+        assert "https://numi.app" in prompt
+        assert "SCRAPE_BODY" in prompt
+        assert "PROSE_BODY" in prompt
+
+    def test_prompt_lists_all_schema_fields(self, monkeypatch):
+        captured = self._mock_query(
+            monkeypatch,
+            '{"purpose": null, "architecture": null, "design": null, '
+            '"behavior_contracts": [], "scope_include": [], "scope_exclude": []}',
+        )
+        _draft_from_inputs(DraftInputs(description="x"))
+
+        prompt = captured[0]
+        for field_name in (
+            "purpose",
+            "architecture",
+            "design",
+            "behavior_contracts",
+            "scope_include",
+            "scope_exclude",
+        ):
+            assert field_name in prompt
+
+    def test_prompt_does_not_request_notes(self, monkeypatch):
+        captured = self._mock_query(
+            monkeypatch,
+            '{"purpose": null, "architecture": null, "design": null, '
+            '"behavior_contracts": [], "scope_include": [], "scope_exclude": []}',
+        )
+        _draft_from_inputs(DraftInputs(description="x"))
+
+        prompt = captured[0]
+        # "notes" must not appear as a schema field.
+        assert "- notes" not in prompt
+        assert "notes:" not in prompt
+
+    def test_neither_url_nor_prose_yields_empty_product_spec(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": None,
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        spec = _draft_from_inputs(DraftInputs())
+
+        assert spec.purpose == ""
+        assert spec.architecture == ""
+        assert spec.design.user_prose == ""
+        assert spec.behavior_contracts == []
+
+    def test_llm_failure_after_retries_returns_empty_spec(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        attempts = [0]
+
+        def always_fail(prompt, **kwargs):
+            attempts[0] += 1
+            raise ClaudeCliError("transport error")
+
+        sleeps: list[float] = []
+        monkeypatch.setattr("duplo.spec_writer.query", always_fail)
+        monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: sleeps.append(s))
+
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+
+        # Fallback to an empty ProductSpec.
+        assert spec.purpose == ""
+        assert spec.architecture == ""
+        # Initial attempt + 2 retries = 3 calls.
+        assert attempts[0] == 3
+        # Slept between attempts, not after the final failure.
+        assert len(sleeps) == 2
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_malformed_json_retries_then_falls_back(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        attempts = [0]
+
+        def bad_json(prompt, **kwargs):
+            attempts[0] += 1
+            return "not-json-at-all"
+
+        monkeypatch.setattr("duplo.spec_writer.query", bad_json)
+        monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: None)
+
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+
+        assert spec.purpose == ""
+        assert attempts[0] == 3
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_transient_failure_then_success(self, monkeypatch):
+        attempts = [0]
+
+        def flaky(prompt, **kwargs):
+            attempts[0] += 1
+            if attempts[0] < 3:
+                raise ClaudeCliError("transient")
+            return json.dumps(
+                {
+                    "purpose": "OK",
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            )
+
+        monkeypatch.setattr("duplo.spec_writer.query", flaky)
+        monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: None)
+
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+
+        assert spec.purpose == "OK"
+        assert attempts[0] == 3
+
+    def test_all_nulls_produces_template_like_spec(self, monkeypatch):
+        """LLM-null-everywhere ⇒ format_spec(spec) shows FILL IN markers."""
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": None,
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+        text = format_spec(spec)
+        assert "<FILL IN: one or two sentences" in text
+        assert "<FILL IN: language, framework" in text
+
+    def test_json_wrapped_in_code_fence_is_parsed(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            "```json\n"
+            + json.dumps(
+                {
+                    "purpose": "Fenced.",
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            )
+            + "\n```",
+        )
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+        assert spec.purpose == "Fenced."
+
+    def test_response_that_is_not_a_json_object_falls_back(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        # A bare array parses but isn't a dict — treat as fallback.
+        self._mock_query(monkeypatch, "[1, 2, 3]")
+
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+        assert spec.purpose == ""
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_behavior_contracts_with_missing_fields_are_dropped(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            json.dumps(
+                {
+                    "purpose": "OK",
+                    "architecture": None,
+                    "design": None,
+                    "behavior_contracts": [
+                        {"input": "2 + 3", "expected": "5"},
+                        {"input": "", "expected": "drop me"},
+                        {"input": "no expected"},
+                        "not a dict",
+                    ],
+                    "scope_include": [],
+                    "scope_exclude": [],
+                }
+            ),
+        )
+        spec = _draft_from_inputs(DraftInputs(description="x"))
+        assert len(spec.behavior_contracts) == 1
+        assert spec.behavior_contracts[0].input == "2 + 3"
