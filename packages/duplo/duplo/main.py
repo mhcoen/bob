@@ -661,7 +661,52 @@ def main() -> None:
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
     # Check for subcommands before parsing, since the default
-    # mode uses a positional 'url' arg that would eat 'fix'/'investigate'.
+    # mode uses a positional 'url' arg that would eat 'fix'/'investigate'/'init'.
+    if len(sys.argv) > 1 and sys.argv[1] == "init":
+        from duplo.init import run_init
+
+        init_parser = argparse.ArgumentParser(
+            prog="duplo init",
+            description="Initialize a new duplo project (writes SPEC.md and ref/).",
+        )
+        init_parser.add_argument(
+            "url",
+            nargs="?",
+            default=None,
+            help="Product URL (must start with http:// or https://).",
+        )
+        init_parser.add_argument(
+            "--from-description",
+            dest="from_description",
+            default=None,
+            metavar="PATH",
+            help="Path to a prose description file, or - for stdin.",
+        )
+        init_parser.add_argument(
+            "--deep",
+            action="store_true",
+            default=False,
+            help="Opt in to deep scraping during init.",
+        )
+        init_parser.add_argument(
+            "--force",
+            action="store_true",
+            default=False,
+            help="Overwrite an existing SPEC.md.",
+        )
+        init_args = init_parser.parse_args(sys.argv[2:])
+        init_args.command = "init"
+        if init_args.url is not None and not init_args.url.startswith(("http://", "https://")):
+            print(
+                f"Error: {init_args.url!r} is not a valid URL.\n"
+                "  URLs must start with http:// or https://.\n"
+                "  To set up without a URL, run `duplo init` (no arguments)."
+            )
+            sys.exit(2)
+        run_init(init_args)
+        diagnostics_print_summary()
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] in ("fix", "investigate"):
         subcmd = sys.argv[1]
         fix_parser = argparse.ArgumentParser(

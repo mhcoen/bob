@@ -6417,12 +6417,8 @@ class TestMigrationDispatchOrder:
         main()
         assert len(subsequent_run_called) == 1
 
-    def test_init_is_not_a_subcommand(self, tmp_path, monkeypatch):
-        """'duplo init' is not a recognised subcommand (lands in Phase 4).
-
-        Today it falls through to the no-subcommand path, so
-        _check_migration is called and 'init' is parsed as the url arg.
-        """
+    def test_init_skips_check_migration(self, tmp_path, monkeypatch):
+        """'duplo init' dispatches to run_init without the migration check."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("sys.argv", ["duplo", "init"])
 
@@ -6436,12 +6432,11 @@ class TestMigrationDispatchOrder:
             "duplo.main._first_run",
             lambda **kw: first_run_called.append(kw),
         )
-        main()
-        # Went through no-subcommand path (migration check ran).
-        assert len(migration_called) == 1
-        # 'init' was treated as the url positional arg, not a subcommand.
-        assert len(first_run_called) == 1
-        assert first_run_called[0]["url"] == "init"
+        with patch("duplo.init.run_init"):
+            main()
+        # init bypasses migration and does not enter the first-run path.
+        assert migration_called == []
+        assert first_run_called == []
 
     def test_fix_old_layout_bypasses_migration_dispatches_fix(
         self,
@@ -12013,3 +12008,102 @@ class TestSubsequentRunProductNameSync:
         pdata = json.loads((duplo_dir / "product.json").read_text(encoding="utf-8"))
         assert pdata["product_name"] == "My Custom Calculator"
         assert pdata["app_name"] == "My Custom Calculator"
+
+
+class TestInitSubcommand:
+    """Tests for the ``duplo init`` subcommand dispatch."""
+
+    def test_init_no_args_dispatches(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init"])
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        mock_run.assert_called_once()
+        ns = mock_run.call_args.args[0]
+        assert ns.url is None
+        assert ns.from_description is None
+        assert ns.deep is False
+        assert ns.force is False
+        assert ns.command == "init"
+
+    def test_init_with_url(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init", "https://numi.app"])
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        mock_run.assert_called_once()
+        assert mock_run.call_args.args[0].url == "https://numi.app"
+
+    def test_init_with_http_url(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init", "http://example.com"])
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        assert mock_run.call_args.args[0].url == "http://example.com"
+
+    def test_init_with_from_description(self, tmp_path, monkeypatch):
+        desc = tmp_path / "description.txt"
+        desc.write_text("a calculator app", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init", "--from-description", str(desc)])
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        ns = mock_run.call_args.args[0]
+        assert ns.url is None
+        assert ns.from_description == str(desc)
+
+    def test_init_with_from_description_stdin(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init", "--from-description", "-"])
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        assert mock_run.call_args.args[0].from_description == "-"
+
+    def test_init_with_url_and_from_description(self, tmp_path, monkeypatch):
+        desc = tmp_path / "description.txt"
+        desc.write_text("notes", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["duplo", "init", "https://numi.app", "--from-description", str(desc)],
+        )
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        ns = mock_run.call_args.args[0]
+        assert ns.url == "https://numi.app"
+        assert ns.from_description == str(desc)
+
+    def test_init_deep_and_force_flags(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["duplo", "init", "https://numi.app", "--deep", "--force"],
+        )
+        with patch("duplo.init.run_init") as mock_run:
+            main()
+        ns = mock_run.call_args.args[0]
+        assert ns.deep is True
+        assert ns.force is True
+
+    def test_init_rejects_invalid_url(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init", "not-a-url"])
+        with patch("duplo.init.run_init") as mock_run:
+            with pytest.raises(SystemExit):
+                main()
+        mock_run.assert_not_called()
+        out = capsys.readouterr().out
+        assert "not a valid URL" in out
+        assert "http://" in out
+
+    def test_init_skips_check_migration(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo", "init"])
+        called = []
+        monkeypatch.setattr(
+            "duplo.main._check_migration",
+            lambda target_dir: called.append(target_dir),
+        )
+        with patch("duplo.init.run_init"):
+            main()
+        assert called == []
