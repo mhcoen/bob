@@ -1940,3 +1940,45 @@ class TestDraftSpec:
         assert len(spec.sources) == 1
         assert spec.sources[0].url == "https://numi.app"
         assert prose in spec.notes
+
+    def test_step1_calls_draft_from_inputs_with_inputs_and_uses_returned_spec(self, monkeypatch):
+        """Pin Step 1 of draft_spec: it calls _draft_from_inputs(inputs) and
+        treats the returned ProductSpec as the base that later steps
+        mutate. Per DRAFTER-design.md § draft_spec."""
+        captured: dict = {}
+        sentinel = ProductSpec(
+            purpose="SENTINEL PURPOSE",
+            architecture="SENTINEL ARCH",
+            design=DesignBlock(user_prose="SENTINEL DESIGN"),
+            behavior_contracts=[BehaviorContract(input="in", expected="out")],
+            scope_include=["inc"],
+            scope_exclude=["exc"],
+        )
+
+        def fake_draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
+            captured["inputs"] = inputs
+            captured["call_count"] = captured.get("call_count", 0) + 1
+            return sentinel
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            fake_draft_from_inputs,
+        )
+
+        inputs = DraftInputs(url="https://example.com", url_scrape="scrape")
+        text = draft_spec(inputs)
+
+        # _draft_from_inputs invoked exactly once with the exact inputs object.
+        assert captured["call_count"] == 1
+        assert captured["inputs"] is inputs
+
+        # The returned ProductSpec's fields propagate through to the
+        # serialized output (proving later steps operate on its return value).
+        spec = _parse_spec(text)
+        assert spec.purpose == "SENTINEL PURPOSE"
+        assert spec.architecture == "SENTINEL ARCH"
+        assert spec.design.user_prose == "SENTINEL DESIGN"
+        assert spec.scope_include == ["inc"]
+        assert spec.scope_exclude == ["exc"]
+        assert len(spec.behavior_contracts) == 1
+        assert spec.behavior_contracts[0].input == "in"
