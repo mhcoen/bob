@@ -8,7 +8,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 ## Legacy _first_run removal
 
-- [ ] Audit all callers of _first_run in duplo/main.py
+- [x] Audit all callers of _first_run in duplo/main.py
   - [x] Grep the codebase for references to _first_run. Identify every call site. Per PIPELINE-design.md: _first_run removal is deferred to cleanup because the new code needs time to prove itself.
   - [x] Confirm that duplo init fully replaces _first_run for new projects: _first_run handled URL input, interactive feature selection, and first PLAN.md generation. duplo init handles URL input and SPEC.md generation; _subsequent_run handles feature extraction and PLAN.md generation from SPEC.md.
   - [x] Confirm that the migration gate (Phase 4) prevents any old-format project from reaching _first_run. If a code path can still reach _first_run, document it and decide whether to gate or remove it.
