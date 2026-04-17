@@ -101,10 +101,10 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Run duplo (no subcommand) in a completely empty tmpdir (no .duplo/, no SPEC.md).
   - [x] Assert: prints a message directing user to run duplo init; exits 0 (not 1); does NOT attempt _first_run behavior (no interactive prompts, no directory creation).
 
-- [ ] Add test_old_project_still_blocked_by_migration
+- [x] Add test_old_project_still_blocked_by_migration
   - [x] Create a tmpdir with .duplo/duplo.json but no SPEC.md.
   - [x] Run duplo (no subcommand).
-  - [ ] Assert: migration message printed (now referencing duplo init); exits 1.
+  - [x] Assert: migration message printed (now referencing duplo init); exits 1.
 
 - [ ] Add test_no_dead_imports_remain
   - [ ] Programmatically import every module in the duplo package.
