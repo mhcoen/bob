@@ -90,10 +90,10 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Document the module inventory: spec_reader.py (parser), spec_writer.py (drafter), init.py (duplo init), orchestrator.py (pipeline helpers), migration.py (migration gate).
   - [x] Document the safety invariant: no raw SPEC.md text in LLM prompts.
 
-- [ ] [BATCH] Remove or archive stale design documents
-  - [ ] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Now that all phases are shipped, decide whether to keep them as historical reference or move them to a docs/ subdirectory.
-  - [ ] Do NOT delete them without confirming with the user. Propose the archival strategy and wait for confirmation.
-  - [ ] If archiving: create docs/design/ directory and move all design docs there. Update any remaining cross-references.
+- [x] [BATCH] Remove or archive stale design documents
+  - [x] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Now that all phases are shipped, decide whether to keep them as historical reference or move them to a docs/ subdirectory.
+  - [x] Do NOT delete them without confirming with the user. Propose the archival strategy and wait for confirmation.
+  - [x] If archiving: create docs/design/ directory and move all design docs there. Update any remaining cross-references.
 
 ## Automated integration tests
 
