@@ -6,42 +6,25 @@ material and it generates a build plan. You then run
 
 ## How it works
 
-Point duplo at a product URL:
-
-```bash
-mkdir ~/proj/my-app
-cd ~/proj/my-app
-duplo https://example.com/product
-```
-
-Or drop reference materials into the directory (screenshots, PDFs,
-text files with notes) and run `duplo` with no arguments. If any
-text file in the directory contains a URL, Duplo will find and
-scrape it. Be careful with this: Duplo extracts URLs from every
-readable file, so avoid placing files with URLs you don't want
-crawled (like notes with GitHub links) in the project directory.
-
-Duplo scans the directory, analyzes everything it finds, identifies
-the product, extracts features and visual design details, asks which
-features you want, and generates a phased build plan. If a `SPEC.md`
-file is present, Duplo uses it to guide every decision — feature
-extraction, roadmap generation, plan generation, and bug
-investigation. You then run mcloop to build it.
+Duplo reads a `SPEC.md` in the project root, analyzes any reference
+material placed under `ref/`, extracts features and visual design
+details, and generates a phased build plan. SPEC.md is the input
+contract — it drives feature extraction, roadmap generation, plan
+generation, and bug investigation. You then run mcloop to build it.
 
 When you test the result and find things missing or wrong, drop more
-reference material into the directory (a screenshot showing the right
-colors, a PDF of the full docs, notes about what to fix) and run
-`duplo` again. It detects the new files, re-scrapes the original
-product URL to pick up any site changes, re-extracts features from
-the updated content, and appends tasks to the plan for anything that
-was missed.
+reference material into `ref/` (a screenshot showing the right
+colors, a PDF of the full docs), update `SPEC.md` if needed, and run
+`duplo` again. It detects the new files, re-scrapes any URLs
+declared in SPEC.md to pick up site changes, re-extracts features
+from the updated content, and appends tasks to the plan for anything
+that was missed.
 
 The cycle is: run duplo to generate the plan, run mcloop to build
 it, test, add more reference material if needed, run duplo again.
 
 ```bash
-duplo https://example.com   # Analyze, extract features, generate PLAN.md
-mcloop                      # Build it (runs until all tasks complete)
+mcloop                       # Build it (runs until all tasks complete)
 # ... test the result ...
 duplo fix "bug description"  # Diagnose bugs and append fix tasks
 duplo investigate "bug"      # Alias for `duplo fix` (explicit naming)
@@ -49,17 +32,15 @@ duplo                        # Detect gaps, generate next phase
 mcloop                       # Build the next phase
 ```
 
-Optionally, create a `SPEC.md` before running duplo to express
-your intent, scope constraints, expected behavior, architecture
-decisions, and design direction. See
-[Product specification](#product-specification-specmd) below.
+See [Product specification](#product-specification-specmd) below
+for the structure of `SPEC.md`.
 
 ## What Duplo does on first run
 
-1. **Scans reference materials.** Images (png, jpg, gif, webp), videos
-   (mp4, mov, webm, avi), PDFs, text/markdown files, and any file
-   containing URLs. Each file is assessed for relevance (tiny images
-   and empty files are flagged).
+1. **Scans reference materials.** Enumerates files under `ref/`:
+   images (png, jpg, gif, webp), videos (mp4, mov, webm, avi),
+   PDFs, and text/markdown files. Roles are declared in SPEC.md
+   `## References`, not inferred from file contents.
 
 2. **Extracts frames from videos.** If video files are present and
    ffmpeg is installed, extracts frames at scene-change points,
@@ -68,66 +49,54 @@ decisions, and design direction. See
    Each accepted frame is described (e.g., "settings panel", "main
    dashboard") and stored in `.duplo/references/`.
 
-3. **Validates the product URL.** Checks that the URL points to a
-   single clear product, not a company portfolio or homepage with
-   multiple products. If ambiguous, asks you to clarify.
-
-4. **Confirms the product.** States what it thinks it's duplicating
-   and gets your confirmation before proceeding.
-
-5. **Extracts visual design from images.** Sends reference screenshots
+3. **Extracts visual design from images.** Sends reference screenshots
    and accepted video frames to Claude Vision to extract colors, fonts,
    spacing, layout, and component styles. These become design
    requirements in the build plan.
 
-6. **Extracts text from PDFs.** Pulls text content from all PDF pages
+4. **Extracts text from PDFs.** Pulls text content from all PDF pages
    and includes it in the feature analysis.
 
-7. **Crawls product documentation.** Follows links from the product
+5. **Crawls product documentation.** Follows links from the product
    URL, prioritizing documentation, features, and API references over
    marketing and legal pages. Follows documentation links even if they
    leave the main domain (docs are often hosted separately). Extracts
    code examples as input/expected output pairs, plus feature tables,
    operation lists, and function references.
 
-8. **Downloads embedded media.** Scans fetched HTML pages for
+6. **Downloads embedded media.** Scans fetched HTML pages for
    ``<video>``, ``<source>``, ``<img>``, and ``<picture>`` tags.
    Downloads product screenshots and demo videos to
    ``.duplo/site_media/``. Downloaded videos are frame-extracted
    the same way as user-provided videos. Downloaded images are
    used for design extraction alongside user-provided screenshots.
 
-9. **Reads SPEC.md (if present).** If a `SPEC.md` file exists in
-   the project root, Duplo reads it and injects its content into
-   all subsequent LLM calls. Scope overrides filter the feature
-   list; behavior contracts become verification tasks; architecture
-   and design sections guide plan generation.
+7. **Reads SPEC.md.** Duplo reads `SPEC.md` from the project root
+   and injects its content into all subsequent LLM calls. Scope
+   overrides filter the feature list; behavior contracts become
+   verification tasks; architecture and design sections guide plan
+   generation.
 
-10. **Extracts features.** Uses Claude to analyze all collected text
-   (guided by the product spec if present) and produce a structured
-   feature list grouped by category. The extraction prompt enforces
-   strict constraints: only features the product demonstrably
-   offers, not features mentioned in passing, not platform/ecosystem
-   features, not marketing claims. When in doubt, features are
-   omitted rather than hallucinated. If the spec includes scope
-   overrides, excluded features are removed and required features
-   are included regardless of what the scraper found.
+8. **Extracts features.** Uses Claude to analyze all collected text
+   (guided by the product spec) and produce a structured feature
+   list grouped by category. The extraction prompt enforces strict
+   constraints: only features the product demonstrably offers, not
+   features mentioned in passing, not platform/ecosystem features,
+   not marketing claims. When in doubt, features are omitted rather
+   than hallucinated. If the spec includes scope overrides, excluded
+   features are removed and required features are included
+   regardless of what the scraper found.
 
-11. **Interactive selection.** Presents the features and asks which
-    to include. Then asks about platform, language, constraints,
-    and preferences.
+9. **Generates a phased roadmap.** Breaks the feature list into
+   phases, starting with the smallest end-to-end working thing.
+   Each phase has a title, goal, feature list, and test criteria.
+   The product spec is included in the roadmap generation prompt.
 
-12. **Generates a phased roadmap.** Breaks the selected features
-    into phases, starting with the smallest end-to-end working
-    thing. Each phase has a title, goal, feature list, and test
-    criteria. The product spec (if present) is included in the
-    roadmap generation prompt.
-
-13. **Generates test cases from documentation.** Every code example
+10. **Generates test cases from documentation.** Every code example
     extracted from the docs becomes a unit test case that calls the
     app's core logic directly. Tests are grouped by category.
 
-14. **Generates verification cases from video frames and spec.**
+11. **Generates verification cases from video frames and spec.**
     If demo video frames were captured and described, Duplo
     extracts expression/result pairs from the frame descriptions
     (e.g., "type `Price: $7 × 4`, expect `$28`") and appends
@@ -135,13 +104,12 @@ decisions, and design direction. See
     `SPEC.md` contains behavior contracts, those become
     additional verification tasks.
 
-15. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
-    CLAUDE.md, and mcloop.json. The product spec (if present)
-    is included in the plan generation prompt. Prints "Run
-    mcloop to start building." and exits. You run mcloop
-    separately.
+12. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
+    CLAUDE.md, and mcloop.json. The product spec is included in
+    the plan generation prompt. Prints "Run mcloop to start
+    building." and exits. You run mcloop separately.
 
-16. **Cleans up.** Moves processed reference files to
+13. **Cleans up.** Moves processed reference files to
     `.duplo/references/` and saves a file hash manifest for
     detecting changes on subsequent runs.
 
@@ -261,18 +229,17 @@ change detection.
 
 ## Migrating existing projects
 
-Duplo's project layout is changing. Existing projects (created before
+Duplo's project layout has changed. Existing projects (created before
 the migration) will see a migration prompt the next time you run
 `duplo`. Migration is manual:
 
 1. Create a `ref/` directory in your project root.
 2. Move your reference files (screenshots, PDFs, text files) into `ref/`.
-3. Author a `SPEC.md` by hand using `SPEC-template.md` as a starting
-   point. At minimum, include Purpose, Architecture, Sources, and
-   References sections.
+3. Run `duplo init` to generate a `SPEC.md`, or author one by hand
+   using `SPEC-template.md` as a starting point. At minimum, include
+   Purpose, Architecture, Sources, and References sections.
 4. Run `duplo` again.
 
-`duplo init` is not available yet. For now, write `SPEC.md` by hand.
 Your existing PLAN.md, `.duplo/duplo.json`, and source code are not
 affected by the migration — only the project layout changes.
 
@@ -412,7 +379,8 @@ How each section is used:
   verification task in PLAN.md, alongside video-frame-derived
   test cases. Also used as ground truth during investigation.
 - **Architecture:** Injected into roadmap and plan generation
-  prompts. Supplements the interactive build preferences.
+  prompts. Parsed by `build_prefs.parse_build_preferences` into
+  the structured `BuildPreferences` that the pipeline consumes.
 - **Design:** Injected into plan generation. Supplements or
   overrides what the design extractor finds from screenshots.
 - **References:** Tells the LLM which reference materials are
