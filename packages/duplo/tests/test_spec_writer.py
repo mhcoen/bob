@@ -1,7 +1,16 @@
 """Tests for duplo.spec_writer."""
 
-from duplo.spec_reader import SourceEntry, _parse_spec
-from duplo.spec_writer import append_sources, update_design_autogen
+from pathlib import Path
+
+from duplo.spec_reader import (
+    BehaviorContract,
+    DesignBlock,
+    ProductSpec,
+    ReferenceEntry,
+    SourceEntry,
+    _parse_spec,
+)
+from duplo.spec_writer import append_sources, format_spec, update_design_autogen
 
 
 class TestAppendSources:
@@ -295,3 +304,225 @@ class TestUpdateDesignAutogen:
         assert "## References" in result
         assert "ref/img.png" in result
         assert "Colors: green" in result
+
+
+class TestFormatSpec:
+    """Tests for format_spec."""
+
+    def test_empty_spec_has_top_matter(self):
+        result = format_spec(ProductSpec())
+        assert result.startswith("# SPEC\n")
+        assert "How the pieces fit together:" in result
+
+    def test_empty_spec_has_fill_in_on_required_sections(self):
+        result = format_spec(ProductSpec())
+        assert "<FILL IN: one or two sentences describing what you're building>" in result
+        assert "<FILL IN: language, framework, platform, constraints>" in result
+
+    def test_empty_spec_has_comment_hints_on_optional_sections(self):
+        result = format_spec(ProductSpec())
+        assert "URLs duplo should scrape" in result
+        assert "Files in ref/" in result
+        assert "Optional if ## References has visual-target files." in result
+        assert "Optional. Overrides for include/exclude." in result
+        assert "Input → output pairs become verification tasks." in result
+        assert "Optional. Free-form context for duplo." in result
+
+    def test_empty_spec_does_not_have_fill_in_on_optional_sections(self):
+        result = format_spec(ProductSpec())
+        # Only Purpose and Architecture get FILL IN markers. The top
+        # matter references "<FILL IN>" literally too, so slice it off
+        # before counting section-level markers.
+        body = result.split("-->", 1)[1]
+        assert body.count("<FILL IN") == 2
+
+    def test_section_order_is_canonical(self):
+        result = format_spec(ProductSpec())
+        # The top matter comment mentions "## Sources" and "## References"
+        # verbatim, so skip past it before searching for the actual
+        # section headings.
+        body = result.split("-->", 1)[1]
+        positions = [
+            body.index("## Purpose"),
+            body.index("## Sources"),
+            body.index("## References"),
+            body.index("## Architecture"),
+            body.index("## Design"),
+            body.index("## Scope"),
+            body.index("## Behavior"),
+            body.index("## Notes"),
+        ]
+        assert positions == sorted(positions)
+
+    def test_filled_purpose_has_content_no_fill_in(self):
+        spec = ProductSpec(purpose="A text calculator for macOS.")
+        result = format_spec(spec)
+        assert "A text calculator for macOS." in result
+        # The Purpose FILL IN marker should be gone.
+        assert "<FILL IN: one or two sentences" not in result
+
+    def test_filled_architecture_has_content_no_fill_in(self):
+        spec = ProductSpec(architecture="SwiftUI on macOS 14+.")
+        result = format_spec(spec)
+        assert "SwiftUI on macOS 14+." in result
+        assert "<FILL IN: language, framework" not in result
+
+    def test_sources_rendered_with_flags(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(
+                    url="https://numi.app",
+                    role="product-reference",
+                    scrape="deep",
+                    notes="main site",
+                ),
+                SourceEntry(
+                    url="https://example.com",
+                    role="docs",
+                    scrape="shallow",
+                    proposed=True,
+                ),
+                SourceEntry(
+                    url="https://crawled.com",
+                    role="docs",
+                    scrape="none",
+                    discovered=True,
+                ),
+            ]
+        )
+        result = format_spec(spec)
+        assert "- https://numi.app" in result
+        assert "  role: product-reference" in result
+        assert "  scrape: deep" in result
+        assert "  notes: main site" in result
+        assert "  proposed: true" in result
+        assert "  discovered: true" in result
+        # No Sources comment hint when sources are present.
+        assert "URLs duplo should scrape" not in result
+
+    def test_sources_entries_separated_by_blank_line(self):
+        spec = ProductSpec(
+            sources=[
+                SourceEntry(url="https://a.com", role="docs", scrape="none"),
+                SourceEntry(url="https://b.com", role="docs", scrape="none"),
+            ]
+        )
+        result = format_spec(spec)
+        # Two entries, separated by a blank line.
+        assert "- https://a.com\n  role: docs\n  scrape: none\n\n- https://b.com" in result
+
+    def test_references_rendered_with_multiple_roles(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/main.png"),
+                    roles=["visual-target", "docs"],
+                    notes="primary view",
+                    proposed=True,
+                ),
+            ]
+        )
+        result = format_spec(spec)
+        assert "- ref/main.png" in result
+        assert "  role: visual-target, docs" in result
+        assert "  notes: primary view" in result
+        assert "  proposed: true" in result
+        assert "Files in ref/" not in result
+
+    def test_design_with_user_prose_only(self):
+        spec = ProductSpec(design=DesignBlock(user_prose="Calm, neutral palette."))
+        result = format_spec(spec)
+        assert "Calm, neutral palette." in result
+        assert "Optional if ## References has visual-target files." not in result
+        assert "BEGIN AUTO-GENERATED" not in result
+
+    def test_design_with_autogenerated_only(self):
+        spec = ProductSpec(design=DesignBlock(auto_generated="Colors: #fff on #000"))
+        result = format_spec(spec)
+        assert "BEGIN AUTO-GENERATED" in result
+        assert "Colors: #fff on #000" in result
+        assert "END AUTO-GENERATED" in result
+
+    def test_design_with_both_prose_and_autogenerated(self):
+        spec = ProductSpec(
+            design=DesignBlock(
+                user_prose="Follow the brand guide.",
+                auto_generated="Extracted palette: teal on ivory.",
+            )
+        )
+        result = format_spec(spec)
+        # user_prose comes before the AUTO-GENERATED block.
+        prose_pos = result.index("Follow the brand guide.")
+        begin_pos = result.index("BEGIN AUTO-GENERATED")
+        auto_pos = result.index("Extracted palette: teal on ivory.")
+        assert prose_pos < begin_pos < auto_pos
+
+    def test_scope_include_exclude_rendered(self):
+        spec = ProductSpec(
+            scope_include=["arithmetic", "unit conversion"],
+            scope_exclude=["plugin API"],
+        )
+        result = format_spec(spec)
+        assert "- include: arithmetic, unit conversion" in result
+        assert "- exclude: plugin API" in result
+        assert "Optional. Overrides for include/exclude." not in result
+
+    def test_behavior_contracts_rendered(self):
+        spec = ProductSpec(
+            behavior_contracts=[
+                BehaviorContract(input="2 + 3", expected="5"),
+                BehaviorContract(input="5 km in miles", expected="3.11 mi"),
+            ]
+        )
+        result = format_spec(spec)
+        assert "- `2 + 3` → `5`" in result
+        assert "- `5 km in miles` → `3.11 mi`" in result
+        assert "Input → output pairs become verification tasks." not in result
+
+    def test_notes_rendered_verbatim(self):
+        spec = ProductSpec(notes="Original description provided to duplo init:\n\nhello")
+        result = format_spec(spec)
+        assert "Original description provided to duplo init:\n\nhello" in result
+        assert "Optional. Free-form context for duplo." not in result
+
+    def test_empty_optional_sections_keep_comment_hint(self):
+        # Purpose is filled but everything else is empty.
+        spec = ProductSpec(purpose="A thing.", architecture="Some stack.")
+        result = format_spec(spec)
+        # Optional hints still present.
+        assert "URLs duplo should scrape" in result
+        assert "Files in ref/" in result
+        assert "Optional. Free-form context for duplo." in result
+
+    def test_output_ends_with_newline(self):
+        assert format_spec(ProductSpec()).endswith("\n")
+
+    def test_output_parses_back_to_a_productspec(self):
+        """Smoke test: the output of format_spec is valid SPEC.md text."""
+        spec = ProductSpec(
+            purpose="A calculator.",
+            architecture="SwiftUI.",
+            sources=[SourceEntry(url="https://a.com", role="docs", scrape="none")],
+            references=[
+                ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"]),
+            ],
+            scope_include=["math"],
+            scope_exclude=["plugins"],
+            behavior_contracts=[BehaviorContract(input="1+1", expected="2")],
+            notes="Some context.",
+            design=DesignBlock(user_prose="Minimal."),
+        )
+        text = format_spec(spec)
+        parsed = _parse_spec(text)
+        assert parsed.purpose == "A calculator."
+        assert parsed.architecture == "SwiftUI."
+        assert len(parsed.sources) == 1
+        assert parsed.sources[0].url == "https://a.com"
+        assert len(parsed.references) == 1
+        assert parsed.references[0].path == Path("ref/a.png")
+        assert parsed.scope_include == ["math"]
+        assert parsed.scope_exclude == ["plugins"]
+        assert len(parsed.behavior_contracts) == 1
+        assert parsed.behavior_contracts[0].input == "1+1"
+        assert parsed.notes == "Some context."
+        assert parsed.design.user_prose == "Minimal."

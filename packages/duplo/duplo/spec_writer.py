@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import re
 
-from duplo.spec_reader import SourceEntry
+from duplo.spec_reader import (
+    DesignBlock,
+    ProductSpec,
+    ReferenceEntry,
+    SourceEntry,
+)
 from duplo.url_canon import canonicalize_url
 
 # Matches a ``## Sources`` heading (exactly level 2).
@@ -267,3 +272,178 @@ def _architecture_section_end(text: str) -> int | None:
     if next_heading:
         return body_start + next_heading.start()
     return len(text)
+
+
+# --------------------------------------------------------------------------
+# format_spec — serialize a ProductSpec to SPEC.md text
+# --------------------------------------------------------------------------
+#
+# The template strings below mirror the content of SPEC-template.md.
+# Tests pin that format_spec(ProductSpec()) matches the template shape.
+
+_TEMPLATE_TOP_MATTER = (
+    "# SPEC\n"
+    "\n"
+    "<!--\n"
+    "Your specification for what duplo should build.\n"
+    "Fill in sections marked <FILL IN>. Leave others blank to skip.\n"
+    "\n"
+    "How the pieces fit together:\n"
+    "SPEC.md → duplo → PLAN.md → mcloop.\n"
+    "You author SPEC.md. duplo generates PLAN.md from it. mcloop\n"
+    "executes PLAN.md. mcloop never reads SPEC.md.\n"
+    "\n"
+    "duplo may append to ## Sources and ## References (marked\n"
+    "`proposed: true`) but never modifies your other sections.\n"
+    "\n"
+    "See SPEC-guide.md for details.\n"
+    "-->"
+)
+
+_PURPOSE_FILL_IN = "<FILL IN: one or two sentences describing what you're building>"
+
+_ARCHITECTURE_FILL_IN = "<FILL IN: language, framework, platform, constraints>"
+
+_SOURCES_COMMENT = (
+    "<!-- URLs duplo should scrape. See SPEC-guide.md for role/scrape options. -->\n"
+    "\n"
+    "<!-- Example:\n"
+    "- https://numi.app\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n"
+    "-->"
+)
+
+_REFERENCES_COMMENT = (
+    "<!-- Files in ref/. Optional if ## Sources or ## Purpose is enough. -->\n"
+    "\n"
+    "<!-- Example:\n"
+    "- ref/numi-main.png\n"
+    "  role: visual-target\n"
+    "-->"
+)
+
+_DESIGN_COMMENT = "<!-- Optional if ## References has visual-target files. -->"
+
+_SCOPE_COMMENT = (
+    "<!-- Optional. Overrides for include/exclude. -->\n"
+    "\n"
+    "<!-- Example:\n"
+    "include:\n"
+    "  - Unit conversion\n"
+    "exclude:\n"
+    "  - Plugin API\n"
+    "-->"
+)
+
+_BEHAVIOR_COMMENT = (
+    "<!-- Optional. Input → output pairs become verification tasks. -->\n"
+    "\n"
+    "<!-- Example:\n"
+    "- `2 + 3` → `5`\n"
+    "- `5 km in miles` → `3.11 mi`\n"
+    "-->"
+)
+
+_NOTES_COMMENT = "<!-- Optional. Free-form context for duplo. -->"
+
+
+def _format_reference_entry(entry: ReferenceEntry) -> str:
+    """Format a single ReferenceEntry as spec text lines."""
+    lines = [f"- {entry.path}"]
+    if entry.roles:
+        lines.append(f"  role: {', '.join(entry.roles)}")
+    if entry.notes:
+        lines.append(f"  notes: {entry.notes}")
+    if entry.proposed:
+        lines.append("  proposed: true")
+    return "\n".join(lines)
+
+
+def _format_design_section(design: DesignBlock) -> str:
+    """Format the body of the ``## Design`` section."""
+    has_user = bool(design.user_prose)
+    has_auto = bool(design.auto_generated)
+    if not has_user and not has_auto:
+        return _DESIGN_COMMENT
+    parts: list[str] = []
+    if has_user:
+        parts.append(design.user_prose)
+    if has_auto:
+        parts.append(_format_autogen_block(design.auto_generated))
+    return "\n\n".join(parts)
+
+
+def _format_scope_section(spec: ProductSpec) -> str:
+    """Format the body of the ``## Scope`` section."""
+    if spec.scope:
+        return spec.scope
+    lines: list[str] = []
+    if spec.scope_include:
+        lines.append(f"- include: {', '.join(spec.scope_include)}")
+    if spec.scope_exclude:
+        lines.append(f"- exclude: {', '.join(spec.scope_exclude)}")
+    if not lines:
+        return _SCOPE_COMMENT
+    return "\n".join(lines)
+
+
+def _format_behavior_section(spec: ProductSpec) -> str:
+    """Format the body of the ``## Behavior`` section."""
+    if spec.behavior:
+        return spec.behavior
+    if not spec.behavior_contracts:
+        return _BEHAVIOR_COMMENT
+    return "\n".join(f"- `{c.input}` → `{c.expected}`" for c in spec.behavior_contracts)
+
+
+def format_spec(spec: ProductSpec) -> str:
+    """Serialize a :class:`ProductSpec` to SPEC.md format.
+
+    The inverse of :func:`duplo.spec_reader._parse_spec`.  Section
+    order: Purpose, Sources, References, Architecture, Design, Scope,
+    Behavior, Notes.
+
+    Empty required sections (Purpose, Architecture) are rendered with
+    the template's ``<FILL IN>`` marker.  Empty optional sections are
+    rendered with the template's ``<!-- ... -->`` hint.  Filled
+    sections are rendered with their content and no hint.
+    """
+    parts: list[str] = [_TEMPLATE_TOP_MATTER]
+
+    # ## Purpose (required)
+    purpose_body = spec.purpose.strip() if spec.purpose else _PURPOSE_FILL_IN
+    parts.append(f"## Purpose\n\n{purpose_body}")
+
+    # ## Sources
+    if spec.sources:
+        entries = "\n\n".join(_format_entry(e) for e in spec.sources)
+        parts.append(f"## Sources\n\n{entries}")
+    else:
+        parts.append(f"## Sources\n\n{_SOURCES_COMMENT}")
+
+    # ## References
+    if spec.references:
+        entries = "\n\n".join(_format_reference_entry(e) for e in spec.references)
+        parts.append(f"## References\n\n{entries}")
+    else:
+        parts.append(f"## References\n\n{_REFERENCES_COMMENT}")
+
+    # ## Architecture (required)
+    arch_body = spec.architecture.strip() if spec.architecture else _ARCHITECTURE_FILL_IN
+    parts.append(f"## Architecture\n\n{arch_body}")
+
+    # ## Design
+    parts.append(f"## Design\n\n{_format_design_section(spec.design)}")
+
+    # ## Scope
+    parts.append(f"## Scope\n\n{_format_scope_section(spec)}")
+
+    # ## Behavior
+    parts.append(f"## Behavior\n\n{_format_behavior_section(spec)}")
+
+    # ## Notes
+    notes_body = spec.notes if spec.notes else _NOTES_COMMENT
+    parts.append(f"## Notes\n\n{notes_body}")
+
+    return "\n\n".join(parts) + "\n"
