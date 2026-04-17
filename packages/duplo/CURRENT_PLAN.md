@@ -190,10 +190,10 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Run run_init with a URL argument.
   - [x] Assert: SPEC.md has pre-filled Purpose (non-empty, no FILL IN); Sources section contains the URL with role: product-reference and scrape: deep; Architecture still has FILL IN; SPEC.md round-trips through the parser without errors.
 
-- [ ] Add test_init_description_produces_notes_with_verbatim_prose
+- [x] Add test_init_description_produces_notes_with_verbatim_prose
   - [x] Write a description.txt fixture. Mock the LLM call in _draft_from_inputs.
   - [x] Run run_init with --from-description pointing to the fixture.
-  - [ ] Assert: SPEC.md Notes section contains "Original description provided to duplo init:" followed by the exact prose from description.txt byte-for-byte; Purpose section populated from LLM output.
+  - [x] Assert: SPEC.md Notes section contains "Original description provided to duplo init:" followed by the exact prose from description.txt byte-for-byte; Purpose section populated from LLM output.
 
 - [ ] Add test_init_with_existing_ref_files_proposes_roles
   - [ ] Create a tmpdir with ref/ containing a .png and a .pdf. Mock _propose_file_role for the image.
