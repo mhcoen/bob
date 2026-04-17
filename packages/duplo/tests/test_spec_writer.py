@@ -2090,3 +2090,113 @@ class TestDraftSpec:
         assert spec.sources[0].role == "product-reference"
         assert spec.sources[0].scrape == "deep"
         assert spec.sources[1].url == "https://other.example"
+
+    def test_step4_ref_files_added_as_reference_entries_with_proposed_true(self, monkeypatch):
+        """Pin Step 4 of draft_spec: each file in inputs.existing_ref_files
+        becomes a ReferenceEntry with proposed=True and the role taken
+        from inputs.vision_proposals. Per DRAFTER-design.md § draft_spec
+        step 4."""
+        sentinel = ProductSpec(purpose="p", architecture="a")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        png = Path("ref/hero.png")
+        pdf = Path("ref/api.pdf")
+        mp4 = Path("ref/demo.mp4")
+        inputs = DraftInputs(
+            existing_ref_files=[png, pdf, mp4],
+            vision_proposals={
+                png: "visual-target",
+                pdf: "docs",
+                mp4: "behavioral-target",
+            },
+        )
+        text = draft_spec(inputs)
+        spec = _parse_spec(text)
+
+        by_path = {str(r.path): r for r in spec.references}
+        assert set(by_path) == {"ref/hero.png", "ref/api.pdf", "ref/demo.mp4"}
+        for entry in by_path.values():
+            assert entry.proposed is True
+        assert by_path["ref/hero.png"].roles == ["visual-target"]
+        assert by_path["ref/api.pdf"].roles == ["docs"]
+        assert by_path["ref/demo.mp4"].roles == ["behavioral-target"]
+
+    def test_step4_no_ref_files_adds_no_reference_entries(self, monkeypatch):
+        """When inputs.existing_ref_files is empty, Step 4 is a no-op —
+        the References list from step 1 (empty) stays empty, so
+        format_spec renders the template comment hint rather than a
+        user entry."""
+        sentinel = ProductSpec(purpose="p", architecture="a")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        text = draft_spec(DraftInputs(description="Build a calculator."))
+        assert "## References\n\n<!-- Files in ref/." in text
+
+    def test_step4_ref_file_missing_from_vision_proposals_emitted_without_role(self, monkeypatch):
+        """A ref/ file that is not a key in inputs.vision_proposals is
+        still emitted as a ``- <path>`` entry with ``proposed: true``
+        but no ``role:`` line. (The reader later drops such entries
+        into ``dropped_references`` because a role is required to
+        reach the validated ``references`` list; this test pins the
+        writer-side behavior, which is all Step 4 controls.)"""
+        sentinel = ProductSpec(purpose="p", architecture="a")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        unknown = Path("ref/mystery.bin")
+        inputs = DraftInputs(
+            existing_ref_files=[unknown],
+            vision_proposals={},
+        )
+        text = draft_spec(inputs)
+
+        assert "- ref/mystery.bin\n  proposed: true" in text
+        # No role: line was written for the unknown file.
+        mystery_idx = text.index("- ref/mystery.bin")
+        next_entry_idx = text.find("\n- ", mystery_idx + 1)
+        end = next_entry_idx if next_entry_idx != -1 else len(text)
+        assert "role:" not in text[mystery_idx:end]
+
+    def test_step4_ref_entries_appended_after_existing_references(self, monkeypatch):
+        """Step 4 appends — references already present on the ProductSpec
+        returned by step 1 are preserved, and the new entries follow."""
+        existing = ReferenceEntry(
+            path=Path("ref/prior.png"),
+            roles=["visual-target"],
+        )
+        sentinel = ProductSpec(
+            purpose="p",
+            architecture="a",
+            references=[existing],
+        )
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: sentinel,
+        )
+
+        new_path = Path("ref/added.png")
+        inputs = DraftInputs(
+            existing_ref_files=[new_path],
+            vision_proposals={new_path: "docs"},
+        )
+        text = draft_spec(inputs)
+        spec = _parse_spec(text)
+
+        assert len(spec.references) == 2
+        assert str(spec.references[0].path) == "ref/prior.png"
+        assert spec.references[0].proposed is False
+        assert str(spec.references[1].path) == "ref/added.png"
+        assert spec.references[1].proposed is True
+        assert spec.references[1].roles == ["docs"]

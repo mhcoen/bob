@@ -13,6 +13,25 @@ never actually written. Added it in this task so `_draft_from_inputs` has its
 parameter type. If the workflow runs 6.1.1-6.1.2 again it will find DraftInputs
 already present; tests pass either way.
 
+### [6.8.5] Step 4 emits reference entries without a role when vision_proposals is incomplete — 2026-04-17
+
+`draft_spec` step 4 uses `inputs.vision_proposals.get(path, "")` so a ref/
+file that is not a key in `vision_proposals` gets a `ReferenceEntry` with
+`roles=[]`. `format_spec` emits this as `- <path>` + `proposed: true` with
+no `role:` line. The parser then drops such entries into
+`dropped_references` because a role is required. In practice this should
+not happen — the caller (`duplo init`) calls `_propose_file_role` for
+every file in `existing_ref_files`, and that function always returns a
+role (falling back to `"ignore"` for unknown extensions). The defensive
+`.get(path, "")` fallback is therefore a silent data-loss path if a
+caller ever constructs `DraftInputs` with mismatched `existing_ref_files`
+/ `vision_proposals`. Options if this becomes a concern: (a) assert every
+`existing_ref_files` entry is present in `vision_proposals`, (b) default
+missing entries to `"ignore"` so they survive the parser round-trip, or
+(c) log a diagnostic. Test
+`test_step4_ref_file_missing_from_vision_proposals_emitted_without_role`
+pins the current writer behavior.
+
 ### [6.7.1] Error-handling discrepancy between plan and design doc — 2026-04-17
 
 CURRENT_PLAN.md bullet 6.7.7 says `_draft_from_inputs` should "fall back to

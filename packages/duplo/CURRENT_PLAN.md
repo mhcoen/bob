@@ -80,7 +80,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Step 1: call _draft_from_inputs(inputs) to get a ProductSpec.
   - [x] Step 2: if inputs.description was provided, copy the original prose verbatim into spec.notes under a labeled header per DRAFTER-design.md: "Original description provided to duplo init:" followed by the verbatim prose. The LLM does NOT write notes.
   - [x] Step 3: add SourceEntry for the URL (if any) with role product-reference and scrape deep. No proposed/discovered flag (user provided the URL explicitly).
-  - [ ] Step 4: add ReferenceEntry for each existing ref/ file with proposed: true and the role from inputs.vision_proposals.
+  - [x] Step 4: add ReferenceEntry for each existing ref/ file with proposed: true and the role from inputs.vision_proposals.
   - [ ] Step 5: call format_spec(spec) to serialize.
   - [ ] Step 6: return the resulting string.
   - [ ] Tests: URL-only inputs produce SPEC.md with Sources entry and pre-filled Purpose; prose-only inputs produce SPEC.md with Notes containing verbatim prose; both inputs produce merged SPEC.md; existing ref/ files produce References entries with proposed: true; vision_proposals roles appear on the entries; format_spec output passes parser round-trip.
