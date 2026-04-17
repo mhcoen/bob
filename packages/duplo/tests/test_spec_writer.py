@@ -955,17 +955,50 @@ class TestRoundTrip:
         assert not _spec_equal_for_round_trip(parsed, spec)
 
     def test_dropped_fields_round_trip_as_empty(self):
-        """Documenting the asymmetry: dropped_* are parser-only and do not
-        survive serialization — a round-tripped spec always has empty
-        dropped_* lists regardless of the original's content.
+        """Documenting the asymmetry per DRAFTER-design.md § "Round-trip testing":
+        ``dropped_*`` are parser-only (entries the parser rejected at read time)
+        and ``format_spec`` does not serialize them. A round-tripped spec
+        therefore always has empty ``dropped_*`` lists regardless of what the
+        original contained — populated ``dropped_*`` on the source side and
+        empty ``dropped_*`` on the parsed side compare equal under
+        ``_spec_equal_for_round_trip``.
         """
         spec = _fixture_all_sections_filled()
         spec = dataclasses.replace(
             spec,
-            dropped_sources=[SourceEntry(url="https://no-role.example", role="", scrape="")],
-            dropped_references=[ReferenceEntry(path=Path("ref/no-role.png"), roles=[])],
+            dropped_sources=[
+                SourceEntry(url="https://no-role.example", role="", scrape=""),
+                SourceEntry(url="https://bad-scrape.example", role="docs", scrape="wobble"),
+            ],
+            dropped_references=[
+                ReferenceEntry(path=Path("ref/no-role.png"), roles=[]),
+                ReferenceEntry(path=Path("ref/bad-role.png"), roles=["bogus-role"]),
+            ],
         )
+        assert spec.dropped_sources, "precondition: source has populated dropped_sources"
+        assert spec.dropped_references, "precondition: source has populated dropped_references"
         serialized = format_spec(spec)
         parsed = _parse_spec(serialized)
+        # Asymmetry: source had entries; parsed side is always empty.
+        assert parsed.dropped_sources == []
+        assert parsed.dropped_references == []
+        # And the comparator treats that as equal for round-trip purposes.
+        assert _spec_equal_for_round_trip(parsed, spec)
+
+    def test_dropped_fields_asymmetry_on_minimal_spec(self):
+        """Isolates the asymmetry from other section content: even when the
+        only difference between the source spec and an otherwise-identical
+        spec is populated ``dropped_*``, format_spec's output is identical
+        and the parser produces empty ``dropped_*`` on the round-trip.
+        """
+        base = _fixture_minimal()
+        with_dropped = dataclasses.replace(
+            base,
+            dropped_sources=[SourceEntry(url="https://dropped.example", role="", scrape="")],
+            dropped_references=[ReferenceEntry(path=Path("ref/dropped.png"), roles=[])],
+        )
+        # format_spec ignores dropped_* — the two specs serialize identically.
+        assert format_spec(base) == format_spec(with_dropped)
+        parsed = _parse_spec(format_spec(with_dropped))
         assert parsed.dropped_sources == []
         assert parsed.dropped_references == []
