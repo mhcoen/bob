@@ -1288,6 +1288,134 @@ class TestEditSafetyAppendSources:
         assert not _spec_equal_except_sources(a, b)
 
 
+_EDIT_SAFETY_APPEND_REFERENCES_EXCLUDED_FIELDS = _ROUND_TRIP_EXCLUDED_FIELDS | {"references"}
+
+
+def _spec_equal_except_references(a: ProductSpec, b: ProductSpec) -> bool:
+    """Same as ``_spec_equal_for_round_trip`` but also ignores ``references``."""
+    for f in dataclasses.fields(ProductSpec):
+        if f.name in _EDIT_SAFETY_APPEND_REFERENCES_EXCLUDED_FIELDS:
+            continue
+        av = getattr(a, f.name)
+        bv = getattr(b, f.name)
+        if f.name == "design":
+            if not _design_blocks_equal_for_round_trip(av, bv):
+                return False
+        else:
+            if av != bv:
+                return False
+    return True
+
+
+# Paths chosen to not collide with any fixture's existing references so the
+# append always lands (path-only dedup would otherwise silently satisfy the
+# property).
+_NEW_REFERENCE_ENTRIES: list[tuple[str, ReferenceEntry]] = [
+    (
+        "plain",
+        ReferenceEntry(
+            path=Path("ref/edit-safety-plain.png"),
+            roles=["visual-target"],
+        ),
+    ),
+    (
+        "with_notes",
+        ReferenceEntry(
+            path=Path("ref/edit-safety-notes.png"),
+            roles=["visual-target"],
+            notes="appended by edit-safety test",
+        ),
+    ),
+    (
+        "proposed",
+        ReferenceEntry(
+            path=Path("ref/edit-safety-proposed.png"),
+            roles=["visual-target"],
+            proposed=True,
+        ),
+    ),
+    (
+        "multi_role",
+        ReferenceEntry(
+            path=Path("ref/edit-safety-multi.png"),
+            roles=["visual-target", "docs"],
+        ),
+    ),
+    (
+        "docs_pdf",
+        ReferenceEntry(
+            path=Path("ref/edit-safety-guide.pdf"),
+            roles=["docs"],
+            notes="reference guide",
+        ),
+    ),
+]
+
+
+class TestEditSafetyAppendReferences:
+    """append_references preserves every non-references field through a round-trip.
+
+    Property: for any well-formed ProductSpec and any new ReferenceEntry,
+    ``append_references(format_spec(spec), [new_entry])`` produces a spec
+    where every field other than ``references`` is unchanged after re-parsing.
+    """
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _ROUND_TRIP_FIXTURES],
+        ids=[f[0] for f in _ROUND_TRIP_FIXTURES],
+    )
+    @pytest.mark.parametrize(
+        "new_entry",
+        [e[1] for e in _NEW_REFERENCE_ENTRIES],
+        ids=[e[0] for e in _NEW_REFERENCE_ENTRIES],
+    )
+    def test_append_references_preserves_non_references_fields(
+        self, spec: ProductSpec, new_entry: ReferenceEntry
+    ):
+        serialized = format_spec(spec)
+        modified = append_references(serialized, [new_entry])
+        parsed = _parse_spec(modified)
+
+        # The new entry actually landed in references (guards against a
+        # silent dedup false-positive that would trivially satisfy the
+        # property).
+        assert any(r.path == new_entry.path for r in parsed.references), (
+            f"new entry {new_entry.path!r} not found in parsed.references; "
+            f"got paths: {[r.path for r in parsed.references]}"
+        )
+
+        # All non-references fields round-trip unchanged.
+        assert _spec_equal_except_references(parsed, spec), (
+            f"edit-safety mismatch; parsed=\n{parsed}\n\nexpected=\n{spec}"
+        )
+
+    def test_comparator_ignores_references_difference(self):
+        """Guards the comparator itself: differing ``references`` must compare
+        equal so the property isolates edits to that section.
+        """
+        a = ProductSpec(
+            purpose="x",
+            architecture="y",
+            references=[ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])],
+        )
+        b = ProductSpec(
+            purpose="x",
+            architecture="y",
+            references=[
+                ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"]),
+                ReferenceEntry(path=Path("ref/b.png"), roles=["docs"]),
+            ],
+        )
+        assert _spec_equal_except_references(a, b)
+
+    def test_comparator_detects_non_references_difference(self):
+        """Complement: a difference in any non-references field is still caught."""
+        a = ProductSpec(purpose="x", architecture="y")
+        b = ProductSpec(purpose="x", architecture="z")
+        assert not _spec_equal_except_references(a, b)
+
+
 class TestInferUrlRole:
     """Tests for ``_infer_url_role`` (regex-based role inference)."""
 
