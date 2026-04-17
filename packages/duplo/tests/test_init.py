@@ -1246,3 +1246,235 @@ class TestRunInitCombined:
         mock_build.assert_not_called()
         assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
         assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+
+class TestOutputDiscipline:
+    """Per INIT-design.md § 'Output discipline'.
+
+    Covers the five formatting rules uniformly across every init
+    input combination (no args, URL identified, URL unidentified,
+    URL fetch failure, description from file, combined URL + prose).
+    """
+
+    # Disallowed codepoint ranges for rule 5 "No emoji".  Covers the
+    # Unicode blocks where pictographic emoji live.  Typographic
+    # punctuation (→, —, en/em dashes, smart quotes) is out of scope
+    # — they are not emoji and duplo's copy legitimately uses some
+    # of them.
+    _EMOJI_RANGES = (
+        (0x1F000, 0x1FFFF),  # Supplementary pictographs (most emoji)
+        (0x1F300, 0x1F5FF),  # Misc Symbols and Pictographs
+        (0x1F600, 0x1F64F),  # Emoticons
+        (0x1F680, 0x1F6FF),  # Transport & Map
+        (0x1F900, 0x1F9FF),  # Supplemental Symbols and Pictographs
+        (0x2600, 0x26FF),  # Misc Symbols (☀ ☂ ★ etc.)
+        (0x2700, 0x27BF),  # Dingbats (✓ ✗ ✨ etc.)
+    )
+
+    # Action-tense rule (rule 1) is pinned case-by-case by the
+    # existing class-per-flow tests (e.g. "Fetched X.", "Wrote X.",
+    # "Created X.", "Read N chars", "Drafted SPEC.md").  Rather than
+    # repeat that with a whitelist here, we spot-check one forbidden
+    # first-person form ("I " prefix) that would signal the LLM-style
+    # phrasing INIT-design.md § "Output discipline" bans.
+    @staticmethod
+    def _assert_no_first_person(stdout: str) -> None:
+        for line in stdout.splitlines():
+            assert not line.startswith(("I ", "I've ", "I'll ")), (
+                f"First-person narration in action output: {line!r}"
+            )
+
+    @staticmethod
+    def _assert_no_color_codes(text: str) -> None:
+        # ANSI color/style escape sequences start with ESC (\x1b).
+        assert "\x1b" not in text, f"ANSI escape code in output: {text!r}"
+
+    @classmethod
+    def _assert_no_emoji(cls, text: str) -> None:
+        for ch in text:
+            cp = ord(ch)
+            for low, high in cls._EMOJI_RANGES:
+                if low <= cp <= high:
+                    raise AssertionError(
+                        f"Disallowed emoji codepoint U+{cp:04X} ({ch!r}) in output"
+                    )
+
+    @staticmethod
+    def _assert_next_steps_numbered(stdout: str) -> None:
+        # Rule 3: success runs end with a "Next steps:" block whose
+        # items are numbered (1., 2., ...), not bulleted.
+        assert "Next steps:" in stdout
+        tail = stdout.split("Next steps:", 1)[1]
+        # First non-blank line after the header must start with "  1.".
+        for line in tail.splitlines():
+            if not line.strip():
+                continue
+            assert line.startswith("  1."), (
+                f"Next steps block does not start with '  1.': {line!r}"
+            )
+            break
+
+    @staticmethod
+    def _assert_bullets_use_arrow(stdout: str) -> None:
+        # Rule 2: sub-result lines are indented and prefixed with "→ ".
+        # Any line that begins with two-space indent and a non-digit,
+        # non-space next char must be an arrow bullet.
+        for line in stdout.splitlines():
+            if not line.startswith("  "):
+                continue
+            rest = line[2:]
+            if not rest:
+                continue
+            first = rest[0]
+            if first.isdigit() or first == " ":
+                # "  1. ..." (next-step items) and "  continuation" lines
+                # are fine.
+                continue
+            assert rest.startswith("→ "), (
+                f"Indented non-numeric line does not use '→ ' bullet: {line!r}"
+            )
+
+    @classmethod
+    def _assert_all_rules(cls, stdout: str, stderr: str, *, is_success: bool) -> None:
+        cls._assert_no_color_codes(stdout)
+        cls._assert_no_color_codes(stderr)
+        cls._assert_no_emoji(stdout)
+        cls._assert_no_emoji(stderr)
+        cls._assert_no_first_person(stdout)
+        cls._assert_bullets_use_arrow(stdout)
+        if is_success:
+            cls._assert_next_steps_numbered(stdout)
+            # Rule 4: successful runs emit nothing to stderr.
+            assert stderr == "", f"Successful run wrote to stderr: {stderr!r}"
+
+    def test_no_args_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        run_init(_make_args())
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_identified_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nNumi.\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_unidentified_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_fetch_failure_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_description_file_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A calculator."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_combined_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("SwiftUI calculator.")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="Calc.",
+                    architecture="SwiftUI.",
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://numi.app", from_description=str(desc_path)))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_error_flow_existing_spec_to_stderr_only(self, tmp_path, capsys, monkeypatch):
+        # Rule 4 (negative): error path writes only to stderr; stdout
+        # carries no action text.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with pytest.raises(SystemExit):
+            run_init(_make_args())
+        out, err = capsys.readouterr()
+        self._assert_no_color_codes(out)
+        self._assert_no_color_codes(err)
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert err.startswith("Error:")
+        # No action lines on stdout when init aborts at the SPEC-exists check.
+        for token in ("Created ", "Wrote ", "Fetched ", "Drafted "):
+            assert token not in out
+
+    def test_error_flow_missing_description_to_stderr_only(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+        with pytest.raises(SystemExit):
+            run_init(_make_args(from_description=str(missing)))
+        out, err = capsys.readouterr()
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert err.startswith("Error: file not found:")
+        for token in ("Created ", "Wrote ", "Drafted "):
+            assert token not in out
+
+    def test_combined_stacked_errors_both_to_stderr(self, tmp_path, capsys, monkeypatch):
+        # Invalid URL + missing file: both messages on stderr, stdout empty.
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+        with pytest.raises(SystemExit):
+            run_init(_make_args(url="not-a-url", from_description=str(missing)))
+        out, err = capsys.readouterr()
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert "not a valid URL" in err
+        assert "file not found" in err
+        assert out == ""
