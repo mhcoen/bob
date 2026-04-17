@@ -7,8 +7,14 @@ modules (``extractor``, ``design_extractor``, etc.).
 
 from __future__ import annotations
 
+import json
 import re
+import time
+from pathlib import Path
 
+from duplo.claude_cli import ClaudeCliError, query_with_images
+from duplo.diagnostics import record_failure
+from duplo.parsing import extract_json
 from duplo.spec_reader import (
     DesignBlock,
     ProductSpec,
@@ -627,3 +633,137 @@ def format_spec(spec: ProductSpec) -> str:
     parts.append(f"## Notes\n\n{notes_body}")
 
     return "\n\n".join(parts) + "\n"
+
+
+# --------------------------------------------------------------------------
+# _propose_file_role — Vision-based role inference for files in ref/
+# --------------------------------------------------------------------------
+#
+# Per DRAFTER-design.md § "Inferring file roles via Vision".  The caller
+# sets ``proposed: true`` on the resulting ReferenceEntry; this function
+# never does.
+
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+_VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".webm", ".avi"})
+_TEXT_SUFFIXES = frozenset({".txt", ".md"})
+_VALID_FILE_ROLES = frozenset(
+    {"visual-target", "behavioral-target", "docs", "counter-example", "ignore"}
+)
+
+# Number of retry attempts after the first call fails (total attempts =
+# 1 + _FILE_ROLE_RETRIES).
+_FILE_ROLE_RETRIES = 2
+# Base delay (seconds) for exponential backoff between retry attempts.
+_FILE_ROLE_BACKOFF = 1.0
+
+_VISION_FILE_ROLE_PROMPT = (
+    "Look at this image and answer two questions:\n"
+    "1. Describe the visual content (1 sentence).\n"
+    "2. What role does this play in a software project? Choose ONE:\n"
+    "   - visual-target: a screenshot or mockup of a UI to build\n"
+    "   - behavioral-target: a recording or sequence showing how\n"
+    "     an app behaves\n"
+    "   - docs: a diagram, spec illustration, or reference figure\n"
+    "   - counter-example: a screenshot of something to AVOID\n"
+    "   - ignore: irrelevant to building the product (e.g. a logo,\n"
+    "     stock photo, or unrelated image)\n"
+    "\n"
+    'Return JSON: {"description": "...", "role": "..."}\n'
+)
+
+
+def _propose_file_role(path: Path) -> tuple[str, str]:
+    """Propose a ``(description, role)`` pair for a file in ``ref/``.
+
+    For images, calls ``claude -p`` Vision with a prompt asking for a
+    one-sentence description and a role from ``visual-target``,
+    ``behavioral-target``, ``docs``, ``counter-example``, or ``ignore``
+    (per DRAFTER-design.md § "Inferring file roles via Vision").  On LLM
+    failure, retries up to ``_FILE_ROLE_RETRIES`` times with exponential
+    backoff; after exhausting retries, returns ``("", "ignore")`` and
+    logs a diagnostic.  On JSON parse or schema errors, returns
+    ``("", "ignore")`` with a diagnostic (no retry).
+
+    For non-image files the role is extension-based:
+    ``.pdf``/``.txt``/``.md`` → ``docs``;
+    ``.mp4``/``.mov``/``.webm``/``.avi`` → ``behavioral-target``;
+    unknown extensions → ``ignore`` (with diagnostic).  Description is
+    an empty string for non-image files.
+
+    The caller is responsible for setting ``proposed: true`` on the
+    resulting ``ReferenceEntry``; this function returns only the
+    inferred content.
+    """
+    suffix = path.suffix.lower()
+    if suffix in _IMAGE_SUFFIXES:
+        return _propose_image_role(path)
+    if suffix == ".pdf" or suffix in _TEXT_SUFFIXES:
+        return ("", "docs")
+    if suffix in _VIDEO_SUFFIXES:
+        return ("", "behavioral-target")
+    record_failure(
+        "spec_writer:_propose_file_role",
+        "llm",
+        f"unknown extension {suffix!r} for {path}",
+        context={"path": str(path), "suffix": suffix},
+    )
+    return ("", "ignore")
+
+
+def _propose_image_role(path: Path) -> tuple[str, str]:
+    """Call Vision to propose ``(description, role)`` for an image file.
+
+    Retries up to ``_FILE_ROLE_RETRIES`` times on ``ClaudeCliError``
+    with exponential backoff (``_FILE_ROLE_BACKOFF * 2**attempt``).  On
+    final failure or on JSON parse/schema error, returns
+    ``("", "ignore")`` and logs a diagnostic.
+    """
+    last_error: str = ""
+    raw: str = ""
+    for attempt in range(_FILE_ROLE_RETRIES + 1):
+        try:
+            raw = query_with_images(_VISION_FILE_ROLE_PROMPT, [path])
+            break
+        except ClaudeCliError as exc:
+            last_error = str(exc)
+            if attempt >= _FILE_ROLE_RETRIES:
+                record_failure(
+                    "spec_writer:_propose_file_role",
+                    "llm",
+                    f"Vision call failed after {attempt + 1} attempts for {path}: {last_error}",
+                    context={"path": str(path)},
+                )
+                return ("", "ignore")
+            time.sleep(_FILE_ROLE_BACKOFF * (2**attempt))
+
+    try:
+        data = json.loads(extract_json(raw))
+    except (json.JSONDecodeError, ValueError) as exc:
+        record_failure(
+            "spec_writer:_propose_file_role",
+            "llm",
+            f"JSON parse error for {path}: {exc}",
+            context={"path": str(path), "raw": raw[:2000]},
+        )
+        return ("", "ignore")
+
+    if not isinstance(data, dict):
+        record_failure(
+            "spec_writer:_propose_file_role",
+            "llm",
+            f"Vision response not a JSON object for {path}",
+            context={"path": str(path), "raw": raw[:2000]},
+        )
+        return ("", "ignore")
+
+    description = str(data.get("description", "")).strip()
+    role = str(data.get("role", "")).strip()
+    if role not in _VALID_FILE_ROLES:
+        record_failure(
+            "spec_writer:_propose_file_role",
+            "llm",
+            f"Vision returned invalid role {role!r} for {path}",
+            context={"path": str(path), "role": role, "raw": raw[:2000]},
+        )
+        return (description, "ignore")
+    return (description, role)

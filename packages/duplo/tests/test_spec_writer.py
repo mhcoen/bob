@@ -15,11 +15,13 @@ from duplo.spec_reader import (
 )
 from duplo.spec_writer import (
     _infer_url_role,
+    _propose_file_role,
     append_references,
     append_sources,
     format_spec,
     update_design_autogen,
 )
+from duplo.claude_cli import ClaudeCliError
 
 
 class TestAppendSources:
@@ -1190,3 +1192,189 @@ class TestInferUrlRole:
     def test_word_boundary_dislike_does_not_match_like(self):
         # ``like`` inside ``dislike`` must not trigger product-reference.
         assert _infer_url_role("I dislike https://bad.example") == "product-reference"
+
+
+class TestProposeFileRole:
+    """Tests for ``_propose_file_role`` (Vision-based role inference)."""
+
+    def test_image_triggers_vision_and_parses_json(self, monkeypatch, tmp_path):
+        calls: list[tuple] = []
+
+        def fake_query(prompt, image_paths, **kwargs):
+            calls.append((prompt, list(image_paths)))
+            return '{"description": "A dashboard UI", "role": "visual-target"}'
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fake_query)
+        path = tmp_path / "dashboard.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+
+        assert description == "A dashboard UI"
+        assert role == "visual-target"
+        assert len(calls) == 1
+        assert calls[0][1] == [path]
+
+    def test_image_vision_prompt_uses_enum_roles(self, monkeypatch, tmp_path):
+        captured_prompt: list[str] = []
+
+        def fake_query(prompt, image_paths, **kwargs):
+            captured_prompt.append(prompt)
+            return '{"description": "x", "role": "docs"}'
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fake_query)
+        path = tmp_path / "diagram.webp"
+        path.write_bytes(b"")
+
+        _propose_file_role(path)
+
+        prompt = captured_prompt[0]
+        for role in ("visual-target", "behavioral-target", "docs", "counter-example", "ignore"):
+            assert role in prompt
+
+    def test_jpg_and_jpeg_treated_as_images(self, monkeypatch, tmp_path):
+        call_count = [0]
+
+        def fake_query(prompt, image_paths, **kwargs):
+            call_count[0] += 1
+            return '{"description": "x", "role": "visual-target"}'
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fake_query)
+        for ext in (".jpg", ".jpeg", ".gif"):
+            p = tmp_path / f"img{ext}"
+            p.write_bytes(b"")
+            _, role = _propose_file_role(p)
+            assert role == "visual-target"
+        assert call_count[0] == 3
+
+    def test_pdf_defaults_to_docs_without_vision(self, monkeypatch, tmp_path):
+        def fail_query(*args, **kwargs):
+            raise AssertionError("Vision must not be called for PDFs")
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fail_query)
+        path = tmp_path / "spec.pdf"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        assert description == ""
+        assert role == "docs"
+
+    def test_text_defaults_to_docs(self, monkeypatch, tmp_path):
+        def fail_query(*args, **kwargs):
+            raise AssertionError("Vision must not be called for text")
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fail_query)
+        for ext in (".txt", ".md"):
+            p = tmp_path / f"readme{ext}"
+            p.write_text("hi")
+            description, role = _propose_file_role(p)
+            assert description == ""
+            assert role == "docs"
+
+    def test_video_defaults_to_behavioral_target(self, monkeypatch, tmp_path):
+        def fail_query(*args, **kwargs):
+            raise AssertionError("Vision must not be called for video")
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", fail_query)
+        for ext in (".mp4", ".mov", ".webm", ".avi"):
+            p = tmp_path / f"clip{ext}"
+            p.write_bytes(b"")
+            description, role = _propose_file_role(p)
+            assert description == ""
+            assert role == "behavioral-target"
+
+    def test_unknown_extension_defaults_to_ignore_with_diagnostic(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / "mystery.xyz"
+        path.write_bytes(b"")
+
+        _, role = _propose_file_role(path)
+        assert role == "ignore"
+        errors_log = tmp_path / ".duplo" / "errors.jsonl"
+        assert errors_log.exists()
+        assert "unknown extension" in errors_log.read_text()
+
+    def test_llm_failure_after_retries_falls_back_to_ignore(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        attempts = [0]
+
+        def always_fail(prompt, image_paths, **kwargs):
+            attempts[0] += 1
+            raise ClaudeCliError("boom")
+
+        sleeps: list[float] = []
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", always_fail)
+        monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: sleeps.append(s))
+        path = tmp_path / "x.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        assert description == ""
+        assert role == "ignore"
+        # 1 initial attempt + 2 retries = 3 calls.
+        assert attempts[0] == 3
+        # Backoff slept between attempts (not after the last failure).
+        assert len(sleeps) == 2
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_llm_retries_then_succeeds(self, monkeypatch, tmp_path):
+        attempts = [0]
+
+        def flaky(prompt, image_paths, **kwargs):
+            attempts[0] += 1
+            if attempts[0] < 3:
+                raise ClaudeCliError("transient")
+            return '{"description": "ok", "role": "visual-target"}'
+
+        monkeypatch.setattr("duplo.spec_writer.query_with_images", flaky)
+        monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: None)
+        path = tmp_path / "x.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        assert description == "ok"
+        assert role == "visual-target"
+        assert attempts[0] == 3
+
+    def test_json_parse_error_falls_back_to_ignore_with_diagnostic(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "duplo.spec_writer.query_with_images",
+            lambda prompt, image_paths, **kwargs: "not-json-at-all",
+        )
+        path = tmp_path / "x.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        assert description == ""
+        assert role == "ignore"
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_invalid_role_in_response_falls_back_to_ignore(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "duplo.spec_writer.query_with_images",
+            lambda prompt, image_paths, **kwargs: ('{"description": "A logo", "role": "mascot"}'),
+        )
+        path = tmp_path / "x.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        # Description preserved even when role is invalid.
+        assert description == "A logo"
+        assert role == "ignore"
+        assert (tmp_path / ".duplo" / "errors.jsonl").exists()
+
+    def test_vision_json_wrapped_in_prose(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "duplo.spec_writer.query_with_images",
+            lambda prompt, image_paths, **kwargs: (
+                'Here is the analysis:\n{"description": "UI", "role": "visual-target"}'
+            ),
+        )
+        path = tmp_path / "x.png"
+        path.write_bytes(b"")
+
+        description, role = _propose_file_role(path)
+        assert description == "UI"
+        assert role == "visual-target"
