@@ -10,9 +10,12 @@ import pytest
 from duplo.doc_tables import DocStructures
 from duplo.fetcher import PageRecord
 from duplo.init import (
+    _DESCRIPTION_FILE_NOT_FOUND,
+    _DESCRIPTION_NEXT_STEPS,
     _NO_ARGS_NEXT_STEPS,
     _REF_README_CONTENT,
     _SPEC_EXISTS_ERROR,
+    _STDIN_TTY_PROMPT,
     _URL_FETCH_FAILED_PRELUDE,
     _URL_NEXT_STEPS_FETCH_FAILED,
     _URL_NEXT_STEPS_IDENTIFIED,
@@ -678,3 +681,331 @@ class TestRunInitUrlRefScaffolding:
         out = capsys.readouterr().out
         assert "Created ref/ (empty)." not in out
         assert "Created ref/README.md." not in out
+
+
+def _stub_build_draft_spec(**fields):
+    """Return a stub callable that yields a ProductSpec with *fields* set.
+
+    Used to avoid real LLM calls from ``_build_draft_spec`` (which
+    internally calls ``_draft_from_inputs`` -> ``query`` -> ``claude -p``)
+    while still exercising the description flow's inspection logic.
+    """
+    from duplo.spec_reader import DesignBlock
+
+    def _stub(inputs):
+        spec = ProductSpec(
+            purpose=fields.get("purpose", ""),
+            architecture=fields.get("architecture", ""),
+            design=DesignBlock(user_prose=fields.get("design", "")),
+            behavior_contracts=fields.get("behavior_contracts", []),
+            scope_include=fields.get("scope_include", []),
+            scope_exclude=fields.get("scope_exclude", []),
+        )
+        if inputs.description:
+            spec.notes = "Original description provided to `duplo init`:\n\n" + inputs.description
+        return spec
+
+    return _stub
+
+
+class TestRunInitDescriptionFile:
+    """Per INIT-design.md § 'duplo init --from-description description.txt'."""
+
+    def test_reads_description_from_file_and_writes_spec(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "Build a SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A SwiftUI calculator."),
+        ) as mock_build:
+            run_init(_make_args(from_description=str(desc_path)))
+
+        mock_build.assert_called_once()
+        inputs = mock_build.call_args.args[0]
+        assert inputs.description == prose
+        assert inputs.url is None
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "A SwiftUI calculator." in written
+        # Verbatim prose lands in ## Notes.
+        notes_idx = written.index("Original description provided to `duplo init`:")
+        assert prose in written[notes_idx:]
+
+        out = capsys.readouterr().out
+        assert f"Read {len(prose)} chars of description from {desc_path}." in out
+        assert "Drafted SPEC.md from description." in out
+        assert "Wrote SPEC.md." in out
+
+    def test_prints_next_steps_block(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert _DESCRIPTION_NEXT_STEPS in capsys.readouterr().out
+
+    def test_missing_file_prints_error_and_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+
+        with (
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(from_description=str(missing)))
+
+        assert exc_info.value.code == 1
+        mock_build.assert_not_called()
+        assert _DESCRIPTION_FILE_NOT_FOUND.format(path=str(missing)) in capsys.readouterr().err
+        assert not (tmp_path / "SPEC.md").exists()
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with (
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert exc_info.value.code == 1
+        mock_build.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+    def test_force_overwrites_existing_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="Something."),
+        ):
+            run_init(_make_args(from_description=str(desc_path), force=True))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "pre-existing" not in written
+        assert "Something." in written
+
+    def test_creates_ref_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a thing.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." in out
+        assert "Created ref/README.md." in out
+
+
+class TestRunInitDescriptionStdin:
+    """Per INIT-design.md § 'duplo init --from-description -'."""
+
+    def test_reads_description_from_stdin_pipe(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator."
+        # Piped stdin: isatty() is False, no prompt emitted.
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(prose))
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="Calc."),
+        ) as mock_build:
+            run_init(_make_args(from_description="-"))
+
+        inputs = mock_build.call_args.args[0]
+        assert inputs.description == prose
+        out = capsys.readouterr().out
+        assert f"Read {len(prose)} chars of description from stdin." in out
+        # No TTY prompt when stdin is not a terminal.
+        assert _STDIN_TTY_PROMPT not in out
+
+    def test_tty_stdin_prints_prompt(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        class _TtyStdin:
+            def isatty(self):
+                return True
+
+            def read(self):
+                return "Interactive prose."
+
+        monkeypatch.setattr("sys.stdin", _TtyStdin())
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description="-"))
+
+        out = capsys.readouterr().out
+        assert _STDIN_TTY_PROMPT in out
+        assert "Read 18 chars of description from stdin." in out
+
+
+class TestRunInitDescriptionUrlExtraction:
+    """Per DRAFTER-design.md § 'Inferring URL roles': URLs in prose
+    become Sources entries with proposed: true and the inferred role.
+
+    The extraction happens inside ``draft_spec`` /
+    ``_build_draft_spec`` (spec_writer).  These tests run the real
+    drafter path with a mocked ``_draft_from_inputs`` so the LLM is
+    bypassed but URL extraction still runs."""
+
+    def test_like_url_in_prose_becomes_proposed_product_reference(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        from duplo.spec_reader import DesignBlock
+
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator like Numi at https://numi.app."
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text(prose)
+
+        # Bypass the LLM call inside _build_draft_spec while leaving
+        # the real URL extraction path intact.
+        def fake_draft_from_inputs(inputs):
+            return ProductSpec(
+                purpose="A calculator.",
+                architecture="",
+                design=DesignBlock(user_prose=""),
+            )
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            fake_draft_from_inputs,
+        )
+
+        run_init(_make_args(from_description=str(desc_path)))
+
+        from duplo.spec_reader import _parse_spec
+
+        written = (tmp_path / "SPEC.md").read_text()
+        spec = _parse_spec(written)
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        assert entry.url == "https://numi.app"
+        assert entry.role == "product-reference"
+        assert entry.proposed is True
+        # User-provided no URL flag, so discovered is not set either.
+        assert entry.discovered is False
+
+    def test_unlike_url_in_prose_becomes_proposed_counter_example_scrape_none(
+        self, tmp_path, monkeypatch
+    ):
+        from duplo.spec_reader import DesignBlock
+
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator, unlike https://bad-calc.example/."
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text(prose)
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: ProductSpec(
+                purpose="",
+                architecture="",
+                design=DesignBlock(user_prose=""),
+            ),
+        )
+
+        run_init(_make_args(from_description=str(desc_path)))
+
+        from duplo.spec_reader import _parse_spec
+
+        written = (tmp_path / "SPEC.md").read_text()
+        spec = _parse_spec(written)
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        # Canonicalized (trailing slash stripped).
+        assert entry.url == "https://bad-calc.example"
+        assert entry.role == "counter-example"
+        assert entry.scrape == "none"
+        assert entry.proposed is True
+
+
+class TestRunInitDescriptionBullets:
+    """Per INIT-design.md § 'duplo init --from-description': the
+    per-section bullets printed after 'Wrote SPEC.md.' must reflect
+    what the drafter actually pre-filled."""
+
+    def test_architecture_filled_when_prose_states_stack(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("SwiftUI calculator.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(architecture="SwiftUI on macOS."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Architecture filled from prose" in out
+        assert "## Architecture left as <FILL IN>" not in out
+
+    def test_architecture_fill_in_when_prose_silent_on_stack(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A calculator."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Architecture left as <FILL IN>" in out
+        assert "Pre-filled ## Purpose from prose." in out
+
+    def test_notes_bullet_always_present(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Anything.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert "## Notes contains the verbatim original description." in capsys.readouterr().out
+
+    def test_behavior_bullet_reports_empty_when_no_contracts(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Calc.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Behavior left empty (no input/output pairs detected)." in out
+
+    def test_design_bullet_when_design_filled(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Monospaced dark theme.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(
+                purpose="A calculator.",
+                design="Monospaced, dark theme.",
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "Pre-filled ## Purpose, ## Design from prose." in out

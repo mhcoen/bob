@@ -1015,6 +1015,109 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
 _NOTES_DESCRIPTION_HEADER = "Original description provided to `duplo init`:"
 
 
+# Matches HTTP(S) URLs anywhere in prose.  Trailing punctuation
+# (period, comma, paren, quote) is stripped from each match at use
+# time because natural-language prose commonly ends a sentence or
+# parenthetical right after a URL.
+_PROSE_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
+_PROSE_URL_TRAILING_PUNCT = ".,;:!?)\"'"
+
+# Size of the context window (in characters) supplied to
+# :func:`_infer_url_role` for each prose-extracted URL.  Enough to
+# capture phrases like "not like https://..." or "see also https://..."
+# immediately preceding a URL.
+_PROSE_URL_CONTEXT_CHARS = 80
+
+
+def _extract_prose_urls(description: str) -> list[tuple[str, str]]:
+    """Return ``[(url, context)]`` for every HTTP(S) URL in *description*.
+
+    *context* is the text immediately surrounding the URL (see
+    ``_PROSE_URL_CONTEXT_CHARS``).  It is the value
+    :func:`_infer_url_role` consumes.  URLs keep their original form —
+    canonicalization is the caller's responsibility because duplicate
+    detection happens after canonicalization.  Trailing sentence
+    punctuation is stripped from each URL so "see https://x.com."
+    yields ``https://x.com`` rather than ``https://x.com.``.
+    """
+    if not description:
+        return []
+    results: list[tuple[str, str]] = []
+    for m in _PROSE_URL_RE.finditer(description):
+        url = m.group(0).rstrip(_PROSE_URL_TRAILING_PUNCT)
+        start = max(0, m.start() - _PROSE_URL_CONTEXT_CHARS)
+        end = min(len(description), m.end() + _PROSE_URL_CONTEXT_CHARS)
+        context = description[start:end]
+        results.append((url, context))
+    return results
+
+
+def _build_draft_spec(inputs: DraftInputs) -> ProductSpec:
+    """Shared core of :func:`draft_spec` — build a ``ProductSpec`` from *inputs*.
+
+    Split out so callers that need to inspect the drafted spec (e.g.
+    ``duplo init`` deciding which sections to report as pre-filled)
+    can share the same construction path rather than re-parsing the
+    serialized text.  Steps 1–4 of :func:`draft_spec` live here; step
+    5 (serialize) is :func:`format_spec`, applied by the wrapper.
+
+    On :class:`DraftingFailed` from the LLM call, falls back to a
+    fresh empty :class:`ProductSpec` so user-supplied inputs are
+    still applied by subsequent steps.
+    """
+    try:
+        spec = _draft_from_inputs(inputs)
+    except DraftingFailed:
+        spec = ProductSpec()
+
+    if inputs.description:
+        spec.notes = f"{_NOTES_DESCRIPTION_HEADER}\n\n{inputs.description}"
+        # Extract URLs referenced in prose (per DRAFTER-design.md
+        # § "Inferring URL roles").  Each becomes a ``proposed: true``
+        # Sources entry with role inferred from surrounding context.
+        existing_urls = {canonicalize_url(s.url) for s in spec.sources}
+        for raw_url, context in _extract_prose_urls(inputs.description):
+            canon = canonicalize_url(raw_url)
+            if canon in existing_urls:
+                continue
+            role = _infer_url_role(context)
+            # Counter-example scrape coercion: same rule as the parser
+            # and ``append_sources`` — counter-examples must not be
+            # scraped, so force ``scrape: none`` at write time.
+            scrape = "none" if role == "counter-example" else "deep"
+            spec.sources.append(
+                SourceEntry(
+                    url=canon,
+                    role=role,
+                    scrape=scrape,
+                    proposed=True,
+                )
+            )
+            existing_urls.add(canon)
+
+    if inputs.url:
+        canon_user_url = canonicalize_url(inputs.url)
+        # If the user's explicit URL also appeared in prose, drop the
+        # prose-derived (proposed) copy before prepending the explicit
+        # entry so Sources stays single-entry-per-URL.
+        spec.sources = [s for s in spec.sources if canonicalize_url(s.url) != canon_user_url]
+        spec.sources.insert(
+            0,
+            SourceEntry(
+                url=inputs.url,
+                role="product-reference",
+                scrape="deep",
+            ),
+        )
+
+    for path in inputs.existing_ref_files:
+        role = inputs.vision_proposals.get(path, "")
+        roles = [role] if role else []
+        spec.references.append(ReferenceEntry(path=path, roles=roles, proposed=True))
+
+    return spec
+
+
 def draft_spec(inputs: DraftInputs) -> str:
     """Draft a fresh SPEC.md from *inputs* and return the serialized text.
 
@@ -1026,6 +1129,8 @@ def draft_spec(inputs: DraftInputs) -> str:
        ``spec.notes`` under a labeled header.  The LLM never writes
        ``## Notes``; this step guarantees the user's original words are
        preserved even if the structured extraction missed nuances.
+       URLs mentioned in the prose become ``proposed: true`` Sources
+       entries with roles inferred via :func:`_infer_url_role`.
     3. Prepend a :class:`SourceEntry` for ``inputs.url`` (if any) with
        ``role="product-reference"`` and ``scrape="deep"``.  The user
        provided the URL explicitly, so no ``proposed`` / ``discovered``
@@ -1041,27 +1146,4 @@ def draft_spec(inputs: DraftInputs) -> str:
     :class:`ProductSpec` (template markers for required sections) and
     still applies steps 2–4 so user-supplied inputs are preserved.
     """
-    try:
-        spec = _draft_from_inputs(inputs)
-    except DraftingFailed:
-        spec = ProductSpec()
-
-    if inputs.description:
-        spec.notes = f"{_NOTES_DESCRIPTION_HEADER}\n\n{inputs.description}"
-
-    if inputs.url:
-        spec.sources.insert(
-            0,
-            SourceEntry(
-                url=inputs.url,
-                role="product-reference",
-                scrape="deep",
-            ),
-        )
-
-    for path in inputs.existing_ref_files:
-        role = inputs.vision_proposals.get(path, "")
-        roles = [role] if role else []
-        spec.references.append(ReferenceEntry(path=path, roles=roles, proposed=True))
-
-    return format_spec(spec)
+    return format_spec(_build_draft_spec(inputs))

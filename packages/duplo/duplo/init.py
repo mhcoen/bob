@@ -21,7 +21,13 @@ from duplo.diagnostics import record_failure
 from duplo.fetcher import fetch_site
 from duplo.scanner import scan_directory  # noqa: F401
 from duplo.spec_reader import ProductSpec, SourceEntry
-from duplo.spec_writer import DraftInputs, _propose_file_role, draft_spec, format_spec
+from duplo.spec_writer import (
+    DraftInputs,
+    _build_draft_spec,
+    _propose_file_role,
+    draft_spec,
+    format_spec,
+)
 from duplo.url_canon import canonicalize_url
 from duplo.validator import validate_product_url
 
@@ -97,6 +103,17 @@ _URL_NEXT_STEPS_FETCH_FAILED = """Next steps:
      issue is resolved.
   3. Run `duplo` to extract features and generate the build plan."""
 
+_DESCRIPTION_NEXT_STEPS = """Next steps:
+  1. Open SPEC.md in your editor. Verify the drafted sections
+     match your intent. Edit anything duplo got wrong.
+  2. (Optional) Add a URL to ## Sources or drop files into ref/
+     if you have additional reference material.
+  3. Run `duplo` to extract features and generate the build plan."""
+
+_DESCRIPTION_FILE_NOT_FOUND = "Error: file not found: {path}"
+
+_STDIN_TTY_PROMPT = "Reading description from stdin. Press Ctrl-D when done."
+
 _URL_DEFERRED_DEEP_NOTE = (
     "Note: duplo will deep-crawl {url} on the next run.\n"
     "The deep scrape is deferred so you can adjust ## Sources first\n"
@@ -129,7 +146,10 @@ def run_init(args: argparse.Namespace) -> None:
     if url is not None and from_description is None:
         _run_url(args, url)
         return
-    raise NotImplementedError("duplo init --from-description is not yet implemented")
+    if url is None and from_description is not None:
+        _run_description(args, from_description)
+        return
+    raise NotImplementedError("duplo init <url> --from-description is not yet implemented")
 
 
 def _run_no_args(args: argparse.Namespace) -> None:
@@ -324,3 +344,127 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
         if not deep:
             print()
             print(_URL_DEFERRED_DEEP_NOTE.format(url=canonical))
+
+
+def _read_description(path_arg: str) -> tuple[str, str] | None:
+    """Read the description text from *path_arg*.
+
+    *path_arg* is either ``"-"`` (read from stdin) or a filesystem
+    path.  Returns ``(text, source_label)`` on success where
+    *source_label* is ``"stdin"`` or the path as given.  Returns
+    ``None`` when the path does not exist (caller reports and
+    exits).  The TTY prompt for stdin is emitted here so the
+    "Reading..." line appears before the user starts typing.
+    """
+    if path_arg == "-":
+        if sys.stdin.isatty():
+            print(_STDIN_TTY_PROMPT)
+        text = sys.stdin.read()
+        return (text, "stdin")
+    path = Path(path_arg)
+    if not path.is_file():
+        print(_DESCRIPTION_FILE_NOT_FOUND.format(path=path_arg), file=sys.stderr)
+        return None
+    text = path.read_text()
+    return (text, path_arg)
+
+
+def _describe_drafted_sections(spec: ProductSpec) -> list[str]:
+    """Return per-section bullets for the description-flow output.
+
+    Per INIT-design.md § "duplo init --from-description
+    description.txt": after ``Wrote SPEC.md.``, print bullets that
+    tell the user which sections the drafter pre-filled vs. left as
+    ``<FILL IN>`` / empty.  The exact set of bullets depends on the
+    content of the drafted :class:`ProductSpec` — sections the LLM
+    filled report as pre-filled; required sections the LLM left
+    null report as ``<FILL IN>``; optional sections left empty
+    report as empty.  ``## Notes`` always reports as containing the
+    verbatim description (populated by :func:`_build_draft_spec`
+    step 2, never by the LLM).
+    """
+    prefilled: list[str] = []
+    if spec.purpose:
+        prefilled.append("## Purpose")
+    if spec.design.user_prose:
+        prefilled.append("## Design")
+
+    bullets: list[str] = []
+    if prefilled:
+        bullets.append(f"  → Pre-filled {', '.join(prefilled)} from prose.")
+
+    if spec.architecture:
+        bullets.append("  → ## Architecture filled from prose (description specified a stack).")
+    else:
+        bullets.append(
+            "  → ## Architecture left as <FILL IN> (description did not state a stack explicitly)."
+        )
+
+    if not spec.behavior_contracts:
+        bullets.append("  → ## Behavior left empty (no input/output pairs detected).")
+    else:
+        bullets.append(
+            f"  → ## Behavior filled with {len(spec.behavior_contracts)} "
+            "input/output pair(s) from prose."
+        )
+
+    bullets.append("  → ## Notes contains the verbatim original description.")
+    return bullets
+
+
+def _run_description(args: argparse.Namespace, path_arg: str) -> None:
+    """Handle ``duplo init --from-description PATH`` per INIT-design.md.
+
+    Reads prose from *path_arg* (a file path or ``-`` for stdin) and
+    drafts SPEC.md from it via :func:`_build_draft_spec`.  Prints
+    per-section bullets describing what the drafter pre-filled vs.
+    left as ``<FILL IN>``.  The original prose is preserved
+    verbatim in ``## Notes``; URLs mentioned in the prose become
+    ``proposed: true`` Sources entries (the drafter handles URL
+    extraction).
+    """
+    cwd = Path.cwd()
+    spec_path = cwd / "SPEC.md"
+    force = bool(getattr(args, "force", False))
+
+    if spec_path.exists() and not force:
+        print(_SPEC_EXISTS_ERROR, file=sys.stderr)
+        sys.exit(1)
+
+    read_result = _read_description(path_arg)
+    if read_result is None:
+        sys.exit(1)
+    description, source_label = read_result
+
+    print(f"Read {len(description)} chars of description from {source_label}.")
+
+    existing_refs, vision_proposals = _scan_existing_ref_files(cwd)
+    inputs = DraftInputs(
+        description=description,
+        existing_ref_files=existing_refs,
+        vision_proposals=vision_proposals,
+    )
+    spec = _build_draft_spec(inputs)
+    content = format_spec(spec)
+    print("Drafted SPEC.md from description.")
+    print()
+
+    ref_dir = cwd / "ref"
+    ref_created = not ref_dir.exists()
+    ref_dir.mkdir(exist_ok=True)
+    if ref_created:
+        print("Created ref/ (empty).")
+
+    readme_path = ref_dir / "README.md"
+    if not readme_path.exists():
+        readme_path.write_text(_REF_README_CONTENT)
+        print("Created ref/README.md.")
+
+    spec_path.write_text(content)
+    print("Wrote SPEC.md.")
+    print()
+
+    for bullet in _describe_drafted_sections(spec):
+        print(bullet)
+    print()
+    print(_DESCRIPTION_NEXT_STEPS)

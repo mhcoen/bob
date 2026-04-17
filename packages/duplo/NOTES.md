@@ -2,6 +2,25 @@
 
 ## Observations
 
+### [6.15.1] draft_spec refactored to expose a ProductSpec-returning core — 2026-04-17
+
+`_run_description` needs to inspect the drafted `ProductSpec` to decide which
+per-section bullets to print ("Pre-filled ## Purpose, ## Design from prose.",
+"## Architecture left as <FILL IN>", etc.). Rather than re-parsing the
+serialized SPEC.md, split `draft_spec` into `_build_draft_spec(inputs) ->
+ProductSpec` + a thin `draft_spec = format_spec ∘ _build_draft_spec` wrapper.
+Existing `draft_spec` tests all still pass because `draft_spec` is
+behaviorally identical. The new internal API is what init.py consumes.
+
+Also added URL extraction from description prose to the drafter
+(`_extract_prose_urls`), so descriptions like "like https://numi.app" now
+produce a `proposed: true` Sources entry with `role: product-reference`
+inferred via `_infer_url_role`. Counter-example roles get `scrape: none`
+coerced at write time (mirrors the parser and `append_sources` rules).
+An explicit `inputs.url` suppresses any duplicate prose-extracted entry
+so Sources stays single-entry-per-URL when the combined case arrives in
+Phase 6.15.2.
+
 ### [6.7.1] DraftInputs added in this task, not in 6.1.1-6.1.2 — 2026-04-17
 
 Task 6.7.1 implements `_draft_from_inputs(inputs: DraftInputs)` whose first
@@ -172,6 +191,18 @@ The multiline regex `^## Sources\s*$` in `needs_migration()` matches even when `
 - Consider documenting the install steps in a README or Makefile for first-time setup.
 
 ## Hypotheses
+
+### [6.15.1] Per-section bullet wording drift from INIT-design.md example — 2026-04-17
+
+INIT-design.md § "duplo init --from-description description.txt" shows one
+specific output example where Architecture is filled and Behavior is empty.
+The current implementation generates bullets dynamically based on the
+drafted `ProductSpec`: always one bullet per required/optional section
+indicating filled vs. not. This is more informative but does drift from
+the example shapes in the design doc. If the doc is read as prescriptive
+(exact wording for exact cases) rather than illustrative, the wording
+may need tightening. Left as-is pending user review of the rendered
+output during the combined-case implementation (6.15.2+).
 
 ### [5.38.2] `claude -p --tools Read` output format — 2026-04-16
 

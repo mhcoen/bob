@@ -19,7 +19,9 @@ from duplo.spec_writer import (
     DraftInputs,
     MalformedSpec,
     SectionNotFound,
+    _build_draft_spec,
     _draft_from_inputs,
+    _extract_prose_urls,
     _infer_url_role,
     _propose_file_role,
     append_references,
@@ -2943,3 +2945,105 @@ class TestExceptionClasses:
         assert "## Sources\n\n<!-- URLs duplo should scrape." in text
         assert "## References\n\n<!-- Files in ref/." in text
         assert "## Notes\n\n<!-- Optional. Free-form context for duplo. -->" in text
+
+
+class TestExtractProseUrls:
+    """Per DRAFTER-design.md § 'Inferring URL roles': ``_extract_prose_urls``
+    finds every HTTP(S) URL in a description and returns surrounding
+    context for :func:`_infer_url_role` to key on."""
+
+    def test_empty_or_none_input_returns_empty_list(self):
+        assert _extract_prose_urls("") == []
+        assert _extract_prose_urls(None) == []  # type: ignore[arg-type]
+
+    def test_no_urls_in_prose_returns_empty_list(self):
+        assert _extract_prose_urls("Just words, no links.") == []
+
+    def test_single_url_returned_with_context(self):
+        prose = "Build a calculator like Numi at https://numi.app for inspiration."
+        results = _extract_prose_urls(prose)
+        assert len(results) == 1
+        url, context = results[0]
+        assert url == "https://numi.app"
+        assert "like" in context.lower()
+
+    def test_trailing_sentence_punctuation_stripped(self):
+        prose = "See https://example.com."
+        results = _extract_prose_urls(prose)
+        assert results[0][0] == "https://example.com"
+
+    def test_multiple_urls_returned_in_order(self):
+        prose = "Visit https://a.example and https://b.example for more."
+        results = _extract_prose_urls(prose)
+        assert [u for u, _ in results] == ["https://a.example", "https://b.example"]
+
+    def test_http_and_https_both_matched(self):
+        prose = "Legacy http://old.example and https://new.example."
+        results = _extract_prose_urls(prose)
+        assert {u for u, _ in results} == {"http://old.example", "https://new.example"}
+
+
+class TestBuildDraftSpecProseUrls:
+    """Per DRAFTER-design.md § 'Inferring URL roles': URLs in
+    ``inputs.description`` become ``proposed: true`` Sources entries
+    with roles inferred via :func:`_infer_url_role`."""
+
+    def _no_llm(self, monkeypatch):
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: ProductSpec(),
+        )
+
+    def test_prose_url_becomes_proposed_product_reference(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(
+            DraftInputs(description="Build a calculator like https://numi.app.")
+        )
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        assert entry.url == "https://numi.app"
+        assert entry.role == "product-reference"
+        assert entry.scrape == "deep"
+        assert entry.proposed is True
+
+    def test_unlike_prose_url_becomes_proposed_counter_example_scrape_none(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(
+            DraftInputs(description="Unlike https://bad.example, keep it simple.")
+        )
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        assert entry.role == "counter-example"
+        assert entry.scrape == "none"
+        assert entry.proposed is True
+
+    def test_see_also_prose_url_becomes_proposed_docs(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(
+            DraftInputs(description="See also https://docs.example for spec details.")
+        )
+        assert spec.sources[0].role == "docs"
+        assert spec.sources[0].proposed is True
+        assert spec.sources[0].scrape == "deep"
+
+    def test_prose_url_canonicalized_before_insertion(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(DraftInputs(description="Like https://Numi.App/ for flavor."))
+        assert spec.sources[0].url == "https://numi.app"
+
+    def test_explicit_url_suppresses_prose_duplicate(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(
+            DraftInputs(
+                url="https://numi.app",
+                description="Build like https://numi.app.",
+            )
+        )
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://numi.app"
+        assert spec.sources[0].proposed is False
+
+    def test_no_prose_urls_leaves_sources_empty(self, monkeypatch):
+        self._no_llm(monkeypatch)
+        spec = _build_draft_spec(DraftInputs(description="Just ideas, no links."))
+        assert spec.sources == []
