@@ -87,7 +87,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 - [ ] Update CLAUDE.md to reflect the current architecture
   - [x] Remove any references to _first_run, interactive prompts, or URL-in-text-file scanning.
   - [x] Document that SPEC.md is the input contract and all pipeline stages consume role-filtered input from the parser.
-  - [ ] Document the module inventory: spec_reader.py (parser), spec_writer.py (drafter), init.py (duplo init), orchestrator.py (pipeline helpers), migration.py (migration gate).
+  - [x] Document the module inventory: spec_reader.py (parser), spec_writer.py (drafter), init.py (duplo init), orchestrator.py (pipeline helpers), migration.py (migration gate).
   - [ ] Document the safety invariant: no raw SPEC.md text in LLM prompts.
 
 - [ ] [BATCH] Remove or archive stale design documents
