@@ -75,7 +75,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Retry logic: two retry attempts with backoff on LLM failure or JSON parse error, then fall back to empty ProductSpec (template-only draft) with a diagnostic per DRAFTER-design.md section "Error handling".
   - [x] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
 
-- [ ] Implement draft_spec(inputs: DraftInputs) -> str in duplo/spec_writer.py
+- [x] Implement draft_spec(inputs: DraftInputs) -> str in duplo/spec_writer.py
   - [x] Per DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
   - [x] Step 1: call _draft_from_inputs(inputs) to get a ProductSpec.
   - [x] Step 2: if inputs.description was provided, copy the original prose verbatim into spec.notes under a labeled header per DRAFTER-design.md: "Original description provided to duplo init:" followed by the verbatim prose. The LLM does NOT write notes.
