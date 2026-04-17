@@ -25,7 +25,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] References entries: serialize each ReferenceEntry with one blank line between entries, including roles (comma-separated), notes, and proposed flag.
   - [x] Design section: if DesignBlock has user_prose, write it first. If auto_generated is present, write the AUTO-GENERATED block after user_prose using the same markers the parser expects.
   - [x] Scope section: serialize scope_include and scope_exclude lists in the template format (include:/exclude: with indented list items).
-  - [ ] Behavior section: serialize behavior_contracts as input/output pairs in the template format.
+  - [x] Behavior section: serialize behavior_contracts as input/output pairs in the template format.
   - [ ] Tests: empty ProductSpec produces template-like output with FILL IN markers on required sections; fully populated ProductSpec serializes all sections; Sources and References entries formatted correctly with flags; Design section with user_prose and auto_generated renders both in order; Scope include/exclude rendered; Behavior contracts rendered; empty optional sections get heading and comment only.
 
 - [ ] Implement round-trip property test for format_spec
