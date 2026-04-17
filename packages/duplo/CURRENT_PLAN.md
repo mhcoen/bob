@@ -116,9 +116,9 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## duplo init: core implementation
 
-- [ ] Create duplo/init.py with run_init(args) entry point
+- [x] Create duplo/init.py with run_init(args) entry point
   - [x] Per INIT-design.md section "Implementation shape". New module with a single run_init entry point.
-  - [ ] Dependencies: duplo.spec_writer (for draft_spec, format_spec), duplo.fetcher (for fetch_site with scrape_depth), duplo.validator (for validate_product_url), duplo.scanner (for scan_directory on ref/).
+  - [x] Dependencies: duplo.spec_writer (for draft_spec, format_spec), duplo.fetcher (for fetch_site with scrape_depth), duplo.validator (for validate_product_url), duplo.scanner (for scan_directory on ref/).
 
 - [ ] Implement run_init for the no-arguments case
   - [ ] Per INIT-design.md section "duplo init (no arguments)".
