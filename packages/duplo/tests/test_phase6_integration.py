@@ -819,3 +819,217 @@ class TestInitForceOverwritesExistingSpec:
         # the error path must not rewrite, truncate, or touch it.
         assert spec_path.read_bytes() == original_bytes
         assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
+
+
+# ---------------------------------------------------------------------------
+# 6.25 fixtures: end-to-end flow from ``run_init`` through ``_subsequent_run``
+# ---------------------------------------------------------------------------
+
+# Architecture prose used to fill in the ``<FILL IN>`` marker that
+# ``draft_spec`` leaves behind in the URL flow.  Distinctive enough that
+# later subtasks can assert the edited spec round-trips through
+# :func:`read_spec` with ``fill_in_architecture`` flipped to ``False``.
+_FILLED_IN_ARCHITECTURE = "Swift 5.9, SwiftUI, macOS 14+."
+
+# The ``<FILL IN>`` marker that the URL-flow drafter leaves in
+# ``## Architecture`` (matches the ``drafted`` string in
+# :meth:`TestInitUrlProducesPrefilledSpec.test_run_init_with_url_argument`).
+_ARCHITECTURE_FILL_IN = "<FILL IN: language, framework, platform, constraints>"
+
+# ``draft_spec`` return value used for the 6.25 URL flow.  Purpose is
+# long enough (>50 chars) to clear ``validate_for_run``'s sparse check;
+# the single ``product-reference`` source with ``scrape: deep`` makes
+# :func:`scrapeable_sources` non-empty so ``_subsequent_run`` takes the
+# declared-sources branch (which exercises ``fetch_site`` per PLAN.md
+# § 6.25.2).  ``## Architecture`` intentionally carries the ``FILL IN``
+# marker — the test flips it to :data:`_FILLED_IN_ARCHITECTURE` after
+# ``run_init`` completes.
+_END_TO_END_DRAFTED_SPEC = (
+    "## Purpose\n\n"
+    "Numi — a calculator app that shows answers inline as you type, "
+    "with history and unit conversion.\n\n"
+    "## Sources\n\n"
+    f"- {_IDENTIFIED_FIXTURE_URL}\n"
+    "  role: product-reference\n"
+    "  scrape: deep\n\n"
+    "## Architecture\n\n"
+    f"{_ARCHITECTURE_FILL_IN}\n"
+)
+
+
+def _make_end_to_end_features():
+    """Return the feature list the mocked ``extract_features`` should yield.
+
+    Two features give ``generate_roadmap`` something to assemble and
+    ``select_features`` something to filter.  Names are intentionally
+    distinct so ``save_features``'s ``_find_duplicate_groups`` (which is
+    mocked away) never has to decide.  Built lazily so the import of
+    :class:`duplo.extractor.Feature` does not become a load-time
+    dependency of this module — keeps import failures scoped to tests
+    that actually use this fixture.
+    """
+    from duplo.extractor import Feature
+
+    return [
+        Feature(
+            name="Inline calculation",
+            description="Answers appear inline as the user types the expression.",
+            category="Calculation",
+        ),
+        Feature(
+            name="Unit conversion",
+            description="Convert between units like '3 miles in km' inline.",
+            category="Calculation",
+        ),
+    ]
+
+
+def _make_end_to_end_roadmap():
+    """Return the roadmap the mocked ``generate_roadmap`` should yield."""
+    return [
+        {
+            "phase": 1,
+            "title": "Core calculator",
+            "goal": "Inline expression evaluation",
+            "features": ["Inline calculation", "Unit conversion"],
+            "test": "User types an expression and sees the result inline.",
+        },
+    ]
+
+
+def _make_end_to_end_plan_content():
+    """Return the PLAN.md body the mocked ``generate_phase_plan`` should yield."""
+    return (
+        "# Numi — Phase 1: Core calculator\n\n"
+        "- [ ] Set up project scaffolding\n"
+        '- [ ] Implement inline evaluation [feat: "Inline calculation"]\n'
+        '- [ ] Implement unit conversion [feat: "Unit conversion"]\n'
+    )
+
+
+def _select_all_features(features, **_kwargs):
+    """Mock replacement for ``select_features`` that returns every feature.
+
+    Matches the helper in ``tests/test_phase5_integration.py``; duplicated
+    here so the two test modules stay independent.
+    """
+    return list(features)
+
+
+class TestInitThenDuploRunWorksEndToEnd:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_then_duplo_run_works_end_to_end``.
+    """
+
+    def test_run_init_then_edit_architecture_then_subsequent_run(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Run ``run_init`` with a URL, fill in ``## Architecture``, then
+        run ``_subsequent_run`` against the same tmpdir.
+
+        Stages the end-to-end integration test for PLAN.md § 6.25:
+        invokes the URL-flow ``run_init`` (under the same three mocks
+        the 6.20 subtasks use: ``fetch_site`` /
+        ``validate_product_url`` / ``draft_spec``) so SPEC.md and
+        ``ref/`` land on disk, programmatically rewrites
+        ``## Architecture`` to replace the drafter's
+        :data:`_ARCHITECTURE_FILL_IN` marker with
+        :data:`_FILLED_IN_ARCHITECTURE` (so :func:`validate_for_run`
+        stops blocking), then calls :func:`_subsequent_run` directly
+        under the mocks that keep the pipeline off the LLM and network
+        (``fetch_site``, ``extract_features``, the in-``save_features``
+        ``_find_duplicate_groups`` call, ``select_features``,
+        ``generate_roadmap``, ``generate_phase_plan``).
+        ``_subsequent_run`` is called — not ``main()`` — because the
+        task targets the pipeline proper, not the migration gate
+        (subtask 6.25.3 will assert no migration message was printed,
+        which is trivially true when the gate is bypassed).  This
+        subtask only confirms the three-action sequence runs to
+        completion under the mocks and lays down PLAN.md; the
+        content-level assertions on PLAN.md / spec consumption arrive
+        in later 6.25 subtasks.
+        """
+        from duplo.init import run_init
+        from duplo.main import _subsequent_run
+        from duplo.validator import ValidationResult
+
+        monkeypatch.chdir(tmp_path)
+
+        # --- Action 1: run_init with a URL to produce SPEC.md. -------------
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="single identifiable product",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=_END_TO_END_DRAFTED_SPEC),
+        ):
+            run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+
+        # Drain captured output so it does not bleed into the
+        # _subsequent_run output the next step produces.
+        capsys.readouterr()
+
+        spec_path = tmp_path / "SPEC.md"
+        assert spec_path.is_file()
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").is_file()
+        # Precondition for the edit step: the drafter left the marker.
+        assert _ARCHITECTURE_FILL_IN in spec_path.read_text()
+
+        # --- Action 2: programmatically edit SPEC.md to fill in Architecture.
+        spec_text = spec_path.read_text()
+        spec_text = spec_text.replace(_ARCHITECTURE_FILL_IN, _FILLED_IN_ARCHITECTURE)
+        spec_path.write_text(spec_text)
+        assert _ARCHITECTURE_FILL_IN not in spec_path.read_text()
+        assert _FILLED_IN_ARCHITECTURE in spec_path.read_text()
+
+        # --- Action 3: _subsequent_run against the same tmpdir. ------------
+        # The fetch_site fixture reused here is the same one run_init
+        # consumed; _scrape_declared_sources will re-fetch the URL
+        # declared in SPEC.md via the patched duplo.main.fetch_site and
+        # receive the same deterministic tuple.
+        with (
+            patch(
+                "duplo.main.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=_make_end_to_end_features(),
+            ),
+            # save_features's own early-return handles the empty-
+            # existing-list case without LLM, but the post-merge pass
+            # calls _find_duplicate_groups once 2+ features are in the
+            # list.  Patch it to skip that LLM call.
+            patch("duplo.saver._find_duplicate_groups", return_value=[]),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_make_end_to_end_roadmap(),
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=_make_end_to_end_plan_content(),
+            ),
+        ):
+            _subsequent_run()
+
+        capsys.readouterr()
+
+        # Minimal staging assertion: the pipeline ran to completion and
+        # produced PLAN.md.  Detailed content-level assertions (PLAN.md
+        # body, spec consumption, migration-message absence) arrive in
+        # the follow-on 6.25 subtasks.
+        assert (tmp_path / "PLAN.md").is_file()
