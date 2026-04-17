@@ -8,6 +8,16 @@ mocked so tests do not depend on claude -p availability or network.
 from __future__ import annotations
 
 import argparse
+from unittest.mock import patch
+
+from duplo.doc_tables import DocStructures
+from duplo.fetcher import PageRecord
+
+
+_IDENTIFIED_FIXTURE_URL = "https://numi.app"
+_IDENTIFIED_FIXTURE_TEXT = (
+    "=== https://numi.app ===\nNumi — a calculator app that shows answers inline as you type."
+)
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -20,6 +30,29 @@ def _make_args(**overrides) -> argparse.Namespace:
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
+
+
+def _fetch_site_identified_fixture() -> tuple:
+    """Build a ``fetch_site`` return tuple whose scraped text names a product.
+
+    Shape matches what :func:`duplo.fetcher.fetch_site` returns for a
+    successful shallow scrape: ``(text, code_examples, doc_structures,
+    page_records, raw_pages)``. The scraped *text* deliberately names
+    "Numi" so the (separately mocked) validator in downstream subtasks
+    can flag it as a single identifiable product.
+    """
+    record = PageRecord(
+        url=_IDENTIFIED_FIXTURE_URL,
+        fetched_at="2026-04-17T00:00:00+00:00",
+        content_hash="deadbeef",
+    )
+    return (
+        _IDENTIFIED_FIXTURE_TEXT,
+        [],
+        DocStructures(),
+        [record],
+        {_IDENTIFIED_FIXTURE_URL: "<html></html>"},
+    )
 
 
 class TestInitNoArgsProducesTemplate:
@@ -60,3 +93,32 @@ class TestInitNoArgsProducesTemplate:
         assert readme_path.read_text() == _REF_README_CONTENT
 
         assert needs_migration(tmp_path) is False
+
+
+class TestInitUrlProducesPrefilledSpec:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_url_produces_prefilled_spec``.
+    """
+
+    def test_fetch_site_mocked_with_identified_fixture(self, tmp_path, monkeypatch):
+        """Mock ``fetch_site`` to return a fixture scrape with identifiable product name.
+
+        Stages the URL-flow integration test: confirms the helper
+        produces a scrape tuple whose text names a product and that
+        patching ``duplo.init.fetch_site`` with it routes the fixture
+        to callers. Later subtasks call ``run_init`` under this mock
+        and assert on SPEC.md contents.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        fixture = _fetch_site_identified_fixture()
+        text, _examples, _structures, records, _raw = fixture
+        assert records, "fixture must look like a successful fetch"
+        assert "Numi" in text
+
+        with patch("duplo.init.fetch_site", return_value=fixture) as mock_fetch:
+            from duplo.init import fetch_site as patched_fetch_site
+
+            assert patched_fetch_site(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow") == fixture
+
+        mock_fetch.assert_called_once_with(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
