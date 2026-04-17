@@ -9,6 +9,25 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# Ruff codes we consider safely salvageable by appending `# noqa: CODE`
+# to the offending line. These are purely stylistic or cosmetic checks
+# that should never block a long-running batch.
+# Extend carefully. Logic-bearing checks (F-family unused/undefined,
+# bugbear B-family logic traps, security S-family) MUST NOT be added.
+_SALVAGEABLE_RUFF_CODES: frozenset[str] = frozenset(
+    {
+        "E501",  # line too long
+        "E741",  # ambiguous variable name
+        "W291",  # trailing whitespace
+        "W293",  # blank line contains whitespace
+    }
+)
+
+# Ruff error line: "path/to/file.py:166:100: E501 Line too long ..."
+_RUFF_ERROR_RE = re.compile(
+    r"^(?P<path>[^:\s][^:]*?):(?P<line>\d+):(?P<col>\d+):\s+(?P<code>[A-Z]+\d+)\b"
+)
+
 
 @dataclass
 class CheckResult:
@@ -82,6 +101,119 @@ def run_autofix(project_dir: str | Path) -> None:
             )
         except subprocess.TimeoutExpired:
             pass
+
+
+def _parse_ruff_failures(output: str) -> list[tuple[str, int, str]]:
+    """Extract (file, line_1indexed, code) tuples from a ruff check output.
+
+    Returns an empty list if no ruff-style error lines are found (so the
+    caller can distinguish "ruff errors we can see" from "something else
+    broke, like pytest").
+    """
+    failures: list[tuple[str, int, str]] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        m = _RUFF_ERROR_RE.match(line)
+        if not m:
+            continue
+        try:
+            lineno = int(m.group("line"))
+        except ValueError:
+            continue
+        failures.append((m.group("path"), lineno, m.group("code")))
+    return failures
+
+
+def try_salvage_style_failures(
+    project_dir: str | Path,
+    failure_output: str,
+) -> tuple[bool, list[str]]:
+    """Patch minor ruff style violations in place by appending ``# noqa``.
+
+    Only triggers when *every* ruff failure in *failure_output* has a
+    code in ``_SALVAGEABLE_RUFF_CODES``. In that case the referenced
+    lines are edited to suppress the check for that line only; no
+    repo-wide config change is made.
+
+    Returns ``(salvaged, patched_files)``:
+    - ``salvaged`` is True if all failures were salvageable and at
+      least one line was patched.
+    - ``patched_files`` is the list of files whose contents changed,
+      for logging.
+
+    A False return means the caller should treat the check failure as
+    real. A True return means the caller should re-run the checks and
+    commit the patched files along with the batch/task changes.
+    """
+    project_dir = Path(project_dir)
+    failures = _parse_ruff_failures(failure_output)
+    if not failures:
+        return False, []
+    if any(code not in _SALVAGEABLE_RUFF_CODES for _, _, code in failures):
+        return False, []
+
+    # Group by file so each file is read/written once.
+    by_file: dict[str, list[tuple[int, str]]] = {}
+    for path, lineno, code in failures:
+        by_file.setdefault(path, []).append((lineno, code))
+
+    patched: list[str] = []
+    for rel_path, entries in by_file.items():
+        file_path = (project_dir / rel_path).resolve()
+        # Sanity: must live inside the project.
+        try:
+            file_path.relative_to(project_dir.resolve())
+        except ValueError:
+            continue
+        if not file_path.is_file():
+            continue
+        try:
+            text = file_path.read_text()
+        except OSError:
+            continue
+        lines = text.splitlines(keepends=True)
+        changed = False
+        for lineno, code in entries:
+            idx = lineno - 1
+            if idx < 0 or idx >= len(lines):
+                continue
+            original = lines[idx]
+            # Preserve the trailing newline (if any) while appending.
+            if original.endswith("\n"):
+                body, eol = original[:-1], "\n"
+            else:
+                body, eol = original, ""
+            # Skip if this exact noqa already present.
+            noqa_re = re.compile(r"#\s*noqa(?::\s*([A-Z0-9, ]+))?\b")
+            m = noqa_re.search(body)
+            if m:
+                existing_codes = m.group(1) or ""
+                existing_set = {
+                    c.strip() for c in existing_codes.split(",") if c.strip()
+                }
+                if code in existing_set:
+                    continue
+                # Extend the existing noqa list.
+                if existing_codes:
+                    new_codes = ", ".join(sorted(existing_set | {code}))
+                else:
+                    new_codes = code
+                new_body = body[: m.start()] + f"# noqa: {new_codes}" + body[m.end() :]
+            else:
+                # Append a fresh noqa comment, with a separator if needed.
+                sep = "" if body.endswith(" ") or not body.strip() else "  "
+                new_body = f"{body}{sep}# noqa: {code}"
+            if new_body != body:
+                lines[idx] = new_body + eol
+                changed = True
+        if changed:
+            try:
+                file_path.write_text("".join(lines))
+                patched.append(rel_path)
+            except OSError:
+                continue
+
+    return bool(patched), patched
 
 
 def run_checks(

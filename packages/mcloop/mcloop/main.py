@@ -39,7 +39,14 @@ from mcloop.checklist import (
 from mcloop.checklist import (
     task_label as _task_label,
 )
-from mcloop.checks import detect_build, detect_run, get_check_commands, run_autofix, run_checks
+from mcloop.checks import (
+    detect_build,
+    detect_run,
+    get_check_commands,
+    run_autofix,
+    run_checks,
+    try_salvage_style_failures,
+)
 from mcloop.claude_md_sync import handle_sync, reconcile_pending
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.conftest_guard import ensure_conftest_guard
@@ -421,6 +428,30 @@ def _run_batch(
         project_dir,
         changed_files=changed_files,
     )
+    if not check_result.passed:
+        # Try salvage: if ruff's only complaints are minor style codes
+        # (E501 line too long, etc.), patch the offending lines with
+        # `# noqa` and re-run once. This prevents a 14-minute batch
+        # from being thrown away for one unbreakable long string.
+        salvaged, patched = try_salvage_style_failures(
+            project_dir,
+            check_result.output,
+        )
+        if salvaged:
+            print(
+                formatting.system_msg(
+                    "Salvaged minor style failures via noqa in: "
+                    + ", ".join(patched)
+                ),
+                flush=True,
+            )
+            # Refresh changed_files since we just edited more files.
+            changed_files = _changed_files(project_dir)
+            pre_check_status = _worktree_status(project_dir)
+            check_result = run_checks(
+                project_dir,
+                changed_files=changed_files,
+            )
     if check_result.passed:
         post = set(_worktree_status(project_dir).splitlines())
         pre = set(pre_check_status.splitlines()) if pre_check_status else set()
@@ -1197,6 +1228,25 @@ def run_loop(
                     project_dir,
                     changed_files=changed_files,
                 )
+                if not check_result.passed:
+                    salvaged, patched = try_salvage_style_failures(
+                        project_dir,
+                        check_result.output,
+                    )
+                    if salvaged:
+                        print(
+                            formatting.system_msg(
+                                "Salvaged minor style failures via noqa in: "
+                                + ", ".join(patched)
+                            ),
+                            flush=True,
+                        )
+                        changed_files = _changed_files(project_dir)
+                        pre_check_status = _worktree_status(project_dir)
+                        check_result = run_checks(
+                            project_dir,
+                            changed_files=changed_files,
+                        )
                 if check_result.passed:
                     post = set(_worktree_status(project_dir).splitlines())
                     pre = set(pre_check_status.splitlines()) if pre_check_status else set()
