@@ -69,7 +69,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
   - [x] Build structured-output prompt for claude -p per DRAFTER-design.md: request JSON with fields purpose, architecture, design, behavior_contracts, scope_include, scope_exclude.
   - [x] Architecture is filled ONLY when description prose explicitly states a stack/platform/language. URL scrapes do NOT inform architecture. Per DRAFTER-design.md and INIT-design.md.
-  - [ ] notes is deliberately NOT in the LLM schema (populated by draft_spec from raw description prose).
+  - [x] notes is deliberately NOT in the LLM schema (populated by draft_spec from raw description prose).
   - [ ] Parse JSON response. Strip code fences before parsing (reuse strip_fences from duplo/parsing.py).
   - [ ] Construct ProductSpec with: filled fields from JSON (when not null/empty); FILL IN markers for required fields the LLM returned null for; empty content for optional fields the LLM returned null for.
   - [ ] Retry logic: two retry attempts with backoff on LLM failure or JSON parse error, then fall back to empty ProductSpec (template-only draft) with a diagnostic per DRAFTER-design.md section "Error handling".
