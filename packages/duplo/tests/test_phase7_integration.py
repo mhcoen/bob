@@ -84,13 +84,18 @@ class TestOldProjectStillBlockedByMigration:
     ``_first_run`` but must NOT have weakened the migration gate.
     """
 
-    def test_old_project_hits_migration_gate(self, tmp_path, monkeypatch):
+    def test_old_project_hits_migration_gate(self, tmp_path, monkeypatch, capsys):
         """Run duplo (no subcommand) against an old-format project.
 
         Fixture: ``.duplo/duplo.json`` present, ``SPEC.md`` absent.
         This is the shape of a project created by the pre-redesign
         duplo (which wrote ``duplo.json`` as its state file but never
         authored ``SPEC.md``).
+
+        Asserts:
+        - The migration message is printed to stdout.
+        - The message references ``duplo init`` as the recommended path.
+        - The process exits 1 (migration needed is a hard stop).
         """
         duplo_dir = tmp_path / ".duplo"
         duplo_dir.mkdir()
@@ -101,5 +106,11 @@ class TestOldProjectStillBlockedByMigration:
         monkeypatch.setattr("sys.argv", ["duplo"])
         monkeypatch.setattr("builtins.input", _fail_on_input)
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             main()
+
+        assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "This project predates the SPEC.md / ref/ redesign." in captured.out
+        assert "duplo init" in captured.out
