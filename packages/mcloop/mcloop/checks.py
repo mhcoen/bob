@@ -226,12 +226,24 @@ def run_checks(
     Call *run_autofix()* first if you want auto-formatting applied
     before verification.
 
-    When *changed_files* is provided, test commands (e.g. pytest) are
-    scoped to only the test files that correspond to the changed source
-    files.  Linters always run in full.  If no matching test files are
-    found the test command is skipped entirely.
+    When *changed_files* is provided, both test and lint commands are
+    scoped to only the files this batch/task touched. Pytest is scoped
+    to tests that map to changed source files. Ruff check/format is
+    scoped to the changed Python files directly. Pre-existing errors
+    in unrelated files therefore do not block an otherwise clean
+    batch. If no matching test files are found the test command is
+    skipped; if no Python files changed the linter is skipped.
+
+    When *changed_files* is None (phase boundary, no-op check), every
+    command runs against the full repo as configured.
     """
-    from mcloop.targeted import is_test_command, map_to_tests, targeted_pytest_command
+    from mcloop.targeted import (
+        is_scoped_python_linter,
+        is_test_command,
+        map_to_tests,
+        targeted_linter_command,
+        targeted_pytest_command,
+    )
 
     project_dir = Path(project_dir)
     commands = get_check_commands(project_dir)
@@ -242,8 +254,8 @@ def run_checks(
         # found (e.g. new module with no test file yet), fall back to
         # the full configured test command rather than skipping tests
         # entirely.  Otherwise untested code could commit.
-        py_changed = any(f.endswith(".py") for f in changed_files)
-        fallback_to_full = py_changed and not test_files
+        py_changed = [f for f in changed_files if f.endswith(".py")]
+        fallback_to_full = bool(py_changed) and not test_files
         narrowed: list[str] = []
         for cmd in commands:
             if is_test_command(cmd):
@@ -252,6 +264,16 @@ def run_checks(
                 elif fallback_to_full:
                     narrowed.append(cmd)
                 # else: no Python changes at all, safe to skip tests
+            elif is_scoped_python_linter(cmd):
+                # Scope the linter to the Python files this batch/task
+                # actually touched. Prevents pre-existing unrelated
+                # errors elsewhere in the repo from killing an
+                # otherwise clean batch. If no .py files changed,
+                # skip the linter entirely (matches the pytest skip
+                # behavior for non-Python changes).
+                if py_changed:
+                    narrowed.append(targeted_linter_command(cmd, py_changed))
+                # else: no Python changes, skip the linter
             else:
                 narrowed.append(cmd)
         commands = narrowed

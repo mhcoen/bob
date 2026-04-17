@@ -242,14 +242,15 @@ def test_run_checks_second_command_fails(mock_run, tmp_path):
 
 
 @patch("mcloop.checks.subprocess.run")
-def test_run_autofix_calls_ruff_fix_only(mock_run, tmp_path):
-    """run_autofix runs ruff check --fix only (ruff format removed 2026-04-15)."""
+def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
+    """run_autofix runs both ruff check --fix and ruff format."""
     ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
     mock_run.return_value = ok
     run_autofix(tmp_path)
-    assert mock_run.call_count == 1
+    assert mock_run.call_count == 2
     cmds = [call[0][0] for call in mock_run.call_args_list]
     assert cmds[0] == ["ruff", "check", "--fix", "."]
+    assert cmds[1] == ["ruff", "format", "."]
 
 
 @patch("mcloop.checks.subprocess.run")

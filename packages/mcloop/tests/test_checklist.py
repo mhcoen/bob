@@ -1597,6 +1597,7 @@ def test_purge_completed_bugs_no_checked(tmp_path):
     # Content preserved (trailing newline normalization is OK)
     assert "Open bug A" in after
     assert "Open bug B" in after
+    assert before.rstrip() == after.rstrip()
 
 
 def test_purge_completed_bugs_keeps_prose(tmp_path):

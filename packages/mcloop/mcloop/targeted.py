@@ -59,3 +59,39 @@ def is_test_command(cmd: str) -> bool:
     if parts[0] == "python" and len(parts) >= 3 and parts[1] == "-m" and parts[2] == "pytest":
         return True
     return False
+
+
+def is_scoped_python_linter(cmd: str) -> bool:
+    """Return True if cmd is a ruff check/format invocation we can scope.
+
+    Recognizes the two repo-wide forms mcloop itself generates via
+    auto-detection:
+      - ``ruff check .``
+      - ``ruff format --check .``
+
+    Non-default invocations (with extra flags, glob patterns, or config
+    overrides) are left alone to avoid changing behavior the user
+    configured deliberately.
+    """
+    parts = cmd.split()
+    if parts == ["ruff", "check", "."]:
+        return True
+    if parts == ["ruff", "format", "--check", "."]:
+        return True
+    return False
+
+
+def targeted_linter_command(
+    cmd: str,
+    python_files: list[str],
+) -> str:
+    """Rewrite a scoped ruff command to target specific Python files.
+
+    Replaces the trailing ``.`` (whole repo) with a space-joined list
+    of file paths. Caller must have already filtered ``python_files``
+    to .py files that actually exist.
+    """
+    parts = cmd.split()
+    # Drop the trailing "." and append the explicit file list.
+    assert parts[-1] == ".", f"unexpected linter cmd shape: {cmd!r}"
+    return " ".join(parts[:-1] + python_files)
