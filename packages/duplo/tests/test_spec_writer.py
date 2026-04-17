@@ -697,6 +697,14 @@ def _well_formed_sources_and_refs() -> tuple[list[SourceEntry], list[ReferenceEn
     )
 
 
+def _fixture_empty() -> ProductSpec:
+    """Truly empty spec. Does NOT round-trip cleanly: see NOTES.md [6.3.1].
+    Used only by ``test_empty_spec_round_trip_pins_documented_behavior`` —
+    excluded from the standard round-trip parametrization.
+    """
+    return ProductSpec()
+
+
 def _fixture_minimal() -> ProductSpec:
     """Minimally filled spec: required sections populated plus one entry each
     in sections whose comment hints would otherwise be re-parsed as content.
@@ -918,6 +926,33 @@ class TestRoundTrip:
         a = ProductSpec(purpose="x", architecture="y")
         b = ProductSpec(purpose="x", architecture="z")
         assert not _spec_equal_for_round_trip(a, b)
+
+    def test_empty_spec_round_trip_pins_documented_behavior(self):
+        """Truly empty ProductSpec does not round-trip identically: the
+        parser picks up example content from format_spec's comment hints,
+        and FILL IN markers survive as Purpose/Architecture text. Pins
+        the current behavior documented in NOTES.md [6.3.1]; if the
+        parser is later updated to comment-strip those section bodies,
+        this test will fail loudly to flag the behavior change.
+        """
+        spec = _fixture_empty()
+        serialized = format_spec(spec)
+        parsed = _parse_spec(serialized)
+        assert "FILL IN" in parsed.purpose
+        assert "FILL IN" in parsed.architecture
+        assert parsed.fill_in_purpose is True
+        assert parsed.fill_in_architecture is True
+        assert parsed.sources, "parser currently picks up example SourceEntry from comment hints"
+        assert parsed.references, (
+            "parser currently picks up example ReferenceEntry from comment hints"
+        )
+        assert parsed.scope_include, (
+            "parser currently picks up example scope items from comment hints"
+        )
+        assert parsed.behavior_contracts, (
+            "parser currently picks up example behavior contracts from comment hints"
+        )
+        assert not _spec_equal_for_round_trip(parsed, spec)
 
     def test_dropped_fields_round_trip_as_empty(self):
         """Documenting the asymmetry: dropped_* are parser-only and do not
