@@ -127,7 +127,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Write ref/README.md with the static content from INIT-design.md section "ref/README.md content". Write-once: do not overwrite if ref/README.md already exists.
   - [x] Write SPEC.md with the static SPEC-template.md content (via format_spec on an empty ProductSpec).
   - [x] Print the output message per INIT-design.md: "Created ref/...", "Wrote SPEC.md (template, no inputs).", and the "Next steps:" block.
-  - [ ] Exit 0.
+  - [x] Exit 0.
   - [ ] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
 
 - [ ] Implement run_init for the URL-only case
