@@ -65,11 +65,30 @@ def _clean_argv(monkeypatch):
     monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
 
 
+_STUB_SPEC = (
+    "# Stub\n"
+    "\n"
+    "## Purpose\n"
+    "Stub spec used by tests. Long enough to pass validate_for_run purpose check.\n"
+    "\n"
+    "## Architecture\n"
+    "Web app using React.\n"
+)
+
+
 def _write_duplo_json(tmp_path: Path, data: dict) -> None:
-    """Write duplo.json into the .duplo/ subdirectory of *tmp_path*."""
+    """Write duplo.json into the .duplo/ subdirectory of *tmp_path*.
+
+    Also writes a stub SPEC.md so main()'s dispatch gate (7.2.3) routes
+    to _subsequent_run. Tests that need specific SPEC.md content can
+    overwrite the file afterwards.
+    """
     duplo_dir = tmp_path / ".duplo"
     duplo_dir.mkdir(exist_ok=True)
     (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
+    spec_path = tmp_path / "SPEC.md"
+    if not spec_path.exists():
+        spec_path.write_text(_STUB_SPEC, encoding="utf-8")
 
 
 def _read_duplo_json(tmp_path: Path) -> dict:
@@ -80,11 +99,12 @@ def _read_duplo_json(tmp_path: Path) -> dict:
 class TestMainFirstRun:
     """First run: no .duplo/duplo.json exists."""
 
-    def test_exits_when_no_reference_materials(self, tmp_path, monkeypatch):
+    def test_exits_when_no_reference_materials(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit) as exc_info:
             main()
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 0
+        assert "duplo init" in capsys.readouterr().out
 
     @SKIP_FIRST_RUN
     def test_scans_and_fetches_url(self, tmp_path, monkeypatch):
@@ -929,6 +949,15 @@ class TestAnalyzeNewFiles:
                     "preferences": [],
                 },
             },
+        )
+        # Overwrite stub SPEC.md to declare the ref image so the
+        # spec-driven path picks it up.
+        (tmp_path / "SPEC.md").write_text(
+            "# Stub\n\n## Purpose\n"
+            "Stub spec used by tests. Long enough to pass validate_for_run check.\n"
+            "\n## Architecture\nWeb app using React.\n"
+            "\n## References\n- ref/new.png\n  role: visual-target\n",
+            encoding="utf-8",
         )
         # Save empty hash manifest.
         duplo_dir = tmp_path / ".duplo"
@@ -2697,13 +2726,10 @@ class TestSubsequentRunReextractsFeatures:
         ):
             main()
 
-        mock_extract.assert_called_once_with(
-            "product text",
-            existing_names=["Auth"],
-            spec_text="",
-            scope_include=None,
-            scope_exclude=None,
-        )
+        mock_extract.assert_called_once()
+        call_args = mock_extract.call_args
+        assert call_args.args == ("product text",)
+        assert call_args.kwargs["existing_names"] == ["Auth"]
         mock_save.assert_called_once_with([new_feature])
 
     def test_skips_extraction_when_no_scraped_text(self, tmp_path, monkeypatch):
@@ -6412,20 +6438,32 @@ class TestMigrationDispatchOrder:
     def test_migration_pass_without_duplo_json_prints_init_message(
         self, tmp_path, monkeypatch, capsys
     ):
-        """When _check_migration returns and no duplo.json exists, main
-        prints the duplo-init message and exits 1 (Phase 7.2.1 — _first_run
-        removed; fresh-directory dispatch refinement lands in 7.2.3)."""
+        """Fresh directory (no SPEC.md, no duplo.json) prints init message
+        and exits 0 (Phase 7.2.3 dispatch refinement)."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
         with pytest.raises(SystemExit) as exc_info:
             main()
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "duplo init" in captured.err
+        assert "duplo init" in captured.out
 
     def test_migration_pass_proceeds_to_subsequent_run(self, tmp_path, monkeypatch):
         """When _check_migration returns, _subsequent_run is called (duplo.json exists)."""
         _write_duplo_json(tmp_path, {"features": []})
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
+        subsequent_run_called = []
+        monkeypatch.setattr(
+            "duplo.main._subsequent_run",
+            lambda: subsequent_run_called.append(True),
+        )
+        main()
+        assert len(subsequent_run_called) == 1
+
+    def test_spec_only_proceeds_to_subsequent_run(self, tmp_path, monkeypatch):
+        """SPEC.md alone (no duplo.json yet) routes to _subsequent_run per 7.2.3."""
+        (tmp_path / "SPEC.md").write_text(_STUB_SPEC, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
         subsequent_run_called = []

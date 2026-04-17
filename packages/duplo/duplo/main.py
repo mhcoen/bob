@@ -784,20 +784,23 @@ def main() -> None:
         _fix_mode(args)
     else:
         _check_migration(Path.cwd())
-        if not duplo_path.exists():
-            # _first_run was removed in 7.2.1. The dispatch rewrite
-            # (CURRENT_PLAN.md line 20 / task 7.2.3) will distinguish
-            # "fresh directory" from "partial reset" and choose the right
-            # next step. Until then, direct the user to `duplo init`.
-            print(
-                "No duplo project found. Run `duplo init` first to create SPEC.md.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        else:
+        spec_path = Path.cwd() / "SPEC.md"
+        if spec_path.exists():
             if args.url:
                 print("Project already initialized. URL argument ignored.")
             _subsequent_run()
+        elif not duplo_path.exists():
+            print("No SPEC.md found. Run `duplo init` first to create SPEC.md.")
+            sys.exit(0)
+        else:
+            # duplo.json exists but SPEC.md does not — migration check
+            # should have caught this. Defensive fallback in case the
+            # migration signals ever diverge.
+            print(
+                "No SPEC.md found. Run `duplo init` first to create SPEC.md.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     diagnostics_print_summary()
 
