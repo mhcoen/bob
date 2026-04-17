@@ -40,17 +40,6 @@ _USER_AGENT = (
 )
 _HEADERS = {"User-Agent": _USER_AGENT}
 
-# Patterns in URL path or anchor text that indicate a documentation link.
-# Used to decide whether to follow cross-domain links during crawling.
-_DOCS_LINK = re.compile(
-    r"(docs?|documentation|wiki|guides?|handbook|reference|manual"
-    r"|getting.started|quickstart|tutorial|api.ref|user.guide"
-    r"|developer.guide|knowledge.base|help.center|support.portal"
-    r"|read.the.docs|gitbook|howto|how.to|cookbook|examples?|learn"
-    r"|instructions|usage|walkthrough)",
-    re.IGNORECASE,
-)
-
 # Paths/anchors that indicate high-value technical content
 _HIGH_PRIORITY = re.compile(
     r"(docs?|documentation|features?|guides?|changelog|changelogs?|"
@@ -66,87 +55,11 @@ _LOW_PRIORITY = re.compile(
     re.IGNORECASE,
 )
 
-# Hosting platform domains whose own documentation should never be
-# followed as cross-domain docs links. When a product is hosted on
-# one of these platforms (e.g. a GitHub repo), the platform's own
-# docs/features/marketing pages are not part of the product.
-# Product documentation paths on platform domains that should be allowed
-# through even when the domain is in _PLATFORM_DOMAINS.
-_PRODUCT_DOC_PATHS = re.compile(r"^/[^/]+/[^/]+/(wiki|docs|documentation|guide)")
-
-_PLATFORM_DOMAINS = {
-    "github.com",
-    "docs.github.com",
-    "gh.io",
-    "gitlab.com",
-    "docs.gitlab.com",
-    "bitbucket.org",
-    "support.atlassian.com",
-    "sourceforge.net",
-    "codeberg.org",
-    "sr.ht",
-    "npmjs.com",
-    "www.npmjs.com",
-    "pypi.org",
-    "crates.io",
-    "hub.docker.com",
-    "formulae.brew.sh",
-    "brew.sh",
-}
-
 
 def _is_html_content_type(ct: str) -> bool:
     """Return True if the Content-Type header indicates HTML content."""
     ct_lower = ct.lower().split(";")[0].strip()
     return ct_lower in ("text/html", "application/xhtml+xml")
-
-
-def _is_platform_domain(url: str) -> bool:
-    """Return True if *url* points to a hosting platform's own pages.
-
-    Returns False for product-specific documentation hosted on a
-    platform (e.g. ``github.com/org/repo/wiki``) since those are
-    legitimate product docs, not platform marketing pages.
-    """
-    parsed = urlparse(url)
-    domain = parsed.netloc
-    path = parsed.path.lower()
-
-    is_platform = False
-    for plat in _PLATFORM_DOMAINS:
-        if domain == plat or domain.endswith("." + plat):
-            is_platform = True
-            break
-    if not is_platform:
-        return False
-
-    # Allow product documentation paths on platform domains.
-    # e.g. github.com/org/repo/wiki, gitlab.com/org/repo/-/wikis
-    if _PRODUCT_DOC_PATHS.search(path):
-        return False
-
-    return True
-
-
-def is_docs_link(url: str, anchor: str) -> bool:
-    """Return True if the link likely points to documentation.
-
-    Checks the URL path and anchor text for documentation-related words
-    rather than matching a hardcoded list of hosting platforms.
-    """
-    path = urlparse(url).path
-    text = f"{path} {anchor}"
-    return bool(_DOCS_LINK.search(text))
-
-
-def detect_docs_links(html: str, base_url: str) -> list[tuple[str, str]]:
-    """Extract documentation links from *html*, including cross-domain ones.
-
-    Returns (absolute_url, anchor_text) pairs for links whose text or URL
-    path indicates they point to documentation.
-    """
-    all_links = extract_links(html, base_url)
-    return [(url, anchor) for url, anchor in all_links if is_docs_link(url, anchor)]
 
 
 def score_link(url: str, anchor: str) -> int:

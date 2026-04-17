@@ -21,7 +21,6 @@ from duplo.questioner import BuildPreferences
 DUPLO_DIR = ".duplo"
 DUPLO_JSON = ".duplo/duplo.json"
 PRODUCT_JSON = ".duplo/product.json"
-CLAUDE_MD = "CLAUDE.md"
 
 
 def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
@@ -162,57 +161,6 @@ def derive_app_name(
     return app_name
 
 
-_CLAUDE_MD_CONTENT = """\
-# Visual verification
-
-Use `appshot` to capture screenshots of the running application.
-`appshot` captures a macOS app window by process name. It works
-with any app that puts a window on screen.
-
-```bash
-appshot "AppName" screenshots/current/main.png
-appshot "AppName" screenshots/current/main.png --launch ./run.sh
-appshot "AppName" screenshots/current/main.png --wait 2
-```
-
-Always use appshot for visual verification. Do not reinvent
-screenshot capture with other approaches.
-
-After capturing, examine the screenshot to confirm:
-- The window renders correctly with expected content
-- Layout and spacing are reasonable
-- No blank screens, missing elements, or rendering artifacts
-- Text is readable and properly styled
-
-Do not delete `.duplo/references/` -- those are the reference
-frames and images duplo uses for visual comparison.
-
-# Swift SPM + SwiftUI
-
-SPM executables using SwiftUI do not automatically show windows.
-Every SwiftUI app built with SPM must include this in the App
-struct init:
-
-```swift
-init() {
-    NSApplication.shared.setActivationPolicy(.regular)
-    NSApplication.shared.activate(ignoringOtherApps: true)
-}
-```
-
-Use `swift build --disable-sandbox` and `swift test --disable-sandbox`
-inside Claude Code's sandbox.
-
-# Debugging
-
-When something crashes or behaves unexpectedly, find and read
-the actual error output first. Check crash reports
-(~/Library/Logs/DiagnosticReports/ on macOS), stderr, log
-files, tracebacks. Do not guess from source code alone.
-After fixing, reproduce the failure and verify it is gone.
-"""
-
-
 def save_selections(
     source_url: str,
     features: list[Feature],
@@ -340,32 +288,6 @@ def save_feedback(
         "recorded_at": datetime.now(tz=timezone.utc).isoformat(),
     }
     data.setdefault("feedback", []).append(entry)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def save_screenshot_feature_map(
-    mapping: dict[str, list[str]],
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Store a screenshot→features mapping in *duplo.json*.
-
-    Writes ``{"screenshot_features": mapping}`` into *duplo.json*, preserving
-    all existing keys.  Creates the file if it does not exist.
-
-    Args:
-        mapping: Dict mapping screenshot filename (basename) to a list of
-            feature names visible on that page.
-        target_dir: Directory containing ``duplo.json``.
-
-    Returns:
-        Path to the updated file.
-    """
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["screenshot_features"] = mapping
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -771,99 +693,6 @@ def mark_implemented_features(
     return marked
 
 
-def save_issues(
-    issues: list[dict],
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Replace the top-level ``issues`` list in *duplo.json*.
-
-    Each issue dict should have ``description`` and ``severity`` keys.
-    Returns the path to the updated file.
-    """
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["issues"] = issues
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def add_issue(
-    description: str,
-    severity: str = "major",
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Append a single issue to the ``issues`` list in *duplo.json*.
-
-    Skips duplicates: if an issue with the same ``description`` already
-    exists, the list is not modified.  Records an ISO 8601 timestamp.
-
-    Args:
-        description: What went wrong.
-        severity: One of ``"critical"``, ``"major"``, ``"minor"``.
-        target_dir: Directory containing ``duplo.json``.
-
-    Returns:
-        Path to the updated file.
-
-    Raises:
-        ValueError: If *severity* is not one of the allowed values.
-    """
-    allowed = {"critical", "major", "minor"}
-    if severity not in allowed:
-        msg = f"Invalid severity {severity!r}; must be one of {sorted(allowed)}"
-        raise ValueError(msg)
-
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    issues = data.get("issues", [])
-    for existing in issues:
-        if existing.get("description") == description:
-            return path
-    issues.append(
-        {
-            "description": description,
-            "severity": severity,
-            "added_at": datetime.now(tz=timezone.utc).isoformat(),
-        }
-    )
-    data["issues"] = issues
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def load_issues(
-    *,
-    target_dir: Path | str = ".",
-) -> list[dict]:
-    """Load the ``issues`` list from *duplo.json*.
-
-    Returns an empty list if no issues have been recorded.
-    """
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data = _safe_read_json(path)
-    return data.get("issues", [])
-
-
-def clear_issues(
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Remove all issues from *duplo.json*.
-
-    Returns the path to the updated file.
-    """
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["issues"] = []
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
 def save_issue(
     description: str,
     source: str,
@@ -977,32 +806,6 @@ def resolve_completed_fixes(
             except ValueError:
                 continue
     return resolved
-
-
-def save_code_examples(
-    examples: list[CodeExample],
-    *,
-    target_dir: Path | str = ".",
-) -> Path:
-    """Save extracted code examples to *duplo.json*.
-
-    Writes ``{"code_examples": [...]}`` into *duplo.json*, preserving
-    all existing keys.  Each example is stored as a dict with ``input``,
-    ``expected_output``, ``source_url``, and ``language`` keys.
-
-    Args:
-        examples: List of :class:`CodeExample` objects to store.
-        target_dir: Directory containing ``duplo.json``.
-
-    Returns:
-        Path to the updated file.
-    """
-    _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["code_examples"] = [dataclasses.asdict(ex) for ex in examples]
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return path
 
 
 def _example_filename(index: int, example: CodeExample) -> str:
@@ -1358,41 +1161,6 @@ def store_accepted_frames(
         save_frame_descriptions(json_entries, target_dir=target_dir)
 
     return copied
-
-
-def write_claude_md(*, target_dir: Path | str = ".") -> Path:
-    """Write ``CLAUDE.md`` with appshot instructions to *target_dir*.
-
-    If the file already exists, only sections whose headings are not
-    already present are appended.  Existing content is never removed
-    or replaced.  Returns the path to the written file.
-    """
-    path = (Path(target_dir) / CLAUDE_MD).resolve()
-    if not path.exists():
-        path.write_text(_CLAUDE_MD_CONTENT, encoding="utf-8")
-        return path
-
-    existing = path.read_text(encoding="utf-8")
-    # Split template into sections by top-level headings (# ...).
-    section_re = re.compile(r"(?=^# )", re.MULTILINE)
-    template_sections = [s for s in section_re.split(_CLAUDE_MD_CONTENT) if s.strip()]
-
-    new_sections: list[str] = []
-    for section in template_sections:
-        heading_match = re.match(r"^# (.+)", section)
-        if not heading_match:
-            continue
-        heading = heading_match.group(1).strip()
-        # Check if this heading already appears in the existing file.
-        if re.search(rf"^# {re.escape(heading)}\s*$", existing, re.MULTILINE):
-            continue
-        new_sections.append(section)
-
-    if new_sections:
-        appended = "\n" + "".join(new_sections)
-        path.write_text(existing.rstrip("\n") + "\n" + appended, encoding="utf-8")
-
-    return path
 
 
 _BUGS_HEADING = "## Bugs"

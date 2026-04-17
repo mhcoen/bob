@@ -2,6 +2,54 @@
 
 ## Observations
 
+### [7.9.1-7.9.4] Dead code sweep — 2026-04-17
+
+Removed functions / constants with no production callers:
+
+- `duplo/saver.py`: `write_claude_md`, `save_screenshot_feature_map`,
+  `save_issues`, `add_issue`, `load_issues`, `clear_issues`,
+  `save_code_examples`. Also the `CLAUDE_MD` module constant and
+  `_CLAUDE_MD_CONTENT` template string (only used by `write_claude_md`).
+- `duplo/fetcher.py`: `is_docs_link`, `detect_docs_links`,
+  `_is_platform_domain`. Also the `_DOCS_LINK`, `_PLATFORM_DOMAINS`,
+  `_PRODUCT_DOC_PATHS` module-level constants (only used by the deleted
+  helpers). Deep-crawl link prioritisation still works via `score_link`
+  / `_HIGH_PRIORITY` / `_LOW_PRIORITY`; the dropped helpers were
+  docs-discovery scaffolding from the old cross-domain crawling design
+  that `fetch_site` no longer follows (same-origin only).
+- `duplo/extractor.py`: no dead code found. `_parse_features` is
+  internal to `extract_features` and therefore live.
+
+Restored `load_sources` after an initial removal pass — it has no
+production callers but is used by `tests/test_main.py` integration
+tests (`TestRemovedSourceIdempotent`) to assert `save_sources` merge
+semantics. Treated as live through test usage.
+
+Kept `save_selections` despite having no production callers. Used as a
+bootstrap fixture by ~40 tests in `tests/test_saver.py` (`TestDeriveAppName`,
+`TestSaveFeedback`, `TestAppendPhaseToHistory`, etc.) that set up an
+initial `duplo.json` before exercising other saver functions. Removing
+it would cascade into large-scale test rewrites disproportionate to the
+cleanup value. Candidate for a future pass that introduces a dedicated
+test helper.
+
+### Dead file candidate: `duplo/initializer.py`
+
+`project_name_from_url` and `create_project_dir` have no production
+callers (Phase 7.5 audit confirmed) — only `tests/test_initializer.py`
+imports them. `tests/test_main.py` § 12249-12282 explicitly asserts the
+production modules do NOT import them. Not removed in this pass because
+the project-wide rule forbids file deletion. User should decide whether
+to delete `duplo/initializer.py` and `tests/test_initializer.py`.
+
+Tests dropped from `tests/test_saver.py` alongside the removed saver
+functions: `TestWriteClaudeMd`, `TestSaveScreenshotFeatureMap`,
+`TestLoadSources`, `TestIssues`. From `tests/test_fetcher.py`:
+`TestIsDocsLink`, `TestDetectDocsLinks`.
+
+Verified: `pytest` → 2863 passed, 103 skipped. `ruff check duplo/ tests/`
+→ clean.
+
 ### [7.7.1] Removed URL-in-text-file scanning — 2026-04-17
 
 Under the old model, `scanner._extract_urls_from_file` read every text

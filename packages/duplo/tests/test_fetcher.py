@@ -9,14 +9,12 @@ import pytest
 from duplo.fetcher import (
     PageRecord,
     _same_origin,
-    detect_docs_links,
     download_media,
     extract_links,
     extract_media_urls,
     extract_text,
     fetch_site,
     fetch_text,
-    is_docs_link,
     score_link,
 )
 
@@ -127,77 +125,6 @@ class TestScoreLink:
     )
     def test_neutral(self, url, anchor):
         assert score_link(url, anchor) == 0
-
-
-class TestIsDocsLink:
-    @pytest.mark.parametrize(
-        "url,anchor",
-        [
-            # Detected by URL path
-            ("https://example.com/docs", ""),
-            ("https://example.com/wiki", ""),
-            ("https://example.com/documentation", ""),
-            ("https://example.com/guide", ""),
-            ("https://example.com/handbook", ""),
-            ("https://example.com/reference", ""),
-            ("https://example.com/manual", ""),
-            ("https://example.com/getting-started", ""),
-            ("https://example.com/quickstart", ""),
-            ("https://example.com/tutorial", ""),
-            ("https://example.com/howto", ""),
-            ("https://example.com/examples", ""),
-            ("https://example.com/learn", ""),
-            # Detected by anchor text
-            ("https://other.com/abc", "Documentation"),
-            ("https://other.com/abc", "Read the docs"),
-            ("https://other.com/abc", "Wiki"),
-            ("https://other.com/abc", "User Guide"),
-            ("https://other.com/abc", "Developer Guide"),
-            ("https://other.com/abc", "Getting Started"),
-            ("https://other.com/abc", "API Reference"),
-            ("https://other.com/abc", "Help Center"),
-            # Known platforms detected by content in URL or anchor
-            ("https://github.com/org/repo/wiki", ""),
-            ("https://myproject.gitbook.io/docs/", ""),
-            ("https://myproject.readthedocs.io/en/latest/", "Read the Docs"),
-        ],
-    )
-    def test_detects_docs_links(self, url, anchor):
-        assert is_docs_link(url, anchor) is True
-
-    @pytest.mark.parametrize(
-        "url,anchor",
-        [
-            ("https://example.com/pricing", "Pricing"),
-            ("https://example.com/blog", "Blog"),
-            ("https://example.com/", "Home"),
-            ("https://example.com/product", "Product"),
-            ("https://github.com/org/repo", "Repository"),
-            ("https://github.com/org/repo/issues", "Issues"),
-        ],
-    )
-    def test_rejects_non_docs_links(self, url, anchor):
-        assert is_docs_link(url, anchor) is False
-
-
-class TestDetectDocsLinks:
-    def test_finds_docs_links_in_html(self):
-        html = (
-            "<html><body>"
-            '<a href="https://other.com/docs">Documentation</a>'
-            '<a href="/features">Features</a>'
-            '<a href="https://github.com/org/repo/wiki">Wiki</a>'
-            "</body></html>"
-        )
-        links = detect_docs_links(html, "https://example.com")
-        urls = [url for url, _ in links]
-        assert "https://other.com/docs" in urls
-        assert "https://github.com/org/repo/wiki" in urls
-        assert len(links) == 2
-
-    def test_returns_empty_when_no_docs_links(self):
-        html = '<html><body><a href="/pricing">Pricing</a></body></html>'
-        assert detect_docs_links(html, "https://example.com") == []
 
 
 class TestExtractLinks:

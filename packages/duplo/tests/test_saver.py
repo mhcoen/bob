@@ -21,7 +21,6 @@ from duplo.fetcher import PageRecord
 from duplo.planner import CompletedTask
 from duplo.questioner import BuildPreferences
 from duplo.saver import (
-    CLAUDE_MD,
     DUPLO_JSON,
     EXAMPLES_DIR,
     PRODUCT_JSON,
@@ -34,14 +33,11 @@ from duplo.saver import (
     _task_key,
     append_to_bugs_section,
     _propagate_implemented_status,
-    add_issue,
     append_phase_to_history,
     resolve_issue,
     save_build_preferences,
     save_issue,
-    clear_issues,
     load_examples,
-    load_issues,
     load_product,
     mark_implemented_features,
     move_references,
@@ -51,18 +47,14 @@ from duplo.saver import (
     save_features,
     save_feedback,
     save_frame_descriptions,
-    save_issues,
     derive_app_name,
     save_product,
     save_raw_content,
     save_reference_urls,
     save_roadmap,
     save_sources,
-    load_sources,
-    save_screenshot_feature_map,
     save_selections,
     store_accepted_frames,
-    write_claude_md,
 )
 
 
@@ -463,109 +455,6 @@ class TestSaveFeedback:
         assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
 
 
-class TestWriteClaudeMd:
-    def test_creates_file(self, tmp_path):
-        path = write_claude_md(target_dir=tmp_path)
-        assert path.exists()
-        assert path.name == CLAUDE_MD
-
-    def test_returns_correct_path(self, tmp_path):
-        path = write_claude_md(target_dir=tmp_path)
-        assert path == tmp_path / CLAUDE_MD
-
-    def test_contains_appshot(self, tmp_path):
-        path = write_claude_md(target_dir=tmp_path)
-        content = path.read_text()
-        assert "appshot" in content
-
-    def test_contains_screenshots_current(self, tmp_path):
-        path = write_claude_md(target_dir=tmp_path)
-        assert "screenshots/current/" in path.read_text()
-
-    def test_preserves_existing_content(self, tmp_path):
-        existing = tmp_path / CLAUDE_MD
-        existing.write_text("# My custom section\n\nold content\n")
-        write_claude_md(target_dir=tmp_path)
-        content = existing.read_text()
-        assert "old content" in content
-        assert "appshot" in content
-
-    def test_does_not_duplicate_existing_sections(self, tmp_path):
-        write_claude_md(target_dir=tmp_path)
-        first = (tmp_path / CLAUDE_MD).read_text()
-        write_claude_md(target_dir=tmp_path)
-        second = (tmp_path / CLAUDE_MD).read_text()
-        assert second == first
-
-    def test_appends_missing_sections(self, tmp_path):
-        existing = tmp_path / CLAUDE_MD
-        existing.write_text("# Visual verification\n\nCustom appshot notes\n")
-        write_claude_md(target_dir=tmp_path)
-        content = existing.read_text()
-        assert "Custom appshot notes" in content
-        assert "# Debugging" in content
-        assert content.count("# Visual verification") == 1
-
-    def test_references_duplo_references_not_screenshots_reference(self, tmp_path):
-        path = write_claude_md(target_dir=tmp_path)
-        content = path.read_text()
-        assert ".duplo/references/" in content
-        assert "screenshots/reference/" not in content
-
-    def test_default_target_dir_is_cwd(self, monkeypatch, tmp_path):
-        monkeypatch.chdir(tmp_path)
-        path = write_claude_md()
-        assert path == tmp_path / CLAUDE_MD
-
-
-class TestSaveScreenshotFeatureMap:
-    _MAPPING = {
-        "example_com_index.png": ["Search", "REST API"],
-        "example_com_docs.png": ["REST API"],
-    }
-
-    def test_creates_file(self, tmp_path):
-        path = save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        assert path.exists()
-        assert path.name == "duplo.json"
-
-    def test_returns_correct_path(self, tmp_path):
-        path = save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        assert path == tmp_path / DUPLO_JSON
-
-    def test_mapping_stored(self, tmp_path):
-        save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["screenshot_features"] == self._MAPPING
-
-    def test_overwrites_existing_mapping(self, tmp_path):
-        save_screenshot_feature_map({"old.png": ["Old Feature"]}, target_dir=tmp_path)
-        save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["screenshot_features"] == self._MAPPING
-        assert "old.png" not in data["screenshot_features"]
-
-    def test_preserves_existing_fields(self, tmp_path, sample_features, sample_prefs):
-        save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
-        save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["source_url"] == "https://example.com"
-
-    def test_empty_mapping_stored(self, tmp_path):
-        save_screenshot_feature_map({}, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["screenshot_features"] == {}
-
-    def test_creates_file_when_absent(self, tmp_path):
-        save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert "screenshot_features" in data
-
-    def test_file_ends_with_newline(self, tmp_path):
-        save_screenshot_feature_map(self._MAPPING, target_dir=tmp_path)
-        assert (tmp_path / DUPLO_JSON).read_text().endswith("\n")
-
-
 class TestSaveReferenceUrls:
     _RECORDS = [
         PageRecord(
@@ -782,39 +671,6 @@ class TestSaveSources:
         # Other entry untouched.
         assert by_url["https://docs.example.com"]["content_hash"] == "def456"
         assert by_url["https://docs.example.com"]["scrape_depth_used"] == "shallow"
-
-
-class TestLoadSources:
-    _SOURCES = [
-        {
-            "url": "https://example.com",
-            "last_scraped": "2026-04-14T10:00:00+00:00",
-            "content_hash": "abc123",
-            "scrape_depth_used": "deep",
-        },
-    ]
-
-    def test_returns_saved_sources(self, tmp_path):
-        save_sources(self._SOURCES, target_dir=tmp_path)
-        result = load_sources(target_dir=tmp_path)
-        assert len(result) == 1
-        assert result[0]["url"] == "https://example.com"
-        assert result[0]["content_hash"] == "abc123"
-
-    def test_empty_when_no_file(self, tmp_path):
-        result = load_sources(target_dir=tmp_path)
-        assert result == []
-
-    def test_empty_when_no_sources_key(self, tmp_path):
-        (tmp_path / ".duplo").mkdir()
-        (tmp_path / DUPLO_JSON).write_text('{"features": []}')
-        result = load_sources(target_dir=tmp_path)
-        assert result == []
-
-    def test_round_trip(self, tmp_path):
-        save_sources(self._SOURCES, target_dir=tmp_path)
-        result = load_sources(target_dir=tmp_path)
-        assert result == self._SOURCES
 
 
 class TestSaveExamples:
@@ -2403,76 +2259,6 @@ class TestSaveFeatureStatus:
         save_feature_status("Auth", "implemented", "Phase 1", target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["source_url"] == "https://example.com"
-
-
-class TestIssues:
-    """Tests for save_issues, add_issue, load_issues, and clear_issues."""
-
-    def test_save_issues_creates_list(self, tmp_path):
-        issues = [
-            {"description": "Crash on startup", "severity": "critical"},
-            {"description": "Slow render", "severity": "minor"},
-        ]
-        save_issues(issues, target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["issues"] == issues
-
-    def test_save_issues_replaces_existing(self, tmp_path):
-        save_issues([{"description": "Old bug", "severity": "major"}], target_dir=tmp_path)
-        save_issues([{"description": "New bug", "severity": "minor"}], target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert len(data["issues"]) == 1
-        assert data["issues"][0]["description"] == "New bug"
-
-    def test_save_issues_preserves_other_keys(self, tmp_path):
-        duplo_dir = tmp_path / ".duplo"
-        duplo_dir.mkdir(parents=True, exist_ok=True)
-        path = duplo_dir / "duplo.json"
-        path.write_text(json.dumps({"source_url": "https://example.com"}), encoding="utf-8")
-        save_issues([{"description": "Bug", "severity": "major"}], target_dir=tmp_path)
-        data = json.loads(path.read_text())
-        assert data["source_url"] == "https://example.com"
-        assert len(data["issues"]) == 1
-
-    def test_add_issue_appends(self, tmp_path):
-        add_issue("First problem", "critical", target_dir=tmp_path)
-        add_issue("Second problem", "minor", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert len(data["issues"]) == 2
-        assert data["issues"][0]["description"] == "First problem"
-        assert data["issues"][0]["severity"] == "critical"
-        assert "added_at" in data["issues"][0]
-        assert data["issues"][1]["description"] == "Second problem"
-
-    def test_add_issue_skips_duplicate(self, tmp_path):
-        add_issue("Same problem", "major", target_dir=tmp_path)
-        add_issue("Same problem", "critical", target_dir=tmp_path)
-        data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert len(data["issues"]) == 1
-
-    def test_add_issue_rejects_invalid_severity(self, tmp_path):
-        with pytest.raises(ValueError, match="Invalid severity"):
-            add_issue("Bug", "blocker", target_dir=tmp_path)
-
-    def test_load_issues_returns_list(self, tmp_path):
-        add_issue("Bug", "major", target_dir=tmp_path)
-        issues = load_issues(target_dir=tmp_path)
-        assert len(issues) == 1
-        assert issues[0]["description"] == "Bug"
-
-    def test_load_issues_empty_when_no_file(self, tmp_path):
-        assert load_issues(target_dir=tmp_path) == []
-
-    def test_load_issues_empty_when_no_key(self, tmp_path):
-        duplo_dir = tmp_path / ".duplo"
-        duplo_dir.mkdir(parents=True, exist_ok=True)
-        (duplo_dir / "duplo.json").write_text("{}", encoding="utf-8")
-        assert load_issues(target_dir=tmp_path) == []
-
-    def test_clear_issues(self, tmp_path):
-        add_issue("Bug", "major", target_dir=tmp_path)
-        clear_issues(target_dir=tmp_path)
-        assert load_issues(target_dir=tmp_path) == []
 
 
 class TestSaveIssueAndResolve:
