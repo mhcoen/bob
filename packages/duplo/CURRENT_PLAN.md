@@ -37,14 +37,14 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter: append_references
 
-- [ ] [BATCH] Implement append_references(existing: str, new_entries: list[ReferenceEntry]) -> str in duplo/spec_writer.py
-  - [ ] Same pattern as append_sources but for the References section. Per DRAFTER-design.md section append_references.
-  - [ ] Deduplication is path-only: two entries with the same path (after normalization) are duplicates regardless of role. First-write-wins.
-  - [ ] Path normalization: compare paths as-is (no resolve, no symlink following). Paths are always relative to project root and start with ref/. Comparison is string equality after stripping any trailing slash.
-  - [ ] If References section does not exist, create it after Sources (if present), else after Purpose (if present), else at end of file.
-  - [ ] Serialize each new entry with roles (comma-separated), notes, and proposed flag.
-  - [ ] Side-effect-free: takes existing content as string, returns modified string.
-  - [ ] Tests: append single new entry; append multiple; dedup against existing path (entry not added); dedup is path-only (same path with different role still deduplicates); idempotent (double-call returns same result); empty new_entries returns input unchanged; missing References section is created; proposed flag written correctly; multiple roles serialized as comma-separated; entry with notes serialized correctly.
+- [x] [BATCH] Implement append_references(existing: str, new_entries: list[ReferenceEntry]) -> str in duplo/spec_writer.py
+  - [x] Same pattern as append_sources but for the References section. Per DRAFTER-design.md section append_references.
+  - [x] Deduplication is path-only: two entries with the same path (after normalization) are duplicates regardless of role. First-write-wins.
+  - [x] Path normalization: compare paths as-is (no resolve, no symlink following). Paths are always relative to project root and start with ref/. Comparison is string equality after stripping any trailing slash.
+  - [x] If References section does not exist, create it after Sources (if present), else after Purpose (if present), else at end of file.
+  - [x] Serialize each new entry with roles (comma-separated), notes, and proposed flag.
+  - [x] Side-effect-free: takes existing content as string, returns modified string.
+  - [x] Tests: append single new entry; append multiple; dedup against existing path (entry not added); dedup is path-only (same path with different role still deduplicates); idempotent (double-call returns same result); empty new_entries returns input unchanged; missing References section is created; proposed flag written correctly; multiple roles serialized as comma-separated; entry with notes serialized correctly.
 
 ## Drafter: role inference helpers
 
