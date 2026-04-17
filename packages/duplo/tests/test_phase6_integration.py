@@ -1033,3 +1033,83 @@ class TestInitThenDuploRunWorksEndToEnd:
         # body, spec consumption, migration-message absence) arrive in
         # the follow-on 6.25 subtasks.
         assert (tmp_path / "PLAN.md").is_file()
+
+    def test_subsequent_run_pipeline_mocks_route_correctly(self, tmp_path, monkeypatch):
+        """Confirm the three mocks 6.25.2 names route to the functions
+        ``_subsequent_run`` actually calls.
+
+        Staging step for PLAN.md § 6.25.2: the parent end-to-end test
+        already wires these mocks in its Action 3 block, but this
+        standalone test pins them down at the routing layer — the same
+        pattern 6.20.1 and 6.22.1 use — so a future rename that moves
+        the import (e.g.  ``from duplo.fetcher import fetch_site`` →
+        ``from duplo import fetcher``) fails here with a targeted message
+        instead of surfacing as a confusing failure in the end-to-end
+        test.  Three mocks, three checks:
+
+        * ``fetch_site`` patched at ``duplo.main.fetch_site`` — this is
+          the binding :func:`_scrape_declared_sources` sees.  Called
+          explicitly with ``scrape_depth="deep"`` here because that is
+          the depth the 6.25 end-to-end flow uses (SPEC.md declares
+          ``scrape: deep`` on the one source).
+        * ``extract_features`` patched at ``duplo.main.extract_features``
+          — the binding :func:`_subsequent_run` closes over when it
+          calls ``extract_features(combined_text, ...)``.
+        * ``select_features`` and ``select_issues`` patched at
+          ``duplo.main.select_features`` / ``duplo.main.select_issues``
+          — the two interactive selectors on the ``_subsequent_run``
+          path.  Both must route without hitting ``input()``, which is
+          what the parent end-to-end test depends on to run headless.
+        """
+        from duplo.extractor import Feature
+
+        monkeypatch.chdir(tmp_path)
+
+        fetch_fixture = _fetch_site_identified_fixture()
+        features_fixture = _make_end_to_end_features()
+
+        sentinel_issue = {"description": "sentinel issue", "status": "open"}
+
+        with (
+            patch("duplo.main.fetch_site", return_value=fetch_fixture) as mock_fetch,
+            patch(
+                "duplo.main.extract_features",
+                return_value=features_fixture,
+            ) as mock_extract,
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ) as mock_select_features,
+            patch(
+                "duplo.main.select_issues",
+                return_value=[sentinel_issue],
+            ) as mock_select_issues,
+        ):
+            from duplo.main import (
+                extract_features as patched_extract,
+                fetch_site as patched_fetch,
+                select_features as patched_select_features,
+                select_issues as patched_select_issues,
+            )
+
+            fetch_result = patched_fetch(_IDENTIFIED_FIXTURE_URL, scrape_depth="deep")
+            extract_result = patched_extract(_IDENTIFIED_FIXTURE_TEXT)
+            select_features_result = patched_select_features(list(features_fixture))
+            select_issues_result = patched_select_issues([sentinel_issue])
+
+        assert fetch_result == fetch_fixture
+        mock_fetch.assert_called_once_with(_IDENTIFIED_FIXTURE_URL, scrape_depth="deep")
+
+        assert extract_result == features_fixture
+        assert all(isinstance(f, Feature) for f in extract_result)
+        mock_extract.assert_called_once_with(_IDENTIFIED_FIXTURE_TEXT)
+
+        # ``select_features`` is a pass-through in the stub, so the
+        # result must be the same list by value (new list, same items)
+        # — that is what the parent test relies on to keep every
+        # extracted feature in the phase.
+        assert select_features_result == list(features_fixture)
+        mock_select_features.assert_called_once()
+
+        assert select_issues_result == [sentinel_issue]
+        mock_select_issues.assert_called_once_with([sentinel_issue])
