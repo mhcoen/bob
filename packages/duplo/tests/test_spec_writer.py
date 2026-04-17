@@ -1,6 +1,9 @@
 """Tests for duplo.spec_writer."""
 
+import dataclasses
 from pathlib import Path
+
+import pytest
 
 from duplo.spec_reader import (
     BehaviorContract,
@@ -634,3 +637,300 @@ class TestFormatSpec:
         assert parsed.behavior_contracts[0].input == "1+1"
         assert parsed.notes == "Some context."
         assert parsed.design.user_prose == "Minimal."
+
+
+# --------------------------------------------------------------------------
+# Round-trip property tests
+# --------------------------------------------------------------------------
+#
+# Property: parse(format_spec(spec)) == spec for all surviving fields.
+# Per DRAFTER-design.md section "Round-trip testing".
+
+_ROUND_TRIP_EXCLUDED_FIELDS = {
+    # Listed in DRAFTER-design.md:
+    "raw",
+    "dropped_sources",
+    "dropped_references",
+    # Additional derived fields that do not survive round-tripping: scope
+    # and behavior hold the raw section body, which the parser always
+    # populates from the serialized content regardless of the original's
+    # value. The fill_in_* flags are parser-set and depend on whether
+    # <FILL IN> markers appear in the serialized body.
+    "scope",
+    "behavior",
+    "fill_in_purpose",
+    "fill_in_architecture",
+    "fill_in_design",
+}
+
+
+def _design_blocks_equal_for_round_trip(a: DesignBlock, b: DesignBlock) -> bool:
+    """Compare DesignBlock semantic fields (ignores parser-only has_fill_in_marker)."""
+    return a.user_prose == b.user_prose and a.auto_generated == b.auto_generated
+
+
+def _spec_equal_for_round_trip(a: ProductSpec, b: ProductSpec) -> bool:
+    """Compare ProductSpecs ignoring fields that do not survive round-tripping."""
+    for f in dataclasses.fields(ProductSpec):
+        if f.name in _ROUND_TRIP_EXCLUDED_FIELDS:
+            continue
+        av = getattr(a, f.name)
+        bv = getattr(b, f.name)
+        if f.name == "design":
+            if not _design_blocks_equal_for_round_trip(av, bv):
+                return False
+        else:
+            if av != bv:
+                return False
+    return True
+
+
+def _well_formed_sources_and_refs() -> tuple[list[SourceEntry], list[ReferenceEntry]]:
+    """A pair of non-empty Sources/References lists.
+
+    Used to avoid the parser picking up example entries from the HTML
+    comment hints that format_spec emits when these sections are empty.
+    """
+    return (
+        [SourceEntry(url="https://baseline.example", role="docs", scrape="none")],
+        [ReferenceEntry(path=Path("ref/baseline.png"), roles=["visual-target"])],
+    )
+
+
+def _fixture_minimal() -> ProductSpec:
+    """Minimally filled spec: required sections populated plus one entry each
+    in sections whose comment hints would otherwise be re-parsed as content.
+    """
+    sources, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="A minimal calculator.",
+        architecture="Python 3.11 CLI.",
+        sources=sources,
+        references=refs,
+        scope_include=["math"],
+        behavior_contracts=[BehaviorContract(input="1+1", expected="2")],
+    )
+
+
+def _fixture_all_sections_filled() -> ProductSpec:
+    return ProductSpec(
+        purpose="A full-featured calculator for macOS.",
+        architecture="SwiftUI targeting macOS 14+.",
+        sources=[
+            SourceEntry(
+                url="https://numi.app",
+                role="product-reference",
+                scrape="deep",
+                notes="main site",
+            ),
+            SourceEntry(
+                url="https://docs.example",
+                role="docs",
+                scrape="shallow",
+            ),
+        ],
+        references=[
+            ReferenceEntry(
+                path=Path("ref/main.png"),
+                roles=["visual-target"],
+                notes="primary view",
+            ),
+            ReferenceEntry(
+                path=Path("ref/demo.mp4"),
+                roles=["behavioral-target"],
+            ),
+        ],
+        design=DesignBlock(
+            user_prose="Follow the brand guide.",
+            auto_generated="Extracted palette: teal on ivory.",
+        ),
+        scope_include=["arithmetic", "unit conversion"],
+        scope_exclude=["plugin API"],
+        behavior_contracts=[
+            BehaviorContract(input="2 + 3", expected="5"),
+            BehaviorContract(input="5 km in miles", expected="3.11 mi"),
+        ],
+        notes="Free-form context for duplo.",
+    )
+
+
+def _fixture_mixed_filled_empty() -> ProductSpec:
+    """Required sections plus Sources/References/Scope/Behavior filled;
+    Design and Notes left empty.
+    """
+    sources, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="A middleweight spec.",
+        architecture="Language agnostic.",
+        sources=sources,
+        references=refs,
+        scope_include=["feature-a"],
+        behavior_contracts=[BehaviorContract(input="x", expected="y")],
+    )
+
+
+def _fixture_sources_with_flags() -> ProductSpec:
+    _, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="Sources flag variants.",
+        architecture="Agnostic.",
+        sources=[
+            SourceEntry(url="https://plain.example", role="docs", scrape="none"),
+            SourceEntry(
+                url="https://proposed.example",
+                role="docs",
+                scrape="shallow",
+                proposed=True,
+            ),
+            SourceEntry(
+                url="https://discovered.example",
+                role="docs",
+                scrape="none",
+                discovered=True,
+            ),
+            SourceEntry(
+                url="https://counter.example",
+                role="counter-example",
+                scrape="none",
+                notes="avoid this layout",
+            ),
+        ],
+        references=refs,
+        scope_include=["x"],
+        behavior_contracts=[BehaviorContract(input="a", expected="b")],
+    )
+
+
+def _fixture_references_multi_role_and_proposed() -> ProductSpec:
+    sources, _ = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="Reference variants.",
+        architecture="Agnostic.",
+        sources=sources,
+        references=[
+            ReferenceEntry(
+                path=Path("ref/main.png"),
+                roles=["visual-target", "docs"],
+                notes="primary + docs",
+                proposed=True,
+            ),
+            ReferenceEntry(
+                path=Path("ref/spec.pdf"),
+                roles=["docs"],
+            ),
+        ],
+        scope_include=["x"],
+        behavior_contracts=[BehaviorContract(input="a", expected="b")],
+    )
+
+
+def _fixture_design_prose_and_autogen() -> ProductSpec:
+    sources, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="Design variants.",
+        architecture="Agnostic.",
+        sources=sources,
+        references=refs,
+        design=DesignBlock(
+            user_prose="Neutral palette; generous whitespace.",
+            auto_generated="Colors: #111 on #fafafa. Font: Inter.",
+        ),
+        scope_include=["x"],
+        behavior_contracts=[BehaviorContract(input="a", expected="b")],
+    )
+
+
+def _fixture_scope_include_and_exclude() -> ProductSpec:
+    sources, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="Scope variants.",
+        architecture="Agnostic.",
+        sources=sources,
+        references=refs,
+        scope_include=["arithmetic", "variables", "unit conversion"],
+        scope_exclude=["plugin API", "scripting"],
+        behavior_contracts=[BehaviorContract(input="a", expected="b")],
+    )
+
+
+def _fixture_multiple_behavior_contracts() -> ProductSpec:
+    sources, refs = _well_formed_sources_and_refs()
+    return ProductSpec(
+        purpose="Behavior variants.",
+        architecture="Agnostic.",
+        sources=sources,
+        references=refs,
+        scope_include=["x"],
+        behavior_contracts=[
+            BehaviorContract(input="2 + 3", expected="5"),
+            BehaviorContract(input="10 * 4", expected="40"),
+            BehaviorContract(input="5 km in miles", expected="3.11 mi"),
+        ],
+    )
+
+
+_ROUND_TRIP_FIXTURES: list[tuple[str, ProductSpec]] = [
+    ("minimal", _fixture_minimal()),
+    ("all_sections_filled", _fixture_all_sections_filled()),
+    ("mixed_filled_empty", _fixture_mixed_filled_empty()),
+    ("sources_with_flags", _fixture_sources_with_flags()),
+    ("references_multi_role_and_proposed", _fixture_references_multi_role_and_proposed()),
+    ("design_prose_and_autogen", _fixture_design_prose_and_autogen()),
+    ("scope_include_and_exclude", _fixture_scope_include_and_exclude()),
+    ("multiple_behavior_contracts", _fixture_multiple_behavior_contracts()),
+]
+
+
+class TestRoundTrip:
+    """parse(format_spec(spec)) == spec for all surviving fields."""
+
+    @pytest.mark.parametrize(
+        "spec",
+        [f[1] for f in _ROUND_TRIP_FIXTURES],
+        ids=[f[0] for f in _ROUND_TRIP_FIXTURES],
+    )
+    def test_round_trip_preserves_surviving_fields(self, spec: ProductSpec):
+        serialized = format_spec(spec)
+        parsed = _parse_spec(serialized)
+        assert _spec_equal_for_round_trip(parsed, spec), (
+            f"round-trip mismatch; parsed=\n{parsed}\n\nexpected=\n{spec}"
+        )
+
+    def test_comparator_excludes_raw_dropped_sources_dropped_references(self):
+        """The comparator ignores raw, dropped_sources, and dropped_references."""
+        a = ProductSpec(
+            purpose="x",
+            architecture="y",
+            raw="one",
+            dropped_sources=[SourceEntry(url="https://bad", role="", scrape="")],
+            dropped_references=[ReferenceEntry(path=Path("ref/bad"), roles=[])],
+        )
+        b = ProductSpec(
+            purpose="x",
+            architecture="y",
+            raw="different",
+            dropped_sources=[],
+            dropped_references=[],
+        )
+        assert _spec_equal_for_round_trip(a, b)
+
+    def test_comparator_detects_difference_in_surviving_field(self):
+        a = ProductSpec(purpose="x", architecture="y")
+        b = ProductSpec(purpose="x", architecture="z")
+        assert not _spec_equal_for_round_trip(a, b)
+
+    def test_dropped_fields_round_trip_as_empty(self):
+        """Documenting the asymmetry: dropped_* are parser-only and do not
+        survive serialization — a round-tripped spec always has empty
+        dropped_* lists regardless of the original's content.
+        """
+        spec = _fixture_all_sections_filled()
+        spec = dataclasses.replace(
+            spec,
+            dropped_sources=[SourceEntry(url="https://no-role.example", role="", scrape="")],
+            dropped_references=[ReferenceEntry(path=Path("ref/no-role.png"), roles=[])],
+        )
+        serialized = format_spec(spec)
+        parsed = _parse_spec(serialized)
+        assert parsed.dropped_sources == []
+        assert parsed.dropped_references == []

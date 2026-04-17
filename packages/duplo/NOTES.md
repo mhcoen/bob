@@ -2,6 +2,38 @@
 
 ## Observations
 
+### [6.3.1] Parser re-ingests content from format_spec comment hints — 2026-04-17
+
+Round-trip testing revealed that `_parse_spec` picks up "example" content
+from inside the HTML comment hints that `format_spec` emits for empty
+optional sections. Specifically: the Sources/References/Scope/Behavior
+parsers operate on raw body text (not comment-stripped), and their regexes
+match the example list items embedded in the `<!-- Example: ... -->` blocks.
+For an empty `ProductSpec`, `parse(format_spec(spec))` yields non-empty
+`sources`, `references`, `scope_include`, `scope_exclude`, and
+`behavior_contracts` populated from the template examples. Notes and
+Architecture strip comments before extraction and are not affected.
+Impact: the round-trip property only holds for specs that populate these
+sections with real content (so `format_spec` skips the comment hints).
+Round-trip fixtures in `tests/test_spec_writer.py::TestRoundTrip` all have
+at least one entry in each "pickup-prone" section. Eventual fix would be
+to either (a) comment-strip bodies in the Sources/References/Scope/Behavior
+parsers, or (b) omit example content from the comment hints. Deferred —
+not in scope for 6.3.1.
+
+### [6.3.1] Round-trip comparator excludes more fields than DRAFTER-design.md lists — 2026-04-17
+
+DRAFTER-design.md's `_ROUND_TRIP_EXCLUDED_FIELDS` example lists only `raw`,
+`dropped_sources`, and `dropped_references`. In practice the comparator also
+must exclude `scope`, `behavior`, `fill_in_purpose`, `fill_in_architecture`,
+and `fill_in_design` because these are derived from the serialized body by
+the parser: `scope` / `behavior` hold the raw body string and always
+change after round-tripping; the `fill_in_*` flags are parser-set when the
+body contains `<FILL IN>` markers. DesignBlock's `has_fill_in_marker` is
+similarly parser-set and excluded by comparing only `user_prose` and
+`auto_generated` in the DesignBlock sub-comparison. Design doc lists the
+minimum; this is the practical set.
+
 ### [1.6] `extract_json` preferred inner object over outer array — 2026-04-16
 
 Adding round-trip parser tests for the four migrated modules surfaced a latent
