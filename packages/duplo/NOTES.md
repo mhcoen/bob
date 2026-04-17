@@ -2,6 +2,48 @@
 
 ## Observations
 
+### [7.2.1] _first_run function deleted — 2026-04-17
+
+Deleted the function body and its preceding removal-audit comment block
+(formerly main.py:1035-1474). The file parses (`python3 -c "import ast;
+ast.parse(...)"` returns OK).
+
+The original plan was to leave the dispatch untouched until 7.2.3, but
+`ruff check duplo/main.py` failed with F821 on the dangling
+`_first_run(url=args.url)` call at main.py:799. A minimal dispatch
+stub had to land here: the `not duplo_path.exists()` branch now prints
+"Run `duplo init` first to create SPEC.md." and exits 1. This anticipates
+task 7.2.3's shape (CURRENT_PLAN.md line 20) — 7.2.3 will refine it to
+distinguish fresh directory (no SPEC.md) from partial reset
+(SPEC.md present, `.duplo/` gone) and route the latter into
+`_subsequent_run`. For now, both cases hit the exit.
+
+Intermediate broken state this commit leaves in place, to be cleaned up
+by subsequent 7.2.x tasks:
+
+- Tests that exercised `_first_run` (either by patching
+  `duplo.main._first_run`, or by patching internals like
+  `ask_preferences`/`scan_directory` and calling `main()` in a
+  fresh-directory setup) have been marked `@pytest.mark.skip` with
+  reason pointing to Phase 7.2.4. A module-level `SKIP_FIRST_RUN`
+  marker was added to tests/test_main.py and
+  tests/test_phase5_integration.py. Affected: 35 tests in test_main.py,
+  22 tests in test_phase5_integration.py (3 classes class-skipped in
+  test_main.py, 5 classes class-skipped in test_phase5_integration.py,
+  remainder individual decorators). The 4 dispatch-oriented tests in
+  TestMigrationDispatchOrder were updated in place: 3 had their
+  `_first_run` setattr removed (the behavior they test doesn't need
+  it); test_migration_pass_proceeds_to_first_run was renamed/rewritten
+  to assert the new init-message-and-exit-1 behavior.
+- Helpers `_confirm_product` (main.py:2027-2058 new numbering),
+  `_validate_url` (main.py:2059-2133), `_init_project` (main.py:2134-2212)
+  remain in place. They were only called from `_first_run`; they are
+  now dead code but are removed in 7.2.2 rather than here to keep
+  this commit scoped strictly to the function-deletion step.
+- Imports of `ask_preferences` and `scan_directory` in main.py were
+  removed in this commit (they had no remaining in-file callers after
+  `_first_run` deletion). `ruff check` would flag them as F401 if left.
+
 ### [7.1.3] Migration gate fully prevents old-format projects from reaching _first_run — 2026-04-17
 
 Audit confirms no old-format project can reach `_first_run`. Dispatch in

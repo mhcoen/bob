@@ -13,12 +13,22 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from duplo.design_extractor import DesignRequirements
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 from duplo.main import ScrapeResult, main
 from duplo.questioner import BuildPreferences
+
+# _first_run was removed in Phase 7.2.1. Classes that exercised the first-run
+# pipeline (fresh directory, no duplo.json, `ref/` + SPEC.md) cannot run
+# anymore without rewrite against `duplo init` + `_subsequent_run`. That
+# rewrite is deferred to Phase 7.2.4 (CURRENT_PLAN.md line 21).
+SKIP_FIRST_RUN = pytest.mark.skip(
+    reason="_first_run removed in Phase 7.2.1; test rewrite deferred to Phase 7.2.4"
+)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures for the URL-only spec integration test
@@ -1180,6 +1190,8 @@ class TestRefOnlyDesignExtraction:
     deterministic _DESIGN_REQUIREMENTS fixture.
     """
 
+    pytestmark = SKIP_FIRST_RUN
+
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main().
 
@@ -1406,6 +1418,8 @@ class TestRefOnlyDocsExtraction:
     deterministic text and we assert the call received the right path.
     """
 
+    pytestmark = SKIP_FIRST_RUN
+
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main()."""
         _setup_ref_only_tmpdir(tmp_path)
@@ -1623,6 +1637,8 @@ class TestRefOnlyFeatureExtraction:
     docs-role ref, and that select_features auto-selects all features
     returned by the extractor.
     """
+
+    pytestmark = SKIP_FIRST_RUN
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main()."""
@@ -4407,6 +4423,8 @@ class TestProposedVisualTargetDesignInput:
     the design_input argument for downstream assertion.
     """
 
+    pytestmark = SKIP_FIRST_RUN
+
     def _run(self, tmp_path, monkeypatch):
         """Set up and run _first_run, returning the extract_design mock."""
         _setup_proposed_vt_tmpdir(tmp_path)
@@ -5481,6 +5499,8 @@ class TestCounterVtMockedExtractors:
     extract_features should be called (with empty/minimal text since
     there are no Sources or docs-role refs in this fixture).
     """
+
+    pytestmark = SKIP_FIRST_RUN
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: counter-vt fixture + monkeypatch for main()."""

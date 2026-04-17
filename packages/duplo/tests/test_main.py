@@ -44,6 +44,15 @@ from duplo.questioner import BuildPreferences
 
 _DUPLO_JSON = ".duplo/duplo.json"
 
+# _first_run was removed in Phase 7.2.1. Tests that exercised its pipeline
+# behavior (patching `duplo.main.ask_preferences`, `duplo.main.scan_directory`,
+# or `duplo.main._first_run` itself) cannot run anymore. Full rewrite against
+# `duplo init` + `_subsequent_run` is deferred to Phase 7.2.4
+# (CURRENT_PLAN.md line 21). Until then, those tests are skipped.
+SKIP_FIRST_RUN = pytest.mark.skip(
+    reason="_first_run removed in Phase 7.2.1; test rewrite deferred to Phase 7.2.4"
+)
+
 
 @pytest.fixture(autouse=True)
 def _clean_argv(monkeypatch):
@@ -73,6 +82,7 @@ class TestMainFirstRun:
             main()
         assert exc_info.value.code == 1
 
+    @SKIP_FIRST_RUN
     def test_scans_and_fetches_url(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -102,6 +112,7 @@ class TestMainFirstRun:
                                         ):
                                             main()
 
+    @SKIP_FIRST_RUN
     def test_uses_first_url_as_source(self, tmp_path, monkeypatch, capsys):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -134,6 +145,7 @@ class TestMainFirstRun:
 
         mock_fetch.assert_called_once_with("https://first.com")
 
+    @SKIP_FIRST_RUN
     def test_first_run_with_images_only(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -158,6 +170,7 @@ class TestMainFirstRun:
                                 with patch("duplo.main.generate_roadmap", return_value=None):
                                     main()
 
+    @SKIP_FIRST_RUN
     def test_generates_roadmap_and_executes_phase(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -210,6 +223,7 @@ class TestMainFirstRun:
                                                                 ):
                                                                     main()
 
+    @SKIP_FIRST_RUN
     def test_skips_validation_when_product_json_exists(self, tmp_path, monkeypatch):
         """When .duplo/product.json exists, skip URL validation and product confirmation."""
         ref = tmp_path / "ref"
@@ -247,6 +261,7 @@ class TestMainFirstRun:
         mock_validate.assert_not_called()
         mock_confirm.assert_not_called()
 
+    @SKIP_FIRST_RUN
     def test_saves_product_json_after_confirmation(self, tmp_path, monkeypatch):
         """First run without product.json saves it after confirmation."""
         ref = tmp_path / "ref"
@@ -2164,6 +2179,8 @@ class TestBehavioralVideoFiltering:
 
 class TestFirstRunSiteVideosBehavioral:
     """Site videos from _download_site_media are merged into behavioral input."""
+
+    pytestmark = SKIP_FIRST_RUN
 
     def test_site_videos_included_in_behavioral_with_spec(
         self,
@@ -5970,6 +5987,7 @@ class TestSubsequentRunSpecVerificationIndependent:
 class TestValidateForRunWiring:
     """validate_for_run is called after read_spec in _first_run and _subsequent_run."""
 
+    @SKIP_FIRST_RUN
     def test_first_run_exits_on_validation_errors(self, tmp_path, monkeypatch, capsys):
         """_first_run exits 1 when validate_for_run returns errors."""
         (tmp_path / "screenshot.png").write_bytes(b"PNG")
@@ -5995,6 +6013,7 @@ class TestValidateForRunWiring:
         assert "some warning" in captured.out
         assert "## Purpose still contains <FILL IN>" in captured.err
 
+    @SKIP_FIRST_RUN
     def test_first_run_continues_on_warnings_only(self, tmp_path, monkeypatch, capsys):
         """_first_run prints warnings but does not exit when no errors."""
         ref = tmp_path / "ref"
@@ -6075,6 +6094,7 @@ class TestValidateForRunWiring:
         captured = capsys.readouterr()
         assert "## Architecture still contains <FILL IN>" in captured.err
 
+    @SKIP_FIRST_RUN
     def test_no_validation_when_no_spec(self, tmp_path, monkeypatch):
         """When read_spec returns None, validate_for_run is not called."""
         (tmp_path / "screenshot.png").write_bytes(b"PNG")
@@ -6144,6 +6164,7 @@ class TestFillInPurposeBlocksRun:
   scrape: deep
 """
 
+    @SKIP_FIRST_RUN
     def test_first_run_blocked_by_fill_in_purpose(self, tmp_path, monkeypatch, capsys):
         """First run (no .duplo/) exits 1 when Purpose has <FILL IN>."""
         (tmp_path / "SPEC.md").write_text(self.SPEC_WITH_FILL_IN)
@@ -6331,12 +6352,7 @@ class TestMigrationDispatchOrder:
         # No SPEC.md → old layout → needs migration.
         monkeypatch.chdir(tmp_path)
 
-        first_run_called = []
         subsequent_run_called = []
-        monkeypatch.setattr(
-            "duplo.main._first_run",
-            lambda **kw: first_run_called.append(kw),
-        )
         monkeypatch.setattr(
             "duplo.main._subsequent_run",
             lambda: subsequent_run_called.append(True),
@@ -6348,7 +6364,6 @@ class TestMigrationDispatchOrder:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "SPEC.md" in captured.out
-        assert first_run_called == []
         assert subsequent_run_called == []
 
     def test_new_format_dir_passes_migration_proceeds(
@@ -6372,14 +6387,9 @@ class TestMigrationDispatchOrder:
         monkeypatch.chdir(tmp_path)
 
         subsequent_run_called = []
-        first_run_called = []
         monkeypatch.setattr(
             "duplo.main._subsequent_run",
             lambda: subsequent_run_called.append(True),
-        )
-        monkeypatch.setattr(
-            "duplo.main._first_run",
-            lambda **kw: first_run_called.append(kw),
         )
 
         main()
@@ -6390,19 +6400,20 @@ class TestMigrationDispatchOrder:
         assert "Migrate manually" not in captured.out
         # Proceeded to subsequent run (duplo.json exists).
         assert len(subsequent_run_called) == 1
-        assert first_run_called == []
 
-    def test_migration_pass_proceeds_to_first_run(self, tmp_path, monkeypatch):
-        """When _check_migration returns, _first_run is called (no duplo.json)."""
+    def test_migration_pass_without_duplo_json_prints_init_message(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """When _check_migration returns and no duplo.json exists, main
+        prints the duplo-init message and exits 1 (Phase 7.2.1 — _first_run
+        removed; fresh-directory dispatch refinement lands in 7.2.3)."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
-        first_run_called = []
-        monkeypatch.setattr(
-            "duplo.main._first_run",
-            lambda **kw: first_run_called.append(kw),
-        )
-        main()
-        assert len(first_run_called) == 1
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "duplo init" in captured.err
 
     def test_migration_pass_proceeds_to_subsequent_run(self, tmp_path, monkeypatch):
         """When _check_migration returns, _subsequent_run is called (duplo.json exists)."""
@@ -6427,16 +6438,10 @@ class TestMigrationDispatchOrder:
             "duplo.main._check_migration",
             lambda target_dir: migration_called.append(target_dir),
         )
-        first_run_called = []
-        monkeypatch.setattr(
-            "duplo.main._first_run",
-            lambda **kw: first_run_called.append(kw),
-        )
         with patch("duplo.init.run_init"):
             main()
-        # init bypasses migration and does not enter the first-run path.
+        # init bypasses migration.
         assert migration_called == []
-        assert first_run_called == []
 
     def test_fix_old_layout_bypasses_migration_dispatches_fix(
         self,
@@ -6507,6 +6512,8 @@ class TestMigrationDispatchOrder:
 
 class TestBehavioralPathsDuplicateAssertion:
     """Assert that duplicate paths in the behavioral video set are rejected."""
+
+    pytestmark = SKIP_FIRST_RUN
 
     def test_duplicate_path_raises_with_spec(
         self,
@@ -6660,6 +6667,7 @@ class TestBehavioralPathsDuplicateAssertion:
 class TestDocsTextInFeatureExtraction:
     """Docs-role text feeds into extract_features via docs_text_extractor."""
 
+    @SKIP_FIRST_RUN
     def test_first_run_includes_docs_text(self, tmp_path, monkeypatch, capsys):
         """First run: docs-role text is combined into extract_features input."""
         from duplo.spec_reader import ProductSpec, ReferenceEntry
@@ -6736,6 +6744,7 @@ class TestDocsTextInFeatureExtraction:
         assert "docs extracted text" in combined
         assert "scraped text" in combined
 
+    @SKIP_FIRST_RUN
     def test_first_run_no_docs_without_spec(self, tmp_path, monkeypatch):
         """Without spec, docs_text_extractor is not called."""
         ref_dir = tmp_path / "ref"
@@ -8072,6 +8081,8 @@ class TestRunVideoFramePipelinePerSourceLookup:
 class TestDesignInputPerSourceLookup:
     """_first_run uses accepted_frames_by_path lookup for design input composition."""
 
+    pytestmark = SKIP_FIRST_RUN
+
     def test_visual_target_frames_via_lookup(self, tmp_path, monkeypatch):
         """Frames from visual-target videos are selected via per-source lookup."""
         from duplo.orchestrator import collect_design_input
@@ -9114,6 +9125,7 @@ class TestDesignInputPerSourceLookup:
 class TestAutogenBlockSkipsVision:
     """Check autogen block FIRST via the in-memory dataclass."""
 
+    @SKIP_FIRST_RUN
     def test_first_run_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
         """_first_run skips extract_design when spec.design.auto_generated
         has content."""
@@ -9190,6 +9202,7 @@ class TestAutogenBlockSkipsVision:
         # Cache invariant: save_design_requirements also skipped
         mock_save_dr.assert_not_called()
 
+    @SKIP_FIRST_RUN
     def test_first_run_writes_autogen_block(self, tmp_path, monkeypatch):
         """_first_run writes autogen block to SPEC.md when absent."""
         from duplo.spec_reader import (
@@ -9458,6 +9471,7 @@ class TestAutogenBlockSkipsVision:
         # Cache invariant: save_design_requirements also skipped
         mock_save_dr.assert_not_called()
 
+    @SKIP_FIRST_RUN
     def test_no_spec_does_not_skip_vision(self, tmp_path, monkeypatch):
         """When spec is None, autogen check is False and Vision proceeds."""
 
@@ -9547,6 +9561,7 @@ class TestAutogenBlockSkipsVision:
         # Empty/whitespace autogen should NOT block Vision
         mock_design.assert_called_once()
 
+    @SKIP_FIRST_RUN
     def test_first_run_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
         """_first_run emits record_failure when skipping Vision due to
         existing autogen block."""
@@ -9738,6 +9753,7 @@ class TestAutogenBlockSkipsVision:
         assert len(design_calls) == 1
         assert "1 input image(s)" in design_calls[0][0][2]
 
+    @SKIP_FIRST_RUN
     def test_first_run_spec_write_idempotent(self, tmp_path, monkeypatch):
         """SPEC.md write only happens when content actually changes."""
         from duplo.spec_reader import (
@@ -9853,6 +9869,7 @@ class TestAutogenBlockSkipsVision:
         # should NOT have been rewritten — mtime stays the same.
         assert spec_path.stat().st_mtime == original_mtime
 
+    @SKIP_FIRST_RUN
     def test_in_memory_spec_consulted_not_disk(self, tmp_path, monkeypatch):
         """The autogen check uses spec.design.auto_generated (in-memory),
         NOT a re-read of SPEC.md from disk. Prove by having SPEC.md on
@@ -10276,6 +10293,7 @@ class TestSpecSourceOfTruth:
     step 13: design autogen).  It is NEVER re-read to drive extraction
     or filtering decisions."""
 
+    @SKIP_FIRST_RUN
     def test_first_run_read_spec_called_once(self, tmp_path, monkeypatch):
         """read_spec is called exactly once in _first_run — not
         re-read after _persist_scrape_result may modify SPEC.md."""
@@ -10414,6 +10432,7 @@ class TestSpecSourceOfTruth:
 
         assert mock_rs.call_count == 1
 
+    @SKIP_FIRST_RUN
     def test_first_run_scope_exclude_uses_in_memory_spec(self, tmp_path, monkeypatch):
         """scope_exclude filtering uses the in-memory spec, not a
         re-read of SPEC.md.  Prove by having SPEC.md on disk change
@@ -10612,6 +10631,7 @@ class TestSpecSourceOfTruth:
         content = spec_path.read_text(encoding="utf-8")
         assert "https://new-link.com" in content
 
+    @SKIP_FIRST_RUN
     def test_scrapeable_sources_uses_in_memory_spec(self, tmp_path, monkeypatch):
         """_first_run passes the in-memory spec to scrapeable_sources,
         not a re-read from disk.  Prove by having the in-memory spec
