@@ -106,7 +106,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Run duplo (no subcommand).
   - [x] Assert: migration message printed (now referencing duplo init); exits 1.
 
-- [ ] Add test_no_dead_imports_remain
+- [x] Add test_no_dead_imports_remain
   - [x] Programmatically import every module in the duplo package.
   - [x] Assert: no ImportError from deleted modules; no AttributeError from deleted functions.
   - [x] This is a smoke test to catch stale imports that the individual deletion tests might miss.
