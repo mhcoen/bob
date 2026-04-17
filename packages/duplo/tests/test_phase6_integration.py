@@ -585,3 +585,38 @@ class TestInitUrlFetchFailureWritesScrapeNone:
                 patched_fetch_site(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
 
         mock_fetch.assert_called_once_with(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
+
+    def test_run_init_with_url_under_network_error(self, tmp_path, capsys, monkeypatch):
+        """Run ``run_init`` with a URL argument while ``fetch_site`` raises.
+
+        Stages the URL-fetch-failure integration path: patches
+        ``duplo.init.fetch_site`` so any call raises
+        :class:`ConnectionError`, then invokes ``run_init`` with
+        ``args.url`` set.  :func:`_run_url` must treat the exception as
+        a fetch failure (equivalent to "fetched but got nothing"),
+        fall through to the template-only branch, and still lay down
+        SPEC.md plus ``ref/``.  The content-level assertions on
+        ``## Sources`` carrying ``scrape: none`` and ``## Purpose``
+        keeping its ``FILL IN`` marker arrive in the next subtask;
+        this subtask only confirms the URL flow runs to completion
+        under the raising mock.  The validator and drafter are not
+        patched because the failure branch never reaches them (both
+        are gated on ``fetch_ok`` / ``text`` in :func:`_run_url`), so
+        any unintended call would surface as a real-LLM failure.
+        """
+        from duplo.init import run_init
+
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "duplo.init.fetch_site",
+            side_effect=_fetch_site_network_error,
+        ):
+            run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+
+        # Drain captured output so it does not bleed into later tests.
+        capsys.readouterr()
+
+        assert (tmp_path / "SPEC.md").is_file()
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").is_file()

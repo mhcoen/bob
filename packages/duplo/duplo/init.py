@@ -285,7 +285,18 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
     scrape_depth = "deep" if deep else "shallow"
     depth_label = "deep scrape" if deep else "shallow scrape"
 
-    text, _examples, _structures, records, _raw = fetch_site(canonical, scrape_depth=scrape_depth)
+    try:
+        text, _examples, _structures, records, _raw = fetch_site(
+            canonical, scrape_depth=scrape_depth
+        )
+    except Exception as exc:  # noqa: BLE001 — any fetch failure falls back to template
+        record_failure(
+            "init:_run_url",
+            "fetch",
+            f"fetch_site raised for {canonical}: {exc}",
+            context={"url": canonical},
+        )
+        text, records = "", []
     fetch_ok = bool(records)
 
     product_name = ""

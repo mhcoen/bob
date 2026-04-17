@@ -209,6 +209,10 @@ the writer must escape `## ` on emit. The pathological body was removed
 from `_NEW_DESIGN_AUTOGEN_BODIES` to keep the property test focused on
 edit-safety rather than parser limits.
 
+### [6.23.2] `_run_url` now guards `fetch_site` against exceptions — 2026-04-17
+
+Real `fetch_site` catches all network/parse errors internally (see `fetcher.py:249-256`) and returns an empty tuple, so the `fetch_ok = bool(records)` branch in `_run_url` already covered real-world fetch failures. The Phase 6 integration test for `TestInitUrlFetchFailureWritesScrapeNone` deliberately mocks `fetch_site` with `side_effect=_fetch_site_network_error` to simulate an exception escaping — PLAN.md § "test_init_url_fetch_failure_writes_scrape_none" demands this shape. `_run_url` now wraps the `fetch_site` call in `try/except Exception` and records a diagnostic so the URL-flow can still produce the template-with-`scrape: none` SPEC.md on that path. The try/except is defensive against a future `fetch_site` variant that forgets the internal catch (or a deeper exception like `SystemExit`-adjacent errors that slip through), not load-bearing in production today.
+
 ### [4.4.5] `## Sources` false positive in fenced code blocks — 2026-04-13
 
 The multiline regex `^## Sources\s*$` in `needs_migration()` matches even when `## Sources` appears inside a fenced code block (e.g. a Markdown example in the SPEC.md top-matter comment). This is a known false positive, accepted as intentional: a file containing `## Sources` in an example is close enough to new-format that force-migrating it would be worse than letting it through. Pinned with `test_sources_inside_fenced_code_block`. If fence-aware parsing is added later, the test will break to flag the behavior change.
