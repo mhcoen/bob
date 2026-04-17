@@ -78,7 +78,7 @@ def match_unannotated_tasks(
     )
 
     raw = query(prompt, system=_SYSTEM)
-    matches = _parse_matches(raw, len(unannotated))
+    matches = _parse_matches(raw)
 
     matched: list[str] = []
     new: list[str] = []
@@ -117,7 +117,7 @@ def match_unannotated_tasks(
     return (matched, new)
 
 
-def _parse_matches(raw: str, expected_count: int) -> list[dict]:
+def _parse_matches(raw: str) -> list[dict]:
     """Parse a JSON array of match objects from *raw*.
 
     Tolerates markdown code fences wrapping the JSON.

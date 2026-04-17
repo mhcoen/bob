@@ -32,22 +32,22 @@ class TestParseMatches:
                 },
             ]
         )
-        result = _parse_matches(raw, 2)
+        result = _parse_matches(raw)
         assert len(result) == 2
         assert result[0]["match"] == "existing"
         assert result[1]["match"] == "none"
 
     def test_strips_code_fences(self):
         raw = '```json\n[{"task_index": 0, "match": "new", "feature": "Export", "description": "Export data.", "category": "core"}]\n```'
-        result = _parse_matches(raw, 1)
+        result = _parse_matches(raw)
         assert len(result) == 1
         assert result[0]["match"] == "new"
 
     def test_returns_empty_on_invalid_json(self):
-        assert _parse_matches("not json", 1) == []
+        assert _parse_matches("not json") == []
 
     def test_returns_empty_on_non_list(self):
-        assert _parse_matches('{"match": "existing"}', 1) == []
+        assert _parse_matches('{"match": "existing"}') == []
 
     def test_skips_invalid_match_values(self):
         raw = json.dumps(
@@ -56,7 +56,7 @@ class TestParseMatches:
                 {"task_index": 1, "match": "invalid", "feature": "B"},
             ]
         )
-        result = _parse_matches(raw, 2)
+        result = _parse_matches(raw)
         assert len(result) == 1
 
     def test_skips_non_dict_items(self):
@@ -66,7 +66,7 @@ class TestParseMatches:
                 {"task_index": 0, "match": "none", "feature": None},
             ]
         )
-        result = _parse_matches(raw, 1)
+        result = _parse_matches(raw)
         assert len(result) == 1
 
 

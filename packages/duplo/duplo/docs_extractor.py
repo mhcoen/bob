@@ -11,7 +11,7 @@ from duplo.pdf_extractor import extract_pdf_text
 if TYPE_CHECKING:
     from duplo.spec_reader import ReferenceEntry
 
-_TEXT_EXTENSIONS = {".txt", ".md"}
+_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rst", ".text"}
 
 
 def docs_text_extractor(entries: list[ReferenceEntry]) -> str:
