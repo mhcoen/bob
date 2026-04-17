@@ -143,7 +143,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests (all with mocked fetch_site and claude -p): successful scrape produces pre-filled Purpose and Sources; failed scrape writes URL with scrape: none and exits 0; unidentified product fills Sources only; existing ref/ files get role proposals with proposed: true; --deep flag passes scrape_depth="deep" to fetch_site; --force overwrites existing SPEC.md; URL canonicalized before writing to Sources.
 
 - [ ] Implement run_init for the --from-description case
-  - [ ] Per INIT-design.md section "duplo init --from-description description.txt".
+  - [x] Per INIT-design.md section "duplo init --from-description description.txt".
   - [ ] Read description from file path or stdin (- argument). If file not found, print error per INIT-design.md and exit 1.
   - [ ] If stdin: print "Reading description from stdin. Press Ctrl-D when done." when stdin is a TTY.
   - [ ] Build DraftInputs with description populated. Call draft_spec(inputs).
