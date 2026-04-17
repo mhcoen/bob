@@ -541,6 +541,70 @@ class TestFormatSpec:
     def test_output_ends_with_newline(self):
         assert format_spec(ProductSpec()).endswith("\n")
 
+    def test_fully_populated_spec_serializes_all_sections(self):
+        """Every section's content is present in the output when all fields are filled."""
+        spec = ProductSpec(
+            purpose="A text calculator for macOS.",
+            architecture="SwiftUI on macOS 14+.",
+            sources=[
+                SourceEntry(
+                    url="https://numi.app",
+                    role="product-reference",
+                    scrape="deep",
+                    notes="main site",
+                ),
+            ],
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/main.png"),
+                    roles=["visual-target"],
+                    notes="primary view",
+                ),
+            ],
+            design=DesignBlock(
+                user_prose="Follow the brand guide.",
+                auto_generated="Extracted palette: teal on ivory.",
+            ),
+            scope_include=["arithmetic"],
+            scope_exclude=["plugin API"],
+            behavior_contracts=[BehaviorContract(input="2 + 3", expected="5")],
+            notes="Free-form context.",
+        )
+        result = format_spec(spec)
+        # Required sections filled.
+        assert "A text calculator for macOS." in result
+        assert "SwiftUI on macOS 14+." in result
+        # Sources.
+        assert "- https://numi.app" in result
+        assert "  role: product-reference" in result
+        assert "  scrape: deep" in result
+        assert "  notes: main site" in result
+        # References.
+        assert "- ref/main.png" in result
+        assert "  role: visual-target" in result
+        assert "  notes: primary view" in result
+        # Design: user_prose before auto_generated.
+        assert "Follow the brand guide." in result
+        assert "BEGIN AUTO-GENERATED" in result
+        assert "Extracted palette: teal on ivory." in result
+        # Scope.
+        assert "include:\n  - arithmetic" in result
+        assert "exclude:\n  - plugin API" in result
+        # Behavior.
+        assert "- `2 + 3` → `5`" in result
+        # Notes.
+        assert "Free-form context." in result
+        # No FILL IN markers remain after the top matter.
+        body = result.split("-->", 1)[1]
+        assert "<FILL IN" not in body
+        # No optional-section comment hints when content is present.
+        assert "URLs duplo should scrape" not in result
+        assert "Files in ref/" not in result
+        assert "Optional if ## References has visual-target files." not in result
+        assert "Optional. Overrides for include/exclude." not in result
+        assert "Input → output pairs become verification tasks." not in result
+        assert "Optional. Free-form context for duplo." not in result
+
     def test_output_parses_back_to_a_productspec(self):
         """Smoke test: the output of format_spec is valid SPEC.md text."""
         spec = ProductSpec(
