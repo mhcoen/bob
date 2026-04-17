@@ -135,7 +135,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Canonicalize URL via url_canon.canonicalize_url before any use (per INIT-design.md error cases).
   - [x] Call fetch_site(url, scrape_depth="shallow") for product identity. If --deep flag set, use scrape_depth="deep" instead.
   - [x] On fetch success: extract product identity from scraped content. Build DraftInputs with url and url_scrape populated. Call draft_spec(inputs).
-  - [ ] On fetch failure (network error, NXDOMAIN, timeout): per INIT-design.md section "URL fetch fails", continue with template-only setup. Write URL to Sources with scrape: none. Print failure message. Exit 0 (not 1).
+  - [x] On fetch failure (network error, NXDOMAIN, timeout): per INIT-design.md section "URL fetch fails", continue with template-only setup. Write URL to Sources with scrape: none. Print failure message. Exit 0 (not 1).
   - [ ] On fetch success but no product identified: per INIT-design.md section "URL fetch succeeds but identifies nothing", pre-fill Sources only. Leave Purpose as FILL IN.
   - [ ] Scan existing ref/ files (if ref/ exists and has files): call _propose_file_role for each image, use extension defaults for non-images. Populate DraftInputs.vision_proposals. Per INIT-design.md section "ref/ already exists with files".
   - [ ] Write SPEC.md from draft_spec output. Create ref/ and ref/README.md as in the no-arguments case.
