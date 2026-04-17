@@ -43,16 +43,15 @@ from duplo.questioner import BuildPreferences
 
 _DUPLO_JSON = ".duplo/duplo.json"
 
-# _first_run was removed in Phase 7.2.1. Tests that exercised its pipeline
-# behavior (patching `duplo.main.ask_preferences`, `duplo.main.scan_directory`,
-# or `duplo.main._first_run` itself) cannot run anymore. Full rewrite against
-# `duplo init` + `_subsequent_run` is deferred to Phase 7.2.4
-# (CURRENT_PLAN.md line 21). Until then, those tests are skipped.
-SKIP_FIRST_RUN = pytest.mark.skip(
-    reason="_first_run removed in Phase 7.2.1; test rewrite deferred to Phase 7.2.4"
+# The legacy fresh-directory pipeline was removed in Phase 7.2.1. Tests
+# that exercised it (patching `duplo.main.ask_preferences`,
+# `duplo.main.scan_directory`, or the removed entry function itself)
+# cannot run anymore; they remain skipped pending the dead-code audit.
+SKIP_LEGACY_PIPELINE = pytest.mark.skip(
+    reason="legacy fresh-directory pipeline removed in Phase 7.2.1"
 )
 
-# _init_project was removed in Phase 7.2.2 (it was only called by _first_run).
+# _init_project was removed in Phase 7.2.2 with the legacy pipeline.
 # The TestInitProject class is skip-marked below; this placeholder keeps the
 # test-body references resolvable for static analysis.
 _init_project = None
@@ -106,7 +105,7 @@ class TestMainFirstRun:
         assert exc_info.value.code == 0
         assert "duplo init" in capsys.readouterr().out
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_scans_and_fetches_url(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -136,7 +135,7 @@ class TestMainFirstRun:
                                         ):
                                             main()
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_uses_first_url_as_source(self, tmp_path, monkeypatch, capsys):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -169,8 +168,8 @@ class TestMainFirstRun:
 
         mock_fetch.assert_called_once_with("https://first.com")
 
-    @SKIP_FIRST_RUN
-    def test_first_run_with_images_only(self, tmp_path, monkeypatch):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_with_images_only(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
         (ref / "screenshot.png").write_bytes(b"PNG")
@@ -194,7 +193,7 @@ class TestMainFirstRun:
                                 with patch("duplo.main.generate_roadmap", return_value=None):
                                     main()
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_generates_roadmap_and_executes_phase(self, tmp_path, monkeypatch):
         ref = tmp_path / "ref"
         ref.mkdir()
@@ -247,7 +246,7 @@ class TestMainFirstRun:
                                                                 ):
                                                                     main()
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_skips_validation_when_product_json_exists(self, tmp_path, monkeypatch):
         """When .duplo/product.json exists, skip URL validation and product confirmation."""
         ref = tmp_path / "ref"
@@ -285,7 +284,7 @@ class TestMainFirstRun:
         mock_validate.assert_not_called()
         mock_confirm.assert_not_called()
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_saves_product_json_after_confirmation(self, tmp_path, monkeypatch):
         """First run without product.json saves it after confirmation."""
         ref = tmp_path / "ref"
@@ -661,7 +660,7 @@ class TestInitProject:
     """Test _init_project directly."""
 
     pytestmark = pytest.mark.skip(
-        reason="_init_project removed in Phase 7.2.2 (was only called by _first_run)"
+        reason="_init_project removed in Phase 7.2.2 with the legacy pipeline"
     )
 
     _FEATURES = [Feature(name="Search", description="Full-text search.", category="core")]
@@ -2217,7 +2216,7 @@ class TestBehavioralVideoFiltering:
 class TestFirstRunSiteVideosBehavioral:
     """Site videos from _download_site_media are merged into behavioral input."""
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def test_site_videos_included_in_behavioral_with_spec(
         self,
@@ -6019,11 +6018,11 @@ class TestSubsequentRunSpecVerificationIndependent:
 
 
 class TestValidateForRunWiring:
-    """validate_for_run is called after read_spec in _first_run and _subsequent_run."""
+    """validate_for_run is called after read_spec in _subsequent_run."""
 
-    @SKIP_FIRST_RUN
-    def test_first_run_exits_on_validation_errors(self, tmp_path, monkeypatch, capsys):
-        """_first_run exits 1 when validate_for_run returns errors."""
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_exits_on_validation_errors(self, tmp_path, monkeypatch, capsys):
+        """Legacy pipeline exits 1 when validate_for_run returns errors."""
         (tmp_path / "screenshot.png").write_bytes(b"PNG")
         monkeypatch.chdir(tmp_path)
 
@@ -6047,9 +6046,9 @@ class TestValidateForRunWiring:
         assert "some warning" in captured.out
         assert "## Purpose still contains <FILL IN>" in captured.err
 
-    @SKIP_FIRST_RUN
-    def test_first_run_continues_on_warnings_only(self, tmp_path, monkeypatch, capsys):
-        """_first_run prints warnings but does not exit when no errors."""
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_continues_on_warnings_only(self, tmp_path, monkeypatch, capsys):
+        """Legacy pipeline prints warnings but does not exit when no errors."""
         ref = tmp_path / "ref"
         ref.mkdir()
         (ref / "links.txt").write_text("https://example.com")
@@ -6128,7 +6127,7 @@ class TestValidateForRunWiring:
         captured = capsys.readouterr()
         assert "## Architecture still contains <FILL IN>" in captured.err
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_no_validation_when_no_spec(self, tmp_path, monkeypatch):
         """When read_spec returns None, validate_for_run is not called."""
         (tmp_path / "screenshot.png").write_bytes(b"PNG")
@@ -6198,8 +6197,8 @@ class TestFillInPurposeBlocksRun:
   scrape: deep
 """
 
-    @SKIP_FIRST_RUN
-    def test_first_run_blocked_by_fill_in_purpose(self, tmp_path, monkeypatch, capsys):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_blocked_by_fill_in_purpose(self, tmp_path, monkeypatch, capsys):
         """First run (no .duplo/) exits 1 when Purpose has <FILL IN>."""
         (tmp_path / "SPEC.md").write_text(self.SPEC_WITH_FILL_IN)
         (tmp_path / "screenshot.png").write_bytes(b"PNG")
@@ -6375,7 +6374,7 @@ class TestMigrationDispatchOrder:
         monkeypatch,
     ):
         """duplo (no args) in old-layout dir: prints migration, exits 1,
-        never calls _first_run or _subsequent_run."""
+        never calls _subsequent_run."""
         from duplo.migration import _check_migration as real_check
 
         monkeypatch.setattr("duplo.main._check_migration", real_check)
@@ -6559,7 +6558,7 @@ class TestMigrationDispatchOrder:
 class TestBehavioralPathsDuplicateAssertion:
     """Assert that duplicate paths in the behavioral video set are rejected."""
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def test_duplicate_path_raises_with_spec(
         self,
@@ -6713,8 +6712,8 @@ class TestBehavioralPathsDuplicateAssertion:
 class TestDocsTextInFeatureExtraction:
     """Docs-role text feeds into extract_features via docs_text_extractor."""
 
-    @SKIP_FIRST_RUN
-    def test_first_run_includes_docs_text(self, tmp_path, monkeypatch, capsys):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_includes_docs_text(self, tmp_path, monkeypatch, capsys):
         """First run: docs-role text is combined into extract_features input."""
         from duplo.spec_reader import ProductSpec, ReferenceEntry
 
@@ -6790,8 +6789,8 @@ class TestDocsTextInFeatureExtraction:
         assert "docs extracted text" in combined
         assert "scraped text" in combined
 
-    @SKIP_FIRST_RUN
-    def test_first_run_no_docs_without_spec(self, tmp_path, monkeypatch):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_no_docs_without_spec(self, tmp_path, monkeypatch):
         """Without spec, docs_text_extractor is not called."""
         ref_dir = tmp_path / "ref"
         ref_dir.mkdir()
@@ -8125,9 +8124,9 @@ class TestRunVideoFramePipelinePerSourceLookup:
 
 
 class TestDesignInputPerSourceLookup:
-    """_first_run uses accepted_frames_by_path lookup for design input composition."""
+    """Legacy pipeline uses accepted_frames_by_path lookup for design input composition."""
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def test_visual_target_frames_via_lookup(self, tmp_path, monkeypatch):
         """Frames from visual-target videos are selected via per-source lookup."""
@@ -9171,9 +9170,9 @@ class TestDesignInputPerSourceLookup:
 class TestAutogenBlockSkipsVision:
     """Check autogen block FIRST via the in-memory dataclass."""
 
-    @SKIP_FIRST_RUN
-    def test_first_run_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
-        """_first_run skips extract_design when spec.design.auto_generated
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_skips_vision_when_autogen_present(self, tmp_path, monkeypatch):
+        """Legacy pipeline skips extract_design when spec.design.auto_generated
         has content."""
         from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
 
@@ -9248,9 +9247,9 @@ class TestAutogenBlockSkipsVision:
         # Cache invariant: save_design_requirements also skipped
         mock_save_dr.assert_not_called()
 
-    @SKIP_FIRST_RUN
-    def test_first_run_writes_autogen_block(self, tmp_path, monkeypatch):
-        """_first_run writes autogen block to SPEC.md when absent."""
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_writes_autogen_block(self, tmp_path, monkeypatch):
+        """Legacy pipeline writes autogen block to SPEC.md when absent."""
         from duplo.spec_reader import (
             DesignBlock,
             ProductSpec,
@@ -9517,7 +9516,7 @@ class TestAutogenBlockSkipsVision:
         # Cache invariant: save_design_requirements also skipped
         mock_save_dr.assert_not_called()
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_no_spec_does_not_skip_vision(self, tmp_path, monkeypatch):
         """When spec is None, autogen check is False and Vision proceeds."""
 
@@ -9607,9 +9606,9 @@ class TestAutogenBlockSkipsVision:
         # Empty/whitespace autogen should NOT block Vision
         mock_design.assert_called_once()
 
-    @SKIP_FIRST_RUN
-    def test_first_run_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
-        """_first_run emits record_failure when skipping Vision due to
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_emits_diagnostic_when_autogen_present(self, tmp_path, monkeypatch):
+        """Legacy pipeline emits record_failure when skipping Vision due to
         existing autogen block."""
         from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
 
@@ -9799,8 +9798,8 @@ class TestAutogenBlockSkipsVision:
         assert len(design_calls) == 1
         assert "1 input image(s)" in design_calls[0][0][2]
 
-    @SKIP_FIRST_RUN
-    def test_first_run_spec_write_idempotent(self, tmp_path, monkeypatch):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_spec_write_idempotent(self, tmp_path, monkeypatch):
         """SPEC.md write only happens when content actually changes."""
         from duplo.spec_reader import (
             DesignBlock,
@@ -9915,7 +9914,7 @@ class TestAutogenBlockSkipsVision:
         # should NOT have been rewritten — mtime stays the same.
         assert spec_path.stat().st_mtime == original_mtime
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_in_memory_spec_consulted_not_disk(self, tmp_path, monkeypatch):
         """The autogen check uses spec.design.auto_generated (in-memory),
         NOT a re-read of SPEC.md from disk. Prove by having SPEC.md on
@@ -10333,16 +10332,16 @@ class TestSubsequentRunSpecSourcesIntegration:
 
 
 class TestSpecSourceOfTruth:
-    """The in-memory spec from read_spec() at the top of _first_run /
-    _subsequent_run is the source of truth for ALL decisions.  SPEC.md
+    """The in-memory spec from read_spec() at the top of _subsequent_run
+    is the source of truth for ALL decisions.  SPEC.md
     is re-read from disk ONLY to stage writes (step 6: discovered URLs,
     step 13: design autogen).  It is NEVER re-read to drive extraction
     or filtering decisions."""
 
-    @SKIP_FIRST_RUN
-    def test_first_run_read_spec_called_once(self, tmp_path, monkeypatch):
-        """read_spec is called exactly once in _first_run — not
-        re-read after _persist_scrape_result may modify SPEC.md."""
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_read_spec_called_once(self, tmp_path, monkeypatch):
+        """Legacy pipeline calls read_spec exactly once — not re-read
+        after _persist_scrape_result may modify SPEC.md."""
         from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
 
         monkeypatch.chdir(tmp_path)
@@ -10478,8 +10477,8 @@ class TestSpecSourceOfTruth:
 
         assert mock_rs.call_count == 1
 
-    @SKIP_FIRST_RUN
-    def test_first_run_scope_exclude_uses_in_memory_spec(self, tmp_path, monkeypatch):
+    @SKIP_LEGACY_PIPELINE
+    def test_legacy_scope_exclude_uses_in_memory_spec(self, tmp_path, monkeypatch):
         """scope_exclude filtering uses the in-memory spec, not a
         re-read of SPEC.md.  Prove by having SPEC.md on disk change
         scope_exclude mid-run (via _persist_scrape_result) while the
@@ -10677,9 +10676,9 @@ class TestSpecSourceOfTruth:
         content = spec_path.read_text(encoding="utf-8")
         assert "https://new-link.com" in content
 
-    @SKIP_FIRST_RUN
+    @SKIP_LEGACY_PIPELINE
     def test_scrapeable_sources_uses_in_memory_spec(self, tmp_path, monkeypatch):
-        """_first_run passes the in-memory spec to scrapeable_sources,
+        """Legacy pipeline passes the in-memory spec to scrapeable_sources,
         not a re-read from disk.  Prove by having the in-memory spec
         contain sources that differ from what's on disk."""
         from duplo.spec_reader import DesignBlock, ProductSpec, SourceEntry
@@ -10783,8 +10782,7 @@ class TestIntegrationUrlOnlySpec:
     """URL-only spec produces correct PLAN.md without consulting ref/.
 
     Uses _subsequent_run (duplo.json exists) since the new spec-sources
-    pipeline is fully wired in _subsequent_run.  _first_run still has
-    the old scanner-based gate (Phase 7 cleanup).
+    pipeline is fully wired there.
     """
 
     def test_url_only_spec_scrapes_sources(self, tmp_path, monkeypatch):

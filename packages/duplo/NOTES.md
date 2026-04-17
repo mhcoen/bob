@@ -2,6 +2,31 @@
 
 ## Observations
 
+### [7.2.4] Cleared `_first_run` textual references from tests — 2026-04-17
+
+Renamed `SKIP_FIRST_RUN` → `SKIP_LEGACY_PIPELINE` in tests/test_main.py
+and tests/test_phase5_integration.py. Renamed 12 skip-marked methods from
+`test_first_run_*` to `test_legacy_*`. Reworded docstrings, class
+comments, and skip-reason strings to drop the `_first_run` name. Zero
+occurrences of `_first_run` remain under `tests/` (grep-verified).
+Full suite: 2937 passed, 84 skipped — unchanged from before.
+
+No test body was deleted. The skipped classes still import or patch
+removed helpers (`_validate_url`, `_confirm_product`, `_init_project`,
+`ask_preferences`, etc.); they remain runnable only via `@pytest.mark.skip`
+and will be revisited during the Phase 7 dead-code audit
+(CURRENT_PLAN.md § "Dead code audit"), consistent with the prior 7.2.x
+tasks' note that full rewrites are deferred.
+
+Dispatch tests for 7.2.3 (fresh directory exits 0 with init message;
+SPEC.md alone routes to `_subsequent_run`; duplo.json + SPEC.md routes
+to `_subsequent_run`) were already in place before this task at
+tests/test_main.py::`test_migration_pass_without_duplo_json_prints_init_message`,
+`test_spec_only_proceeds_to_subsequent_run`, and
+`test_migration_pass_proceeds_to_subsequent_run` (plus
+`test_exits_when_no_reference_materials` in TestMainFirstRun). Verified
+passing; no new tests added for this checkbox.
+
 ### [7.2.2] Deleted _confirm_product, _validate_url, _init_project — 2026-04-17
 
 Audit results (grep + in-file AST scan via `ast.walk` checking every `Call`

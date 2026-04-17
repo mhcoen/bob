@@ -195,10 +195,10 @@ class TestValidateProductUrl:
 
 
 class TestValidateUrlInMain:
-    """Test _validate_url integration in main._first_run."""
+    """Test _validate_url integration (legacy pipeline removed)."""
 
     pytestmark = pytest.mark.skip(
-        reason="_validate_url removed in Phase 7.2.2 (was only called by _first_run)"
+        reason="_validate_url removed in Phase 7.2.2 with the legacy pipeline"
     )
 
     def test_single_product_proceeds(self, capsys):
@@ -398,7 +398,7 @@ class TestConfirmProduct:
     """Test _confirm_product product confirmation."""
 
     pytestmark = pytest.mark.skip(
-        reason="_confirm_product removed in Phase 7.2.2 (was only called by _first_run)"
+        reason="_confirm_product removed in Phase 7.2.2 with the legacy pipeline"
     )
 
     def test_confirms_known_product(self, capsys):

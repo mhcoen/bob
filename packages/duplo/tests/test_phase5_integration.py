@@ -22,12 +22,12 @@ from duplo.fetcher import PageRecord
 from duplo.main import ScrapeResult, main
 from duplo.questioner import BuildPreferences
 
-# _first_run was removed in Phase 7.2.1. Classes that exercised the first-run
-# pipeline (fresh directory, no duplo.json, `ref/` + SPEC.md) cannot run
-# anymore without rewrite against `duplo init` + `_subsequent_run`. That
-# rewrite is deferred to Phase 7.2.4 (CURRENT_PLAN.md line 21).
-SKIP_FIRST_RUN = pytest.mark.skip(
-    reason="_first_run removed in Phase 7.2.1; test rewrite deferred to Phase 7.2.4"
+# The legacy fresh-directory pipeline was removed in Phase 7.2.1. Classes
+# that exercised it (fresh directory, no duplo.json, `ref/` + SPEC.md)
+# cannot run anymore; rewrite against `duplo init` + `_subsequent_run`
+# is left to the dead-code audit in Phase 7.
+SKIP_LEGACY_PIPELINE = pytest.mark.skip(
+    reason="legacy fresh-directory pipeline removed in Phase 7.2.1"
 )
 
 # ---------------------------------------------------------------------------
@@ -1184,13 +1184,14 @@ class TestRefOnlyNoHttp:
 class TestRefOnlyDesignExtraction:
     """Ref-only spec: extract_design called with visual-target ref paths.
 
-    Runs _first_run with a ref-only SPEC.md (no ## Sources).  The
-    visual-target image in ref/ should reach extract_design as the
+    Runs the legacy fresh-directory pipeline with a ref-only SPEC.md
+    (no ## Sources). The visual-target image in ref/ should reach
+    extract_design as the
     design_input argument.  extract_design is mocked to return the
     deterministic _DESIGN_REQUIREMENTS fixture.
     """
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main().
@@ -1412,13 +1413,13 @@ _DOCS_EXTRACTED_TEXT = (
 class TestRefOnlyDocsExtraction:
     """Ref-only spec: docs_text_extractor called with docs ref/ entries.
 
-    Runs _first_run with a ref-only SPEC.md (no ## Sources).  The
-    docs-role entry (ref/user_guide.txt) should reach
+    Runs the legacy fresh-directory pipeline with a ref-only SPEC.md
+    (no ## Sources). The docs-role entry (ref/user_guide.txt) should reach
     docs_text_extractor as a ReferenceEntry.  The mock returns
     deterministic text and we assert the call received the right path.
     """
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main()."""
@@ -1632,13 +1633,14 @@ class TestRefOnlyDocsExtraction:
 class TestRefOnlyFeatureExtraction:
     """Ref-only spec: extract_features and select_features wiring.
 
-    Runs _first_run with a ref-only SPEC.md (no ## Sources).  Verifies
+    Runs the legacy fresh-directory pipeline with a ref-only SPEC.md
+    (no ## Sources). Verifies
     that extract_features is called with non-empty text derived from the
     docs-role ref, and that select_features auto-selects all features
     returned by the extractor.
     """
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: ref-only fixture + monkeypatch for main()."""
@@ -4423,10 +4425,10 @@ class TestProposedVisualTargetDesignInput:
     the design_input argument for downstream assertion.
     """
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def _run(self, tmp_path, monkeypatch):
-        """Set up and run _first_run, returning the extract_design mock."""
+        """Set up and run the legacy pipeline, returning the extract_design mock."""
         _setup_proposed_vt_tmpdir(tmp_path)
         duplo_dir = tmp_path / ".duplo"
         duplo_dir.mkdir(exist_ok=True)
@@ -5500,7 +5502,7 @@ class TestCounterVtMockedExtractors:
     there are no Sources or docs-role refs in this fixture).
     """
 
-    pytestmark = SKIP_FIRST_RUN
+    pytestmark = SKIP_LEGACY_PIPELINE
 
     def _setup(self, tmp_path, monkeypatch):
         """Common setup: counter-vt fixture + monkeypatch for main()."""
