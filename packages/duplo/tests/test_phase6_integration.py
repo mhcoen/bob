@@ -1034,6 +1034,134 @@ class TestInitThenDuploRunWorksEndToEnd:
         # the follow-on 6.25 subtasks.
         assert (tmp_path / "PLAN.md").is_file()
 
+    def test_end_to_end_plan_produced_no_migration_no_spec_consumption(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Assert PLAN.md produced, no migration message printed, pipeline
+        consumed SPEC.md correctly.
+
+        Content-level check for PLAN.md § 6.25.3.  Re-runs the same
+        three-action sequence the staging test uses (URL-flow
+        ``run_init`` → hand-edit Architecture →
+        :func:`_subsequent_run`) under the same mocks, then asserts on
+        the three things the subtask calls out:
+
+        * **PLAN.md produced**: the file exists and its body contains
+          the mocked :func:`generate_phase_plan` output verbatim.  Both
+          feature names (``"Inline calculation"`` and
+          ``"Unit conversion"``) must appear so a regression that
+          loses the ``[feat: ...]`` annotations or the phase H1 shows
+          up here, not just in the staging test's ``is_file()`` check.
+        * **No migration message printed**: neither stdout nor stderr
+          contains the pinned opening line of :data:`_MIGRATION_MESSAGE`
+          (``"This project predates the SPEC.md / ref/ redesign"``).
+          :func:`_subsequent_run` is called directly — it does not run
+          the migration gate — so this is a property of the pipeline
+          proper, not of the gate.  If a future change routes
+          ``_subsequent_run`` through ``_check_migration`` (which would
+          fire here because ``.duplo/duplo.json`` gets written during
+          the run), this assertion catches it.
+        * **Pipeline consumed SPEC.md correctly**: the ``read_spec``
+          banner (``"Product spec loaded from SPEC.md"``) appears in
+          stdout, and the mocked features land in
+          ``.duplo/duplo.json``.  Those two signals together prove the
+          spec reached both :func:`validate_for_run` (the banner only
+          prints when ``read_spec`` succeeds) and
+          :func:`extract_features` (whose output is what
+          :func:`save_features` writes to ``duplo.json``).
+        """
+        import json
+
+        from duplo.init import run_init
+        from duplo.main import _subsequent_run
+        from duplo.migration import _MIGRATION_MESSAGE
+        from duplo.validator import ValidationResult
+
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="single identifiable product",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=_END_TO_END_DRAFTED_SPEC),
+        ):
+            run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+
+        capsys.readouterr()
+
+        spec_path = tmp_path / "SPEC.md"
+        spec_text = spec_path.read_text()
+        spec_text = spec_text.replace(_ARCHITECTURE_FILL_IN, _FILLED_IN_ARCHITECTURE)
+        spec_path.write_text(spec_text)
+
+        plan_content = _make_end_to_end_plan_content()
+        features = _make_end_to_end_features()
+
+        with (
+            patch(
+                "duplo.main.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.main.extract_features",
+                return_value=features,
+            ),
+            patch("duplo.saver._find_duplicate_groups", return_value=[]),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.main.generate_roadmap",
+                return_value=_make_end_to_end_roadmap(),
+            ),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value=plan_content,
+            ),
+        ):
+            _subsequent_run()
+
+        captured = capsys.readouterr()
+
+        # --- PLAN.md produced --------------------------------------------
+        plan_path = tmp_path / "PLAN.md"
+        assert plan_path.is_file()
+        plan_text = plan_path.read_text()
+        # Mocked plan body must land on disk verbatim — save_plan wraps
+        # it with a trailing ``## Bugs`` section on first write but does
+        # not touch the generated content itself.
+        assert plan_content in plan_text
+        for feat in features:
+            assert feat.name in plan_text
+
+        # --- No migration message printed --------------------------------
+        migration_signal = _MIGRATION_MESSAGE.splitlines()[0]
+        assert migration_signal not in captured.out
+        assert migration_signal not in captured.err
+
+        # --- Pipeline consumed SPEC.md correctly -------------------------
+        # Banner only prints when read_spec returned a ProductSpec.
+        assert "Product spec loaded from SPEC.md" in captured.out
+        # Features from mocked extract_features must have reached
+        # save_features → duplo.json.
+        duplo_json = tmp_path / ".duplo" / "duplo.json"
+        assert duplo_json.is_file()
+        data = json.loads(duplo_json.read_text())
+        saved_names = {f["name"] for f in data.get("features", [])}
+        expected_names = {f.name for f in features}
+        assert expected_names.issubset(saved_names)
+
     def test_subsequent_run_pipeline_mocks_route_correctly(self, tmp_path, monkeypatch):
         """Confirm the three mocks 6.25.2 names route to the functions
         ``_subsequent_run`` actually calls.
