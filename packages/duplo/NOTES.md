@@ -2,6 +2,50 @@
 
 ## Observations
 
+### [7.4.2] Determination: delete questioner.py after moving BuildPreferences to build_prefs.py — 2026-04-17
+
+Decision for CURRENT_PLAN.md line 34 based on the 7.4.1 audit:
+
+**questioner.py can be deleted entirely.** `select_features` is not an
+open question because it is not defined in `questioner.py` and never
+has been (verified 7.3.4, 7.4.1) — it lives in `duplo/selector.py` and
+its one live caller in `_subsequent_run` at `duplo/main.py:1876` stays.
+The phrasing of the checkbox ("whether select_features should be
+migrated to selector.py") is moot: there is nothing to migrate. This
+matches the decision already pre-committed in PLAN.md lines 960-972
+("BuildPreferences migration" → "questioner.py removal").
+
+Inventory of `duplo/questioner.py` symbols and their fate:
+
+- `BuildPreferences` (dataclass, used by 12 importers: 5 in `duplo/`,
+  7 in `tests/`) — **move** to `duplo/build_prefs.py`. Cannot be
+  deleted with the module; it is live code on the `_subsequent_run`
+  path (`_prefs_from_dict`, `_load_preferences`).
+- `ask_preferences` — **delete** (zero production callers; only
+  consumers are `tests/test_questioner.py` which tests the function
+  itself, and `tests/test_main.py:12223` which asserts non-call).
+- `_ask_platform`, `_ask_language`, `_ask_list`, `_print_summary`,
+  `_PLATFORMS` — **delete** (only reachable via `ask_preferences`;
+  only external references are from `tests/test_questioner.py`).
+
+Execution order (required to keep the suite green at every step):
+
+1. Add `BuildPreferences` to `duplo/build_prefs.py` and re-export from
+   `duplo/questioner.py` (one-line `from duplo.build_prefs import
+   BuildPreferences`) so importers keep working across the rename.
+2. Retarget the 12 `from duplo.questioner import BuildPreferences`
+   sites to `from duplo.build_prefs import BuildPreferences`.
+3. Delete `duplo/questioner.py` and `tests/test_questioner.py`.
+4. Retarget or drop `tests/test_main.py:12223`'s `import
+   duplo.questioner as q` (two sibling tests —
+   `test_main_module_has_no_ask_preferences` and
+   `test_orchestrator_module_has_no_ask_preferences` — already cover
+   the invariant, so dropping is the simpler path).
+
+This maps directly onto the remaining 7.4.x checkboxes
+(CURRENT_PLAN.md lines 35-37) and PLAN.md § "BuildPreferences
+migration" / § "questioner.py removal".
+
 ### [7.4.1] `duplo.questioner` import audit: 13 sites; only `BuildPreferences` and `ask_preferences` family imported — 2026-04-17
 
 Full grep for `duplo.questioner` / `import questioner` across the
