@@ -2,6 +2,29 @@
 
 ## Observations
 
+### [6.15.5] URL-from-prose extraction already in place — 2026-04-17
+
+Task 6.15.5 asks for URL extraction from the prose description, with role
+inferred via `_infer_url_role` and `proposed: true` on the resulting
+`SourceEntry`. This was already implemented as part of task 6.15.1 (see
+the note below). `_build_draft_spec` (spec_writer.py lines ~1073-1096)
+handles extraction, canonicalization, role inference, counter-example
+scrape coercion, and dedup against an explicit `inputs.url`. `_run_description`
+already calls `_build_draft_spec`, so the init flow gets the behavior for
+free. Tests covering the behavior: `TestExtractProseUrls`,
+`TestBuildDraftSpecProseUrls` (in test_spec_writer.py), and
+`TestRunInitDescriptionUrlExtraction` (in test_init.py). All pass.
+
+INIT-design.md vs DRAFTER-design.md discrepancy: INIT-design.md § "duplo init
+--from-description" lines 185-187 says the prose-extracted source entry gets
+"a note explaining the URL was extracted from the description." DRAFTER-design.md
+§ "Inferring URL roles" does not mention a note. The task description says
+"Per DRAFTER-design.md" and the plan header specifies DRAFTER-design.md is
+authoritative for spec_writer.py extensions, so the current implementation
+(no note) follows the authoritative source. Flagging here per the plan's
+"flag the discrepancy for resolution" rule — a later task or user decision
+may want to add `notes="extracted from description"` on these entries.
+
 ### [6.15.1] draft_spec refactored to expose a ProductSpec-returning core — 2026-04-17
 
 `_run_description` needs to inspect the drafted `ProductSpec` to decide which
