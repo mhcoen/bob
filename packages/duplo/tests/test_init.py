@@ -7,6 +7,8 @@ import argparse
 import pytest
 
 from duplo.init import _REF_README_CONTENT, _SPEC_EXISTS_ERROR, run_init
+from duplo.spec_reader import ProductSpec
+from duplo.spec_writer import format_spec
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -139,3 +141,37 @@ class TestRunInitNoArgsRefReadme:
         assert readme.read_text() == _REF_README_CONTENT
         captured = capsys.readouterr()
         assert "Created ref/README.md." in captured.out
+
+
+class TestRunInitNoArgsSpecWrite:
+    """Per INIT-design.md § 'duplo init (no arguments)': SPEC.md is the
+    template produced by format_spec on an empty ProductSpec."""
+
+    def test_spec_matches_format_spec_of_empty_product_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert written == format_spec(ProductSpec())
+
+    def test_spec_has_fill_in_markers_for_required_sections(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Required sections must carry the template's <FILL IN> markers
+        # so the user knows where to author content.
+        assert "## Purpose" in written
+        assert "<FILL IN: one or two sentences" in written
+        assert "## Architecture" in written
+        assert "<FILL IN: language, framework, platform, constraints>" in written
+
+    def test_prints_wrote_spec_message(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        captured = capsys.readouterr()
+        assert "Wrote SPEC.md (template, no inputs)." in captured.out
