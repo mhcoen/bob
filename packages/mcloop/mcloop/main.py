@@ -286,15 +286,16 @@ def _run_batch(
     notes_snapshot: tuple[str, int] | None,
     reviewer_config: dict | None = None,
     commit_hashes: list[str] | None = None,
-) -> str:
+    prior_errors: str = "",
+) -> tuple[str, str]:
     """Run multiple subtasks in a single session.
 
     Combines the text of all batch_children into a single prompt
     with numbered steps. On success (checks pass), checks off all
-    children. On failure, returns "failed" so the caller can fall
-    back to individual execution.
+    children. On failure, returns ("failed", error_tail) so the
+    caller can retry the batch with the error as prior_errors.
 
-    Returns "success" or "failed".
+    Returns ("success", "") or ("failed", error_tail).
     """
     n = len(batch_children)
     labels = []
@@ -362,6 +363,7 @@ def _run_batch(
         description,
         task_label=label_range,
         model=current_model,
+        prior_errors=prior_errors,
         session_context=ctx.text(),
         check_commands=project_checks,
         allowed_tools=allowed_tools,
@@ -371,10 +373,10 @@ def _run_batch(
     if not result.success:
         elapsed = _format_elapsed(time.monotonic() - task_start)
         print(
-            formatting.error_msg(f"Batch failed ({elapsed}), will retry individually"),
+            formatting.error_msg(f"Batch session failed ({elapsed})"),
             flush=True,
         )
-        return "failed"
+        return "failed", _tail(result.output, 50)
 
     if not _has_meaningful_changes(project_dir):
         # No changes, check if work was already done
@@ -395,12 +397,15 @@ def _run_batch(
                 elapsed,
                 result.output,
             )
-            return "success"
+            return "success", ""
         print(
             formatting.error_msg("Batch produced no changes and checks failed"),
             flush=True,
         )
-        return "failed"
+        return "failed", (
+            f"Batch produced no changes. Checks still failing: {noop_check.command}\n"
+            + _tail(noop_check.output, 50)
+        )
 
     _lifecycle._current_phase = "checks"
     run_autofix(project_dir)
@@ -410,7 +415,7 @@ def _run_batch(
             formatting.error_msg("Batch: autofix modified metadata-only files"),
             flush=True,
         )
-        return "failed"
+        return "failed", "Autofix modified metadata-only files"
     pre_check_status = _worktree_status(project_dir)
     check_result = run_checks(
         project_dir,
@@ -424,7 +429,7 @@ def _run_batch(
                 formatting.error_msg("Batch: checker introduced uncommitted changes"),
                 flush=True,
             )
-            return "failed"
+            return "failed", "Checker introduced uncommitted changes"
         try:
             batch_hash = _commit(
                 project_dir,
@@ -435,7 +440,7 @@ def _run_batch(
                 formatting.error_msg(str(exc)),
                 flush=True,
             )
-            return "failed"
+            return "failed", f"Commit failed: {exc}"
         if batch_hash and commit_hashes is not None:
             commit_hashes.append(batch_hash)
         handle_sync(project_dir, batch_hash or "", task_label=first_label)
@@ -459,12 +464,14 @@ def _run_batch(
             result.output,
             changed_files=changed_files,
         )
-        return "success"
+        return "success", ""
 
     print(
         formatting.error_msg(f"Batch checks failed: {check_result.command}"),
         flush=True,
     )
+    _check_tail = _tail(check_result.output, 50)
+    _batch_error = f"Command: {check_result.command}\n{_check_tail}"
     # Discard uncommitted changes from the failed batch,
     # preserving files that were dirty before the batch started.
     # Selective rollback: only revert files the batch actually touched.
@@ -499,7 +506,7 @@ def _run_batch(
                 import shutil
 
                 shutil.rmtree(fpath)
-    return "failed"
+    return "failed", _batch_error
 
 
 def _build_and_write_summary(
@@ -910,40 +917,77 @@ def run_loop(
         ):
             batch_children = get_batch_children(parent)
             if len(batch_children) > 1:
-                batch_handled = _run_batch(
-                    batch_children,
-                    tasks,
-                    active_file,
-                    project_dir,
-                    log_dir,
-                    description,
-                    label,
-                    ctx,
-                    rate_state,
-                    cli,
-                    current_model,
-                    fallback_model,
-                    max_retries,
-                    project_checks,
-                    allowed_tools,
-                    run_start,
-                    completed,
-                    notes_snapshot,
-                    reviewer_config=reviewer_config,
-                    commit_hashes=commit_hashes,
-                )
+                batch_handled = "failed"
+                batch_prior_errors = ""
+                for batch_attempt in range(1, max_retries + 1):
+                    if batch_attempt > 1:
+                        print(
+                            formatting.system_msg(
+                                f"Retrying batch with prior errors"
+                                f" (attempt {batch_attempt}/{max_retries})"
+                            ),
+                            flush=True,
+                        )
+                    batch_handled, batch_prior_errors = _run_batch(
+                        batch_children,
+                        tasks,
+                        active_file,
+                        project_dir,
+                        log_dir,
+                        description,
+                        label,
+                        ctx,
+                        rate_state,
+                        cli,
+                        current_model,
+                        fallback_model,
+                        max_retries,
+                        project_checks,
+                        allowed_tools,
+                        run_start,
+                        completed,
+                        notes_snapshot,
+                        reviewer_config=reviewer_config,
+                        commit_hashes=commit_hashes,
+                        prior_errors=batch_prior_errors,
+                    )
+                    if batch_handled == "success":
+                        break
                 if batch_handled == "success":
                     continue
-                elif batch_handled == "failed":
-                    # Fall through to individual execution
-                    print(
-                        formatting.system_msg("Batch failed, falling back to individual tasks"),
-                        flush=True,
+                # Batch exhausted its retries. Mark the parent and every
+                # child as failed, record the failure, and stop the run.
+                # Falling through to per-subtask execution is wrong: a
+                # batch body is written as a coherent unit where some
+                # subtasks may be context-only and cannot stand alone.
+                print(
+                    formatting.error_msg(
+                        f"Batch failed after {max_retries} attempts"
+                    ),
+                    flush=True,
+                )
+                batch_exhausted.add(parent_label)
+                mark_failed(active_file, parent)
+                for child in batch_children:
+                    mark_failed(active_file, child)
+                task_entries.append(
+                    TaskEntry(
+                        label=parent_label,
+                        text=parent.text,
+                        outcome="failed",
+                        elapsed=round(time.monotonic() - run_start, 2),
+                        model=current_model or "",
+                        attempts=max_retries,
                     )
-                    # Re-parse and re-find since batch may have
-                    # partially modified state
-                    batch_exhausted.add(parent_label)
-                    continue
+                )
+                failed_task = f"{parent_label}) {parent.text}"
+                failed_reason = batch_prior_errors
+                notify(
+                    f"Giving up on batch: {parent.text}",
+                    level="error",
+                )
+                terminal_failure = f"Batch failed: {parent.text}"
+                break
 
         active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
         if active_cli is None:
