@@ -430,9 +430,10 @@ def _run_batch(
     )
     if not check_result.passed:
         # Try salvage: if ruff's only complaints are minor style codes
-        # (E501 line too long, etc.), patch the offending lines with
-        # `# noqa` and re-run once. This prevents a 14-minute batch
-        # from being thrown away for one unbreakable long string.
+        # (E501 line too long, etc.), suppress those specific lines
+        # via a per-line suppression comment and re-run once. This
+        # prevents a 14-minute batch from being thrown away for one
+        # unbreakable long string.
         salvaged, patched = try_salvage_style_failures(
             project_dir,
             check_result.output,
@@ -440,7 +441,7 @@ def _run_batch(
         if salvaged:
             print(
                 formatting.system_msg(
-                    "Salvaged minor style failures via noqa in: "
+                    "Salvaged minor style failures in: "
                     + ", ".join(patched)
                 ),
                 flush=True,
@@ -1240,7 +1241,7 @@ def run_loop(
                     if salvaged:
                         print(
                             formatting.system_msg(
-                                "Salvaged minor style failures via noqa in: "
+                                "Salvaged minor style failures in: "
                                 + ", ".join(patched)
                             ),
                             flush=True,

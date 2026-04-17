@@ -6462,7 +6462,7 @@ def test_run_batch_success_checks_off_children(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "success"
+        assert result[0] == "success"
         assert mock_check_off.call_count == 2
         assert len(args["completed"]) == 2
 
@@ -6481,7 +6481,7 @@ def test_run_batch_task_failure_returns_failed(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         mock_check_off.assert_not_called()
         assert len(args["completed"]) == 0
 
@@ -6515,7 +6515,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         mock_check_off.assert_not_called()
         # Verify rollback: selective git checkout (not blanket)
         git_calls = mock_git.call_args_list
@@ -6546,7 +6546,7 @@ def test_run_batch_noop_auto_checks(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "success"
+        assert result[0] == "success"
         assert mock_check_off.call_count == 2
         assert len(args["completed"]) == 2
 
@@ -6599,7 +6599,7 @@ def test_run_loop_batch_detection(tmp_path):
         patch("mcloop.main.get_check_commands", return_value=[]),
     ):
         # First call: batch succeeds; second parse finds nothing left
-        mock_batch.return_value = "success"
+        mock_batch.return_value = ("success", "")
         mock_full_checks.return_value = MagicMock(passed=True)
 
         # run_loop will call _run_batch because parent has [BATCH]
@@ -6618,7 +6618,7 @@ def test_run_loop_batch_detection(tmp_path):
                 "- [x] [BATCH] Build components",
             )
             current.write_text(content)
-            return "success"
+            return ("success", "")
 
         mock_batch.side_effect = batch_side_effect
 
@@ -6999,7 +6999,7 @@ def test_run_batch_autofix_metadata_only_fails(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         mock_commit.assert_not_called()
         # Checks should not have been run since we bail early
         mock_checks.assert_not_called()
@@ -7024,7 +7024,7 @@ def test_run_batch_autofix_no_uncommitted_succeeds(tmp_path):
         result = _run_batch(**args)
 
         # No meaningful changes path: auto-success if checks pass
-        assert result == "success"
+        assert result[0] == "success"
 
 
 def test_individual_task_autofix_metadata_only_retries(tmp_path):
@@ -7121,7 +7121,7 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         # batch_new.py should have been removed (new untracked file)
         assert not new_file.exists()
         # Pre-batch untracked file should be preserved
@@ -7162,7 +7162,7 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         assert not new_dir.exists()
 
 
@@ -7198,7 +7198,7 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         git_calls = mock_git.call_args_list
         # Should NOT have a blanket "git checkout ." call
         checkout_dot_calls = [c for c in git_calls if c[0][0] == ["git", "checkout", "."]]
@@ -7247,7 +7247,7 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         git_calls = mock_git.call_args_list
         # Should NOT use blanket checkout
         checkout_dot_calls = [c for c in git_calls if c[0][0] == ["git", "checkout", "."]]
@@ -7303,7 +7303,7 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         git_calls = mock_git.call_args_list
         # Only batch_touched.py should be checked out, not pre_dirty.py
         checkout_calls = [
@@ -7350,7 +7350,7 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         # No checkout calls since no modified files
         git_calls = mock_git.call_args_list
         checkout_calls = [
@@ -7407,7 +7407,7 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         # Pre-existing files survive
         assert pre1.exists()
         assert pre2.exists()
@@ -7434,7 +7434,7 @@ def test_run_batch_rollback_task_failure_no_rollback(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "failed"
+        assert result[0] == "failed"
         # No rollback git calls (diff, checkout, ls-files) should happen
         # because the task failed before checks
         mock_changes.assert_not_called()
@@ -7488,7 +7488,7 @@ def test_run_batch_worktree_status_reordered_lines_not_treated_as_change(tmp_pat
 
         result = _run_batch(**args)
 
-        assert result == "success"
+        assert result[0] == "success"
         mock_commit.assert_called_once()
 
 
@@ -7529,7 +7529,7 @@ def test_run_batch_empty_pre_check_status_not_false_positive(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result == "success"
+        assert result[0] == "success"
         mock_commit.assert_called_once()
 
 

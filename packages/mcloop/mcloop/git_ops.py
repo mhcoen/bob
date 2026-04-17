@@ -363,22 +363,60 @@ def _worktree_status(project_dir: Path) -> str:
 
 
 def _changed_files(project_dir: Path) -> list[str]:
-    """Return list of files with uncommitted changes, excluding logs and metadata."""
-    result = _git(
-        ["git", "status", "--porcelain"],
+    """Return list of files with uncommitted changes, excluding logs and metadata.
+
+    Uses ``git diff --name-only HEAD`` plus ``git ls-files --others
+    --exclude-standard`` instead of parsing ``git status --porcelain``
+    output. The porcelain format is position-sensitive (status chars at
+    cols 0-1, space at col 2, path at col 3+) and easy to mis-parse;
+    the name-only commands return bare filenames with no prefix to
+    strip, avoiding entire classes of slicing bugs.
+    """
+    files: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        name = name.strip()
+        if not name or name in seen:
+            return
+        if name.startswith("logs/") or name.startswith(".mcloop/") or name == "PLAN.md":
+            return
+        seen.add(name)
+        files.append(name)
+
+    # Tracked files: modified, staged, or deleted relative to HEAD.
+    # --name-only emits one clean path per line (handles renames by
+    # emitting only the new name).
+    diff_result = _git(
+        ["git", "diff", "--name-only", "HEAD"],
         cwd=project_dir,
-        label="changed files",
+        label="changed files (diff)",
+        silent=True,
     )
-    if result.returncode != 0:
-        return []
-    files = []
-    for line in result.stdout.strip().splitlines():
-        if len(line) > 3:
-            f = line[3:]
-            if " -> " in f:
-                f = f.split(" -> ", 1)[1]
-            if f and not f.startswith("logs/") and not f.startswith(".mcloop/") and f != "PLAN.md":
-                files.append(f)
+    # Fall back to diff without HEAD when HEAD doesn't exist yet
+    # (fresh repo with no commits).
+    if diff_result.returncode != 0:
+        diff_result = _git(
+            ["git", "diff", "--name-only"],
+            cwd=project_dir,
+            label="changed files (diff, no HEAD)",
+            silent=True,
+        )
+    if diff_result.returncode == 0:
+        for line in diff_result.stdout.splitlines():
+            _add(line)
+
+    # Untracked files (ignores .gitignore entries via --exclude-standard).
+    untracked_result = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="changed files (untracked)",
+        silent=True,
+    )
+    if untracked_result.returncode == 0:
+        for line in untracked_result.stdout.splitlines():
+            _add(line)
+
     return files
 
 
