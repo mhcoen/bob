@@ -146,7 +146,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per INIT-design.md section "duplo init --from-description description.txt".
   - [x] Read description from file path or stdin (- argument). If file not found, print error per INIT-design.md and exit 1.
   - [x] If stdin: print "Reading description from stdin. Press Ctrl-D when done." when stdin is a TTY.
-  - [ ] Build DraftInputs with description populated. Call draft_spec(inputs).
+  - [x] Build DraftInputs with description populated. Call draft_spec(inputs).
   - [ ] Per DRAFTER-design.md: if prose mentions a URL, extract it and add to Sources with proposed: true and role inferred via _infer_url_role.
   - [ ] Write SPEC.md, create ref/, write ref/README.md.
   - [ ] Print output per INIT-design.md (character count, pre-filled sections, next steps).
