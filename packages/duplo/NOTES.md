@@ -2,6 +2,33 @@
 
 ## Observations
 
+### [7.6.2] Vacuous: no legacy scoring code to delete from scanner.py — 2026-04-17
+
+Task conditional ("If any legacy scoring functions or constants remain in
+scanner.py that are no longer called, delete them") is not triggered.
+Re-verified today with the same greps as 7.6.1 plus a full sweep of every
+symbol in `duplo/scanner.py`:
+
+- Grep `_MIN_IMAGE|dimension|threshold|too_small|too_large|getsize|
+  st_size|relevance|_assess_|FileRelevance|MIN_BYTES|MAX_BYTES` in
+  `duplo/scanner.py` → zero hits.
+- Grep `scan\.relevance|scan_result\.relevance|result\.relevance|
+  ScanResult\.relevance` across the repo → zero hits in live code (only
+  the 7.6.1 NOTES.md entry itself).
+- All symbols defined in `duplo/scanner.py` today (`ScanResult`,
+  `scan_files`, `scan_directory`, `_classify_file`,
+  `check_unlisted_ref_files`, `_build_reference_index`, `_lookup_roles`,
+  `_extract_urls_from_file`; constants `_IMAGE_EXTS`, `_VIDEO_EXTS`,
+  `_PDF_EXTS`, `_TEXT_EXTS`, `_SKIP_DIRS`, `_URL_RE`, `_IGNORE_EXTS`,
+  `_SOURCE_EXTS`, `_SOURCE_NAMES`) are consumed on the live scan path —
+  the extension/name sets feed `_classify_file`; the rest are entry
+  points or index/lookup helpers reached from `scan_files` /
+  `scan_directory` / `check_unlisted_ref_files`. Nothing orphaned.
+
+CURRENT_PLAN.md line 53 therefore has no code change — same status as
+line 52 (7.6.1). Next checkbox (presumably a Tests verification in
+7.6.3+) can proceed.
+
 ### [7.6.1] Confirmed: scanner.py has no legacy scoring code — 2026-04-17
 
 Verification task (no code change). Commit `ffc66ea` (2026-04-13 "Drop
