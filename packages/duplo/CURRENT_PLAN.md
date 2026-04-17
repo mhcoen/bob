@@ -32,7 +32,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 - [ ] Evaluate questioner.py for removal
   - [x] Audit all imports of questioner across the codebase.
   - [x] If ask_preferences has no remaining callers after _first_run removal, and select_features is only used via selector.py (or the next-phase flow), determine whether questioner.py can be deleted entirely or whether select_features should be migrated to selector.py.
-  - [ ] If questioner.py can be deleted: delete it and tests/test_questioner.py.
+  - [x] If questioner.py can be deleted: delete it and tests/test_questioner.py.
   - [ ] If select_features is still needed: keep the function, move it to selector.py (or leave in questioner.py), remove only the dead code.
   - [ ] Tests: no remaining imports of deleted functions; existing next-phase flow tests still pass.
 
