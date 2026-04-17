@@ -1918,6 +1918,59 @@ class TestDraftSpec:
         assert len(spec.sources) == 1
         assert "Build a SwiftUI calculator." in spec.notes
 
+    def test_output_strictly_round_trips_via_spec_equal_helper(self, monkeypatch):
+        """draft_spec output parses back to a ProductSpec that is
+        ``_spec_equal_for_round_trip`` to the pre-serialization spec.
+        Pins the full round-trip property (the weaker test above only
+        spot-checks individual fields)."""
+        png = Path("ref/hero.png")
+        pdf = Path("ref/api.pdf")
+
+        pre_serialize: dict[str, ProductSpec] = {}
+
+        def fake_draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
+            return ProductSpec(
+                purpose="A SwiftUI calculator.",
+                architecture="SwiftUI on macOS 14+.",
+                design=DesignBlock(user_prose="Monospaced, dark theme."),
+                behavior_contracts=[BehaviorContract(input="2 + 3", expected="5")],
+                scope_include=["Units"],
+                scope_exclude=["Plugins"],
+            )
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            fake_draft_from_inputs,
+        )
+
+        prose = "Build a SwiftUI calculator like Numi."
+        inputs = DraftInputs(
+            url="https://numi.app",
+            url_scrape="...",
+            description=prose,
+            existing_ref_files=[png, pdf],
+            vision_proposals={png: "visual-target", pdf: "docs"},
+        )
+        text = draft_spec(inputs)
+
+        # Reconstruct the pre-serialization spec the orchestrator builds
+        # internally (draft_spec mutates the spec from step 1 before
+        # serializing — this mirrors steps 2–4 deterministically).
+        expected = fake_draft_from_inputs(inputs)
+        expected.notes = f"Original description provided to `duplo init`:\n\n{prose}"
+        expected.sources.insert(
+            0,
+            SourceEntry(url="https://numi.app", role="product-reference", scrape="deep"),
+        )
+        expected.references.append(
+            ReferenceEntry(path=png, roles=["visual-target"], proposed=True)
+        )
+        expected.references.append(ReferenceEntry(path=pdf, roles=["docs"], proposed=True))
+        pre_serialize["spec"] = expected
+
+        parsed = _parse_spec(text)
+        assert _spec_equal_for_round_trip(parsed, pre_serialize["spec"])
+
     def test_llm_failure_still_produces_spec_with_user_supplied_entries(
         self, monkeypatch, tmp_path
     ):
