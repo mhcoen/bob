@@ -2,6 +2,29 @@
 
 ## Observations
 
+### [7.5.4] project_name_from_url conditional does not fire — 2026-04-17
+
+Task condition: "If project_name_from_url is used by derive_app_name or
+another live path, keep only that function and delete the rest."
+
+The condition is false. Verified via re-grep today:
+
+- `derive_app_name` (`duplo/saver.py:91-159`) does not call
+  `project_name_from_url`. Its resolution order is product.json
+  `app_name` → duplo.json `app_name` → product.json `product_name` →
+  `td.resolve().name` (directory). No hostname-derived naming anywhere
+  in the chain.
+- No other importer of `duplo.initializer` exists in `duplo/`. Only
+  references to `project_name_from_url` outside `duplo/initializer.py`
+  are test callers in `tests/test_initializer.py` (10, 15, 18, 21, 24,
+  27), plan checklist text in `PLAN.md` / `CURRENT_PLAN.md`, prose in
+  `AGENTS.md:356`, and prior NOTES.md entries.
+
+Action: no "keep only that function" operation applies. Full-file
+deletion remains blocked by the no-delete rule — already captured in
+the 7.5.3 note above. CURRENT_PLAN.md line 45 marked complete because
+the conditional's premise is false, not because any code changed.
+
 ### [7.5.3] Initializer deletion blocked by no-delete rule — 2026-04-17
 
 The deletion prerequisite ("no remaining callers exist after _first_run
