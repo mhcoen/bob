@@ -122,3 +122,56 @@ class TestInitUrlProducesPrefilledSpec:
             assert patched_fetch_site(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow") == fixture
 
         mock_fetch.assert_called_once_with(_IDENTIFIED_FIXTURE_URL, scrape_depth="shallow")
+
+    def test_run_init_with_url_argument(self, tmp_path, capsys, monkeypatch):
+        """Run ``run_init`` with a URL argument.
+
+        Stages the URL-flow integration path: patches the three LLM /
+        network dependencies (``fetch_site`` with the identified
+        fixture, ``validate_product_url`` with a ``single_product``
+        result for "Numi", and ``draft_spec`` with a minimal
+        pre-filled SPEC body) and invokes ``run_init`` with
+        ``args.url`` set.  This subtask only confirms the URL flow
+        runs to completion under mocks and lays down SPEC.md / ref/;
+        the content-level assertions on Purpose / Sources /
+        Architecture arrive in the next subtask.
+        """
+        from duplo.init import run_init
+        from duplo.validator import ValidationResult
+
+        monkeypatch.chdir(tmp_path)
+
+        drafted = (
+            "## Purpose\n\nNumi — a calculator app that shows answers inline.\n\n"
+            "## Sources\n\n"
+            f"- {_IDENTIFIED_FIXTURE_URL}\n"
+            "  role: product-reference\n"
+            "  scrape: deep\n\n"
+            "## Architecture\n\n"
+            "<FILL IN: language, framework, platform, constraints>\n"
+        )
+
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="single identifiable product",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=drafted),
+        ):
+            run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+
+        # Drain captured output so it does not bleed into later tests.
+        capsys.readouterr()
+
+        assert (tmp_path / "SPEC.md").is_file()
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").is_file()
