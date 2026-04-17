@@ -2,6 +2,24 @@
 
 ## Observations
 
+### [7.5.5] Pinned no-initializer-imports invariant in test suite — 2026-04-17
+
+Added `TestNoInitializerImportsInPipeline` at `tests/test_main.py:12269`
+with four `hasattr`-style assertions proving `duplo.main`, `duplo.init`,
+`duplo.orchestrator`, and `duplo.saver` do not expose
+`create_project_dir` or `project_name_from_url` in their module
+namespaces. Mirrors the 7.3.5 / 7.4.4 pattern
+(`TestNoAskPreferencesInPipeline`). All four tests pass.
+
+The initializer files (`duplo/initializer.py`, `tests/test_initializer.py`)
+still exist — per the no-delete rule captured in the 7.5.3 note above,
+the physical deletion remains a user-executed follow-up. This test
+class pins the live invariant (nothing in the pipeline imports the
+dead functions) so the residual files cannot silently regain a caller.
+
+Full suite: 2925 passed, 103 skipped (+4 passes vs. the 2921/103 after
+7.4.4; no newly skipped tests).
+
 ### [7.5.4] project_name_from_url conditional does not fire — 2026-04-17
 
 Task condition: "If project_name_from_url is used by derive_app_name or
