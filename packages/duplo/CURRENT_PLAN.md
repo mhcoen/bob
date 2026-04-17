@@ -47,10 +47,10 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 ## Legacy scanner heuristics removal
 
-- [ ] Remove file-relevance scoring from duplo/scanner.py
+- [x] Remove file-relevance scoring from duplo/scanner.py
   - [x] Phase 5 already changed scan_directory to point at ref/ and drop relevance heuristics. Confirm that no legacy scoring code remains (image dimension checks, file size thresholds, etc.).
   - [x] If any legacy scoring functions or constants remain in scanner.py that are no longer called, delete them.
-  - [ ] Tests: no reference to removed scoring functions; scan_directory works purely on ref/ file inventory.
+  - [x] Tests: no reference to removed scoring functions; scan_directory works purely on ref/ file inventory.
 
 ## Legacy URL-in-text-file scanning removal
 
