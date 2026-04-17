@@ -965,3 +965,55 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
 
     # Unreachable: every branch in the loop either returns or continues.
     return ProductSpec()
+
+
+# --------------------------------------------------------------------------
+# draft_spec — orchestrate _draft_from_inputs and format_spec
+# --------------------------------------------------------------------------
+
+_NOTES_DESCRIPTION_HEADER = "Original description provided to `duplo init`:"
+
+
+def draft_spec(inputs: DraftInputs) -> str:
+    """Draft a fresh SPEC.md from *inputs* and return the serialized text.
+
+    Per DRAFTER-design.md § ``draft_spec``.  Orchestrates:
+
+    1. :func:`_draft_from_inputs` to turn *inputs* into a
+       :class:`ProductSpec` via the drafter LLM call.
+    2. If ``inputs.description`` is set, copy the verbatim prose into
+       ``spec.notes`` under a labeled header.  The LLM never writes
+       ``## Notes``; this step guarantees the user's original words are
+       preserved even if the structured extraction missed nuances.
+    3. Prepend a :class:`SourceEntry` for ``inputs.url`` (if any) with
+       ``role="product-reference"`` and ``scrape="deep"``.  The user
+       provided the URL explicitly, so no ``proposed`` / ``discovered``
+       flag is set.
+    4. Append a :class:`ReferenceEntry` for each file in
+       ``inputs.existing_ref_files`` with ``proposed=True`` and the
+       role from ``inputs.vision_proposals``.
+    5. Serialize the result with :func:`format_spec`.
+
+    The caller (``duplo init``) writes the returned string to SPEC.md.
+    """
+    spec = _draft_from_inputs(inputs)
+
+    if inputs.description:
+        spec.notes = f"{_NOTES_DESCRIPTION_HEADER}\n\n{inputs.description}"
+
+    if inputs.url:
+        spec.sources.insert(
+            0,
+            SourceEntry(
+                url=inputs.url,
+                role="product-reference",
+                scrape="deep",
+            ),
+        )
+
+    for path in inputs.existing_ref_files:
+        role = inputs.vision_proposals.get(path, "")
+        roles = [role] if role else []
+        spec.references.append(ReferenceEntry(path=path, roles=roles, proposed=True))
+
+    return format_spec(spec)

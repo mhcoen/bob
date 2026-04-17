@@ -21,6 +21,7 @@ from duplo.spec_writer import (
     _propose_file_role,
     append_references,
     append_sources,
+    draft_spec,
     format_spec,
     update_design_autogen,
 )
@@ -1782,3 +1783,160 @@ class TestDraftFromInputs:
         spec = _draft_from_inputs(DraftInputs(description="x"))
         assert len(spec.behavior_contracts) == 1
         assert spec.behavior_contracts[0].input == "2 + 3"
+
+
+class TestDraftSpec:
+    """Tests for ``draft_spec`` — orchestrates ``_draft_from_inputs`` and ``format_spec``."""
+
+    def _mock_query(self, monkeypatch, response: str) -> None:
+        def fake_query(prompt, **kwargs):
+            return response
+
+        monkeypatch.setattr("duplo.spec_writer.query", fake_query)
+
+    def _llm_response(self, **overrides) -> str:
+        data = {
+            "purpose": None,
+            "architecture": None,
+            "design": None,
+            "behavior_contracts": [],
+            "scope_include": [],
+            "scope_exclude": [],
+        }
+        data.update(overrides)
+        return json.dumps(data)
+
+    def test_url_only_produces_sources_entry_and_prefilled_purpose(self, monkeypatch):
+        self._mock_query(monkeypatch, self._llm_response(purpose="A calculator like Numi."))
+        text = draft_spec(DraftInputs(url="https://numi.app", url_scrape="Numi is a calculator."))
+
+        spec = _parse_spec(text)
+        assert spec.purpose == "A calculator like Numi."
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://numi.app"
+        assert spec.sources[0].role == "product-reference"
+        assert spec.sources[0].scrape == "deep"
+        assert spec.sources[0].proposed is False
+        assert spec.sources[0].discovered is False
+
+    def test_description_copied_verbatim_into_notes(self, monkeypatch):
+        self._mock_query(monkeypatch, self._llm_response(purpose="Calc."))
+        prose = "Build a calculator.\n\nIt should support units.\nAnd currencies."
+
+        text = draft_spec(DraftInputs(description=prose))
+
+        assert "## Notes" in text
+        assert "Original description provided to `duplo init`:" in text
+        # Prose appears byte-for-byte after the labeled header.
+        notes_idx = text.index("Original description provided to `duplo init`:")
+        assert prose in text[notes_idx:]
+
+    def test_prose_only_emits_sources_comment_hint(self, monkeypatch):
+        """No URL ⇒ Sources section shows the template comment hint, not a user entry."""
+        self._mock_query(monkeypatch, self._llm_response(purpose="Calc."))
+        text = draft_spec(DraftInputs(description="Build something."))
+        assert "## Sources\n\n<!-- URLs duplo should scrape." in text
+
+    def test_url_plus_description_merged(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            self._llm_response(purpose="A SwiftUI calculator.", architecture="SwiftUI on macOS."),
+        )
+        prose = "Build a SwiftUI calculator like Numi."
+        text = draft_spec(
+            DraftInputs(
+                url="https://numi.app",
+                url_scrape="Numi is a calculator.",
+                description=prose,
+            )
+        )
+
+        spec = _parse_spec(text)
+        assert spec.purpose == "A SwiftUI calculator."
+        assert spec.architecture == "SwiftUI on macOS."
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://numi.app"
+        assert prose in spec.notes
+
+    def test_no_inputs_produces_template_like_spec(self, monkeypatch):
+        self._mock_query(monkeypatch, self._llm_response())
+        text = draft_spec(DraftInputs())
+
+        assert "<FILL IN: one or two sentences" in text
+        assert "<FILL IN: language, framework" in text
+        assert "## Sources\n\n<!-- URLs duplo should scrape." in text
+        assert "## References\n\n<!-- Files in ref/." in text
+        assert "## Notes\n\n<!-- Optional. Free-form context for duplo. -->" in text
+
+    def test_existing_ref_files_produce_reference_entries(self, monkeypatch):
+        self._mock_query(monkeypatch, self._llm_response(purpose="Calc."))
+        png = Path("ref/hero.png")
+        pdf = Path("ref/api.pdf")
+        inputs = DraftInputs(
+            existing_ref_files=[png, pdf],
+            vision_proposals={png: "visual-target", pdf: "docs"},
+        )
+
+        text = draft_spec(inputs)
+        spec = _parse_spec(text)
+
+        paths_to_entries = {str(r.path): r for r in spec.references}
+        assert str(png) in paths_to_entries
+        assert str(pdf) in paths_to_entries
+        assert paths_to_entries[str(png)].proposed is True
+        assert paths_to_entries[str(pdf)].proposed is True
+        assert "visual-target" in paths_to_entries[str(png)].roles
+        assert "docs" in paths_to_entries[str(pdf)].roles
+
+    def test_output_round_trips_through_parser(self, monkeypatch):
+        self._mock_query(
+            monkeypatch,
+            self._llm_response(
+                purpose="A text calculator.",
+                architecture="SwiftUI.",
+                design="Monospaced.",
+                behavior_contracts=[{"input": "2 + 3", "expected": "5"}],
+                scope_include=["Units"],
+                scope_exclude=["Plugins"],
+            ),
+        )
+        text = draft_spec(
+            DraftInputs(
+                url="https://numi.app",
+                url_scrape="...",
+                description="Build a SwiftUI calculator.",
+            )
+        )
+
+        spec = _parse_spec(text)
+        assert spec.purpose == "A text calculator."
+        assert spec.architecture == "SwiftUI."
+        assert spec.design.user_prose == "Monospaced."
+        assert len(spec.behavior_contracts) == 1
+        assert spec.scope_include == ["Units"]
+        assert spec.scope_exclude == ["Plugins"]
+        assert len(spec.sources) == 1
+        assert "Build a SwiftUI calculator." in spec.notes
+
+    def test_llm_failure_still_produces_spec_with_user_supplied_entries(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.chdir(tmp_path)
+
+        def fake_query(prompt, **kwargs):
+            raise ClaudeCliError("boom")
+
+        monkeypatch.setattr("duplo.spec_writer.query", fake_query)
+        monkeypatch.setattr("duplo.spec_writer._DRAFT_BACKOFF", 0.0)
+
+        prose = "Build a calculator."
+        text = draft_spec(DraftInputs(url="https://numi.app", url_scrape="...", description=prose))
+        spec = _parse_spec(text)
+
+        # LLM fallback ⇒ empty ProductSpec before user entries are added;
+        # format_spec emits the FILL IN marker, which parses back as
+        # purpose content with fill_in_purpose set.
+        assert spec.fill_in_purpose is True
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://numi.app"
+        assert prose in spec.notes
