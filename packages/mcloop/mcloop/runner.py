@@ -634,9 +634,14 @@ def _run_session(
         _last_output_lines.append(line.rstrip("\n"))
         if len(output_lines) > _MAX_OUTPUT_LINES * 2:
             output_lines = output_lines[-_MAX_OUTPUT_LINES:]
-        _print_stream_event(line)
+        printed_visible = _print_stream_event(line)
         shown_waiting = False
-        last_dot = time.monotonic()
+        now = time.monotonic()
+        if printed_visible:
+            last_dot = now
+        elif now - last_dot >= PROGRESS_DOT_INTERVAL:
+            print(".", end="", flush=True)
+            last_dot = now
 
     t.join(timeout=5)
     process.wait()
@@ -659,18 +664,18 @@ def _run_session(
 _SUPPRESS_ALL_TOOLS = True
 
 
-def _print_stream_event(line: str) -> None:
+def _print_stream_event(line: str) -> bool:
     """Parse a stream-json line and print relevant activity.
 
-    Prints non-suppressed tool calls (e.g. Bash). Suppresses quiet
-    tools and code.
+    Returns True iff something user-visible was printed. Callers use
+    this to decide whether to suppress the next progress dot.
     """
     import json as _json
 
     try:
         data = _json.loads(line)
     except (ValueError, TypeError):
-        return
+        return False
 
     if data.get("type") == "assistant":
         for block in data.get("message", {}).get("content", []):
@@ -681,6 +686,8 @@ def _print_stream_event(line: str) -> None:
                     detail = inp.get("command", "") if name == "Bash" else ""
                     label = f"{name}: {detail}" if detail else name
                     print(f"  {label}", flush=True)
+                    return True
+    return False
 
 
 def run_sync(
