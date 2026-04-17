@@ -64,7 +64,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 - [ ] Remove Phase 3 compatibility shims for spec.references and spec.design string access
   - [x] Phase 3 changed spec.references from str to list[ReferenceEntry] and spec.design from str to DesignBlock. If any compatibility properties or helper methods were added to ProductSpec to support old-style string access, remove them now.
-  - [ ] Grep for any call site that accesses spec.references as a string or spec.design as a string. If found, update to use the structured types.
+  - [x] Grep for any call site that accesses spec.references as a string or spec.design as a string. If found, update to use the structured types.
   - [ ] Tests: no string-access patterns remain; all callers use list[ReferenceEntry] and DesignBlock.
 
 ## Dead code audit
