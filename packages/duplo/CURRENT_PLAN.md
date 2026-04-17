@@ -161,13 +161,13 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## duplo init: output discipline
 
-- [ ] [BATCH] Ensure all init output follows INIT-design.md section "Output discipline"
-  - [ ] Present-tense or simple-past for actions: "Fetched X.", "Pre-filled Y.", "Created Z."
-  - [ ] Indented bullets with arrow for sub-results: "  -> Identified product: Numi"
-  - [ ] "Next steps" sections with numbered items at the end of successful runs.
-  - [ ] Errors to stderr, successful output to stdout.
-  - [ ] No emoji, no color codes.
-  - [ ] Tests: capture stdout/stderr and assert formatting rules hold for each input combination.
+- [x] [BATCH] Ensure all init output follows INIT-design.md section "Output discipline"
+  - [x] Present-tense or simple-past for actions: "Fetched X.", "Pre-filled Y.", "Created Z."
+  - [x] Indented bullets with arrow for sub-results: "  -> Identified product: Numi"
+  - [x] "Next steps" sections with numbered items at the end of successful runs.
+  - [x] Errors to stderr, successful output to stdout.
+  - [x] No emoji, no color codes.
+  - [x] Tests: capture stdout/stderr and assert formatting rules hold for each input combination.
 
 ## Migration message update
 
