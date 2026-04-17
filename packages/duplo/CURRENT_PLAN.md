@@ -15,7 +15,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: dataclass construction with all fields; default values for optional fields; field types enforced.
 
 - [ ] Implement format_spec(spec: ProductSpec) -> str in duplo/spec_writer.py
-  - [ ] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per DRAFTER-design.md section format_spec.
+  - [x] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per DRAFTER-design.md section format_spec.
   - [ ] Start with the standard top-matter comment block (the same block from SPEC-template.md, including the "How the pieces fit together:" marker string).
   - [ ] Render sections in canonical order: Purpose, Sources, References, Architecture, Design, Scope, Behavior, Notes.
   - [ ] For empty required sections (Purpose, Architecture): write the FILL IN marker from the template.
