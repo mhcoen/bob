@@ -60,3 +60,33 @@ class TestRunInitNoArgsExistingSpec:
 
         assert (tmp_path / "SPEC.md").exists()
         assert "How the pieces fit together:" in (tmp_path / "SPEC.md").read_text()
+
+
+class TestRunInitNoArgsRefDir:
+    """Per INIT-design.md § 'duplo init (no arguments)': ref/ creation."""
+
+    def test_creates_ref_dir_when_absent(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / "ref").exists()
+
+        run_init(_make_args())
+
+        ref_dir = tmp_path / "ref"
+        assert ref_dir.is_dir()
+        captured = capsys.readouterr()
+        assert "Created ref/ (empty)." in captured.out
+
+    def test_skips_creation_when_ref_dir_exists(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        # Pre-existing user file must not be touched.
+        user_file = ref_dir / "mockup.png"
+        user_file.write_bytes(b"user data")
+
+        run_init(_make_args())
+
+        assert ref_dir.is_dir()
+        assert user_file.read_bytes() == b"user data"
+        captured = capsys.readouterr()
+        assert "Created ref/ (empty)." not in captured.out
