@@ -103,7 +103,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 - [ ] Add test_old_project_still_blocked_by_migration
   - [x] Create a tmpdir with .duplo/duplo.json but no SPEC.md.
-  - [ ] Run duplo (no subcommand).
+  - [x] Run duplo (no subcommand).
   - [ ] Assert: migration message printed (now referencing duplo init); exits 1.
 
 - [ ] Add test_no_dead_imports_remain
