@@ -1,8 +1,35 @@
 # Duplo
 
-Duplo duplicates apps, customized however you want. Give it reference
-material and it generates a build plan. You then run
-[McLoop](https://github.com/mhcoen/mcloop) to build it.
+Duplo builds software from reference material. Point it at a product
+URL, drop in screenshots or a demo video, write a sentence about
+what you want — and it produces a phased build plan that
+[McLoop](https://github.com/mhcoen/mcloop) executes autonomously.
+
+It is a clone-anything tool: give it whatever you have (a website, a
+screenshot, a PDF of docs, a video walkthrough, a prose description)
+and it figures out what features the product has, what it looks like,
+and how to build it. You review a spec, kick off the build, test the
+result, and iterate. Each cycle adds to what exists without
+destroying previous work.
+
+Typical workflow:
+
+```
+duplo init https://numi.app       # one-time: create a spec from a live product
+vim SPEC.md                        # review and customize (architecture, scope, design)
+duplo                              # extract features, generate Phase 1 build plan
+mcloop                             # build it
+# ... test the result ...
+duplo fix "colors are wrong"       # diagnose bugs, append fix tasks
+mcloop                             # apply fixes
+duplo                              # detect gaps, generate Phase 2
+mcloop                             # build Phase 2
+```
+
+No source code from the reference product is used. Duplo works from
+what a user can see: the UI, the documentation, the behavior. It
+extracts features, visual design details, and behavioral contracts,
+then hands everything to an AI coding agent.
 
 ## How it works
 
