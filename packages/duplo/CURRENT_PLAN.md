@@ -69,11 +69,11 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 ## Dead code audit
 
-- [ ] [BATCH] Run a dead-code audit across the duplo package
-  - [ ] Use ruff or manual grep to identify functions, classes, and module-level constants that are never imported or called from any live code path.
-  - [ ] For each candidate: confirm it is truly dead (not used by tests that test the function itself, not used by external scripts). If dead, delete it.
-  - [ ] Pay special attention to: functions in saver.py that were only used by _first_run; functions in fetcher.py that were only used by the old URL-in-text-file scanning; functions in extractor.py that were only used by the old first-run feature selection flow.
-  - [ ] Tests: pytest -x passes after all deletions.
+- [x] [BATCH] Run a dead-code audit across the duplo package
+  - [x] Use ruff or manual grep to identify functions, classes, and module-level constants that are never imported or called from any live code path.
+  - [x] For each candidate: confirm it is truly dead (not used by tests that test the function itself, not used by external scripts). If dead, delete it.
+  - [x] Pay special attention to: functions in saver.py that were only used by _first_run; functions in fetcher.py that were only used by the old URL-in-text-file scanning; functions in extractor.py that were only used by the old first-run feature selection flow.
+  - [x] Tests: pytest -x passes after all deletions.
 
 ## Documentation updates
 
