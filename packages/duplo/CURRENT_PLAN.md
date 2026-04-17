@@ -65,7 +65,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter: _draft_from_inputs and draft_spec
 
-- [ ] Implement _draft_from_inputs(inputs: DraftInputs) -> ProductSpec in duplo/spec_writer.py
+- [x] Implement _draft_from_inputs(inputs: DraftInputs) -> ProductSpec in duplo/spec_writer.py
   - [x] Per DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
   - [x] Build structured-output prompt for claude -p per DRAFTER-design.md: request JSON with fields purpose, architecture, design, behavior_contracts, scope_include, scope_exclude.
   - [x] Architecture is filled ONLY when description prose explicitly states a stack/platform/language. URL scrapes do NOT inform architecture. Per DRAFTER-design.md and INIT-design.md.
@@ -73,7 +73,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Parse JSON response. Strip code fences before parsing (reuse strip_fences from duplo/parsing.py).
   - [x] Construct ProductSpec with: filled fields from JSON (when not null/empty); FILL IN markers for required fields the LLM returned null for; empty content for optional fields the LLM returned null for.
   - [x] Retry logic: two retry attempts with backoff on LLM failure or JSON parse error, then fall back to empty ProductSpec (template-only draft) with a diagnostic per DRAFTER-design.md section "Error handling".
-  - [ ] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
+  - [x] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
 
 - [ ] Implement draft_spec(inputs: DraftInputs) -> str in duplo/spec_writer.py
   - [ ] Per DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
