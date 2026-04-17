@@ -78,7 +78,7 @@ def extract_scene_frames(
         original_frames = list(frames)
         preserved: list[tuple[Path, Path]] = []
         for fp in original_frames:
-            backup = fp.with_suffix(".orig.png")
+            backup = fp.with_suffix(".orig")
             try:
                 fp.rename(backup)
                 preserved.append((backup, fp))
