@@ -779,3 +779,43 @@ class TestInitForceOverwritesExistingSpec:
         assert _CUSTOM_SPEC_MARKER not in new_text
         assert "How the pieces fit together:" in new_text
         assert "<FILL IN: one or two sentences describing what you're building>" in new_text
+
+    def test_run_init_without_force_errors_and_preserves_existing_spec(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Run ``run_init`` without ``--force``; assert exits 1 and SPEC.md unchanged.
+
+        Content-level check for the default (no-``--force``) branch of
+        the force-overwrite flow: after a hand-authored SPEC.md
+        (carrying :data:`_CUSTOM_SPEC_MARKER`) is in place, invoking
+        ``run_init`` under the no-args flow with ``force=False`` must
+        raise :class:`SystemExit` with code 1, print the pinned
+        :data:`_SPEC_EXISTS_ERROR` message to stderr (per
+        INIT-design.md), and leave the file bytes-identical to the
+        fixture.  This is the complement of
+        :meth:`test_run_init_with_force_overwrites_existing_spec`:
+        together they prove ``run_init`` respects the ``force`` flag
+        both ways — overwrites when set, errors out when not — without
+        ever clobbering user content by accident.
+        """
+        import pytest
+
+        from duplo.init import _SPEC_EXISTS_ERROR, run_init
+
+        monkeypatch.chdir(tmp_path)
+
+        spec_path = _write_custom_spec_fixture(tmp_path)
+        original_bytes = spec_path.read_bytes()
+        assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
+
+        with pytest.raises(SystemExit) as excinfo:
+            run_init(_make_args())
+        assert excinfo.value.code == 1
+
+        captured = capsys.readouterr()
+        assert _SPEC_EXISTS_ERROR in captured.err
+
+        # SPEC.md must be byte-for-byte identical to the fixture —
+        # the error path must not rewrite, truncate, or touch it.
+        assert spec_path.read_bytes() == original_bytes
+        assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
