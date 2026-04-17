@@ -10,6 +10,7 @@ import pytest
 from duplo.doc_tables import DocStructures
 from duplo.fetcher import PageRecord
 from duplo.init import (
+    _COMBINED_NEXT_STEPS,
     _DESCRIPTION_FILE_NOT_FOUND,
     _DESCRIPTION_NEXT_STEPS,
     _NO_ARGS_NEXT_STEPS,
@@ -1045,3 +1046,203 @@ class TestRunInitDescriptionOutputOrdering:
         assert "\n\n" in out[idx_spec:idx_bullet]
         # Blank line separates the last bullet from "Next steps:".
         assert "\n\n" in out[idx_bullet:idx_next]
+
+
+class TestRunInitCombined:
+    """Per INIT-design.md § 'duplo init <url> --from-description description.txt'.
+
+    Combined flow: URL scrape + prose. Drafter merges both, with prose
+    winning on conflicts.  Errors stack (bad URL AND missing file
+    both reported)."""
+
+    def test_combined_inputs_produce_merged_spec(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="A SwiftUI calculator inspired by Numi.",
+                    architecture="SwiftUI on macOS.",
+                ),
+            ) as mock_build,
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        mock_build.assert_called_once()
+        inputs = mock_build.call_args.args[0]
+        # Both channels populate DraftInputs; the drafter is in charge
+        # of merging them per DRAFTER-design.md § "Drafting from inputs".
+        assert inputs.url == "https://numi.app"
+        assert inputs.url_scrape
+        assert inputs.description == prose
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "A SwiftUI calculator inspired by Numi." in written
+        # Prose wins for architecture — URL-only would leave it FILL IN.
+        assert "SwiftUI on macOS." in written
+        # Verbatim prose preserved in ## Notes.
+        notes_idx = written.index("Original description provided to `duplo init`:")
+        assert prose in written[notes_idx:]
+
+    def test_prose_architecture_overrides_url_only(self, tmp_path, monkeypatch):
+        # Control: URL-only leaves Architecture as FILL IN.  Combined
+        # with prose that states a stack fills Architecture.
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Qt desktop app in C++.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="Calc.",
+                    architecture="Qt, C++.",
+                ),
+            ),
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Architecture populated, not FILL IN.
+        arch_idx = written.index("## Architecture")
+        next_heading = written.index("\n## ", arch_idx + 1)
+        arch_block = written[arch_idx:next_heading]
+        assert "Qt, C++." in arch_block
+        assert "FILL IN" not in arch_block
+
+    def test_both_errors_reported_simultaneously(self, tmp_path, capsys, monkeypatch):
+        # Invalid URL AND missing description file → both errors printed
+        # to stderr, nothing written, exit 1.
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(url="not-a-url", from_description=str(missing)))
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_build.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not a valid URL" in err
+        assert _DESCRIPTION_FILE_NOT_FOUND.format(path=str(missing)) in err
+        # Nothing written to disk when validation fails.
+        assert not (tmp_path / "SPEC.md").exists()
+
+    def test_combined_fetch_failure_falls_back_to_description(self, tmp_path, capsys, monkeypatch):
+        # URL fetch fails but description is valid → draft from
+        # description alone, record URL as scrape: none.
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(purpose="A calculator."),
+            ) as mock_build,
+        ):
+            run_init(
+                _make_args(
+                    url="https://does-not-exist.invalid",
+                    from_description=str(desc_path),
+                ),
+            )
+
+        mock_val.assert_not_called()
+        inputs = mock_build.call_args.args[0]
+        # Fetch failure → no URL scrape passed to the drafter.
+        assert inputs.url is None
+        assert inputs.url_scrape is None
+        assert inputs.description == "Build a calculator."
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # URL recorded with scrape: none.
+        assert "- https://does-not-exist.invalid" in written
+        assert "scrape: none" in written
+        assert "A calculator." in written
+
+    def test_combined_creates_ref_dir_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(purpose="Calc."),
+            ),
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        ref_dir = tmp_path / "ref"
+        assert ref_dir.is_dir()
+        assert (ref_dir / "README.md").read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert _COMBINED_NEXT_STEPS in out
+
+    def test_combined_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_build.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"

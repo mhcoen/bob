@@ -114,6 +114,20 @@ _DESCRIPTION_FILE_NOT_FOUND = "Error: file not found: {path}"
 
 _STDIN_TTY_PROMPT = "Reading description from stdin. Press Ctrl-D when done."
 
+_INVALID_URL_ERROR = (
+    "Error: {url!r} is not a valid URL.\n"
+    "  URLs must start with http:// or https://.\n"
+    "  To set up without a URL, run `duplo init` (no arguments)."
+)
+
+_COMBINED_NEXT_STEPS = """Next steps:
+  1. Open SPEC.md in your editor. Verify the drafted sections
+     match your intent. Edit anything duplo got wrong.
+  2. (Optional) Drop reference files into ref/ if you want
+     additional visual direction or behavior examples.
+  3. Run `duplo` to do the full crawl, extract features, and
+     generate the build plan."""
+
 _URL_DEFERRED_DEEP_NOTE = (
     "Note: duplo will deep-crawl {url} on the next run.\n"
     "The deep scrape is deferred so you can adjust ## Sources first\n"
@@ -149,7 +163,7 @@ def run_init(args: argparse.Namespace) -> None:
     if url is None and from_description is not None:
         _run_description(args, from_description)
         return
-    raise NotImplementedError("duplo init <url> --from-description is not yet implemented")
+    _run_combined(args, url, from_description)
 
 
 def _run_no_args(args: argparse.Namespace) -> None:
@@ -468,3 +482,130 @@ def _run_description(args: argparse.Namespace, path_arg: str) -> None:
         print(bullet)
     print()
     print(_DESCRIPTION_NEXT_STEPS)
+
+
+def _run_combined(args: argparse.Namespace, url: str, path_arg: str) -> None:
+    """Handle ``duplo init <url> --from-description PATH`` per INIT-design.md.
+
+    The drafter merges URL scrape and prose, with prose winning on
+    conflicts (see DRAFTER-design.md § "Drafting from inputs" — the
+    LLM is told that architecture comes ONLY from prose, and is asked
+    to reconcile design/scope/behavior across both inputs with prose
+    taking precedence).
+
+    Errors stack: if the URL is malformed AND the description file is
+    missing, both errors are reported to stderr and nothing is
+    written (per INIT-design.md § "Both init arguments invalid").
+
+    On URL fetch failure, the flow falls back to description-only
+    drafting and records the URL in ``## Sources`` with
+    ``scrape: none`` (matching the URL-only fetch-failure path) so
+    the user can retry the crawl on the next ``duplo`` run.
+    """
+    cwd = Path.cwd()
+    spec_path = cwd / "SPEC.md"
+    force = bool(getattr(args, "force", False))
+    deep = bool(getattr(args, "deep", False))
+
+    if spec_path.exists() and not force:
+        print(_SPEC_EXISTS_ERROR, file=sys.stderr)
+        sys.exit(1)
+
+    errors: list[str] = []
+    if not url.startswith(("http://", "https://")):
+        errors.append(_INVALID_URL_ERROR.format(url=url))
+
+    # Description file existence is checked up front so the error
+    # stacks with the URL-validation error.  Stdin is always
+    # "available" syntactically; we defer the read itself until after
+    # validation so the TTY prompt appears after any error output
+    # would have been flushed (which it isn't, since errors cause
+    # exit, but this keeps the order clean on the happy path).
+    description_from_stdin = path_arg == "-"
+    if not description_from_stdin:
+        desc_path = Path(path_arg)
+        if not desc_path.is_file():
+            errors.append(_DESCRIPTION_FILE_NOT_FOUND.format(path=path_arg))
+
+    if errors:
+        for message in errors:
+            print(message, file=sys.stderr)
+        sys.exit(1)
+
+    if description_from_stdin:
+        if sys.stdin.isatty():
+            print(_STDIN_TTY_PROMPT)
+        description = sys.stdin.read()
+        source_label = "stdin"
+    else:
+        description = Path(path_arg).read_text()
+        source_label = path_arg
+
+    canonical = canonicalize_url(url)
+    scrape_depth = "deep" if deep else "shallow"
+    depth_label = "deep scrape" if deep else "shallow scrape"
+
+    text, _examples, _structures, records, _raw = fetch_site(canonical, scrape_depth=scrape_depth)
+    fetch_ok = bool(records)
+
+    product_name = ""
+    identified = False
+    if fetch_ok and text:
+        product_name, identified = _identify_product(canonical, text)
+
+    existing_refs, vision_proposals = _scan_existing_ref_files(cwd)
+
+    if fetch_ok:
+        if identified:
+            print(f"Fetched {canonical} ({depth_label} for product identity).")
+            print(f"  → Identified product: {product_name}")
+        else:
+            print(f"Fetched {canonical}.")
+            print("  → Could not identify a specific product from the page content.")
+    else:
+        print(f"Fetching {canonical} ...")
+        print("  → Failed: could not fetch URL.")
+        print()
+        print(_URL_FETCH_FAILED_PRELUDE)
+
+    print(f"Read {len(description)} chars of description from {source_label}.")
+    print("Drafted SPEC.md from URL and description (prose wins on conflicts).")
+    print()
+
+    inputs = DraftInputs(
+        url=canonical if fetch_ok else None,
+        url_scrape=text if fetch_ok else None,
+        description=description,
+        existing_ref_files=existing_refs,
+        vision_proposals=vision_proposals,
+    )
+    spec = _build_draft_spec(inputs)
+    if not fetch_ok:
+        # URL fetch failed, but we still record it so the user can
+        # re-enable scraping after fixing the network issue.  Matches
+        # the URL-only fetch-failure path.
+        spec.sources.insert(
+            0,
+            SourceEntry(url=canonical, role="product-reference", scrape="none"),
+        )
+    content = format_spec(spec)
+
+    ref_dir = cwd / "ref"
+    ref_created = not ref_dir.exists()
+    ref_dir.mkdir(exist_ok=True)
+    if ref_created:
+        print("Created ref/ (empty).")
+
+    readme_path = ref_dir / "README.md"
+    if not readme_path.exists():
+        readme_path.write_text(_REF_README_CONTENT)
+        print("Created ref/README.md.")
+
+    spec_path.write_text(content)
+    print("Wrote SPEC.md.")
+    print()
+
+    for bullet in _describe_drafted_sections(spec):
+        print(bullet)
+    print()
+    print(_COMBINED_NEXT_STEPS)

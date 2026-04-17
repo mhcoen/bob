@@ -152,12 +152,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Print output per INIT-design.md (character count, pre-filled sections, next steps).
   - [x] Tests: description from file read correctly; description from stdin (mocked) read correctly; file not found exits 1; URL extracted from prose added to Sources with proposed: true; inferred role correct; Notes section contains verbatim prose.
 
-- [ ] Implement run_init for the combined URL + --from-description case
-  - [ ] Per INIT-design.md section "duplo init URL --from-description description.txt".
-  - [ ] Build DraftInputs with both url/url_scrape and description populated.
-  - [ ] Prose wins on conflicts per INIT-design.md.
-  - [ ] Both error conditions checked: invalid URL and missing description file. Both errors reported if both fail per INIT-design.md.
-  - [ ] Tests: combined inputs produce merged SPEC.md; prose-stated architecture overrides (URL-only would leave it as FILL IN); both errors reported simultaneously when both inputs are bad.
+- [x] Implement run_init for the combined URL + --from-description case
+  - [x] Per INIT-design.md section "duplo init URL --from-description description.txt".
+  - [x] Build DraftInputs with both url/url_scrape and description populated.
+  - [x] Prose wins on conflicts per INIT-design.md.
+  - [x] Both error conditions checked: invalid URL and missing description file. Both errors reported if both fail per INIT-design.md.
+  - [x] Tests: combined inputs produce merged SPEC.md; prose-stated architecture overrides (URL-only would leave it as FILL IN); both errors reported simultaneously when both inputs are bad.
 
 ## duplo init: output discipline
 

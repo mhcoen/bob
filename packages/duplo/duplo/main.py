@@ -696,7 +696,15 @@ def main() -> None:
         )
         init_args = init_parser.parse_args(sys.argv[2:])
         init_args.command = "init"
-        if init_args.url is not None and not init_args.url.startswith(("http://", "https://")):
+        # Defer URL validation to run_init when --from-description is
+        # also set, so run_init can stack errors (invalid URL AND
+        # missing description file) per INIT-design.md § "Both init
+        # arguments invalid".
+        if (
+            init_args.url is not None
+            and init_args.from_description is None
+            and not init_args.url.startswith(("http://", "https://"))
+        ):
             print(
                 f"Error: {init_args.url!r} is not a valid URL.\n"
                 "  URLs must start with http:// or https://.\n"
