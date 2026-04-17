@@ -1557,6 +1557,32 @@ class TestDraftFromInputs:
         assert "- notes" not in prompt
         assert "notes:" not in prompt
 
+    def test_prompt_forbids_inferring_architecture_from_url_scrape(self, monkeypatch):
+        """Per DRAFTER-design.md and INIT-design.md: architecture is filled
+        ONLY when description prose explicitly states a stack/platform/language;
+        URL scrapes do NOT inform architecture."""
+        captured = self._mock_query(
+            monkeypatch,
+            '{"purpose": null, "architecture": null, "design": null, '
+            '"behavior_contracts": [], "scope_include": [], "scope_exclude": []}',
+        )
+        _draft_from_inputs(
+            DraftInputs(
+                url="https://numi.app",
+                url_scrape="Numi is a macOS calculator written in Swift.",
+                description="Build a calculator.",
+            )
+        )
+
+        prompt = captured[0].lower()
+        # Architecture is gated on description prose only.
+        assert "only if" in prompt
+        assert "description prose" in prompt
+        # URL scrapes / product identity must not inform architecture.
+        assert "do not infer architecture" in prompt
+        assert "scraped product pages" in prompt
+        assert "product identity" in prompt
+
     def test_neither_url_nor_prose_yields_empty_product_spec(self, monkeypatch):
         self._mock_query(
             monkeypatch,
