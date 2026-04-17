@@ -97,7 +97,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Edit-safety property test
 
 - [ ] Add edit-safety property test per DRAFTER-design.md section "Round-trip testing"
-  - [ ] Property: for any well-formed ProductSpec and any new SourceEntry, append_sources(format_spec(spec), [new_entry]) produces a spec where every field other than sources is unchanged after re-parsing.
+  - [x] Property: for any well-formed ProductSpec and any new SourceEntry, append_sources(format_spec(spec), [new_entry]) produces a spec where every field other than sources is unchanged after re-parsing.
   - [ ] Same property for append_references with ReferenceEntry.
   - [ ] Same property for update_design_autogen: all fields other than design.auto_generated unchanged.
   - [ ] Tests: each property exercised with multiple fixture combinations; unrecognized/custom sections preserved byte-for-byte through modify operations.
