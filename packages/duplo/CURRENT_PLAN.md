@@ -172,7 +172,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Migration message update
 
 - [ ] Update migration message in duplo/migration.py to reference duplo init
-  - [ ] Per REDESIGN-overview.md section "Implementation phasing" Phase 4: "Update the migration message from Phase 2 to reference duplo init (one-line change)."
+  - [x] Per REDESIGN-overview.md section "Implementation phasing" Phase 4: "Update the migration message from Phase 2 to reference duplo init (one-line change)."
   - [ ] Replace step 3 in _MIGRATION_MESSAGE: change "Author a SPEC.md by hand. Use SPEC-template.md..." to "Run duplo init to generate a SPEC.md. Or author one by hand using SPEC-template.md..."
   - [ ] Add duplo init as the recommended path. Keep the manual-authoring option as an alternative.
   - [ ] Tests: update the migration-message snapshot test from Phase 4 to match the new wording. Pin the exact new message content.
