@@ -202,7 +202,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [ ] Add test_init_url_fetch_failure_writes_scrape_none
   - [x] Mock fetch_site to raise an exception (network error).
-  - [ ] Run run_init with a URL argument.
+  - [x] Run run_init with a URL argument.
   - [ ] Assert: exit code 0 (not 1); SPEC.md written; Sources contains the URL with scrape: none; Purpose has FILL IN marker.
 
 - [ ] Add test_init_force_overwrites_existing_spec
