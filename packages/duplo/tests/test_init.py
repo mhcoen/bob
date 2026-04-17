@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from duplo.init import _SPEC_EXISTS_ERROR, run_init
+from duplo.init import _REF_README_CONTENT, _SPEC_EXISTS_ERROR, run_init
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -90,3 +90,52 @@ class TestRunInitNoArgsRefDir:
         assert user_file.read_bytes() == b"user data"
         captured = capsys.readouterr()
         assert "Created ref/ (empty)." not in captured.out
+
+
+class TestRunInitNoArgsRefReadme:
+    """Per INIT-design.md § 'ref/README.md content': write-once semantics."""
+
+    def test_writes_readme_when_absent(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        readme = tmp_path / "ref" / "README.md"
+        assert readme.is_file()
+        assert readme.read_text() == _REF_README_CONTENT
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." in captured.out
+
+    def test_content_matches_init_design(self):
+        # INIT-design.md § "ref/README.md content" pins this text.
+        assert _REF_README_CONTENT.startswith("# ref/\n")
+        assert "Accepted file types:" in _REF_README_CONTENT
+        assert "**This directory can be empty.**" in _REF_README_CONTENT
+        assert "visual-target, behavioral-target, docs," in _REF_README_CONTENT
+        assert "See SPEC-guide.md (in the project root)" in _REF_README_CONTENT
+
+    def test_does_not_overwrite_existing_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        existing = "user-authored README\n"
+        readme = ref_dir / "README.md"
+        readme.write_text(existing)
+
+        run_init(_make_args())
+
+        assert readme.read_text() == existing
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." not in captured.out
+
+    def test_writes_readme_even_when_ref_dir_preexists(self, tmp_path, capsys, monkeypatch):
+        # ref/ exists but README.md does not — still write it.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "ref").mkdir()
+
+        run_init(_make_args())
+
+        readme = tmp_path / "ref" / "README.md"
+        assert readme.read_text() == _REF_README_CONTENT
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." in captured.out
