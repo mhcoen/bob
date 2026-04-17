@@ -197,7 +197,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [ ] Add test_init_with_existing_ref_files_proposes_roles
   - [x] Create a tmpdir with ref/ containing a .png and a .pdf. Mock _propose_file_role for the image.
-  - [ ] Run run_init.
+  - [x] Run run_init.
   - [ ] Assert: SPEC.md References section contains entries for both files; both have proposed: true; image has Vision-inferred role; PDF has role: docs (extension default).
 
 - [ ] Add test_init_url_fetch_failure_writes_scrape_none

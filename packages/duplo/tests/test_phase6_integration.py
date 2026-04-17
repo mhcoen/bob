@@ -438,3 +438,50 @@ class TestInitWithExistingRefFilesProposesRoles:
         assert mock_propose.call_count == 2
         assert image_result == (_IMAGE_VISION_DESCRIPTION, _IMAGE_VISION_ROLE)
         assert pdf_result == ("", "docs")
+
+    def test_run_init_with_existing_ref_files(self, tmp_path, capsys, monkeypatch):
+        """Run ``run_init`` against a ``ref/`` pre-populated with user files.
+
+        Stages the existing-ref-files integration path: drops the .png
+        and .pdf fixture into ``tmp_path/ref`` and invokes ``run_init``
+        under ``--from-description`` (the simplest flow that exercises
+        :func:`_scan_existing_ref_files` — the no-args flow does not
+        scan, and the URL flow needs extra ``fetch_site`` /
+        ``validate_product_url`` mocks we don't need here).  Two mocks
+        keep the LLM out: :func:`duplo.init._propose_file_role` routes
+        the image to a deterministic role via
+        :func:`_stub_propose_file_role`, and
+        :func:`duplo.spec_writer._draft_from_inputs` returns the same
+        :class:`ProductSpec` the description tests use.  This subtask
+        only confirms the flow runs to completion under the mocks and
+        lays down SPEC.md / ref/; the content-level assertions on
+        ``## References`` entries arrive in the next subtask.
+        """
+        from duplo.init import run_init
+
+        monkeypatch.chdir(tmp_path)
+
+        image_path, pdf_path = _write_ref_fixture(tmp_path)
+        desc_path = _write_description_fixture(tmp_path)
+
+        with (
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=_stub_propose_file_role,
+            ),
+            patch(
+                "duplo.spec_writer._draft_from_inputs",
+                side_effect=_stub_draft_from_inputs,
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        # Drain captured output so it does not bleed into later tests.
+        capsys.readouterr()
+
+        assert (tmp_path / "SPEC.md").is_file()
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").is_file()
+        # Fixture files must not have been disturbed by run_init.
+        assert image_path.is_file()
+        assert pdf_path.is_file()
