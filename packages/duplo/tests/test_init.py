@@ -481,9 +481,7 @@ class TestRunInitUrlOutputOrdering:
     lock the output layout for each URL-flow outcome so future edits do
     not drift from the design doc's example shapes."""
 
-    def test_identified_flow_ordering_matches_init_design(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_identified_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
         monkeypatch.chdir(tmp_path)
         with (
             patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
@@ -501,9 +499,7 @@ class TestRunInitUrlOutputOrdering:
             run_init(_make_args(url="https://numi.app"))
 
         out = capsys.readouterr().out
-        idx_fetched = out.index(
-            "Fetched https://numi.app (shallow scrape for product identity)."
-        )
+        idx_fetched = out.index("Fetched https://numi.app (shallow scrape for product identity).")
         idx_identified = out.index("→ Identified product: Numi")
         idx_prefilled = out.index("→ Pre-filled ## Purpose, ## Sources")
         idx_ref = out.index("Created ref/ (empty).")
@@ -529,9 +525,7 @@ class TestRunInitUrlOutputOrdering:
         # Blank line separates "Next steps:" block from the deferred-deep note.
         assert "\n\n" in out[idx_next:idx_note]
 
-    def test_unidentified_flow_ordering_matches_init_design(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_unidentified_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
         monkeypatch.chdir(tmp_path)
         with (
             patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
@@ -556,21 +550,11 @@ class TestRunInitUrlOutputOrdering:
         idx_readme = out.index("Created ref/README.md.")
         idx_spec = out.index("Wrote SPEC.md.")
         idx_next = out.index(_URL_NEXT_STEPS_UNIDENTIFIED)
-        assert (
-            idx_fetched
-            < idx_reason
-            < idx_sources
-            < idx_ref
-            < idx_readme
-            < idx_spec
-            < idx_next
-        )
+        assert idx_fetched < idx_reason < idx_sources < idx_ref < idx_readme < idx_spec < idx_next
         assert "\n\n" in out[idx_sources:idx_ref]
         assert "\n\n" in out[idx_spec:idx_next]
 
-    def test_fetch_failure_flow_ordering_matches_init_design(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_fetch_failure_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
         monkeypatch.chdir(tmp_path)
         with (
             patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
@@ -585,15 +569,7 @@ class TestRunInitUrlOutputOrdering:
         idx_readme = out.index("Created ref/README.md.")
         idx_spec = out.index("Wrote SPEC.md (template).")
         idx_next = out.index(_URL_NEXT_STEPS_FETCH_FAILED)
-        assert (
-            idx_fetching
-            < idx_failed
-            < idx_prelude
-            < idx_ref
-            < idx_readme
-            < idx_spec
-            < idx_next
-        )
+        assert idx_fetching < idx_failed < idx_prelude < idx_ref < idx_readme < idx_spec < idx_next
         assert "\n\n" in out[idx_failed:idx_prelude]
         assert "\n\n" in out[idx_prelude:idx_ref]
         assert "\n\n" in out[idx_spec:idx_next]
