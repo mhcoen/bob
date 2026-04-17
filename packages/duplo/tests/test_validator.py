@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from duplo.validator import ValidationResult, _parse_result, validate_product_url
 
 
@@ -194,6 +196,10 @@ class TestValidateProductUrl:
 
 class TestValidateUrlInMain:
     """Test _validate_url integration in main._first_run."""
+
+    pytestmark = pytest.mark.skip(
+        reason="_validate_url removed in Phase 7.2.2 (was only called by _first_run)"
+    )
 
     def test_single_product_proceeds(self, capsys):
         from duplo.main import _validate_url
@@ -390,6 +396,10 @@ class TestValidateUrlInMain:
 
 class TestConfirmProduct:
     """Test _confirm_product product confirmation."""
+
+    pytestmark = pytest.mark.skip(
+        reason="_confirm_product removed in Phase 7.2.2 (was only called by _first_run)"
+    )
 
     def test_confirms_known_product(self, capsys):
         from duplo.main import _confirm_product

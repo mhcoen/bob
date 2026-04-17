@@ -246,12 +246,6 @@ from duplo.questioner import BuildPreferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
 from duplo.scanner import scan_files
-from duplo.test_generator import (
-    detect_target_language,
-    generate_test_source,
-    save_test_file,
-)
-from duplo.validator import validate_product_url
 from duplo.frame_describer import describe_frames
 from duplo.verification_extractor import (
     extract_verification_cases,
@@ -300,16 +294,11 @@ from duplo.saver import (
     save_reference_urls,
     save_roadmap,
     save_sources,
-    save_screenshot_feature_map,
-    save_selections,
     store_accepted_frames,
-    write_claude_md,
 )
 from duplo.task_matcher import match_unannotated_tasks
-from duplo.screenshotter import map_screenshots_to_features, save_reference_screenshots
 from duplo.selector import select_features, select_issues
 
-_SECTION_URL_RE = re.compile(r"^=== (.+?) ===$", re.MULTILINE)
 _DUPLO_JSON = ".duplo/duplo.json"
 # Files that are project artifacts, not user-provided reference materials.
 _PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md", "SPEC.md"}
@@ -2030,192 +2019,6 @@ def _build_completion_history(data: dict) -> list[dict]:
             label = f["implemented_in"]
             phase_features.setdefault(label, []).append(f["name"])
     return [{"phase": label, "features": names} for label, names in phase_features.items()]
-
-
-def _confirm_product(product_name: str, source_url: str) -> str:
-    """Clearly state which product Duplo will duplicate and get confirmation.
-
-    Returns the confirmed product name, or empty string if the user cancels.
-    """
-    if product_name:
-        print(f"\n>>> Duplo will duplicate: {product_name}")
-        if source_url:
-            print(f"    Source: {source_url}")
-    elif source_url:
-        print(f"\n>>> Duplo will duplicate the product at: {source_url}")
-    else:
-        print("\n>>> No product URL found.")
-
-    if product_name:
-        answer = input("Is this correct? [Y/n] ").strip().lower()
-        if answer and answer != "y":
-            new_name = input("Enter the product name (or 'q' to quit): ").strip()
-            if not new_name or new_name.lower() == "q":
-                print("Cancelled.")
-                return ""
-            return new_name
-        return product_name
-
-    # No product name identified \u2014 ask the user.
-    name = input("What product should Duplo duplicate? ").strip()
-    if not name:
-        print("No product specified. Cancelled.")
-        return ""
-    return name
-
-
-def _validate_url(url: str) -> tuple[str, str]:
-    """Validate that *url* points to a single product.
-
-    If the page appears to list multiple products, present them
-    and let the user choose one by number, enter a more specific URL,
-    or press Enter to quit. Returns ``(validated_url, product_name)``
-    where *product_name* may be empty if unknown.  Returns ``("", "")``
-    if the user cancels.
-    """
-    print(f"\nValidating {url} \u2026")
-    try:
-        result = validate_product_url(url)
-    except Exception as exc:
-        print(f"Could not validate URL ({exc}). Proceeding anyway.")
-        return url, ""
-
-    if result.single_product:
-        label = result.product_name or url
-        print(f"Identified product: {label}")
-        return url, result.product_name
-
-    if result.unclear_boundaries:
-        print(f"This URL has unclear product boundaries: {result.reason}")
-        print(
-            "\nDuplo can't tell what specific product to duplicate from this page.\n"
-            "Please describe the product you want, enter a more specific URL,\n"
-            "or press Enter to cancel."
-        )
-        choice = input("Product or URL: ").strip()
-        if not choice:
-            print("Cancelled.")
-            return "", ""
-        if choice.startswith(("http://", "https://")):
-            return choice, ""
-        # Treat as a product description \u2014 use it as the product name.
-        return url, choice
-
-    print(f"This URL appears to list multiple products: {result.reason}")
-    if result.products:
-        print("\nWhich product do you want to duplicate?\n")
-        for i, name in enumerate(result.products, 1):
-            print(f"  {i}. {name}")
-        print(
-            "\nEnter a number to select a product, a URL for a specific product,\n"
-            "or press Enter to cancel."
-        )
-        choice = input("Choice: ").strip()
-        if not choice:
-            print("Cancelled.")
-            return "", ""
-        # Check if the user entered a number.
-        try:
-            idx = int(choice)
-            if 1 <= idx <= len(result.products):
-                selected = result.products[idx - 1]
-                print(f"Selected: {selected}")
-                return url, selected
-            print(f"Invalid selection: {idx}. Cancelled.")
-            return "", ""
-        except ValueError:
-            pass
-        # Treat as a URL.
-        if choice.startswith(("http://", "https://")):
-            return choice, ""
-        print(f"Not a valid number or URL: {choice}")
-        return "", ""
-    # No product list \u2014 ask for a URL.
-    print("\nPlease provide a URL that points to a single product,\nor press Enter to cancel.")
-    new_url = input("Product URL: ").strip()
-    if new_url:
-        return new_url, ""
-    print("Cancelled.")
-    return "", ""
-
-
-def _init_project(
-    *,
-    url: str,
-    project_name: str,
-    project_dir: Path,
-    features: list[Feature],
-    prefs: BuildPreferences,
-    app_name: str,
-    text: str,
-    code_examples: list | None,
-    doc_structures=None,
-    page_records: list | None = None,
-    raw_pages: dict[str, str] | None = None,
-    design: DesignRequirements | None = None,
-    spec_text: str = "",
-    arch_hash: str = "",
-) -> list | None:
-    """Core init logic: save selections, generate tests, write CLAUDE.md, build roadmap.
-
-    Returns the generated roadmap (list of phase dicts) or ``None``.
-    """
-    saved = save_selections(
-        url,
-        features,
-        prefs,
-        app_name=app_name,
-        arch_hash=arch_hash,
-        code_examples=code_examples or None,
-        doc_structures=doc_structures or None,
-        target_dir=project_dir,
-    )
-    print(f"\nSelections saved to {saved}")
-    if page_records:
-        save_reference_urls(page_records, target_dir=project_dir)
-        print(f"Saved {len(page_records)} reference URL(s) to duplo.json.")
-        if raw_pages:
-            save_raw_content(raw_pages, page_records, target_dir=project_dir)
-            print(f"Saved raw content for {len(raw_pages)} page(s).")
-    if code_examples:
-        save_examples(code_examples, target_dir=project_dir)
-        print(f"Saved {len(code_examples)} code example(s) to .duplo/examples/.")
-        target_lang = detect_target_language(project_dir)
-        if target_lang == "Python" or target_lang == "unknown":
-            test_source = generate_test_source(code_examples, project_name=project_name)
-            if test_source:
-                tests_dir = project_dir / "tests"
-                test_path = save_test_file(test_source, target_dir=tests_dir)
-                print(f"Generated {len(code_examples)} test case(s) in {test_path}")
-        else:
-            print(
-                f"Test generation skipped (target language: {target_lang}, only Python supported)."
-            )
-    if doc_structures:
-        print("Saved doc structures to duplo.json.")
-    if design and (design.colors or design.fonts or design.layout):
-        save_design_requirements(dataclasses.asdict(design), target_dir=project_dir)
-        print("Saved design requirements to duplo.json.")
-
-    claude_md = write_claude_md(target_dir=project_dir)
-    print(f"CLAUDE.md written to {claude_md}")
-
-    print("\nGenerating build roadmap \u2026")
-    roadmap = generate_roadmap(url, features, prefs, spec_text=spec_text)
-
-    urls = _SECTION_URL_RE.findall(text)
-    if urls:
-        output_dir = project_dir / "screenshots"
-        print(f"\nSaving reference screenshots to {output_dir}/ \u2026")
-        saved_shots = save_reference_screenshots(urls, output_dir)
-        print(f"Saved {len(saved_shots)} screenshot(s).")
-        feature_names = [f.name for f in features]
-        screenshot_map = map_screenshots_to_features(text, feature_names, output_dir)
-        if screenshot_map:
-            save_screenshot_feature_map(screenshot_map, target_dir=project_dir)
-            print(f"Screenshot\u2192feature map saved ({len(screenshot_map)} entries).")
-
-    return roadmap
 
 
 def _current_phase_content(content: str) -> str:

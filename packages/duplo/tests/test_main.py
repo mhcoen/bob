@@ -22,7 +22,6 @@ from duplo.main import (
     _current_phase_content,
     _detect_and_append_gaps,
     _download_site_media,
-    _init_project,
     _investigation_context,
     _load_preferences,
     _partition_features,
@@ -52,6 +51,11 @@ _DUPLO_JSON = ".duplo/duplo.json"
 SKIP_FIRST_RUN = pytest.mark.skip(
     reason="_first_run removed in Phase 7.2.1; test rewrite deferred to Phase 7.2.4"
 )
+
+# _init_project was removed in Phase 7.2.2 (it was only called by _first_run).
+# The TestInitProject class is skip-marked below; this placeholder keeps the
+# test-body references resolvable for static analysis.
+_init_project = None
 
 
 @pytest.fixture(autouse=True)
@@ -635,6 +639,10 @@ class TestSubsequentRunFileChanges:
 
 class TestInitProject:
     """Test _init_project directly."""
+
+    pytestmark = pytest.mark.skip(
+        reason="_init_project removed in Phase 7.2.2 (was only called by _first_run)"
+    )
 
     _FEATURES = [Feature(name="Search", description="Full-text search.", category="core")]
     _PREFS = BuildPreferences(platform="web", language="Python")

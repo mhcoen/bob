@@ -2,6 +2,68 @@
 
 ## Observations
 
+### [7.2.2] Deleted _confirm_product, _validate_url, _init_project — 2026-04-17
+
+Audit results (grep + in-file AST scan via `ast.walk` checking every `Call`
+node's function name) confirmed these three helpers had zero callers in
+`duplo/` after `_first_run` was removed in 7.2.1. Deleted from `main.py`.
+
+Associated import cleanup in `duplo/main.py` (each verified by AST scan to
+have no other in-file caller):
+
+- `from duplo.validator import validate_product_url` — was only used by
+  `_validate_url`.
+- `from duplo.test_generator import (detect_target_language,
+  generate_test_source, save_test_file)` — all three were only used by
+  `_init_project`; whole block removed.
+- `from duplo.screenshotter import map_screenshots_to_features,
+  save_reference_screenshots` — both only used by `_init_project`; whole
+  line removed.
+- From `duplo.saver` import block: dropped `save_selections`,
+  `save_screenshot_feature_map`, `write_claude_md` (the rest of the saver
+  imports are still in use).
+- Module-level `_SECTION_URL_RE = re.compile(...)` — only consumed by
+  `_init_project`; removed along with it.
+
+Other in-file helpers not called anywhere in `duplo/` are retained
+because they are out of scope for this task:
+
+- `_visual_target_video_frames` was never called by `_first_run` (git
+  history at `80ba6e7` and `f40e24b` dropped its call site earlier). It
+  has direct tests in `test_main.py` and is unrelated to `_first_run`
+  removal; left in place.
+- `_excepthook`, `_signal_handler`, `_handle_signal` are nested closures
+  inside `_mcloop_setup_crash_handlers` / `main()` and are wired into
+  `sys.excepthook` / `signal.signal`; not dead code.
+
+Test-file updates:
+
+- `tests/test_main.py` dropped `_init_project` from its top-level import
+  list and added `pytestmark = pytest.mark.skip(...)` to `TestInitProject`
+  (8 tests). A module-level placeholder `_init_project = None` was added
+  so ruff's F821 check still passes on the (now-skipped) test bodies that
+  still reference the name as a free function. Removing it will require
+  deleting or rewriting those tests, which is out of scope here.
+- `tests/test_validator.py` gained `import pytest` and class-level
+  `pytestmark = pytest.mark.skip(...)` on `TestValidateUrlInMain` (12
+  tests) and `TestConfirmProduct` (8 tests). Each test imports the
+  removed symbol inside the test body, so the imports are never resolved
+  under the skip mark.
+- `tests/test_phase5_integration.py` only referenced `_confirm_product`
+  in a docstring on an already-class-skipped test and needed no change.
+
+Verification: `ruff check duplo/ tests/test_main.py tests/test_validator.py`
+passes. Full test suite `pytest -q` reports 2936 passed, 84 skipped (up
+from 62 skipped, reflecting the 20 `TestValidateUrlInMain`/`TestConfirmProduct`
+tests and 8 `TestInitProject` tests newly skipped by this task minus
+overlap with prior skips; no new failures).
+
+PLAN.md § "_first_run removal" line 951 ("no test references
+_first_run, _confirm_product, _validate_url, or _init_project") is
+still partially open: references remain in skipped tests. That is
+consistent with the 7.2.1 convention of deferring test rewrites; a
+later task can delete the skipped classes outright.
+
 ### [7.2.1] _first_run function deleted — 2026-04-17
 
 Deleted the function body and its preceding removal-audit comment block
