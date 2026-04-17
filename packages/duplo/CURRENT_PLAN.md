@@ -15,7 +15,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Document findings in a comment block at the removal site.
 
 - [ ] Remove _first_run and its direct dependencies from duplo/main.py
-  - [ ] Delete the _first_run function.
+  - [x] Delete the _first_run function.
   - [ ] Delete any helper functions in main.py that are ONLY called by _first_run (audit each helper for other callers before removing).
   - [ ] Update the no-subcommand dispatch in main() to remove the _first_run branch. After migration check passes and SPEC.md exists, always go to _subsequent_run. If SPEC.md does not exist and .duplo/duplo.json does not exist (fresh directory, not an old project), print a message directing the user to run duplo init and exit 0.
   - [ ] Tests: duplo in a fresh directory (no .duplo/, no SPEC.md) prints "run duplo init" message and exits 0; duplo in a directory with SPEC.md proceeds to _subsequent_run; no test references _first_run.
