@@ -4,9 +4,10 @@ This project predates the SPEC.md / ref/ redesign. Migrate manually:
   2. Move reference files into ref/. Reference files are images
      (.png .jpg .gif .webp), videos (.mp4 .mov .webm .avi), and
      PDFs that aren't part of your source code.
-  3. Run `duplo init` to generate a SPEC.md. Or author one by hand
+  3. Create SPEC.md. The recommended path is `duplo init`, which
+     generates SPEC.md for you. Alternatively, author one by hand
      using SPEC-template.md (in the duplo repository) as a starting
-     point. At minimum, fill in:
+     point. If authoring by hand, at minimum fill in:
      - ## Purpose: one or two sentences
      - ## Architecture: your platform/language stack
      - ## Sources: add the URL from .duplo/product.json if any
