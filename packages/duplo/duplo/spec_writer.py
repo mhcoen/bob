@@ -15,7 +15,7 @@ from pathlib import Path
 
 from duplo.claude_cli import ClaudeCliError, query, query_with_images
 from duplo.diagnostics import record_failure
-from duplo.parsing import extract_json
+from duplo.parsing import extract_json, strip_fences
 from duplo.spec_reader import (
     BehaviorContract,
     DesignBlock,
@@ -938,7 +938,7 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
             continue
 
         try:
-            data = json.loads(extract_json(raw))
+            data = json.loads(strip_fences(raw).strip())
         except (json.JSONDecodeError, ValueError) as exc:
             last_error = f"JSON parse error: {exc}"
             if attempt >= _DRAFT_RETRIES:
