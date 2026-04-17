@@ -206,7 +206,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Assert: exit code 0 (not 1); SPEC.md written; Sources contains the URL with scrape: none; Purpose has FILL IN marker.
 
 - [ ] Add test_init_force_overwrites_existing_spec
-  - [ ] Create a tmpdir with an existing SPEC.md containing custom content.
+  - [x] Create a tmpdir with an existing SPEC.md containing custom content.
   - [ ] Run run_init with --force. Assert: SPEC.md overwritten with new content.
   - [ ] Run run_init without --force. Assert: exits 1 with error message; SPEC.md unchanged.
 

@@ -41,6 +41,19 @@ _PDF_REF_BYTES = b"%PDF-1.4\n"
 _IMAGE_VISION_DESCRIPTION = "Screenshot of the calculator UI showing inline answers."
 _IMAGE_VISION_ROLE = "visual-target"
 
+# Custom SPEC.md body used by the --force overwrite tests.  The prose
+# is deliberately distinctive ("HAND-AUTHORED MARKER") so later
+# subtasks can assert overwrite-vs-preserve by presence/absence of
+# this exact substring.  It is NOT valid SPEC.md (no required
+# sections) — the overwrite flow must not parse it; it only checks
+# that the file exists before deciding whether to error or overwrite.
+_CUSTOM_SPEC_MARKER = "HAND-AUTHORED MARKER"
+_CUSTOM_SPEC_CONTENT = (
+    "# My Project\n\n"
+    "## Purpose\n\n"
+    f"{_CUSTOM_SPEC_MARKER}: a calculator I wrote by hand before running duplo init.\n"
+)
+
 
 def _write_description_fixture(tmp_path: Path) -> Path:
     """Drop a ``description.txt`` fixture into *tmp_path* and return its path.
@@ -73,6 +86,21 @@ def _write_ref_fixture(tmp_path: Path) -> tuple[Path, Path]:
     pdf_path = ref_dir / _PDF_REF_FILENAME
     pdf_path.write_bytes(_PDF_REF_BYTES)
     return (image_path, pdf_path)
+
+
+def _write_custom_spec_fixture(tmp_path: Path) -> Path:
+    """Drop a hand-authored SPEC.md into *tmp_path* and return its path.
+
+    Centralized here so later subtasks that exercise the
+    ``--force`` / no-``--force`` branches of ``run_init`` against a
+    pre-existing SPEC.md reuse the same fixture.  The body contains
+    :data:`_CUSTOM_SPEC_MARKER` so overwrite-vs-preserve assertions
+    can key off a single substring: present ⇒ untouched, absent ⇒
+    overwritten by the template / drafter output.
+    """
+    path = tmp_path / "SPEC.md"
+    path.write_text(_CUSTOM_SPEC_CONTENT)
+    return path
 
 
 def _stub_propose_file_role(path: Path) -> tuple[str, str]:
@@ -690,3 +718,30 @@ class TestInitUrlFetchFailureWritesScrapeNone:
             assert excinfo.value.code == 1
 
         capsys.readouterr()
+
+
+class TestInitForceOverwritesExistingSpec:
+    """Per PLAN.md § 'Automated integration tests':
+    ``test_init_force_overwrites_existing_spec``.
+    """
+
+    def test_custom_spec_fixture_in_tmpdir(self, tmp_path, monkeypatch):
+        """Create a tmpdir with an existing SPEC.md containing custom content.
+
+        Stages the force-overwrite integration test: drops a
+        hand-authored SPEC.md (distinguished by
+        :data:`_CUSTOM_SPEC_MARKER`) into ``tmp_path`` and confirms
+        the fixture lands on disk with the expected bytes.  Later
+        subtasks run ``run_init`` against this tmpdir with and
+        without ``--force`` and assert that ``--force`` overwrites
+        the marker while the default path errors out and leaves the
+        marker intact.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        spec_path = _write_custom_spec_fixture(tmp_path)
+
+        assert spec_path == tmp_path / "SPEC.md"
+        assert spec_path.is_file()
+        assert spec_path.read_text() == _CUSTOM_SPEC_CONTENT
+        assert _CUSTOM_SPEC_MARKER in spec_path.read_text()
