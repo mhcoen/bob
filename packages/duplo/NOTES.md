@@ -2,7 +2,34 @@
 
 ## Observations
 
-### [7.3.1] Audit of `questioner.ask_preferences` / `questioner.select_features` callers in main.py — 2026-04-17
+### [7.3.2] New-model wiring is already live in main.py — 2026-04-17
+
+Confirmed the model statement on CURRENT_PLAN.md line 27 matches the
+code as of 7.2.x:
+
+- `BuildPreferences` flow: `duplo/main.py:242` imports
+  `parse_build_preferences`; `_load_preferences` (`main.py:344-361`)
+  re-parses from `spec.architecture` whenever `architecture_hash(spec.architecture)`
+  differs from the stored hash, persists via `save_build_preferences`,
+  and also calls `validate_build_preferences` for warnings. No
+  `ask_preferences` fallback exists in that path (grep: zero hits in
+  `duplo/main.py`).
+- Feature-selection flow: `duplo/main.py:300` imports
+  `select_features` from `duplo.selector`. The one live call site
+  (`main.py:1876-1878`) fires inside `_subsequent_run`'s phase-planning
+  block: `remaining = _unimplemented_features(data)` then
+  `select_features(remaining, recommended=phase_info["features"], phase_label=...)`,
+  and rewrites `phase_info["features"]` from the user's selection.
+  This is the per-phase confirmation path and is explicitly retained.
+
+Implication: CURRENT_PLAN.md line 28 (remove `ask_preferences` calls
+from the pipeline) is already a no-op in `main.py` — it was effectively
+completed by the 7.2.1 `_first_run` deletion, which was the last
+caller. The import that remains from `duplo.questioner` is only
+`BuildPreferences` (the dataclass); fate of the module as a whole is
+tracked by CURRENT_PLAN.md § "Evaluate questioner.py for removal".
+
+
 
 `questioner.ask_preferences` — zero callers in `duplo/main.py`. The
 only `duplo.questioner` import in main.py is `BuildPreferences` (the
