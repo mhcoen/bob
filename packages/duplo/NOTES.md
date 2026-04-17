@@ -2,6 +2,90 @@
 
 ## Observations
 
+### [7.4.1] `duplo.questioner` import audit: 13 sites; only `BuildPreferences` and `ask_preferences` family imported — 2026-04-17
+
+Full grep for `duplo.questioner` / `import questioner` across the
+repo. Every import listed; nothing else names the module.
+
+Production code (`duplo/`) — 5 imports, all `BuildPreferences` only:
+
+- `duplo/main.py:245` — `from duplo.questioner import BuildPreferences`
+- `duplo/planner.py:11` — `from duplo.questioner import BuildPreferences`
+- `duplo/roadmap.py:10` — `from duplo.questioner import BuildPreferences`
+- `duplo/saver.py:19` — `from duplo.questioner import BuildPreferences`
+- `duplo/build_prefs.py:22` — `from duplo.questioner import BuildPreferences`
+
+Tests (`tests/`) — 8 import sites:
+
+- `tests/test_main.py:42` — `from duplo.questioner import BuildPreferences`
+- `tests/test_main.py:12223` — `import duplo.questioner as q` inside
+  `TestNoAskPreferencesInPipeline::test_pipeline_does_not_call_ask_preferences`;
+  used to `monkeypatch.setattr(q, "ask_preferences", ...)` so the test
+  asserts no call. This is the one test that needs `ask_preferences` to
+  exist on the module.
+- `tests/test_planner.py:27` — `BuildPreferences`
+- `tests/test_roadmap.py:8` — `BuildPreferences`
+- `tests/test_saver.py:22` — `BuildPreferences`
+- `tests/test_build_prefs.py:17` — `BuildPreferences`
+- `tests/test_phase5_integration.py:23` — `BuildPreferences`
+- `tests/test_questioner.py:5` — `from duplo.questioner import
+  BuildPreferences, _ask_list, _ask_platform, ask_preferences`
+  (the only importer of `ask_preferences`, `_ask_list`, `_ask_platform`)
+
+Symbols actually defined in `duplo/questioner.py` (verified by reading
+the file, 128 lines):
+
+- `BuildPreferences` (dataclass) — imported by 12 of the 13 sites.
+- `ask_preferences` — imported only by `tests/test_questioner.py`
+  (explicit) and referenced by `tests/test_main.py` line 12223 via the
+  module-alias import (to prove it is NOT called).
+- `_ask_platform`, `_ask_language`, `_ask_list`, `_print_summary`,
+  `_PLATFORMS` — only `_ask_list` and `_ask_platform` leave the module,
+  and only via `tests/test_questioner.py`.
+
+Non-import mentions (prose/comments, ignored by import audit):
+
+- `duplo/build_prefs.py:4` — module docstring mentions
+  `questioner.py` as the thing this module replaces. Not an import.
+- `AGENTS.md:268,527`, `PIPELINE-design.md:991`, `PLAN.md` multiple,
+  `CURRENT_PLAN.md` multiple, `NOTES.md` prior 7.3.x entries — design
+  docs and prior task notes.
+
+Implications for CURRENT_PLAN.md line 34 (decide whether questioner.py
+can be deleted):
+
+1. `ask_preferences` has zero production callers (confirmed 7.3.3). The
+   only live consumer is `tests/test_questioner.py` which tests the
+   function itself, plus the module-alias in `test_main.py` line 12223
+   which only asserts non-call.
+2. `select_features` is not defined in questioner.py and never has been
+   (confirmed 7.3.4) — the `tests/test_questioner.py` import list above
+   does not include it.
+3. To delete `duplo/questioner.py`, `BuildPreferences` must first move
+   to `duplo/build_prefs.py` (as PLAN.md § "BuildPreferences migration"
+   plans). That is a rename touching 12 `from duplo.questioner import
+   BuildPreferences` sites. Mechanically simple.
+4. After the move, `tests/test_questioner.py` becomes the only thing
+   keeping questioner.py alive; it tests dead interactive-prompt code.
+   Deleting it alongside questioner.py is consistent with PLAN.md
+   § "questioner.py removal" line 971.
+5. `tests/test_main.py` line 12223's `import duplo.questioner as q`
+   would need to change after deletion. Options: (a) replace with a
+   module-attribute check that still asserts the function isn't wired
+   into the pipeline (e.g. assert `ask_preferences` name not in
+   `duplo.main` / `duplo.orchestrator`, which two sibling tests
+   `test_main_module_has_no_ask_preferences` /
+   `test_orchestrator_module_has_no_ask_preferences` already do), or
+   (b) delete the test since the two sibling tests cover the same
+   invariant.
+
+Net: no blocker to the removal path in CURRENT_PLAN.md lines 32-37.
+The sequence is (a) add `BuildPreferences` to `build_prefs.py`,
+(b) retarget the 12 importers, (c) delete `duplo/questioner.py` and
+`tests/test_questioner.py`, (d) either drop or retarget
+`test_main.py:12223`. All subsequent 7.4.x subtasks are well-defined
+once this audit is ratified.
+
 ### [7.3.4] No-op: `questioner.select_features` doesn't exist; `selector.select_features` stays — 2026-04-17
 
 Grep-verified (2026-04-17): `duplo/questioner.py` defines no
