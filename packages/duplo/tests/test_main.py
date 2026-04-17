@@ -12193,6 +12193,11 @@ class TestNoAskPreferencesInPipeline:
 
         assert not hasattr(duplo.orchestrator, "ask_preferences")
 
+    @pytest.mark.skip(
+        reason="Phase 7.4.4: questioner.ask_preferences removed as dead code. "
+        "The invariant is still pinned by test_main_module_has_no_ask_preferences "
+        "and test_orchestrator_module_has_no_ask_preferences above."
+    )
     def test_pipeline_does_not_call_ask_preferences(self, tmp_path, monkeypatch):
         """Running ``main()`` with a valid SPEC.md never reaches
         ``questioner.ask_preferences``. BuildPreferences come from

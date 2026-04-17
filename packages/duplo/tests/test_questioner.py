@@ -1,8 +1,23 @@
-"""Tests for duplo.questioner."""
+"""Tests for duplo.questioner.
+
+The interactive-prompt helpers (``ask_preferences``, ``_ask_platform``,
+``_ask_language``, ``_ask_list``) were removed in Phase 7.4.4 as dead
+code. The test classes below cover those removed helpers; they are
+preserved under ``pytest.mark.skip`` rather than deleted (per the
+no-file-delete rule documented in NOTES.md [7.4.3]). The
+``BuildPreferences`` dataclass survives and is still importable from
+``duplo.questioner``.
+"""
 
 from __future__ import annotations
 
-from duplo.questioner import BuildPreferences, _ask_list, _ask_platform, ask_preferences
+import pytest
+
+from duplo.questioner import BuildPreferences
+
+pytestmark = pytest.mark.skip(
+    reason="Phase 7.4.4: ask_preferences / _ask_* helpers removed as dead code."
+)
 
 
 def make_input(*answers: str):
@@ -18,6 +33,8 @@ def make_input(*answers: str):
 
 class TestAskPlatform:
     def _run(self, *answers):
+        from duplo.questioner import _ask_platform  # noqa: F401 — removed; tests skipped
+
         lines = []
         result = _ask_platform(make_input(*answers), lines.append)
         return result, lines
@@ -59,6 +76,8 @@ class TestAskPlatform:
 
 class TestAskList:
     def _run(self, *answers):
+        from duplo.questioner import _ask_list  # noqa: F401 — removed; tests skipped
+
         lines = []
         result = _ask_list("Prompt", "Item", make_input(*answers), lines.append)
         return result, lines
@@ -83,6 +102,8 @@ class TestAskList:
 
 class TestAskPreferences:
     def _run(self, *answers):
+        from duplo.questioner import ask_preferences  # noqa: F401 — removed; tests skipped
+
         lines = []
         result = ask_preferences(input_fn=make_input(*answers), print_fn=lines.append)
         return result, lines

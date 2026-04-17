@@ -2,6 +2,65 @@
 
 ## Observations
 
+### [7.4.4] Removed dead interactive-prompt code from questioner.py — 2026-04-17
+
+The conditional ("If select_features is still needed") is vacuously
+satisfied on the "leave in questioner.py" branch because
+`select_features` is already in `duplo/selector.py` (and never lived
+in `questioner.py` — confirmed by 7.3.4 / 7.4.1 audits). Nothing to
+move. The actionable half of the task is "remove only the dead code",
+i.e. strip `questioner.py` down to its one live symbol
+(`BuildPreferences`).
+
+Removed from `duplo/questioner.py`:
+
+- `ask_preferences(...)` function (zero production callers after
+  `_first_run` was deleted in 7.2.1).
+- `_ask_platform`, `_ask_language`, `_ask_list`, `_print_summary`
+  helpers (only reachable via `ask_preferences`).
+- `_PLATFORMS` constant (only consumed by `_ask_platform`).
+
+Kept:
+
+- `BuildPreferences` dataclass (live; 12 importers across `duplo/`
+  and `tests/`). A future task (CURRENT_PLAN.md § "BuildPreferences
+  migration") will relocate it to `duplo/build_prefs.py` and retarget
+  callers; the dataclass still has a home in `questioner.py` until
+  then.
+
+Test-file handling (followed the 7.2.x skip-don't-delete convention):
+
+- `tests/test_questioner.py`: top-level import reduced to
+  `BuildPreferences`; added module-level
+  `pytestmark = pytest.mark.skip(...)`; moved the references to the
+  removed helpers from the top-level import into each test class's
+  `_run` method so import-time resolution doesn't hit the deleted
+  names. The 18 tests that covered removed symbols are now skipped.
+- `tests/test_main.py::TestNoAskPreferencesInPipeline::test_pipeline_does_not_call_ask_preferences`:
+  marked `@pytest.mark.skip(...)`. The `monkeypatch.setattr(q,
+  "ask_preferences", ...)` call would raise `AttributeError` now
+  that the function is gone. The two sibling tests in the same class
+  (`test_main_module_has_no_ask_preferences`,
+  `test_orchestrator_module_has_no_ask_preferences`) still cover the
+  invariant that the pipeline does not import `ask_preferences`.
+
+Verification: `ruff check duplo/ tests/` passes. Full test suite
+reports 2921 passed, 103 skipped (vs. 2937/84 before this task — the
+19-skipped delta matches the 18 + 1 tests newly skipped, with no new
+failures). Grep for `ask_preferences|_ask_platform|_ask_language|_ask_list|_print_summary|_PLATFORMS`
+in `duplo/` returns only unrelated hits (`main._print_summary` for
+`UpdateSummary`, `diagnostics.print_summary`, `questioner.py`'s own
+docstring referencing the removed names, `build_prefs.py`'s module
+docstring mentioning the superseded flow).
+
+CURRENT_PLAN.md line 37 ("Tests: no remaining imports of deleted
+functions; existing next-phase flow tests still pass") is the
+remaining 7.4.x subtask. It is effectively satisfied by the full-suite
+run above — no unskipped test imports `ask_preferences` or the `_ask_*`
+helpers, and all non-skipped tests pass — but a dedicated one-line
+assertion test would be a natural home for the invariant and is
+deferred to the next checkbox.
+
 ### [7.4.3] Not executed: precondition not met + absolute no-delete rule — 2026-04-17
 
 Task 7.4.3 ("If questioner.py can be deleted: delete it and
