@@ -464,7 +464,6 @@ class UpdateSummary:
     video_frames_extracted: int = 0
     pdfs_extracted: int = 0
     text_files_read: int = 0
-    urls_fetched: int = 0
     pages_rescraped: int = 0
     examples_rescraped: int = 0
     new_features: int = 0
@@ -1036,11 +1035,11 @@ def _analyze_new_files(
     file_names: list[str],
     spec: ProductSpec | None = None,
 ) -> UpdateSummary:
-    """Analyze new or changed files the same way as first run.
+    """Analyze new or changed files in ref/.
 
-    Images are sent to Vision for design extraction, PDFs are
-    converted to text, and URLs found in text files are scraped.
-    Results are saved to duplo.json.
+    Images are sent to Vision for design extraction, PDFs and text
+    files are read for prompt context. URLs are sourced exclusively
+    from SPEC.md's ``## Sources`` section, not from file contents.
 
     When *spec* is provided, design extraction input is composed via
     :func:`collect_design_input` (four-source model with dedup).
@@ -1155,50 +1154,6 @@ def _analyze_new_files(
             summary.text_files_read = len(scan.text_files)
             analyzed_anything = True
 
-    # Fetch new URLs.
-    if scan.urls:
-        existing_urls = _load_existing_urls()
-        new_urls = [u for u in scan.urls if u not in existing_urls]
-        if new_urls:
-            print(f"\nFetching {len(new_urls)} new URL(s) \u2026")
-            fetched = 0
-            all_page_records = []
-            all_raw_pages: dict[str, str] = {}
-            all_code_examples = []
-            all_doc_structures = DocStructures()
-            for url in new_urls:
-                print(f"  Fetching {url} \u2026")
-                try:
-                    url_text, code_examples, doc_structures, page_records, raw_pages = fetch_site(
-                        url
-                    )
-                    if url_text:
-                        summary.collected_text += url_text + "\n"
-                    if page_records:
-                        all_page_records.extend(page_records)
-                        if raw_pages:
-                            all_raw_pages.update(raw_pages)
-                    if code_examples:
-                        all_code_examples.extend(code_examples)
-                    if doc_structures:
-                        all_doc_structures.feature_tables.extend(doc_structures.feature_tables)
-                        all_doc_structures.operation_lists.extend(doc_structures.operation_lists)
-                        all_doc_structures.unit_lists.extend(doc_structures.unit_lists)
-                        all_doc_structures.function_refs.extend(doc_structures.function_refs)
-                    fetched += 1
-                    analyzed_anything = True
-                except Exception as exc:
-                    print(f"  Failed to fetch {url}: {exc}")
-            if all_page_records:
-                save_reference_urls(all_page_records)
-                if all_raw_pages:
-                    save_raw_content(all_raw_pages, all_page_records)
-            if all_code_examples:
-                save_examples(all_code_examples)
-            if all_doc_structures:
-                save_doc_structures(all_doc_structures)
-            summary.urls_fetched = fetched
-
     # Move processed reference files into .duplo/references/.
     ref_files = list(scan.images) + list(scan.videos) + list(scan.pdfs) + list(scan.text_files)
     if ref_files:
@@ -1210,19 +1165,6 @@ def _analyze_new_files(
         print("No analyzable reference materials in new files.")
 
     return summary
-
-
-def _load_existing_urls() -> set[str]:
-    """Load previously scraped URLs from duplo.json."""
-    duplo_path = Path(_DUPLO_JSON)
-    if not duplo_path.exists():
-        return set()
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return set()
-    records = data.get("reference_urls", [])
-    return {r["url"] for r in records if "url" in r}
 
 
 def _rescrape_product_url(
@@ -1494,8 +1436,6 @@ def _print_summary(summary: UpdateSummary) -> None:
         found_lines.append(f"  PDFs extracted: {summary.pdfs_extracted}")
     if summary.text_files_read:
         found_lines.append(f"  Text files read: {summary.text_files_read}")
-    if summary.urls_fetched:
-        found_lines.append(f"  URLs fetched: {summary.urls_fetched}")
     if summary.pages_rescraped:
         found_lines.append(f"  Pages re-scraped: {summary.pages_rescraped}")
     if summary.examples_rescraped:
@@ -1584,7 +1524,6 @@ def _subsequent_run() -> None:
             summary.videos_found = analysis.videos_found
             summary.pdfs_extracted = analysis.pdfs_extracted
             summary.text_files_read = analysis.text_files_read
-            summary.urls_fetched = analysis.urls_fetched
             summary.video_frames_extracted = analysis.video_frames_extracted
             summary.collected_text = analysis.collected_text
 

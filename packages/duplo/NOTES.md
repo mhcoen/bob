@@ -2,6 +2,43 @@
 
 ## Observations
 
+### [7.7.1] Removed URL-in-text-file scanning — 2026-04-17
+
+Under the old model, `scanner._extract_urls_from_file` read every text
+file (and every non-source file) in the project, pulled HTTP(S) URLs
+out with `_URL_RE`, and `_analyze_new_files` in `main.py` then handed
+those URLs to `fetch_site`. Under the SPEC-driven model, URLs live
+exclusively in SPEC.md's `## Sources` section and reach the scraper
+via `scrapeable_sources(spec)` → `_scrape_declared_sources(spec)`.
+
+Code change:
+
+- `duplo/scanner.py`: dropped `_URL_RE`, `_SOURCE_EXTS`,
+  `_SOURCE_NAMES`, `_extract_urls_from_file`, the `seen_urls` threads
+  through `_classify_file` / `scan_files` / `scan_directory`, and the
+  `urls: list[str]` field on `ScanResult`. `ScanResult` now exposes
+  only `images`, `videos`, `pdfs`, `text_files`, `roles`.
+- `duplo/main.py`: deleted the `if scan.urls:` URL-fetch block in
+  `_analyze_new_files`, the `_load_existing_urls` helper, the
+  `UpdateSummary.urls_fetched` field, the summary print, and the
+  `summary.urls_fetched = analysis.urls_fetched` assignment in
+  `_subsequent_run`. Updated `_analyze_new_files` docstring.
+- `tests/test_scanner.py`: removed URL-extraction tests (extract,
+  dedup, trailing punctuation, JSON/HTML/YAML skip, dedup across
+  text/non-text, binary-file skip). Updated
+  `TestScanDirectoryRefInventoryOnly.test_output_fields_are_inventory_only`
+  to expect `{"images","videos","pdfs","text_files","roles"}`.
+- `tests/test_main.py`: replaced `test_fetches_new_urls` and
+  `test_skips_already_fetched_urls` with one negative test
+  (`test_text_file_with_url_does_not_trigger_fetch`). Dropped
+  `urls=[]` kwargs from `ScanResult(...)` mock returns. Dropped
+  `assert result.urls == []` in `TestIntegrationRefOnlySpec`.
+
+Confirmed live URL path for `_subsequent_run`: `scrapeable_sources(spec)`
+(line 1537) → `_scrape_declared_sources(spec)` (line 1538) → `fetch_site`
+(line 515). No remaining reference to `scan.urls`, `_load_existing_urls`,
+or `urls_fetched` in the `duplo/` or `tests/` trees.
+
 ### [7.6.2] Vacuous: no legacy scoring code to delete from scanner.py — 2026-04-17
 
 Task conditional ("If any legacy scoring functions or constants remain in

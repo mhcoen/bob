@@ -54,11 +54,11 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 ## Legacy URL-in-text-file scanning removal
 
-- [ ] Remove URL extraction from arbitrary text files in the project directory
-  - [ ] Under the old model, duplo scanned the project root for text files containing URLs and used them as scrape targets. Under the new model, URLs live exclusively in SPEC.md Sources section.
-  - [ ] Audit main.py and any other module for code that scans the project root for text files containing URLs. Remove that code.
-  - [ ] Confirm that _subsequent_run reads URLs only from format_scrapeable_sources(spec), not from file scanning.
-  - [ ] Tests: placing a text file containing a URL in the project root does NOT cause duplo to scrape that URL; URLs come only from SPEC.md.
+- [x] Remove URL extraction from arbitrary text files in the project directory
+  - [x] Under the old model, duplo scanned the project root for text files containing URLs and used them as scrape targets. Under the new model, URLs live exclusively in SPEC.md Sources section.
+  - [x] Audit main.py and any other module for code that scans the project root for text files containing URLs. Remove that code.
+  - [x] Confirm that _subsequent_run reads URLs only from format_scrapeable_sources(spec), not from file scanning.
+  - [x] Tests: placing a text file containing a URL in the project root does NOT cause duplo to scrape that URL; URLs come only from SPEC.md.
 
 ## Compatibility layer removal
 

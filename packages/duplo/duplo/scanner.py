@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from duplo.diagnostics import record_failure
@@ -26,8 +25,6 @@ _SKIP_DIRS = {
     ".claude",
 }
 
-_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
-
 # Files that are clearly not reference material.
 _IGNORE_EXTS = {
     ".pyc",
@@ -50,122 +47,6 @@ _IGNORE_EXTS = {
     ".egg",
 }
 
-# Source code and config files that should not be scanned for URLs.
-# URLs in these files are dependencies, DTDs, or code references,
-# not product URLs the user wants scraped.
-_SOURCE_EXTS = {
-    ".swift",
-    ".m",
-    ".h",
-    ".c",
-    ".cpp",
-    ".cc",
-    ".cxx",
-    ".hpp",
-    ".java",
-    ".kt",
-    ".kts",
-    ".scala",
-    ".groovy",
-    ".py",
-    ".pyi",
-    ".pyw",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".mjs",
-    ".cjs",
-    ".rb",
-    ".go",
-    ".rs",
-    ".lua",
-    ".pl",
-    ".pm",
-    ".cs",
-    ".fs",
-    ".vb",
-    ".r",
-    ".R",
-    ".jl",
-    ".sh",
-    ".bash",
-    ".zsh",
-    ".fish",
-    ".bat",
-    ".cmd",
-    ".ps1",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".ini",
-    ".cfg",
-    ".conf",
-    ".xml",
-    ".plist",
-    ".dtd",
-    ".xsd",
-    ".xsl",
-    ".html",
-    ".htm",
-    ".css",
-    ".scss",
-    ".sass",
-    ".less",
-    ".sql",
-    ".graphql",
-    ".gql",
-    ".proto",
-    ".thrift",
-    ".avsc",
-    ".lock",
-    ".resolved",
-    ".sum",
-    ".gitignore",
-    ".dockerignore",
-    ".editorconfig",
-    ".env",
-    ".envrc",
-    ".mk",
-    ".cmake",
-}
-
-# Source/build files identified by name rather than extension.
-_SOURCE_NAMES = {
-    "Makefile",
-    "Dockerfile",
-    "Podfile",
-    "Gemfile",
-    "Rakefile",
-    "Vagrantfile",
-    "Procfile",
-    "Brewfile",
-    "Cartfile",
-    "LICENSE",
-    "CHANGELOG",
-    "CONTRIBUTING",
-    "Package.swift",
-    "Package.resolved",
-    "Cargo.toml",
-    "Cargo.lock",
-    "go.mod",
-    "go.sum",
-    "package.json",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "pyproject.toml",
-    "setup.py",
-    "setup.cfg",
-    "requirements.txt",
-    "Pipfile",
-    "Pipfile.lock",
-    "poetry.lock",
-    "CMakeLists.txt",
-    "Info.plist",
-}
-
 
 @dataclass
 class ScanResult:
@@ -175,7 +56,6 @@ class ScanResult:
     videos: list[Path] = field(default_factory=list)
     pdfs: list[Path] = field(default_factory=list)
     text_files: list[Path] = field(default_factory=list)
-    urls: list[str] = field(default_factory=list)
     roles: dict[Path, list[str]] = field(default_factory=dict)
 
 
@@ -195,12 +75,11 @@ def scan_files(
     original path.
     """
     result = ScanResult()
-    seen_urls: set[str] = set()
     ref_index = _build_reference_index(references) if references else {}
     for path in paths:
         if not path.is_file():
             continue
-        _classify_file(path, result, seen_urls)
+        _classify_file(path, result)
         roles = _lookup_roles(path, ref_index)
         if roles:
             result.roles[path] = roles
@@ -210,18 +89,17 @@ def scan_files(
 def scan_directory(ref_dir: Path | str = ".") -> ScanResult:
     """Scan *ref_dir* for reference materials.
 
-    Finds images, PDFs, and text/markdown files.  Extracts URLs from
-    any file that can be read as text.  Skips ``.duplo/``, ``.git/``,
-    and other non-project directories.
+    Finds images, videos, PDFs, and text/markdown files.  Skips
+    ``.duplo/``, ``.git/``, and other non-project directories.  URLs
+    are sourced from SPEC.md's ``## Sources`` section, not extracted
+    from file contents.
 
-    Returns a :class:`ScanResult` with categorised file lists and
-    extracted URLs (deduplicated, order-preserved).
+    Returns a :class:`ScanResult` with categorised file lists.
     """
     root = Path(ref_dir).resolve()
     result = ScanResult()
     if not root.is_dir():
         return result
-    seen_urls: set[str] = set()
 
     for path in sorted(root.iterdir()):
         if path.name.startswith(".") and path.is_dir():
@@ -230,16 +108,12 @@ def scan_directory(ref_dir: Path | str = ".") -> ScanResult:
             continue
         if path.is_dir():
             continue
-        _classify_file(path, result, seen_urls)
+        _classify_file(path, result)
 
     return result
 
 
-def _classify_file(
-    path: Path,
-    result: ScanResult,
-    seen_urls: set[str],
-) -> None:
+def _classify_file(path: Path, result: ScanResult) -> None:
     """Classify a single file and add it to the appropriate list."""
     suffix = path.suffix.lower()
 
@@ -260,18 +134,7 @@ def _classify_file(
 
     if suffix in _TEXT_EXTS:
         result.text_files.append(path)
-        _extract_urls_from_file(path, result, seen_urls)
         return
-
-    # Skip source code and config files. URLs in these are
-    # dependencies or code references, not product URLs.
-    if suffix in _SOURCE_EXTS:
-        return
-    if path.name in _SOURCE_NAMES:
-        return
-
-    # Any other file: try to extract URLs from it.
-    _extract_urls_from_file(path, result, seen_urls)
 
 
 def check_unlisted_ref_files(
@@ -355,24 +218,3 @@ def _lookup_roles(
         if len(parts) >= 2 and parts[0] == "ref" and parts[-1] == name:
             return roles
     return []
-
-
-def _extract_urls_from_file(
-    path: Path,
-    result: ScanResult,
-    seen_urls: set[str],
-) -> None:
-    """Extract HTTP(S) URLs from a file.
-
-    Attempts to read any file as UTF-8 text.  Binary files that
-    fail to decode are silently skipped.
-    """
-    try:
-        text = path.read_text(encoding="utf-8", errors="strict")
-    except (OSError, UnicodeDecodeError):
-        return
-    for match in _URL_RE.finditer(text):
-        url = match.group(0).rstrip(".,;:!?")
-        if url not in seen_urls:
-            seen_urls.add(url)
-            result.urls.append(url)

@@ -42,20 +42,6 @@ class TestScanDirectory:
         result = scan_directory(tmp_path)
         assert len(result.text_files) == 2
 
-    def test_extracts_urls_from_text(self, tmp_path: Path):
-        (tmp_path / "links.txt").write_text(
-            "Check out https://example.com and https://docs.example.com/guide"
-        )
-        result = scan_directory(tmp_path)
-        assert "https://example.com" in result.urls
-        assert "https://docs.example.com/guide" in result.urls
-
-    def test_deduplicates_urls(self, tmp_path: Path):
-        (tmp_path / "a.txt").write_text("https://example.com is a great site")
-        (tmp_path / "b.txt").write_text("https://example.com is mentioned again")
-        result = scan_directory(tmp_path)
-        assert result.urls.count("https://example.com") == 1
-
     def test_skips_dotdirs(self, tmp_path: Path):
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
@@ -81,14 +67,6 @@ class TestScanDirectory:
         result = scan_directory(tmp_path)
         assert result == ScanResult()
 
-    def test_strips_trailing_punctuation_from_urls(self, tmp_path: Path):
-        (tmp_path / "notes.txt").write_text(
-            "Visit https://example.com/page, or https://other.com."
-        )
-        result = scan_directory(tmp_path)
-        assert "https://example.com/page" in result.urls
-        assert "https://other.com" in result.urls
-
     def test_ignores_non_reference_files(self, tmp_path: Path):
         (tmp_path / "code.py").write_text("print('hello')")
         (tmp_path / "data.json").write_text("{}")
@@ -96,23 +74,6 @@ class TestScanDirectory:
         assert len(result.images) == 0
         assert len(result.pdfs) == 0
         assert len(result.text_files) == 0
-
-    def test_skips_urls_in_json_files(self, tmp_path: Path):
-        """JSON files are in _SOURCE_EXTS — URLs are config refs, not product URLs."""
-        (tmp_path / "config.json").write_text('{"url": "https://product.example.com/api"}')
-        result = scan_directory(tmp_path)
-        assert "https://product.example.com/api" not in result.urls
-
-    def test_skips_urls_in_html_files(self, tmp_path: Path):
-        """HTML files are in _SOURCE_EXTS — URLs are code refs, not product URLs."""
-        (tmp_path / "page.html").write_text('<a href="https://docs.example.com">Docs</a>')
-        result = scan_directory(tmp_path)
-        assert "https://docs.example.com" not in result.urls
-
-    def test_skips_binary_files_for_url_extraction(self, tmp_path: Path):
-        (tmp_path / "image.bin").write_bytes(bytes(range(256)) * 10)
-        result = scan_directory(tmp_path)
-        assert len(result.urls) == 0
 
     def test_skips_ignored_extensions(self, tmp_path: Path):
         (tmp_path / "lib.so").write_bytes(b"\x00" * 100)
@@ -122,7 +83,6 @@ class TestScanDirectory:
         assert len(result.images) == 0
         assert len(result.pdfs) == 0
         assert len(result.text_files) == 0
-        assert len(result.urls) == 0
 
 
 class TestNoRelevanceScoring:
@@ -164,18 +124,6 @@ class TestNoRelevanceScoring:
         result = scan_directory(tmp_path)
         assert not hasattr(result, "relevance")
 
-    def test_yaml_files_skipped_as_source(self, tmp_path: Path):
-        """YAML files are in _SOURCE_EXTS — no URL extraction."""
-        (tmp_path / "links.yaml").write_text("url: https://example.com/product")
-        result = scan_directory(tmp_path)
-        assert "https://example.com/product" not in result.urls
-
-    def test_dedup_urls_across_text_and_non_text(self, tmp_path: Path):
-        (tmp_path / "notes.txt").write_text("Visit https://example.com for more info")
-        (tmp_path / "config.yaml").write_text("url: https://example.com")
-        result = scan_directory(tmp_path)
-        assert result.urls.count("https://example.com") == 1
-
 
 class TestScanFiles:
     def test_classifies_image(self, tmp_path: Path):
@@ -196,12 +144,11 @@ class TestScanFiles:
         result = scan_files([pdf])
         assert len(result.pdfs) == 1
 
-    def test_classifies_text_and_extracts_urls(self, tmp_path: Path):
+    def test_classifies_text(self, tmp_path: Path):
         txt = tmp_path / "notes.txt"
-        txt.write_text("See https://example.com for details about the product")
+        txt.write_text("See details about the product")
         result = scan_files([txt])
         assert len(result.text_files) == 1
-        assert "https://example.com" in result.urls
 
     def test_skips_nonexistent(self, tmp_path: Path):
         result = scan_files([tmp_path / "gone.png"])
@@ -222,15 +169,13 @@ class TestScanFiles:
     def test_source_files_excluded_from_all_categories(self, tmp_path: Path):
         """Source code files must not appear in any ScanResult category."""
         source_files = []
-        # Extension-based source files
         for ext in (".py", ".swift", ".rs", ".go", ".js", ".ts", ".java", ".c", ".cpp", ".rb"):
             p = tmp_path / f"code{ext}"
-            p.write_text("https://example.com/should-not-be-extracted")
+            p.write_text("reference content")
             source_files.append(p)
-        # Name-based source files
         for name in ("Makefile", "Dockerfile", "Package.swift", "Cargo.toml", "go.mod"):
             p = tmp_path / name
-            p.write_text("https://example.com/should-not-be-extracted")
+            p.write_text("reference content")
             source_files.append(p)
 
         result = scan_files(source_files)
@@ -239,7 +184,6 @@ class TestScanFiles:
         assert result.videos == []
         assert result.pdfs == []
         assert result.text_files == []
-        assert result.urls == []
 
     def test_no_relevance_field(self, tmp_path: Path):
         tiny = tmp_path / "tiny.png"
@@ -647,12 +591,12 @@ class TestScanDirectoryRefInventoryOnly:
     """scan_directory is a pure file-inventory walk of ref/ — no scoring."""
 
     def test_output_fields_are_inventory_only(self, tmp_path: Path):
-        """ScanResult exposes only file lists, urls, and roles — no scores."""
+        """ScanResult exposes only file lists and roles — no scores, no URLs."""
         ref = tmp_path / "ref"
         ref.mkdir()
         (ref / "a.png").write_bytes(b"PNG")
         result = scan_directory(ref)
-        expected_fields = {"images", "videos", "pdfs", "text_files", "urls", "roles"}
+        expected_fields = {"images", "videos", "pdfs", "text_files", "roles"}
         assert set(ScanResult.__dataclass_fields__) == expected_fields
         assert result.images[0].name == "a.png"
 

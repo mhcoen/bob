@@ -880,37 +880,19 @@ class TestAnalyzeNewFiles:
         out = capsys.readouterr().out
         assert "PDF" in out
 
-    def test_fetches_new_urls(self, capsys, tmp_path, monkeypatch):
+    def test_text_file_with_url_does_not_trigger_fetch(self, tmp_path, monkeypatch):
+        """URLs in text files under ref/ must NOT be scraped — sources
+        come exclusively from SPEC.md ## Sources."""
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "", "features": []})
         txt = tmp_path / "urls.txt"
         txt.write_text("Check https://newsite.com for the product details")
 
-        with patch(
-            "duplo.main.fetch_site",
-            return_value=("text", [], None, [], {}),
-        ) as mock_fetch:
-            with patch("duplo.main._load_existing_urls", return_value=set()):
-                _analyze_new_files(["urls.txt"])
-
-        mock_fetch.assert_called_once_with("https://newsite.com")
-        out = capsys.readouterr().out
-        assert "Fetching" in out
-
-    def test_skips_already_fetched_urls(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
-        txt = tmp_path / "urls.txt"
-        txt.write_text("Check https://already.com for the product details")
-
         with patch("duplo.main.fetch_site") as mock_fetch:
-            with patch(
-                "duplo.main._load_existing_urls",
-                return_value={"https://already.com"},
-            ):
-                _analyze_new_files(["urls.txt"])
+            summary = _analyze_new_files(["urls.txt"])
 
         mock_fetch.assert_not_called()
+        assert not hasattr(summary, "urls_fetched")
 
     def test_skips_nonexistent_files(self, capsys, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -2077,7 +2059,6 @@ class TestBehavioralVideoFiltering:
                 videos=[beh_vid, vis_vid],
                 pdfs=[],
                 text_files=[],
-                urls=[],
             )
             _analyze_new_files(
                 ["ref/demo.mp4", "ref/design.mp4"],
@@ -2154,7 +2135,6 @@ class TestBehavioralVideoFiltering:
                 videos=[vis_vid],
                 pdfs=[],
                 text_files=[],
-                urls=[],
             )
             _analyze_new_files(
                 ["ref/design.mp4"],
@@ -2203,7 +2183,6 @@ class TestBehavioralVideoFiltering:
                 videos=[vid],
                 pdfs=[],
                 text_files=[],
-                urls=[],
             )
             _analyze_new_files(
                 ["ref/proposed.mp4"],
@@ -10863,7 +10842,6 @@ class TestIntegrationUrlOnlySpec:
         assert result.videos == []
         assert result.pdfs == []
         assert result.text_files == []
-        assert result.urls == []
 
 
 class TestIntegrationRefOnlySpec:
