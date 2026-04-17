@@ -108,7 +108,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 - [ ] Add test_no_dead_imports_remain
   - [x] Programmatically import every module in the duplo package.
-  - [ ] Assert: no ImportError from deleted modules; no AttributeError from deleted functions.
+  - [x] Assert: no ImportError from deleted modules; no AttributeError from deleted functions.
   - [ ] This is a smoke test to catch stale imports that the individual deletion tests might miss.
 
 - [ ] Run the full test suite and confirm Phase 7 closes cleanly
