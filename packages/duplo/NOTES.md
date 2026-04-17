@@ -2,6 +2,53 @@
 
 ## Observations
 
+### [7.1.3] Migration gate fully prevents old-format projects from reaching _first_run — 2026-04-17
+
+Audit confirms no old-format project can reach `_first_run`. Dispatch in
+`main.py:655-805` has three entry branches:
+
+- `init` subcommand (main.py:665-716) — bypasses `_check_migration`, calls
+  `run_init` (duplo/init.py). `run_init` never calls `_first_run` (grep confirms).
+- `fix`/`investigate` subcommand (main.py:718-795) — bypasses
+  `_check_migration`, calls `_fix_mode`. `_fix_mode` never calls `_first_run`.
+- Default no-subcommand path (main.py:796-803) — calls `_check_migration(Path.cwd())`
+  first (main.py:797), then dispatches on `duplo.json` existence:
+  `_first_run(url=args.url)` if absent, `_subsequent_run()` if present.
+
+`_first_run` is called from exactly one site (main.py:799) — grep for
+`_first_run(` returns only the definition (main.py:1035) and that one call.
+No internal recursion; `_subsequent_run` does not invoke it.
+
+`needs_migration` (migration.py:37-64) fires only when `.duplo/duplo.json`
+exists AND no new-format SPEC.md is present. By definition:
+- Old-format project has `.duplo/duplo.json` → either migration fires and
+  `sys.exit(1)` before dispatch, or it passes (new-format SPEC.md present)
+  and `duplo_path.exists()` is True → `_subsequent_run`, not `_first_run`.
+- Therefore `_first_run` is reachable only when `.duplo/duplo.json` does
+  NOT exist, which is by definition NOT an old-format project.
+
+Existing tests pin this:
+- `test_old_layout_prints_message_exits_skips_runs` (test_main.py:6316)
+  asserts `first_run_called == []` for old layout.
+- `test_init_skips_check_migration` (test_main.py:6420) asserts
+  `first_run_called == []` on init bypass.
+- `test_fix_old_layout_bypasses_migration_dispatches_fix` (test_main.py:6441)
+  confirms fix bypass routes to `_fix_mode`.
+- `test_migration_pass_proceeds_to_first_run` (test_main.py:6395) pins
+  that `_first_run` runs only when no `duplo.json`.
+
+Conclusion: no code path allows an old-format project to reach `_first_run`.
+No gating or removal needed for bypass. The next checkbox (document at
+removal site) can proceed.
+
+**Edge case flagged, not a reachability problem**: a user who manually deletes
+`.duplo/duplo.json` but leaves other old artifacts (`.duplo/product.json`,
+`screenshots/`, legacy `references/`) falls through to `_first_run`. By
+MIGRATION-design.md:168-172 this is intentional ("they can always delete
+`.duplo/` and start fresh"). `_first_run` even consumes a lingering
+`.duplo/product.json` via `load_product()` at main.py:1111. This partial-reset
+path is a feature of the current design, not a missed old-format case.
+
 ### [7.1.2] duplo init + _subsequent_run coverage of _first_run — 2026-04-17
 
 Confirmed the coverage claim in CURRENT_PLAN.md line 13.
