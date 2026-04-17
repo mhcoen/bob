@@ -1888,7 +1888,7 @@ class TestProposeFileRole:
             raise AssertionError("Vision must not be called for text")
 
         monkeypatch.setattr("duplo.spec_writer.query_with_images", fail_query)
-        for ext in (".txt", ".md"):
+        for ext in (".txt", ".md", ".markdown", ".rst", ".text"):
             p = tmp_path / f"readme{ext}"
             p.write_text("hi")
             description, role = _propose_file_role(p)

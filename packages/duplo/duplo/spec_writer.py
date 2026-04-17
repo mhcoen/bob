@@ -704,7 +704,7 @@ def format_spec(spec: ProductSpec) -> str:
 
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 _VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".webm", ".avi"})
-_TEXT_SUFFIXES = frozenset({".txt", ".md"})
+_TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".rst", ".text"})
 _VALID_FILE_ROLES = frozenset(
     {"visual-target", "behavioral-target", "docs", "counter-example", "ignore"}
 )
@@ -744,7 +744,7 @@ def _propose_file_role(path: Path) -> tuple[str, str]:
     ``("", "ignore")`` with a diagnostic (no retry).
 
     For non-image files the role is extension-based:
-    ``.pdf``/``.txt``/``.md`` → ``docs``;
+    ``.pdf``/``.txt``/``.md``/``.markdown``/``.rst``/``.text`` → ``docs``;
     ``.mp4``/``.mov``/``.webm``/``.avi`` → ``behavioral-target``;
     unknown extensions → ``ignore`` (with diagnostic).  Description is
     an empty string for non-image files.
