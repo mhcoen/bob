@@ -123,7 +123,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 - [ ] Implement run_init for the no-arguments case
   - [x] Per INIT-design.md section "duplo init (no arguments)".
   - [x] Check for existing SPEC.md: if present and --force not set, print error message per INIT-design.md and exit 1.
-  - [ ] Create ref/ directory if it does not exist.
+  - [x] Create ref/ directory if it does not exist.
   - [ ] Write ref/README.md with the static content from INIT-design.md section "ref/README.md content". Write-once: do not overwrite if ref/README.md already exists.
   - [ ] Write SPEC.md with the static SPEC-template.md content (via format_spec on an empty ProductSpec).
   - [ ] Print the output message per INIT-design.md: "Created ref/...", "Wrote SPEC.md (template, no inputs).", and the "Next steps:" block.
