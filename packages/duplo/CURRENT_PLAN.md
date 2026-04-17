@@ -142,7 +142,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Print output per INIT-design.md (shallow scrape message, product identity, pre-filled sections, next steps).
   - [x] Tests (all with mocked fetch_site and claude -p): successful scrape produces pre-filled Purpose and Sources; failed scrape writes URL with scrape: none and exits 0; unidentified product fills Sources only; existing ref/ files get role proposals with proposed: true; --deep flag passes scrape_depth="deep" to fetch_site; --force overwrites existing SPEC.md; URL canonicalized before writing to Sources.
 
-- [ ] Implement run_init for the --from-description case
+- [x] Implement run_init for the --from-description case
   - [x] Per INIT-design.md section "duplo init --from-description description.txt".
   - [x] Read description from file path or stdin (- argument). If file not found, print error per INIT-design.md and exit 1.
   - [x] If stdin: print "Reading description from stdin. Press Ctrl-D when done." when stdin is a TTY.
@@ -150,7 +150,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Per DRAFTER-design.md: if prose mentions a URL, extract it and add to Sources with proposed: true and role inferred via _infer_url_role.
   - [x] Write SPEC.md, create ref/, write ref/README.md.
   - [x] Print output per INIT-design.md (character count, pre-filled sections, next steps).
-  - [ ] Tests: description from file read correctly; description from stdin (mocked) read correctly; file not found exits 1; URL extracted from prose added to Sources with proposed: true; inferred role correct; Notes section contains verbatim prose.
+  - [x] Tests: description from file read correctly; description from stdin (mocked) read correctly; file not found exits 1; URL extracted from prose added to Sources with proposed: true; inferred role correct; Notes section contains verbatim prose.
 
 - [ ] Implement run_init for the combined URL + --from-description case
   - [ ] Per INIT-design.md section "duplo init URL --from-description description.txt".
