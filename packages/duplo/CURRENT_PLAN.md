@@ -10,9 +10,9 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter: DraftInputs and format_spec
 
-- [ ] [BATCH] Add DraftInputs dataclass to duplo/spec_writer.py
-  - [ ] Add DraftInputs dataclass with fields: url (str or None), url_scrape (str or None), description (str or None), existing_ref_files (list[Path], default empty), vision_proposals (dict[Path, str], default empty). Per DRAFTER-design.md section DraftInputs.
-  - [ ] Tests: dataclass construction with all fields; default values for optional fields; field types enforced.
+- [x] [BATCH] Add DraftInputs dataclass to duplo/spec_writer.py
+  - [x] Add DraftInputs dataclass with fields: url (str or None), url_scrape (str or None), description (str or None), existing_ref_files (list[Path], default empty), vision_proposals (dict[Path, str], default empty). Per DRAFTER-design.md section DraftInputs.
+  - [x] Tests: dataclass construction with all fields; default values for optional fields; field types enforced.
 
 - [ ] Implement format_spec(spec: ProductSpec) -> str in duplo/spec_writer.py
   - [ ] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per DRAFTER-design.md section format_spec.
