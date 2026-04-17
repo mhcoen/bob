@@ -6,7 +6,12 @@ import argparse
 
 import pytest
 
-from duplo.init import _REF_README_CONTENT, _SPEC_EXISTS_ERROR, run_init
+from duplo.init import (
+    _NO_ARGS_NEXT_STEPS,
+    _REF_README_CONTENT,
+    _SPEC_EXISTS_ERROR,
+    run_init,
+)
 from duplo.spec_reader import ProductSpec
 from duplo.spec_writer import format_spec
 
@@ -175,3 +180,42 @@ class TestRunInitNoArgsSpecWrite:
 
         captured = capsys.readouterr()
         assert "Wrote SPEC.md (template, no inputs)." in captured.out
+
+
+class TestRunInitNoArgsOutputMessage:
+    """Per INIT-design.md § 'duplo init (no arguments)': full output
+    including the 'Next steps:' block."""
+
+    def test_prints_next_steps_block(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        captured = capsys.readouterr()
+        assert _NO_ARGS_NEXT_STEPS in captured.out
+
+    def test_next_steps_content_matches_init_design(self):
+        # INIT-design.md § "duplo init (no arguments)" pins this text.
+        assert _NO_ARGS_NEXT_STEPS.startswith("Next steps:\n")
+        assert "1. Open SPEC.md in your editor." in _NO_ARGS_NEXT_STEPS
+        assert "<FILL IN> marker" in _NO_ARGS_NEXT_STEPS
+        assert "2. (Optional) Drop reference files into ref/" in _NO_ARGS_NEXT_STEPS
+        assert "3. (Optional) Add a URL to ## Sources" in _NO_ARGS_NEXT_STEPS
+        assert "4. Run `duplo` to extract features" in _NO_ARGS_NEXT_STEPS
+
+    def test_output_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        # Created ref/, Created ref/README.md, Wrote SPEC.md, blank
+        # line, then Next steps — in that order.
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        out = capsys.readouterr().out
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md (template, no inputs).")
+        idx_next = out.index("Next steps:")
+        assert idx_ref < idx_readme < idx_spec < idx_next
+        # Blank line separates the "Wrote SPEC.md" line from "Next steps:".
+        between = out[idx_spec:idx_next]
+        assert "\n\n" in between
