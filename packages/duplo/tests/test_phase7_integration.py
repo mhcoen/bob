@@ -71,3 +71,35 @@ class TestFreshDirectoryWithoutInitPrintsMessage:
             "fresh-directory flow must not create any files or directories; "
             f"new entries: {sorted(after - before)}"
         )
+
+
+class TestOldProjectStillBlockedByMigration:
+    """Per CURRENT_PLAN.md § 'Automated integration tests':
+    ``test_old_project_still_blocked_by_migration``.
+
+    An old-format project — one with ``.duplo/duplo.json`` but no
+    new-format ``SPEC.md`` — must still hit the migration gate
+    (``duplo.migration._check_migration``) and exit with a message
+    telling the user how to migrate. Phase 7 cleanup removed
+    ``_first_run`` but must NOT have weakened the migration gate.
+    """
+
+    def test_old_project_hits_migration_gate(self, tmp_path, monkeypatch):
+        """Run duplo (no subcommand) against an old-format project.
+
+        Fixture: ``.duplo/duplo.json`` present, ``SPEC.md`` absent.
+        This is the shape of a project created by the pre-redesign
+        duplo (which wrote ``duplo.json`` as its state file but never
+        authored ``SPEC.md``).
+        """
+        duplo_dir = tmp_path / ".duplo"
+        duplo_dir.mkdir()
+        (duplo_dir / "duplo.json").write_text("{}\n", encoding="utf-8")
+        assert not (tmp_path / "SPEC.md").exists()
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["duplo"])
+        monkeypatch.setattr("builtins.input", _fail_on_input)
+
+        with pytest.raises(SystemExit):
+            main()
