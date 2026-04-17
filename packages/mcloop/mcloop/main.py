@@ -666,9 +666,19 @@ def run_loop(
     if current_model:
         warn_unknown_model(cli, current_model)
 
-    # Split-plan: extract current phase from master if needed
+    # Split-plan: extract current phase from master if needed.
+    # Bug check first: even if all phases are complete, unchecked
+    # bugs must still be worked before the run is allowed to exit.
+    _phases_exhausted = False
     if not ensure_current_plan(master_path, current_plan_path):
-        # All phases already complete
+        _phases_exhausted = True
+
+    # Parse bugs now so the bug-only check can gate the early exit.
+    _early_bug_tasks = parse(bugs_path) if bugs_path.exists() else []
+    _early_has_bugs = has_unchecked_bugs(_early_bug_tasks)
+
+    if _phases_exhausted and not _early_has_bugs:
+        # All phases already complete and no bugs to work.
         total = time.monotonic() - run_start_mono
         _build_and_write_summary(
             project_dir,
@@ -696,7 +706,7 @@ def run_loop(
         return None
 
     initial_bug_tasks = parse(bugs_path)
-    initial_plan_tasks = parse(current_plan_path)
+    initial_plan_tasks = parse(current_plan_path) if current_plan_path.exists() else []
     bug_only = has_unchecked_bugs(initial_bug_tasks)
     _run_mode = "bug-only" if bug_only else "plan"
     if bug_only:
@@ -713,7 +723,9 @@ def run_loop(
             )
             stop_after_stage = False
 
-    active_phase_name = get_current_phase_name(current_plan_path)
+    active_phase_name = (
+        get_current_phase_name(current_plan_path) if current_plan_path.exists() else ""
+    )
 
     # Count remaining tasks for the startup notification
     remaining_count = count_unchecked(initial_bug_tasks) + count_unchecked(initial_plan_tasks)
@@ -739,7 +751,7 @@ def run_loop(
 
         # Parse both split-plan files
         bug_tasks = parse(bugs_path)
-        plan_tasks = parse(current_plan_path)
+        plan_tasks = parse(current_plan_path) if current_plan_path.exists() else []
 
         # If any task has failed, stop the entire run.
         # A failed task is fatal: do not attempt other tasks.
@@ -1016,7 +1028,8 @@ def run_loop(
                             completed,
                             None,
                             "",
-                            parse(bugs_path) + parse(current_plan_path),
+                            parse(bugs_path)
+                            + (parse(current_plan_path) if current_plan_path.exists() else []),
                             total,
                             project_dir,
                             notes_snapshot,
@@ -1271,7 +1284,8 @@ def run_loop(
                 completed,
                 None,
                 "",
-                parse(bugs_path) + parse(current_plan_path),
+                parse(bugs_path)
+                + (parse(current_plan_path) if current_plan_path.exists() else []),
                 total,
                 project_dir,
                 notes_snapshot,
@@ -1323,7 +1337,8 @@ def run_loop(
             completed,
             failed_task,
             failed_reason,
-            parse(bugs_path) + parse(current_plan_path),
+            parse(bugs_path)
+            + (parse(current_plan_path) if current_plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -1390,7 +1405,8 @@ def run_loop(
             completed,
             None,
             "",
-            parse(bugs_path) + parse(current_plan_path),
+            parse(bugs_path)
+            + (parse(current_plan_path) if current_plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -1419,7 +1435,9 @@ def run_loop(
         phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
         if stopped_early == "stage" or phase_done_more_remain:
             # Phase completed, full suite + build already ran in-loop.
-            summary_remaining_tasks = parse(bugs_path) + parse(current_plan_path)
+            summary_remaining_tasks = parse(bugs_path) + (
+                parse(current_plan_path) if current_plan_path.exists() else []
+            )
             _summary_full_suite = True  # Passed in-loop (otherwise terminal_failure would be set)
             _summary_build = True
             msg = f"{completed_stage} complete."

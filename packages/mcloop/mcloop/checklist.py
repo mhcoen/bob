@@ -406,8 +406,29 @@ def _search_tasks(
 
 
 def has_unchecked_bugs(tasks: list[Task]) -> bool:
-    """Return True if there are unchecked tasks in the ``## Bugs`` section."""
-    return _search_in_stage(tasks, "Bugs") is not None
+    """Return True if there are unchecked bug tasks.
+
+    Accepts any of these shapes:
+    - Tasks under a ``## Bugs`` header (any heading level, any case).
+    - A standalone bug file with no stage/phase headers: every
+      unchecked task counts as a bug. This covers files with no
+      header, a non-matching header (``## Known bugs``,
+      ``## Open bugs``, ``# Bugs to fix``), or a bare checklist.
+    """
+    if _search_in_stage(tasks, "Bugs") is not None:
+        return True
+    if get_stages(tasks):
+        return False
+
+    def _any_unchecked(task_list: list[Task]) -> bool:
+        for t in task_list:
+            if not t.checked and not t.failed:
+                return True
+            if _any_unchecked(t.children):
+                return True
+        return False
+
+    return _any_unchecked(tasks)
 
 
 def find_next(tasks: list[Task]) -> Task | None:
