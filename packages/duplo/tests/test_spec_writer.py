@@ -463,6 +463,16 @@ class TestFormatSpec:
         assert "  proposed: true" in result
         assert "Files in ref/" not in result
 
+    def test_references_entries_separated_by_blank_line(self):
+        spec = ProductSpec(
+            references=[
+                ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"]),
+                ReferenceEntry(path=Path("ref/b.png"), roles=["docs"]),
+            ]
+        )
+        result = format_spec(spec)
+        assert "- ref/a.png\n  role: visual-target\n\n- ref/b.png" in result
+
     def test_design_with_user_prose_only(self):
         spec = ProductSpec(design=DesignBlock(user_prose="Calm, neutral palette."))
         result = format_spec(spec)
