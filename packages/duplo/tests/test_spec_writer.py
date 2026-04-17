@@ -289,6 +289,13 @@ class TestAppendReferences:
         result = append_references(spec, [])
         assert result == spec
 
+    def test_dedup_path_with_spaces(self):
+        spec = "## References\n\n- ref/Screen Shot.png\n  role: visual-target\n"
+        entry = ReferenceEntry(path=Path("ref/Screen Shot.png"), roles=["docs"])
+        result = append_references(spec, [entry])
+        assert result == spec
+        assert result.count("- ref/Screen Shot.png") == 1
+
     def test_missing_references_section_created(self):
         spec = "## Purpose\n\nBuild a calculator.\n"
         entry = ReferenceEntry(path=Path("ref/a.png"), roles=["visual-target"])

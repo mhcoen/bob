@@ -110,9 +110,10 @@ _SOURCE_ENTRY_START = re.compile(r"^-\s+(https?://\S+)\s*$", re.MULTILINE)
 
 # Matches a reference entry start line: ``- <path>``.  The path is
 # anything on the same line that is not an HTTP(S) URL (Sources own
-# those) and is not the start of a comment or another Markdown list
-# construct we care about.
-_REFERENCE_ENTRY_START = re.compile(r"^-\s+(?!https?://)(\S+)\s*$", re.MULTILINE)
+# those).  Non-greedy ``.+?`` (anchored by ``\s*$``) allows paths
+# containing spaces — e.g. ``ref/Screen Shot.png`` — which ``\S+``
+# would truncate at the first space.
+_REFERENCE_ENTRY_START = re.compile(r"^-\s+(?!https?://)(.+?)\s*$", re.MULTILINE)
 
 # Ordered list of (pattern, role) pairs used by ``_infer_url_role``.
 # The role is chosen by the earliest-starting match across all
