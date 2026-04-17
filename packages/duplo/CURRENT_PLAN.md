@@ -55,13 +55,13 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Case-insensitive matching.
   - [x] Tests: each pattern produces the expected role; default when no pattern matches; case-insensitive; multiple patterns in same context uses the first match.
 
-- [ ] [BATCH] Implement Vision-based file role inference in duplo/spec_writer.py
-  - [ ] Per DRAFTER-design.md section "Inferring file roles via Vision". Add _propose_file_role(path: Path) -> tuple[str, str] returning (description, role).
-  - [ ] For image files (.png, .jpg, .gif, .webp): call claude -p with the Vision prompt from DRAFTER-design.md that asks for description and role from the enum (visual-target, behavioral-target, docs, counter-example, ignore). Parse JSON response.
-  - [ ] For non-image files: use extension-based defaults. PDFs default to docs. Text/markdown files default to docs. Videos (.mp4, .mov, .webm, .avi) default to behavioral-target.
-  - [ ] All results are proposals (proposed: true is set by the caller, not by this function).
-  - [ ] Retry logic: two retry attempts with backoff on LLM failure, then fall back to ignore role with a diagnostic.
-  - [ ] Tests: image file triggers claude -p Vision call (mocked) and parses JSON response; PDF defaults to docs without Vision call; text file defaults to docs; video defaults to behavioral-target; unknown extension defaults to ignore with diagnostic; LLM failure after retries falls back to ignore; JSON parse error falls back to ignore with diagnostic.
+- [x] [BATCH] Implement Vision-based file role inference in duplo/spec_writer.py
+  - [x] Per DRAFTER-design.md section "Inferring file roles via Vision". Add _propose_file_role(path: Path) -> tuple[str, str] returning (description, role).
+  - [x] For image files (.png, .jpg, .gif, .webp): call claude -p with the Vision prompt from DRAFTER-design.md that asks for description and role from the enum (visual-target, behavioral-target, docs, counter-example, ignore). Parse JSON response.
+  - [x] For non-image files: use extension-based defaults. PDFs default to docs. Text/markdown files default to docs. Videos (.mp4, .mov, .webm, .avi) default to behavioral-target.
+  - [x] All results are proposals (proposed: true is set by the caller, not by this function).
+  - [x] Retry logic: two retry attempts with backoff on LLM failure, then fall back to ignore role with a diagnostic.
+  - [x] Tests: image file triggers claude -p Vision call (mocked) and parses JSON response; PDF defaults to docs without Vision call; text file defaults to docs; video defaults to behavioral-target; unknown extension defaults to ignore with diagnostic; LLM failure after retries falls back to ignore; JSON parse error falls back to ignore with diagnostic.
 
 ## Drafter: _draft_from_inputs and draft_spec
 
