@@ -98,7 +98,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 ## Automated integration tests
 
 - [ ] Add tests/test_phase7_integration.py with test_fresh_directory_without_init_prints_message
-  - [ ] Run duplo (no subcommand) in a completely empty tmpdir (no .duplo/, no SPEC.md).
+  - [x] Run duplo (no subcommand) in a completely empty tmpdir (no .duplo/, no SPEC.md).
   - [ ] Assert: prints a message directing user to run duplo init; exits 0 (not 1); does NOT attempt _first_run behavior (no interactive prompts, no directory creation).
 
 - [ ] Add test_old_project_still_blocked_by_migration
