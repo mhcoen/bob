@@ -26,6 +26,44 @@ from duplo.spec_reader import (
 from duplo.url_canon import canonicalize_url
 
 
+class SectionNotFound(Exception):
+    """Raised when an append/update target section is absent from the file.
+
+    Per DRAFTER-design.md § "Error handling".  Carries the name of the
+    missing section so callers can report it without parsing the
+    exception message.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"section not found: {name}")
+
+
+class MalformedSpec(Exception):
+    """Raised when a parse-during-modify fails on an existing SPEC.md.
+
+    Per DRAFTER-design.md § "Error handling".  Carries the reason the
+    parse failed so callers can decide whether to overwrite or bail.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+class DraftingFailed(Exception):
+    """Raised when the LLM call in :func:`_draft_from_inputs` fails.
+
+    Per DRAFTER-design.md § "Error handling".  Raised after all retries
+    are exhausted (transport error, JSON parse error, or non-object
+    response).  Callers fall back to a template-only draft.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
 @dataclass
 class DraftInputs:
     """Inputs consumed by :func:`draft_spec` / :func:`_draft_from_inputs`.
@@ -914,10 +952,10 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
        empty content where the LLM returned ``null``.
 
     On LLM failure after retries, or on unrecoverable JSON parse
-    errors after retries, returns an empty ``ProductSpec`` and logs a
-    diagnostic via :func:`~duplo.diagnostics.record_failure`.  Callers
-    serialize the result with :func:`format_spec`, which emits the
-    template ``<FILL IN>`` markers for empty required sections.
+    errors after retries, raises :class:`DraftingFailed` and logs a
+    diagnostic via :func:`~duplo.diagnostics.record_failure`.  The
+    caller (:func:`draft_spec`) catches the exception and falls back
+    to a template-only draft.
     """
     prompt = _build_draft_prompt(inputs)
 
@@ -928,12 +966,13 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
         except ClaudeCliError as exc:
             last_error = f"ClaudeCliError: {exc}"
             if attempt >= _DRAFT_RETRIES:
+                reason = f"Draft LLM call failed after {attempt + 1} attempts: {last_error}"
                 record_failure(
                     "spec_writer:_draft_from_inputs",
                     "llm",
-                    f"Draft LLM call failed after {attempt + 1} attempts: {last_error}",
+                    reason,
                 )
-                return ProductSpec()
+                raise DraftingFailed(reason) from exc
             time.sleep(_DRAFT_BACKOFF * (2**attempt))
             continue
 
@@ -942,29 +981,31 @@ def _draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
         except (json.JSONDecodeError, ValueError) as exc:
             last_error = f"JSON parse error: {exc}"
             if attempt >= _DRAFT_RETRIES:
+                reason = f"Draft JSON parse failed after {attempt + 1} attempts: {last_error}"
                 record_failure(
                     "spec_writer:_draft_from_inputs",
                     "llm",
-                    f"Draft JSON parse failed after {attempt + 1} attempts: {last_error}",
+                    reason,
                     context={"raw": raw[:2000]},
                 )
-                return ProductSpec()
+                raise DraftingFailed(reason) from exc
             time.sleep(_DRAFT_BACKOFF * (2**attempt))
             continue
 
         if not isinstance(data, dict):
+            reason = "Draft response was not a JSON object"
             record_failure(
                 "spec_writer:_draft_from_inputs",
                 "llm",
-                "Draft response was not a JSON object",
+                reason,
                 context={"raw": raw[:2000]},
             )
-            return ProductSpec()
+            raise DraftingFailed(reason)
 
         return _construct_spec_from_draft_json(data)
 
-    # Unreachable: every branch in the loop either returns or continues.
-    return ProductSpec()
+    # Unreachable: every branch in the loop either returns or raises.
+    raise DraftingFailed("drafter exited retry loop unexpectedly")
 
 
 # --------------------------------------------------------------------------
@@ -995,8 +1036,15 @@ def draft_spec(inputs: DraftInputs) -> str:
     5. Serialize the result with :func:`format_spec`.
 
     The caller (``duplo init``) writes the returned string to SPEC.md.
+
+    On :class:`DraftingFailed` from step 1, falls back to a fresh empty
+    :class:`ProductSpec` (template markers for required sections) and
+    still applies steps 2–4 so user-supplied inputs are preserved.
     """
-    spec = _draft_from_inputs(inputs)
+    try:
+        spec = _draft_from_inputs(inputs)
+    except DraftingFailed:
+        spec = ProductSpec()
 
     if inputs.description:
         spec.notes = f"{_NOTES_DESCRIPTION_HEADER}\n\n{inputs.description}"

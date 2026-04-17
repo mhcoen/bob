@@ -15,7 +15,10 @@ from duplo.spec_reader import (
     _parse_spec,
 )
 from duplo.spec_writer import (
+    DraftingFailed,
     DraftInputs,
+    MalformedSpec,
+    SectionNotFound,
     _draft_from_inputs,
     _infer_url_role,
     _propose_file_role,
@@ -1647,7 +1650,7 @@ class TestDraftFromInputs:
         assert spec.design.user_prose == ""
         assert spec.behavior_contracts == []
 
-    def test_llm_failure_after_retries_returns_empty_spec(self, monkeypatch, tmp_path):
+    def test_llm_failure_after_retries_raises_drafting_failed(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
         attempts = [0]
 
@@ -1659,18 +1662,16 @@ class TestDraftFromInputs:
         monkeypatch.setattr("duplo.spec_writer.query", always_fail)
         monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: sleeps.append(s))
 
-        spec = _draft_from_inputs(DraftInputs(description="x"))
+        with pytest.raises(DraftingFailed):
+            _draft_from_inputs(DraftInputs(description="x"))
 
-        # Fallback to an empty ProductSpec.
-        assert spec.purpose == ""
-        assert spec.architecture == ""
         # Initial attempt + 2 retries = 3 calls.
         assert attempts[0] == 3
         # Slept between attempts, not after the final failure.
         assert len(sleeps) == 2
         assert (tmp_path / ".duplo" / "errors.jsonl").exists()
 
-    def test_malformed_json_retries_then_falls_back(self, monkeypatch, tmp_path):
+    def test_malformed_json_retries_then_raises(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
         attempts = [0]
 
@@ -1681,9 +1682,9 @@ class TestDraftFromInputs:
         monkeypatch.setattr("duplo.spec_writer.query", bad_json)
         monkeypatch.setattr("duplo.spec_writer.time.sleep", lambda s: None)
 
-        spec = _draft_from_inputs(DraftInputs(description="x"))
+        with pytest.raises(DraftingFailed):
+            _draft_from_inputs(DraftInputs(description="x"))
 
-        assert spec.purpose == ""
         assert attempts[0] == 3
         assert (tmp_path / ".duplo" / "errors.jsonl").exists()
 
@@ -1752,13 +1753,13 @@ class TestDraftFromInputs:
         spec = _draft_from_inputs(DraftInputs(description="x"))
         assert spec.purpose == "Fenced."
 
-    def test_response_that_is_not_a_json_object_falls_back(self, monkeypatch, tmp_path):
+    def test_response_that_is_not_a_json_object_raises(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
         # A bare array parses but isn't a dict — treat as fallback.
         self._mock_query(monkeypatch, "[1, 2, 3]")
 
-        spec = _draft_from_inputs(DraftInputs(description="x"))
-        assert spec.purpose == ""
+        with pytest.raises(DraftingFailed):
+            _draft_from_inputs(DraftInputs(description="x"))
         assert (tmp_path / ".duplo" / "errors.jsonl").exists()
 
     def test_behavior_contracts_with_missing_fields_are_dropped(self, monkeypatch):
@@ -2253,3 +2254,84 @@ class TestDraftSpec:
         assert str(spec.references[1].path) == "ref/added.png"
         assert spec.references[1].proposed is True
         assert spec.references[1].roles == ["docs"]
+
+
+class TestExceptionClasses:
+    """Tests for the drafter's exception classes (per DRAFTER-design.md §
+    "Error handling")."""
+
+    def test_section_not_found_carries_name(self):
+        exc = SectionNotFound("Sources")
+        assert exc.name == "Sources"
+        assert "Sources" in str(exc)
+
+    def test_malformed_spec_carries_reason(self):
+        exc = MalformedSpec("missing ## Purpose heading")
+        assert exc.reason == "missing ## Purpose heading"
+        assert str(exc) == "missing ## Purpose heading"
+
+    def test_drafting_failed_carries_reason(self):
+        exc = DraftingFailed("LLM timed out")
+        assert exc.reason == "LLM timed out"
+        assert str(exc) == "LLM timed out"
+
+    def test_exception_classes_are_distinct_exception_subclasses(self):
+        assert issubclass(SectionNotFound, Exception)
+        assert issubclass(MalformedSpec, Exception)
+        assert issubclass(DraftingFailed, Exception)
+
+    def test_draft_spec_catches_drafting_failed_and_falls_back_to_template(
+        self, monkeypatch, tmp_path
+    ):
+        """draft_spec catches DraftingFailed from _draft_from_inputs and
+        returns a serialized spec built from an empty ProductSpec, so the
+        output contains the template FILL IN markers for required sections.
+        User-supplied inputs are still applied per steps 2–4."""
+        monkeypatch.chdir(tmp_path)
+
+        def raise_drafting_failed(inputs):
+            raise DraftingFailed("simulated LLM outage")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            raise_drafting_failed,
+        )
+
+        prose = "Build a calculator."
+        text = draft_spec(
+            DraftInputs(
+                url="https://numi.app",
+                url_scrape="...",
+                description=prose,
+            )
+        )
+
+        # Required-section FILL IN markers from the template.
+        assert "<FILL IN: one or two sentences" in text
+        assert "<FILL IN: language, framework" in text
+        # User-supplied URL and prose are preserved.
+        spec = _parse_spec(text)
+        assert spec.fill_in_purpose is True
+        assert len(spec.sources) == 1
+        assert spec.sources[0].url == "https://numi.app"
+        assert prose in spec.notes
+
+    def test_draft_spec_with_no_inputs_and_drafting_failed_returns_template(self, monkeypatch):
+        """With no user inputs, the fallback output matches the static
+        template (FILL IN markers + optional-section comment hints)."""
+
+        def raise_drafting_failed(inputs):
+            raise DraftingFailed("simulated LLM outage")
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            raise_drafting_failed,
+        )
+
+        text = draft_spec(DraftInputs())
+
+        assert "<FILL IN: one or two sentences" in text
+        assert "<FILL IN: language, framework" in text
+        assert "## Sources\n\n<!-- URLs duplo should scrape." in text
+        assert "## References\n\n<!-- Files in ref/." in text
+        assert "## Notes\n\n<!-- Optional. Free-form context for duplo. -->" in text
