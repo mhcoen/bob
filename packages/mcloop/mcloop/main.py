@@ -445,6 +445,10 @@ def _run_batch(
                 ),
                 flush=True,
             )
+            # Add patched files to the pre-batch snapshot so the
+            # rollback path below does NOT revert them. Salvage
+            # patches are deliberate fixes that must survive retries.
+            pre_batch_modified = list(pre_batch_modified) + list(patched)
             # Refresh changed_files since we just edited more files.
             changed_files = _changed_files(project_dir)
             pre_check_status = _worktree_status(project_dir)

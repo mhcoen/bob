@@ -163,7 +163,8 @@ def build_audit_prompt(existing_bugs: str = "") -> str:
         )
     else:
         parts.append(
-            "If no bugs are found, write .mcloop/audit-report.md containing only:\n# Bugs\n\nNo bugs found.\n"
+            "If no bugs are found, write .mcloop/audit-report.md"
+            " containing only:\n# Bugs\n\nNo bugs found.\n"
         )
 
     return "\n".join(parts)
