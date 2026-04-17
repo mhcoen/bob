@@ -38,7 +38,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
 
 ## Legacy initializer removal
 
-- [ ] Evaluate duplo/initializer.py for removal
+- [x] Evaluate duplo/initializer.py for removal
   - [x] Audit all callers of initializer.create_project_dir and initializer.project_name_from_url.
   - [x] _first_run used initializer to create a target project directory and git init it. Under the new model, the user creates their own project directory and runs duplo init from it. duplo init does NOT call create_project_dir.
   - [x] If no remaining callers exist after _first_run removal: delete duplo/initializer.py and tests/test_initializer.py.
