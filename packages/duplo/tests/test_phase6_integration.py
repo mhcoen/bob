@@ -36,7 +36,8 @@ class TestInitNoArgsProducesTemplate:
         add the content-level assertions (SPEC.md contents, ref/
         layout, migration status).
         """
-        from duplo.init import run_init
+        from duplo.init import _REF_README_CONTENT, run_init
+        from duplo.migration import needs_migration
 
         monkeypatch.chdir(tmp_path)
 
@@ -44,3 +45,18 @@ class TestInitNoArgsProducesTemplate:
 
         # Drain captured output so it does not bleed into other tests.
         capsys.readouterr()
+
+        spec_path = tmp_path / "SPEC.md"
+        assert spec_path.is_file()
+        spec_text = spec_path.read_text()
+        assert "How the pieces fit together:" in spec_text
+        assert "<FILL IN: one or two sentences describing what you're building>" in spec_text
+        assert "<FILL IN: language, framework, platform, constraints>" in spec_text
+
+        ref_dir = tmp_path / "ref"
+        assert ref_dir.is_dir()
+        readme_path = ref_dir / "README.md"
+        assert readme_path.is_file()
+        assert readme_path.read_text() == _REF_README_CONTENT
+
+        assert needs_migration(tmp_path) is False
