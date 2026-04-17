@@ -66,7 +66,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Drafter: _draft_from_inputs and draft_spec
 
 - [ ] Implement _draft_from_inputs(inputs: DraftInputs) -> ProductSpec in duplo/spec_writer.py
-  - [ ] Per DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
+  - [x] Per DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
   - [ ] Build structured-output prompt for claude -p per DRAFTER-design.md: request JSON with fields purpose, architecture, design, behavior_contracts, scope_include, scope_exclude.
   - [ ] Architecture is filled ONLY when description prose explicitly states a stack/platform/language. URL scrapes do NOT inform architecture. Per DRAFTER-design.md and INIT-design.md.
   - [ ] notes is deliberately NOT in the LLM schema (populated by draft_spec from raw description prose).
