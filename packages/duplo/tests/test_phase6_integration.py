@@ -485,3 +485,54 @@ class TestInitWithExistingRefFilesProposesRoles:
         # Fixture files must not have been disturbed by run_init.
         assert image_path.is_file()
         assert pdf_path.is_file()
+
+    def test_run_init_references_populated_with_proposed_roles(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Assert ``## References`` has both files, both ``proposed: true``,
+        image carries the Vision-inferred role, PDF carries ``docs``.
+
+        Content-level check for the existing-ref-files flow: after
+        ``run_init`` completes under the mocked ``_propose_file_role``
+        and ``_draft_from_inputs``, SPEC.md's ``## References`` section
+        must list one entry per fixture file, both flagged
+        ``proposed: true`` (user-reviewable), with the image's role
+        coming from the Vision stub (``visual-target``) and the PDF's
+        role from the real extension-default branch (``docs``).
+        """
+        from duplo.init import run_init
+        from duplo.spec_reader import read_spec
+
+        monkeypatch.chdir(tmp_path)
+
+        _write_ref_fixture(tmp_path)
+        desc_path = _write_description_fixture(tmp_path)
+
+        with (
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=_stub_propose_file_role,
+            ),
+            patch(
+                "duplo.spec_writer._draft_from_inputs",
+                side_effect=_stub_draft_from_inputs,
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        capsys.readouterr()
+
+        spec = read_spec(target_dir=tmp_path)
+        assert spec is not None
+
+        by_name = {entry.path.name: entry for entry in spec.references}
+        assert set(by_name) == {_IMAGE_REF_FILENAME, _PDF_REF_FILENAME}
+
+        image_entry = by_name[_IMAGE_REF_FILENAME]
+        pdf_entry = by_name[_PDF_REF_FILENAME]
+
+        assert image_entry.proposed is True
+        assert pdf_entry.proposed is True
+
+        assert image_entry.roles == [_IMAGE_VISION_ROLE]
+        assert pdf_entry.roles == ["docs"]
