@@ -187,7 +187,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [ ] Add test_init_url_produces_prefilled_spec
   - [x] Mock fetch_site to return a fixture scrape with identifiable product name.
-  - [ ] Run run_init with a URL argument.
+  - [x] Run run_init with a URL argument.
   - [ ] Assert: SPEC.md has pre-filled Purpose (non-empty, no FILL IN); Sources section contains the URL with role: product-reference and scrape: deep; Architecture still has FILL IN; SPEC.md round-trips through the parser without errors.
 
 - [ ] Add test_init_description_produces_notes_with_verbatim_prose
