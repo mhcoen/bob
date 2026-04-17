@@ -2,6 +2,17 @@
 
 ## Observations
 
+### [7.3.4] No-op: `questioner.select_features` doesn't exist; `selector.select_features` stays — 2026-04-17
+
+Grep-verified (2026-04-17): `duplo/questioner.py` defines no
+`select_features`. The only `select_features` lives in
+`duplo/selector.py` and has one live call site at `duplo/main.py:1876`
+inside `_subsequent_run`'s phase-planning block (imported at
+`main.py:300` from `duplo.selector`). That call is explicitly retained
+per CURRENT_PLAN.md line 27 / task 7.3.2. Task 7.3.4's conditional is
+vacuously satisfied on the "elsewhere" branch — leave it. No code
+change required.
+
 ### [7.3.3] No-op: no `ask_preferences` call to remove — 2026-04-17
 
 Grep across `duplo/` for `ask_preferences(` returns only two hits:

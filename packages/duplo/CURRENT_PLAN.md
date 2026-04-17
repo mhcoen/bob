@@ -26,7 +26,7 @@ This phase is entirely about deletion, simplification, and documentation. No new
   - [x] Audit callers of questioner.ask_preferences and questioner.select_features in main.py.
   - [x] The new model: BuildPreferences come from spec.architecture via build_prefs.parse_build_preferences (Phase 5). Feature selection for phase planning uses the existing selector.select_features in the next-phase flow, which is NOT being removed.
   - [x] Remove any call to questioner.ask_preferences from the pipeline. BuildPreferences are now derived from SPEC.md, not from interactive prompts.
-  - [ ] If questioner.select_features is still called during _first_run only, its removal is covered by the _first_run removal above. If it is called elsewhere, leave it.
+  - [x] If questioner.select_features is still called during _first_run only, its removal is covered by the _first_run removal above. If it is called elsewhere, leave it.
   - [ ] Tests: no import of ask_preferences remains in main.py or orchestrator.py; pipeline runs without interactive prompts when given a valid SPEC.md.
 
 - [ ] Evaluate questioner.py for removal
