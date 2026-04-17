@@ -2,6 +2,42 @@
 
 ## Observations
 
+### [7.6.1] Confirmed: scanner.py has no legacy scoring code — 2026-04-17
+
+Verification task (no code change). Commit `ffc66ea` (2026-04-13 "Drop
+the relevance scoring (image dimensions, file size). Roles are declared
+in ## References, not inferred.") already removed every scoring artifact
+from `duplo/scanner.py`. Re-verified today:
+
+- No scoring constants: grep for `_MIN_IMAGE|dimension|threshold|MIN_|
+  MAX_|too_small|too_large|getsize|st_size|\.size` in `duplo/scanner.py`
+  returns zero hits.
+- No scoring functions: `_assess_image`, `_assess_video`, `_assess_pdf`,
+  `_assess_text` are gone (confirmed via `git show ffc66ea --
+  duplo/scanner.py`).
+- No `FileRelevance` dataclass and no `ScanResult.relevance` field
+  (both removed in the same commit).
+- No callers reference the removed field: grep for
+  `scan\.relevance|scan_result\.relevance|result\.relevance` across the
+  repo returns zero hits.
+- Sole `_MIN_IMAGE_BYTES` that remains lives in `duplo/fetcher.py:34`
+  and gates newly-downloaded embedded-media images during web scraping
+  (`download_media` at `fetcher.py:443-476`). Unrelated to scanner
+  reference-material scoring; not in scope for this task.
+
+CURRENT_PLAN.md line 52 ("If any legacy scoring functions or constants
+remain in scanner.py ... delete them") is therefore vacuously satisfied
+— nothing to delete.
+
+**Stale documentation flagged, not in scope:** `AGENTS.md:82-95` still
+describes the removed `FileRelevance` dataclass, the `relevance` field,
+and the "Assesses relevance of each file: flags tiny images (<1KB),
+empty PDFs, empty/very-short text files as irrelevant" behavior. This is
+documentation drift, not live code. User may want to refresh that entry
+when touching AGENTS.md — duplo/CLAUDE.md's one-liner for `scanner.py`
+is already accurate ("Roles are declared in SPEC.md `## References`, not
+inferred."). No code path depends on AGENTS.md.
+
 ### [7.5.5] Pinned no-initializer-imports invariant in test suite — 2026-04-17
 
 Added `TestNoInitializerImportsInPipeline` at `tests/test_main.py:12269`
