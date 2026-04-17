@@ -48,12 +48,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter: role inference helpers
 
-- [ ] [BATCH] Implement URL role inference heuristics in duplo/spec_writer.py
-  - [ ] Per DRAFTER-design.md section "Inferring URL roles". Regex-based, not LLM-based.
-  - [ ] Add _infer_url_role(context: str) -> str function. Takes the surrounding prose context where a URL was mentioned.
-  - [ ] Rules: "like X" / "such as X" / "inspired by X" returns product-reference. "see also X" / "X for reference" returns docs. "not like X" / "unlike X" / "avoid X" returns counter-example. Default: product-reference.
-  - [ ] Case-insensitive matching.
-  - [ ] Tests: each pattern produces the expected role; default when no pattern matches; case-insensitive; multiple patterns in same context uses the first match.
+- [x] [BATCH] Implement URL role inference heuristics in duplo/spec_writer.py
+  - [x] Per DRAFTER-design.md section "Inferring URL roles". Regex-based, not LLM-based.
+  - [x] Add _infer_url_role(context: str) -> str function. Takes the surrounding prose context where a URL was mentioned.
+  - [x] Rules: "like X" / "such as X" / "inspired by X" returns product-reference. "see also X" / "X for reference" returns docs. "not like X" / "unlike X" / "avoid X" returns counter-example. Default: product-reference.
+  - [x] Case-insensitive matching.
+  - [x] Tests: each pattern produces the expected role; default when no pattern matches; case-insensitive; multiple patterns in same context uses the first match.
 
 - [ ] [BATCH] Implement Vision-based file role inference in duplo/spec_writer.py
   - [ ] Per DRAFTER-design.md section "Inferring file roles via Vision". Add _propose_file_role(path: Path) -> tuple[str, str] returning (description, role).
