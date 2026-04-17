@@ -2,6 +2,41 @@
 
 ## Observations
 
+### [7.3.1] Audit of `questioner.ask_preferences` / `questioner.select_features` callers in main.py — 2026-04-17
+
+`questioner.ask_preferences` — zero callers in `duplo/main.py`. The
+only `duplo.questioner` import in main.py is `BuildPreferences` (the
+dataclass), at `main.py:245`, consumed by `_prefs_from_dict` and
+`_load_preferences` (`main.py:324`, `main.py:334`) as a type. No call
+to `ask_preferences` exists in main.py (grep-verified). Already dead
+at the source after 7.2.1's `_first_run` deletion.
+
+`questioner.select_features` — does not exist. `select_features` lives
+in `duplo.selector`, not `duplo.questioner`. `duplo/questioner.py`
+defines only `ask_preferences`, `_ask_platform`, `_ask_language`,
+`_ask_list`, `_print_summary`, and `BuildPreferences`. The audit item
+in CURRENT_PLAN.md line 26 presupposes a function that was never in
+questioner.py — the wording should read "selector.select_features",
+matching line 27 which correctly attributes it to `selector`.
+
+`selector.select_features` in main.py has one live caller at
+`main.py:1876` inside the next-phase / `_subsequent_run` phase-planning
+flow (confirmed/adjusted feature list before PLAN.md generation). Per
+CURRENT_PLAN.md line 27 this call is explicitly NOT being removed.
+Imported at `main.py:300` from `duplo.selector`.
+
+`duplo/orchestrator.py` — zero hits for `ask_preferences`,
+`questioner`, or `select_features`. Satisfies the CURRENT_PLAN.md
+line 30 test condition preemptively.
+
+Implication for the remaining 7.3 checkboxes: CURRENT_PLAN.md line 28
+(removing `ask_preferences` calls from the pipeline) is a no-op for
+main.py — no such call exists. Only action left for this subsection
+is line 30's verification test. Whether `BuildPreferences`'s import
+path stays on `duplo.questioner` or moves to `build_prefs.py` is a
+follow-up question for "Evaluate questioner.py for removal"
+(CURRENT_PLAN.md line 32).
+
 ### [7.2.4] Cleared `_first_run` textual references from tests — 2026-04-17
 
 Renamed `SKIP_FIRST_RUN` → `SKIP_LEGACY_PIPELINE` in tests/test_main.py
