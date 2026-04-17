@@ -87,12 +87,12 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Drafter: error handling
 
-- [ ] [BATCH] Add drafter exception classes to duplo/spec_writer.py
-  - [ ] Per DRAFTER-design.md section "Error handling". Add SectionNotFound(name: str), MalformedSpec(reason: str), DraftingFailed(reason: str) exception classes.
-  - [ ] SectionNotFound: raised by append/update functions when the target section is not in the file.
-  - [ ] MalformedSpec: raised when parse-during-modify fails because the existing file is not valid SPEC.md format.
-  - [ ] DraftingFailed: raised when the LLM call in _draft_from_inputs fails after retries. Caller falls back to template-only draft.
-  - [ ] Tests: each exception class can be instantiated and carries its message; draft_spec catches DraftingFailed and falls back to template-only output.
+- [x] [BATCH] Add drafter exception classes to duplo/spec_writer.py
+  - [x] Per DRAFTER-design.md section "Error handling". Add SectionNotFound(name: str), MalformedSpec(reason: str), DraftingFailed(reason: str) exception classes.
+  - [x] SectionNotFound: raised by append/update functions when the target section is not in the file.
+  - [x] MalformedSpec: raised when parse-during-modify fails because the existing file is not valid SPEC.md format.
+  - [x] DraftingFailed: raised when the LLM call in _draft_from_inputs fails after retries. Caller falls back to template-only draft.
+  - [x] Tests: each exception class can be instantiated and carries its message; draft_spec catches DraftingFailed and falls back to template-only output.
 
 ## Edit-safety property test
 
