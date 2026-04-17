@@ -104,15 +104,15 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## duplo init: argument parsing
 
-- [ ] [BATCH] Add init subcommand to argument parser in duplo/main.py
-  - [ ] Per INIT-design.md section "Command surface". Add init as a recognized subcommand alongside fix and investigate.
-  - [ ] Positional argument: url (optional). Validated as starting with http:// or https://.
-  - [ ] Flag: --from-description PATH (or - for stdin). Path to a text file containing prose description.
-  - [ ] Flag: --deep (boolean, default false). Opt-in to deep scraping during init.
-  - [ ] Flag: --force (boolean, default false). Overwrite existing SPEC.md.
-  - [ ] Dispatch to duplo.init.run_init(args) when subcommand is init.
-  - [ ] init subcommand bypasses migration check (same as fix and investigate). Per MIGRATION-design.md: migration check applies only to the no-subcommand path.
-  - [ ] Tests: argparse accepts duplo init with no args; accepts duplo init URL; accepts duplo init --from-description FILE; accepts duplo init URL --from-description FILE; accepts --deep and --force flags; rejects invalid URL (not http/https); init dispatches to run_init (mock and assert called).
+- [x] [BATCH] Add init subcommand to argument parser in duplo/main.py
+  - [x] Per INIT-design.md section "Command surface". Add init as a recognized subcommand alongside fix and investigate.
+  - [x] Positional argument: url (optional). Validated as starting with http:// or https://.
+  - [x] Flag: --from-description PATH (or - for stdin). Path to a text file containing prose description.
+  - [x] Flag: --deep (boolean, default false). Opt-in to deep scraping during init.
+  - [x] Flag: --force (boolean, default false). Overwrite existing SPEC.md.
+  - [x] Dispatch to duplo.init.run_init(args) when subcommand is init.
+  - [x] init subcommand bypasses migration check (same as fix and investigate). Per MIGRATION-design.md: migration check applies only to the no-subcommand path.
+  - [x] Tests: argparse accepts duplo init with no args; accepts duplo init URL; accepts duplo init --from-description FILE; accepts duplo init URL --from-description FILE; accepts --deep and --force flags; rejects invalid URL (not http/https); init dispatches to run_init (mock and assert called).
 
 ## duplo init: core implementation
 
