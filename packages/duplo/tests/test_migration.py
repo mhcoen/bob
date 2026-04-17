@@ -32,12 +32,12 @@ class TestMigrationMessage:
         """Message reassures the user nothing was moved or modified."""
         assert "Nothing has been moved or modified" in _MIGRATION_MESSAGE
 
-    def test_lists_five_numbered_steps(self) -> None:
-        """Phase 4 message has exactly five numbered steps."""
+    def test_lists_four_numbered_steps(self) -> None:
+        """Message has exactly four numbered steps."""
         import re
 
         steps = re.findall(r"^\s+\d+\.", _MIGRATION_MESSAGE, re.MULTILINE)
-        assert len(steps) == 5
+        assert len(steps) == 4
 
     def test_minimum_field_architecture(self) -> None:
         """Message lists Architecture as a minimum SPEC.md field."""
