@@ -10,10 +10,13 @@ creation, no LLM calls.
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from pathlib import Path
 
 import pytest
 
+import duplo
 from duplo.main import main
 
 
@@ -114,3 +117,38 @@ class TestOldProjectStillBlockedByMigration:
         captured = capsys.readouterr()
         assert "This project predates the SPEC.md / ref/ redesign." in captured.out
         assert "duplo init" in captured.out
+
+
+class TestNoDeadImportsRemain:
+    """Per CURRENT_PLAN.md § 'Automated integration tests':
+    ``test_no_dead_imports_remain``.
+
+    Smoke test that walks the ``duplo`` package and imports every
+    submodule. Catches stale ``from duplo.X import Y`` statements where
+    ``X`` was deleted by Phase 7 cleanup or where ``Y`` was removed
+    from a surviving module. Individual deletion tests only check the
+    modules they touch; this test sweeps the whole package so a dead
+    import anywhere in the tree still fails loudly.
+    """
+
+    def test_every_duplo_submodule_imports_cleanly(self):
+        """Import every module under ``duplo/`` via ``importlib``.
+
+        Uses ``pkgutil.iter_modules`` on ``duplo.__path__`` to enumerate
+        submodules — this is resilient to renames, so we do not need to
+        hand-maintain a list. Any ``ImportError`` (stale import of a
+        deleted module) or ``AttributeError`` raised at import time
+        (stale ``from`` of a deleted symbol) fails the test.
+        """
+        failures: list[str] = []
+        for module_info in pkgutil.iter_modules(duplo.__path__):
+            name = f"duplo.{module_info.name}"
+            try:
+                importlib.import_module(name)
+            except (ImportError, AttributeError) as exc:
+                failures.append(f"{name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, (
+            "one or more duplo submodules failed to import; a deleted "
+            "module or symbol is still referenced somewhere:\n  " + "\n  ".join(failures)
+        )
