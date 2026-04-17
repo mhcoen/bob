@@ -211,7 +211,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
   - [x] Run run_init without --force. Assert: exits 1 with error message; SPEC.md unchanged.
 
 - [ ] Add test_init_then_duplo_run_works_end_to_end
-  - [ ] Run run_init with a URL to produce SPEC.md. Then programmatically edit SPEC.md to fill in Architecture (remove FILL IN). Then run _subsequent_run against the same tmpdir.
+  - [x] Run run_init with a URL to produce SPEC.md. Then programmatically edit SPEC.md to fill in Architecture (remove FILL IN). Then run _subsequent_run against the same tmpdir.
   - [ ] Mock fetch_site (for the deep scrape), extract_features, and interactive selectors.
   - [ ] Assert: PLAN.md produced; no migration message printed; pipeline consumed SPEC.md correctly.
 
