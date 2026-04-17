@@ -429,6 +429,20 @@ _EXCLUDE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Block-form headings: a bare keyword on its own line, followed by
+# indented list items.  Example:
+#     include:
+#       - Unit conversion
+_INCLUDE_BLOCK_HEAD_RE = re.compile(
+    r"^(?:include|add|keep|want|need)\s*:\s*$",
+    re.IGNORECASE,
+)
+_EXCLUDE_BLOCK_HEAD_RE = re.compile(
+    r"^(?:exclude|skip|drop|remove|omit)\s*:\s*$",
+    re.IGNORECASE,
+)
+_SCOPE_BLOCK_ITEM_RE = re.compile(r"^\s+[-*]\s+(.+?)\s*$")
+
 # Pattern for behavior contracts: ``input`` → ``expected``
 # Accepts →, ->, =>, and "expect"/"should produce"/"should be" as separators.
 _CONTRACT_RE = re.compile(
@@ -566,8 +580,8 @@ def _parse_spec(text: str) -> ProductSpec:
                 spec.fill_in_purpose = True
         elif key == "scope":
             spec.scope = body.strip()
-            spec.scope_include = _parse_scope_list(body, _INCLUDE_RE)
-            spec.scope_exclude = _parse_scope_list(body, _EXCLUDE_RE)
+            spec.scope_include = _parse_scope_list(body, _INCLUDE_RE, _INCLUDE_BLOCK_HEAD_RE)
+            spec.scope_exclude = _parse_scope_list(body, _EXCLUDE_RE, _EXCLUDE_BLOCK_HEAD_RE)
         elif key in ("behavior", "behaviour"):
             spec.behavior = body.strip()
             spec.behavior_contracts = _parse_contracts(body)
@@ -646,8 +660,18 @@ def _split_sections(text: str) -> dict[str, str]:
     return sections
 
 
-def _parse_scope_list(text: str, pattern: re.Pattern) -> list[str]:
-    """Extract a list of feature names from scope include/exclude lines."""
+def _parse_scope_list(text: str, pattern: re.Pattern, block_head_pattern: re.Pattern) -> list[str]:
+    """Extract a list of feature names from scope include/exclude lines.
+
+    Supports two formats:
+
+    - Single-line with dash prefix: ``- include: a, b, c``
+    - Block form (from SPEC-template)::
+
+        include:
+          - Unit conversion
+          - Variables
+    """
     items: list[str] = []
     for match in pattern.finditer(text):
         raw = match.group(1).strip()
@@ -656,6 +680,25 @@ def _parse_scope_list(text: str, pattern: re.Pattern) -> list[str]:
             cleaned = part.strip().strip('"').strip("'").strip()
             if cleaned:
                 items.append(cleaned)
+
+    # Block form: after a bare ``keyword:`` line, collect indented
+    # dash/star list items until a non-indented non-blank line.
+    in_block = False
+    for line in text.splitlines():
+        if block_head_pattern.match(line):
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        if not line.strip():
+            continue
+        item_match = _SCOPE_BLOCK_ITEM_RE.match(line)
+        if item_match:
+            cleaned = item_match.group(1).strip().strip('"').strip("'").strip()
+            if cleaned:
+                items.append(cleaned)
+        else:
+            in_block = False
     return items
 
 

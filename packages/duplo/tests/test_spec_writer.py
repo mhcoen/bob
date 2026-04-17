@@ -507,8 +507,8 @@ class TestFormatSpec:
             scope_exclude=["plugin API"],
         )
         result = format_spec(spec)
-        assert "- include: arithmetic, unit conversion" in result
-        assert "- exclude: plugin API" in result
+        assert "include:\n  - arithmetic\n  - unit conversion" in result
+        assert "exclude:\n  - plugin API" in result
         assert "Optional. Overrides for include/exclude." not in result
 
     def test_behavior_contracts_rendered(self):

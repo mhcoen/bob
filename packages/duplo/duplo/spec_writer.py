@@ -380,9 +380,11 @@ def _format_scope_section(spec: ProductSpec) -> str:
         return spec.scope
     lines: list[str] = []
     if spec.scope_include:
-        lines.append(f"- include: {', '.join(spec.scope_include)}")
+        lines.append("include:")
+        lines.extend(f"  - {item}" for item in spec.scope_include)
     if spec.scope_exclude:
-        lines.append(f"- exclude: {', '.join(spec.scope_exclude)}")
+        lines.append("exclude:")
+        lines.extend(f"  - {item}" for item in spec.scope_exclude)
     if not lines:
         return _SCOPE_COMMENT
     return "\n".join(lines)
