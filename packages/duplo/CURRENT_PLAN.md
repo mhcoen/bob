@@ -13,7 +13,7 @@ scaffold.py, macos/swiftui_spm.py, macos/python_cli.py) is already on
 disk. This phase wires it into the pipeline and adds structured platform
 declarations to SPEC.md.
 
-- [ ] Add structured platform entry syntax to the spec parser. In spec_reader.py, parse list-item entries under the Architecture section with fields: platform, language, build. Each entry becomes one element in a new list field on ProductSpec. Free-form prose after the structured entries is still captured in spec.architecture as before. Write tests in test_spec_reader.py covering: single entry, multiple entries, mixed entries plus prose, no entries (backward compatible prose-only).
+- [!] Add structured platform entry syntax to the spec parser. In spec_reader.py, parse list-item entries under the Architecture section with fields: platform, language, build. Each entry becomes one element in a new list field on ProductSpec. Free-form prose after the structured entries is still captured in spec.architecture as before. Write tests in test_spec_reader.py covering: single entry, multiple entries, mixed entries plus prose, no entries (backward compatible prose-only).
 
 - [ ] Update SPEC-template.md and SPEC-guide.md. Add an example showing structured platform entries under Architecture. The template should show one entry with platform/language/build fields. The guide should explain that multiple entries are supported for multi-stack projects and that free-form prose can follow.
 
