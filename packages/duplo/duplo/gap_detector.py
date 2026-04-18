@@ -239,7 +239,6 @@ def _parse_design_markdown(text: str) -> dict:
     return result
 
 
-
 def detect_design_gaps(
     plan_content: str,
     design: dict,

@@ -649,11 +649,14 @@ class TestSubsequentRunFileChanges:
                 with patch("duplo.main.extract_features", return_value=[]):
                     main()
 
-        # Verify hashes reflect post-move state (ref/new.txt moved to .duplo/references/).
+        # ref/ files are durable user inputs and stay in place; the hash
+        # for ref/new.txt is recorded at its original path so future runs
+        # can detect changes.
         from duplo.hasher import load_hashes
 
         saved = load_hashes(tmp_path)
-        assert "ref/new.txt" not in saved
+        assert "ref/new.txt" in saved
+        assert (tmp_path / "ref" / "new.txt").exists()
 
 
 class TestInitProject:
@@ -900,7 +903,9 @@ class TestAnalyzeNewFiles:
         out = capsys.readouterr().out
         assert out == ""
 
-    def test_moves_references(self, tmp_path, monkeypatch):
+    def test_does_not_move_references(self, tmp_path, monkeypatch):
+        """ref/ files are durable user inputs and must stay in place;
+        SPEC.md paths point at ref/ and break if files are relocated."""
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "", "features": []})
         img = tmp_path / "ref.png"
@@ -913,8 +918,8 @@ class TestAnalyzeNewFiles:
         with patch("duplo.main.extract_design", return_value=design):
             _analyze_new_files(["ref.png"])
 
-        assert not img.exists()
-        assert (tmp_path / ".duplo" / "references" / "ref.png").exists()
+        assert img.exists()
+        assert not (tmp_path / ".duplo" / "references" / "ref.png").exists()
 
     def test_subsequent_run_analyzes_new_images(self, capsys, tmp_path, monkeypatch):
         """Integration: _subsequent_run triggers analysis of new image files."""

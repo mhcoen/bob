@@ -279,7 +279,6 @@ from duplo.saver import (
     load_examples,
     load_product,
     mark_implemented_features,
-    move_references,
     resolve_completed_fixes,
     save_build_preferences,
     save_design_requirements,
@@ -1152,13 +1151,6 @@ def _analyze_new_files(
             print(f"\nRead {len(scan.text_files)} new text file(s).")
             summary.text_files_read = len(scan.text_files)
             analyzed_anything = True
-
-    # Move processed reference files into .duplo/references/.
-    ref_files = list(scan.images) + list(scan.videos) + list(scan.pdfs) + list(scan.text_files)
-    if ref_files:
-        moved = move_references(ref_files)
-        if moved:
-            print(f"Moved {len(moved)} new reference file(s) to .duplo/references/.")
 
     if not analyzed_anything:
         print("No analyzable reference materials in new files.")

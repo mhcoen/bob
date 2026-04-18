@@ -610,7 +610,9 @@ class TestDesignGapsSpecOnly:
 
     def test_spec_colors_and_components(self):
         """Spec with colors and components both produce gaps."""
-        spec_markdown = "### Colors\n- **bg**: `#fafafa`\n\n### Component Styles\n- **card**: rounded corners"
+        spec_markdown = (
+            "### Colors\n- **bg**: `#fafafa`\n\n### Component Styles\n- **card**: rounded corners"
+        )
         spec_design = _parse_design_markdown(spec_markdown)
         gaps = detect_design_gaps("# Plan", spec_design)
         assert len(gaps) == 2
