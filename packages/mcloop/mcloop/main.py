@@ -1202,11 +1202,23 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
+                    # No-op: session ran but produced no changes and
+                    # checks fail on the existing code.  Treat as a
+                    # retryable failure so the next attempt gets the
+                    # error context via prior_errors.
+                    last_error = (
+                        "Session produced no file changes."
+                        f" Checks failing: {noop_check.command}\n"
+                        + _tail(noop_check.output, 30)
+                    )
                     print(
-                        formatting.error_msg("No-op task, checks failing on existing code"),
+                        formatting.error_msg(
+                            f"No-op task"
+                            f" (attempt {attempt}/{max_retries})"
+                        ),
                         flush=True,
                     )
-                    break
+                    continue
 
                 _lifecycle._current_phase = "checks"
                 run_autofix(project_dir)
