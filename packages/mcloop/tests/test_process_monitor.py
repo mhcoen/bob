@@ -519,11 +519,11 @@ class TestRunCLIMocked:
         mock_proc.wait.return_value = None
         return mock_proc
 
-    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.kill_process_group")
     @patch("mcloop.process_monitor.sample", return_value="sample text")
     @patch("select.select", return_value=([], [], []))
     @patch("mcloop.process_monitor.launch")
-    def test_hang_calls_sample_and_kill(self, mock_launch, mock_select, mock_sample, mock_kill):
+    def test_hang_calls_sample_and_kill(self, mock_launch, mock_select, mock_sample, mock_killpg):
         mock_proc = self._make_mock_proc([None] * 200)
         mock_launch.return_value = LaunchedProcess(
             pid=100,
@@ -538,15 +538,15 @@ class TestRunCLIMocked:
         assert result.exit_code is None
         assert result.sample_output == "sample text"
         mock_sample.assert_called_once_with(100)
-        mock_kill.assert_called_once_with(100)
+        mock_killpg.assert_called_once_with(100)
 
-    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.kill_process_group")
     @patch("mcloop.process_monitor.sample", return_value="timeout sample")
     @patch("select.select", return_value=([99], [], []))
     @patch("os.read", return_value=b"output ")
     @patch("mcloop.process_monitor.launch")
     def test_wall_timeout_kills_process(
-        self, mock_launch, mock_os_read, mock_select, mock_sample, mock_kill
+        self, mock_launch, mock_os_read, mock_select, mock_sample, mock_killpg
     ):
         mock_proc = self._make_mock_proc([None] * 200)
         mock_launch.return_value = LaunchedProcess(
@@ -560,7 +560,7 @@ class TestRunCLIMocked:
         )
         assert result.hung is True
         assert result.exit_code is None
-        mock_kill.assert_called_once_with(101)
+        mock_killpg.assert_called_once_with(101)
 
     @patch("select.select", return_value=([99], [], []))
     @patch("os.read", return_value=b"all output")
@@ -615,6 +615,7 @@ class TestLaunchMocked:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd="/some/dir",
+            start_new_session=True,
         )
         assert result.pid == 42
         assert result.process is mock_proc
@@ -632,6 +633,7 @@ class TestLaunchMocked:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=None,
+            start_new_session=True,
         )
 
 
@@ -661,6 +663,126 @@ class TestKillMocked:
     def test_already_dead_on_sigterm(self, mock_kill):
         result = process_monitor.kill(557)
         assert result is True
+
+
+class TestKillProcessGroup:
+    """kill_process_group() signals the process group, not just the leader.
+
+    This is the regression suite for the shell=True orphan bug: children
+    forked by the shell share the leader's process group id, so signaling
+    via killpg is the only way to terminate them when a hang or timeout
+    forces us to kill the CLI subprocess.
+    """
+
+    @patch("time.sleep")
+    @patch("mcloop.process_monitor.is_alive", return_value=False)
+    @patch("os.killpg")
+    @patch("os.getpgid", return_value=42)
+    def test_sigterm_on_group_succeeds(self, mock_getpgid, mock_killpg, mock_alive, mock_sleep):
+        result = process_monitor.kill_process_group(42, graceful_timeout=1.0)
+        assert result is True
+        mock_getpgid.assert_called_once_with(42)
+        mock_killpg.assert_called_once_with(42, signal.SIGTERM)
+
+    @patch("time.sleep")
+    @patch("mcloop.process_monitor.is_alive", return_value=True)
+    @patch("os.killpg")
+    @patch("os.getpgid", return_value=77)
+    def test_escalates_to_sigkill_on_group(
+        self, mock_getpgid, mock_killpg, mock_alive, mock_sleep
+    ):
+        result = process_monitor.kill_process_group(77, graceful_timeout=0.0)
+        assert result is True
+        calls = mock_killpg.call_args_list
+        assert calls[0] == ((77, signal.SIGTERM),)
+        assert calls[1] == ((77, signal.SIGKILL),)
+
+    @patch("os.getpgid", side_effect=ProcessLookupError)
+    def test_already_dead_before_signal(self, mock_getpgid):
+        result = process_monitor.kill_process_group(999)
+        assert result is True
+
+    @patch("os.killpg", side_effect=ProcessLookupError)
+    @patch("os.getpgid", return_value=55)
+    def test_sigterm_race_process_exits(self, mock_getpgid, mock_killpg):
+        result = process_monitor.kill_process_group(55)
+        assert result is True
+
+
+class TestLaunchStartsNewSession:
+    """launch() must put the child in its own process group.
+
+    Without start_new_session=True, the shell and its children share the
+    parent's process group. When run_cli later calls killpg it would signal
+    the mcloop process itself. With start_new_session=True, the shell is a
+    new session leader and its pgid equals its pid — safe to killpg.
+    """
+
+    def test_launched_process_is_session_leader(self):
+        proc = process_monitor.launch("sleep 10")
+        try:
+            import os
+
+            pgid = os.getpgid(proc.pid)
+            assert pgid == proc.pid
+        finally:
+            if proc.process.poll() is None:
+                process_monitor.kill_process_group(proc.pid)
+                proc.process.wait()
+
+
+class TestRunCliKillsGroup:
+    """run_cli hang/timeout paths must target the process group."""
+
+    def _make_mock_proc(self, poll_returns, read_data=b"", pid=100):
+        mock_proc = MagicMock()
+        mock_proc.pid = pid
+        mock_proc.poll = MagicMock(side_effect=poll_returns)
+        mock_stdout = MagicMock()
+        mock_stdout.fileno.return_value = 99
+        mock_stdout.read.return_value = read_data
+        mock_proc.stdout = mock_stdout
+        mock_proc.wait.return_value = None
+        return mock_proc
+
+    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.kill_process_group")
+    @patch("mcloop.process_monitor.sample", return_value="x")
+    @patch("select.select", return_value=([], [], []))
+    @patch("mcloop.process_monitor.launch")
+    def test_hang_path_does_not_call_single_pid_kill(
+        self, mock_launch, mock_select, mock_sample, mock_killpg, mock_kill
+    ):
+        mock_proc = self._make_mock_proc([None] * 50)
+        mock_launch.return_value = LaunchedProcess(
+            pid=300,
+            process=mock_proc,
+            started_at=time.monotonic(),
+            last_output_at=time.monotonic() - 20,
+        )
+        process_monitor.run_cli("fake", hang_seconds=0.01, timeout_seconds=60, poll_interval=0)
+        mock_killpg.assert_called_once_with(300)
+        mock_kill.assert_not_called()
+
+    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.kill_process_group")
+    @patch("mcloop.process_monitor.sample", return_value="x")
+    @patch("select.select", return_value=([99], [], []))
+    @patch("os.read", return_value=b"out")
+    @patch("mcloop.process_monitor.launch")
+    def test_timeout_path_does_not_call_single_pid_kill(
+        self, mock_launch, mock_os_read, mock_select, mock_sample, mock_killpg, mock_kill
+    ):
+        mock_proc = self._make_mock_proc([None] * 50)
+        mock_launch.return_value = LaunchedProcess(
+            pid=301,
+            process=mock_proc,
+            started_at=time.monotonic() - 100,
+            last_output_at=time.monotonic(),
+        )
+        process_monitor.run_cli("fake", timeout_seconds=0.0, hang_seconds=999, poll_interval=0)
+        mock_killpg.assert_called_once_with(301)
+        mock_kill.assert_not_called()
 
 
 class TestIsHungMocked:
@@ -920,6 +1042,7 @@ class TestLaunchWithStdin:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=None,
+            start_new_session=True,
         )
 
     @patch("subprocess.Popen")
@@ -935,4 +1058,5 @@ class TestLaunchWithStdin:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=None,
+            start_new_session=True,
         )

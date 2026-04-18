@@ -31,6 +31,24 @@ cannot reach the API. This is an infrastructure issue — the maintain
 mechanism itself parsed invariants, built prompts, and handled failures
 correctly. Live verification blocked until API connectivity is resolved.
 
+### [2] shell=True orphan fix only covers run_cli (2026-04-17)
+`launch()` now passes `start_new_session=True` so every shell-wrapped
+child is its own process-group leader, and `run_cli`'s hang/timeout
+paths use the new `kill_process_group` helper (SIGTERM→SIGKILL on the
+group). Other callers of `kill(pid)` in the codebase (notably
+`run_gui`'s kill_on_return path and `lifecycle.cleanup_orphan_processes`)
+still target single PIDs. Those paths either already resolve the true
+app PID via pgrep or do their own targeted verification, so they were
+left alone to keep this fix minimal, but anything that launches via
+`launch()` and kills via single-PID `kill()` could leak orphans the
+same way. Audit those call sites if a similar bug recurs.
+
+Reproduced the original bug with `sleep 120 & echo $! > pidfile; wait`
+launched via `shell=True` with no `start_new_session`: killing only the
+shell pid leaves the `sleep` child running. With the fix, killpg on the
+group takes out both. Reproduction script kept at
+`/tmp/claude/verify_orphan_fix.py` for reference (not committed).
+
 ## Hypotheses
 
 ## Eliminated

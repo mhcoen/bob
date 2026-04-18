@@ -60,6 +60,7 @@ def launch(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=cwd,
+        start_new_session=True,
     )
     now = time.monotonic()
     return LaunchedProcess(
@@ -224,6 +225,43 @@ def kill(pid: int, graceful_timeout: float = 5.0) -> bool:
     return True
 
 
+def kill_process_group(pid: int, graceful_timeout: float = 5.0) -> bool:
+    """Kill a process and all children spawned via its process group.
+
+    Sends SIGTERM to the group, waits up to graceful_timeout for the
+    leader to exit, then escalates to SIGKILL on the group. Used for
+    shell=True processes where the shell forks children that would
+    otherwise survive as orphans if only the shell PID were signaled.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+    deadline = time.monotonic() + graceful_timeout
+    while time.monotonic() < deadline:
+        if not is_alive(pid):
+            return True
+        time.sleep(0.1)
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return True
+
+
 def read_crash_report(process_name: str) -> str | None:
     """Read the most recent crash report matching a process name.
 
@@ -283,7 +321,7 @@ def run_cli(
         elapsed = time.monotonic() - start
         if elapsed >= timeout_seconds:
             sample_out = sample(proc.pid)
-            kill(proc.pid)
+            kill_process_group(proc.pid)
             # Drain remaining output.
             if proc.process.stdout:
                 rest = proc.process.stdout.read()
@@ -328,7 +366,7 @@ def run_cli(
         silence = time.monotonic() - proc.last_output_at
         if silence >= hang_seconds:
             sample_out = sample(proc.pid)
-            kill(proc.pid)
+            kill_process_group(proc.pid)
             if proc.process.stdout:
                 rest = proc.process.stdout.read()
                 if rest:
