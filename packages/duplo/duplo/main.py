@@ -1577,6 +1577,17 @@ def _subsequent_run() -> None:
                 pname = saved[0] if saved else derive_app_name(spec)
                 save_product(pname, spec_url)
     else:
+        legacy_source_url = (
+            status_data.get("source_url", "") if isinstance(status_data, dict) else ""
+        )
+        if legacy_source_url:
+            record_failure(
+                "orchestrator:_subsequent_run",
+                "io",
+                "SPEC.md authority boundary bypassed: spec_sources is empty,"
+                " falling back to duplo.json source_url for re-scrape.",
+                context={"source_url": legacy_source_url},
+            )
         pages, examples, scraped_text = _rescrape_product_url(spec=spec)
         summary.pages_rescraped = pages
         summary.examples_rescraped = examples
