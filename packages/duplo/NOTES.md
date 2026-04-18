@@ -1141,3 +1141,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 4abf331: Added platform-specific rules to the planner's system prompts. The phase plan and next-phase plan functions now accept an optional platform addendum parameter, which appends platform knowledge (like using Swift Package Manager) to the system prompt when provided. This ensures generated plans adhere to platform constraints.
 
 37f3c2b: Added platform scaffolding to generate project files like run.sh and .gitignore entries during the first phase. This ensures tasks can reference these artifacts instead of recreating them. The scaffolding respects existing files and avoids duplication.
+
+63356ea: Added automatic generation of CLAUDE.md file to keep platform rules synchronized with the resolved stack. The file includes project name, stack configuration, platform-specific rules, and optional local overrides. It's regenerated whenever platform profiles are present to ensure consistency across runs.
