@@ -124,10 +124,7 @@ _PROFILE = PlatformProfile(
             "./run.sh which creates the venv, installs the package "
             "in editable mode, and runs via python -m."
         ),
-        (
-            "Do NOT recreate or overwrite run.sh or .gitignore -- "
-            "these are managed by duplo."
-        ),
+        ("Do NOT recreate or overwrite run.sh or .gitignore -- these are managed by duplo."),
         (
             "Do NOT create a venv manually, do NOT run pip install "
             "manually. run.sh handles all of this. If you need a "
@@ -138,9 +135,7 @@ _PROFILE = PlatformProfile(
             "Use pyproject.toml for ALL project configuration. "
             "Do not create setup.py, setup.cfg, or requirements.txt."
         ),
-        (
-            "Run tests via .venv/bin/pytest, never bare pytest."
-        ),
+        ("Run tests via .venv/bin/pytest, never bare pytest."),
         (
             "The package MUST have a __main__.py so that "
             "python -m <package> works. This is what run.sh calls."

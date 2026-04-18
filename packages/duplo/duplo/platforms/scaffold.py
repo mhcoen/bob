@@ -66,11 +66,7 @@ def write_scaffold(
                 line.rstrip("\n")
                 for line in gitignore_path.read_text(encoding="utf-8").splitlines()
             }
-        new_entries = [
-            entry
-            for entry in profile.gitignore_entries
-            if entry not in existing_lines
-        ]
+        new_entries = [entry for entry in profile.gitignore_entries if entry not in existing_lines]
         if new_entries:
             with gitignore_path.open("a", encoding="utf-8") as f:
                 # Ensure we start on a new line.
@@ -113,8 +109,7 @@ def format_scaffold_notice(written: list[Path], target_dir: Path | str = ".") ->
         lines.append(f"- {rp}")
     lines.append("")
     lines.append(
-        "Phase 0 tasks should USE these files (e.g. 'Run ./run.sh to "
-        "verify'), not recreate them."
+        "Phase 0 tasks should USE these files (e.g. 'Run ./run.sh to verify'), not recreate them."
     )
     lines.append("")
     return "\n".join(lines)

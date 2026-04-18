@@ -156,10 +156,7 @@ _PROFILE = PlatformProfile(
             "test. macOS GUI apps do not exit on their own. Use: "
             "./run.sh to launch, then kill the process or Cmd-Q."
         ),
-        (
-            "Do NOT recreate or overwrite run.sh or .gitignore -- these "
-            "are managed by duplo."
-        ),
+        ("Do NOT recreate or overwrite run.sh or .gitignore -- these are managed by duplo."),
         (
             "When adding resources to SPM targets, always use "
             "Bundle.module (not Bundle.main) and add a matching "
@@ -193,10 +190,7 @@ _PROFILE = PlatformProfile(
             "Running .build/debug/<name> directly: produces no window. "
             "SwiftUI requires Info.plist and app bundle structure."
         ),
-        (
-            "Waiting for a GUI binary to exit: infinite hang. macOS apps "
-            "run until explicitly quit."
-        ),
+        ("Waiting for a GUI binary to exit: infinite hang. macOS apps run until explicitly quit."),
         (
             ".build/ directory not in .gitignore: pollutes git status "
             "and breaks mcloop's post-task git checks."

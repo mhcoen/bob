@@ -87,8 +87,4 @@ def format_local_overrides(local_md_content: str) -> str:
     stripped = local_md_content.strip()
     if not stripped:
         return ""
-    return (
-        "\n## Local overrides (from local.md -- project-specific)\n\n"
-        + stripped
-        + "\n"
-    )
+    return "\n## Local overrides (from local.md -- project-specific)\n\n" + stripped + "\n"
