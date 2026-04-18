@@ -15,7 +15,7 @@ declarations to SPEC.md.
 
 - [x] Add structured platform entry syntax to the spec parser. In spec_reader.py, parse list-item entries under the Architecture section with fields: platform, language, build. Each entry becomes one element in a new list field on ProductSpec. Free-form prose after the structured entries is still captured in spec.architecture as before. Write tests in test_spec_reader.py covering: single entry, multiple entries, mixed entries plus prose, no entries (backward compatible prose-only).
 
-- [ ] Update SPEC-template.md and SPEC-guide.md. Add an example showing structured platform entries under Architecture. The template should show one entry with platform/language/build fields. The guide should explain that multiple entries are supported for multi-stack projects and that free-form prose can follow.
+- [x] Update SPEC-template.md and SPEC-guide.md. Add an example showing structured platform entries under Architecture. The template should show one entry with platform/language/build fields. The guide should explain that multiple entries are supported for multi-stack projects and that free-form prose can follow.
 
 - [ ] Extend BuildPreferences to support multiple stacks. In build_prefs.py, change parse_build_preferences to accept the structured entries from the spec parser when available, falling back to LLM extraction from prose when no structured entries exist. Return a list of BuildPreferences instead of a single instance. Update architecture_hash and validation. Update all callers in main.py to handle the list. Write tests in test_build_prefs.py.
 
