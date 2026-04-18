@@ -17,7 +17,7 @@ declarations to SPEC.md.
 
 - [x] Update SPEC-template.md and SPEC-guide.md. Add an example showing structured platform entries under Architecture. The template should show one entry with platform/language/build fields. The guide should explain that multiple entries are supported for multi-stack projects and that free-form prose can follow.
 
-- [ ] Extend BuildPreferences to support multiple stacks. In build_prefs.py, change parse_build_preferences to accept the structured entries from the spec parser when available, falling back to LLM extraction from prose when no structured entries exist. Return a list of BuildPreferences instead of a single instance. Update architecture_hash and validation. Update all callers in main.py to handle the list. Write tests in test_build_prefs.py.
+- [x] Extend BuildPreferences to support multiple stacks. In build_prefs.py, change parse_build_preferences to accept the structured entries from the spec parser when available, falling back to LLM extraction from prose when no structured entries exist. Return a list of BuildPreferences instead of a single instance. Update architecture_hash and validation. Update all callers in main.py to handle the list. Write tests in test_build_prefs.py.
 
 - [ ] Wire the resolver into the pipeline. In main.py, after loading preferences, call resolve_profiles() for each BuildPreferences in the list. Collect the union of matched profiles. Pass them downstream to the planner and CLAUDE.md writer. Write a test confirming resolve_profiles is called and its output is threaded through.
 
