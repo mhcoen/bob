@@ -262,9 +262,11 @@ All forms accept the `--deep` and `--force` flags below.
     the plan generation prompt. Prints "Run mcloop to start
     building." and exits. You run mcloop separately.
 
-13. **Cleans up.** Moves processed reference files to
-    `.duplo/references/` and saves a file hash manifest for
-    detecting changes on subsequent runs.
+13. **Saves state.** Saves a file hash manifest for detecting
+    changes on subsequent runs. Reference files in `ref/` stay
+    in place as durable user inputs; only derived artifacts
+    (extracted video frames, downloaded site media) are stored
+    in `.duplo/`.
 
 ## Subsequent runs
 
