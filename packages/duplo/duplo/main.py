@@ -243,6 +243,7 @@ from duplo.build_prefs import (
 )
 from duplo.platforms.formatter import format_planner_system_addendum
 from duplo.platforms.resolver import resolve_profiles
+from duplo.platforms.scaffold import format_scaffold_notice, write_scaffold
 from duplo.platforms.schema import PlatformProfile
 from duplo.questioner import BuildPreferences
 from duplo.roadmap import format_roadmap, generate_roadmap
@@ -1948,6 +1949,21 @@ def _subsequent_run() -> None:
             **{k: v for k, v in design_data.items() if k in _dfields}
         )
         design_section = format_design_section(loaded_design)
+
+    # On the first phase of a new project, lay down platform scaffold
+    # artifacts (run.sh, .gitignore entries, etc.) before the planner
+    # runs, so tasks can reference them instead of recreating them.
+    scaffold_notice = ""
+    if history_phase_number == 1 and profiles:
+        written = write_scaffold(profiles, app_name, target_dir=Path.cwd())
+        if written:
+            for p in written:
+                try:
+                    print(f"  Scaffold: {p.relative_to(Path.cwd())}")
+                except ValueError:
+                    print(f"  Scaffold: {p}")
+        scaffold_notice = format_scaffold_notice(written, target_dir=Path.cwd())
+
     content = generate_phase_plan(
         source_url,
         features,
@@ -1957,7 +1973,7 @@ def _subsequent_run() -> None:
         design_section=design_section,
         phase_number=history_phase_number,
         spec_text=spec_prompt,
-        platform_addendum=format_planner_system_addendum(profiles),
+        platform_addendum=format_planner_system_addendum(profiles) + scaffold_notice,
     )
     # Append verification tasks from video frame descriptions.
     frame_descs = load_frame_descriptions()
