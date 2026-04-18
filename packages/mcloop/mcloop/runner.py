@@ -23,6 +23,8 @@ from mcloop.prompts import (
     build_sync_prompt,
 )
 
+DEFAULT_TASK_TIMEOUT = 1800  # 30 minutes; override with --timeout
+
 
 @dataclass
 class RunResult:
@@ -379,6 +381,7 @@ def run_task(
     check_commands: list[str] | None = None,
     allowed_tools: str | None = None,
     eliminated: list[str] | None = None,
+    timeout: int = DEFAULT_TASK_TIMEOUT,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -412,6 +415,7 @@ def run_task(
         cmd,
         project_dir,
         env=_build_session_env(task_label=task_label, cli=cli),
+        timeout=timeout,
     )
     log_path = _write_log(
         log_dir,
@@ -480,8 +484,13 @@ def _run_session(
     cmd: list[str],
     cwd: Path,
     env: dict | None = None,
+    timeout: int = DEFAULT_TASK_TIMEOUT,
 ) -> tuple[str, int]:
-    """Run a CLI session, stream output, return (output, exit_code)."""
+    """Run a CLI session, stream output, return (output, exit_code).
+
+    If *timeout* seconds elapse, the process group is killed and
+    exit code -2 is returned.
+    """
     session_env = env if env is not None else _build_session_env()
     _last_output_lines.clear()
     global _active_process
@@ -556,6 +565,8 @@ def _run_session(
     t = threading.Thread(target=_reader, daemon=True)
     t.start()
 
+    session_start = time.monotonic()
+
     # Cap output buffer to prevent unbounded memory growth.
     # A stuck claude session running checks in a loop can
     # produce millions of lines. Keep only the tail.
@@ -568,6 +579,29 @@ def _run_session(
     while True:
         if _interrupted:
             break
+        # Check task timeout
+        if timeout and (time.monotonic() - session_start) > timeout:
+            elapsed_m = timeout / 60
+            print(
+                f"\n!!! Task timed out after {elapsed_m:.0f}m. Killing session.",
+                flush=True,
+            )
+            try:
+                os.killpg(os.getpgid(process.pid), 9)
+            except OSError:
+                process.kill()
+            process.wait()
+            _active_process = None
+            try:
+                _watchdog.kill()
+                _watchdog.wait()
+            except OSError:
+                pass
+            try:
+                (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
+            except OSError:
+                pass
+            return "".join(output_lines), -2
         try:
             line = line_q.get(
                 timeout=PROGRESS_DOT_INTERVAL,

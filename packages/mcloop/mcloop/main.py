@@ -129,6 +129,7 @@ from mcloop.run_summary import (
     write_run_summary,
 )
 from mcloop.runner import (
+    DEFAULT_TASK_TIMEOUT,
     INVESTIGATION_TOOLS,
     run_audit,
     run_task,
@@ -265,6 +266,7 @@ def _main() -> None:
         enable_reviewer=args.reviewer,
         stop_after_stage=args.stop_after_stage,
         stop_after_one=args.stop_after_one,
+        task_timeout=args.timeout,
     )
     if not result.ok:
         sys.exit(1)
@@ -292,6 +294,7 @@ def _run_batch(
     reviewer_config: dict | None = None,
     commit_hashes: list[str] | None = None,
     prior_errors: str = "",
+    task_timeout: int | None = None,
 ) -> tuple[str, str]:
     """Run multiple subtasks in a single session.
 
@@ -373,6 +376,7 @@ def _run_batch(
         check_commands=project_checks,
         allowed_tools=allowed_tools,
         eliminated=eliminated,
+        timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
     )
 
     if not result.success:
@@ -590,6 +594,7 @@ def run_loop(
     enable_reviewer: bool = False,
     stop_after_stage: bool = False,
     stop_after_one: bool = False,
+    task_timeout: int | None = None,
 ) -> RunStatus:
     """Run the main loop. Returns a RunStatus indicating outcome."""
     import mcloop.runner as _runner
@@ -991,6 +996,7 @@ def run_loop(
                         reviewer_config=reviewer_config,
                         commit_hashes=commit_hashes,
                         prior_errors=batch_prior_errors,
+                        task_timeout=task_timeout,
                     )
                     if batch_handled == "success":
                         break
@@ -1084,6 +1090,7 @@ def run_loop(
                     check_commands=project_checks,
                     allowed_tools=allowed_tools,
                     eliminated=eliminated,
+                    timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
                 )
 
                 if is_session_limited(
@@ -1180,6 +1187,12 @@ def run_loop(
 
                 if not result.success:
                     last_error = _tail(result.output, 50)
+                    if result.exit_code == -2:
+                        timeout_m = (task_timeout or DEFAULT_TASK_TIMEOUT) // 60
+                        notify(
+                            f"Task {label} timed out after {timeout_m}m.",
+                            level="warning",
+                        )
                     print(
                         formatting.error_msg(f"Task failed (attempt {attempt}/{max_retries})"),
                         flush=True,
@@ -1698,6 +1711,12 @@ def _parse_args() -> argparse.Namespace:
         "--stop-after-one",
         action="store_true",
         help="Run exactly one task then exit (bypasses batching)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="Per-task timeout in seconds (default: 1800 = 30 minutes)",
     )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")

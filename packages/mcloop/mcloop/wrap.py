@@ -77,10 +77,13 @@ enum _McloopState {
     }
 }
 
+private var _mcloopErrorDir = ""
+
 private func _mcloopSetupCrashHandlers() {
     let errorDir = FileManager.default.currentDirectoryPath + "/.mcloop"
     try? FileManager.default.createDirectory(
         atPath: errorDir, withIntermediateDirectories: true)
+    _mcloopErrorDir = errorDir
 
     NSSetUncaughtExceptionHandler { exception in
         let state = _McloopState.snapshot()
@@ -97,7 +100,7 @@ private func _mcloopSetupCrashHandlers() {
             "last_action": action,
             "fix_attempts": 0,
         ]
-        _mcloopWriteError(report, dir: errorDir)
+        _mcloopWriteError(report, dir: _mcloopErrorDir)
         let excType = String(describing: type(of: exception))
         fputs(
             "[McLoop] Crash captured: \\(excType)"
@@ -109,18 +112,7 @@ private func _mcloopSetupCrashHandlers() {
 
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
         signal(sig) { signum in
-            // fork() is async-signal-safe. The child uses only POSIX
-            // I/O (open/write/close) — no Foundation calls — to avoid
-            // deadlocking on ObjC/Foundation locks held by other threads.
-            let pid = fork()
-            if pid == 0 {
-                _mcloopWriteSignalReport(signum, dir: errorDir)
-                _exit(0)
-            } else if pid > 0 {
-                var status: Int32 = 0
-                waitpid(pid, &status, 0)
-            }
-            // write() and fputs to stderr are async-signal-safe
+            _mcloopWriteSignalReport(signum, dir: _mcloopErrorDir)
             fputs(
                 "[McLoop] Crash captured: Signal \\(signum)."
                 + " Run mcloop from __MCLOOP_PROJECT_DIR__"
