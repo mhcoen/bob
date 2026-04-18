@@ -20,7 +20,7 @@ from duplo.claude_cli import ClaudeCliError
 from duplo.diagnostics import record_failure
 from duplo.fetcher import fetch_site
 from duplo.scanner import scan_directory  # noqa: F401
-from duplo.spec_reader import ProductSpec, SourceEntry
+from duplo.spec_reader import ProductSpec, ReferenceEntry, SourceEntry
 from duplo.spec_writer import (
     DraftInputs,
     _build_draft_spec,
@@ -258,6 +258,24 @@ def _scan_existing_ref_files(cwd: Path) -> tuple[list[Path], dict[Path, str]]:
     return (paths, proposals)
 
 
+def _append_proposed_references(
+    spec: ProductSpec,
+    paths: list[Path],
+    proposals: dict[Path, str],
+) -> None:
+    """Append a ``proposed: true`` ReferenceEntry per scanned ref/ file.
+
+    Mirrors the loop in :func:`duplo.spec_writer._build_draft_spec` so
+    URL-flow branches that bypass :func:`draft_spec` (unidentified and
+    fetch-failure) still surface user files from ``ref/`` as proposed
+    References entries in SPEC.md.
+    """
+    for path in paths:
+        role = proposals.get(path, "")
+        roles = [role] if role else []
+        spec.references.append(ReferenceEntry(path=path, roles=roles, proposed=True))
+
+
 def _run_url(args: argparse.Namespace, url: str) -> None:
     """Handle ``duplo init <url>`` per INIT-design.md § "duplo init <url>".
 
@@ -328,6 +346,7 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
             spec.sources.append(
                 SourceEntry(url=canonical, role="product-reference", scrape="deep")
             )
+            _append_proposed_references(spec, existing_refs, vision_proposals)
             content = format_spec(spec)
     else:
         print(f"Fetching {canonical} ...")
@@ -337,6 +356,7 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
         print()
         spec = ProductSpec()
         spec.sources.append(SourceEntry(url=canonical, role="product-reference", scrape="none"))
+        _append_proposed_references(spec, existing_refs, vision_proposals)
         content = format_spec(spec)
 
     ref_dir = cwd / "ref"

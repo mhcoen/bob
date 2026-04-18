@@ -426,6 +426,50 @@ class TestRunInitUrlUnidentified:
         purpose_block = written.split("## Purpose", 1)[1].split("##", 1)[0]
         assert "FILL IN" in purpose_block
 
+    def test_unidentified_threads_existing_refs_into_references(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Files in ref/ appear as ``proposed: true`` entries even when the
+        URL flow skips the drafter because the product is unidentified."""
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "shot.png").write_bytes(b"")
+        (ref_dir / "notes.pdf").write_bytes(b"")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+            patch("duplo.init.draft_spec") as mock_draft,
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=lambda p: (
+                    ("screenshot", "visual-target") if p.suffix == ".png" else ("", "docs")
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        # The drafter must still be bypassed in the unidentified branch.
+        mock_draft.assert_not_called()
+        capsys.readouterr()
+
+        written = (tmp_path / "SPEC.md").read_text()
+        refs_block = written.split("\n## References\n", 1)[1].split("\n## ", 1)[0]
+        assert "- ref/shot.png" in refs_block
+        assert "- ref/notes.pdf" in refs_block
+        assert "role: visual-target" in refs_block
+        assert "role: docs" in refs_block
+        assert refs_block.count("proposed: true") == 2
+
 
 class TestRunInitUrlFetchFailure:
     """Per INIT-design.md § 'URL fetch fails'."""
@@ -466,6 +510,41 @@ class TestRunInitUrlFetchFailure:
         # Required sections left as FILL IN markers.
         assert "<FILL IN: one or two sentences" in written
         assert "<FILL IN: language, framework, platform, constraints>" in written
+
+    def test_fetch_failure_threads_existing_refs_into_references(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Files in ref/ appear as ``proposed: true`` entries even when
+        URL fetch fails and the flow falls back to a template-only draft."""
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "shot.png").write_bytes(b"")
+        (ref_dir / "notes.pdf").write_bytes(b"")
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch("duplo.init.draft_spec") as mock_draft,
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=lambda p: (
+                    ("screenshot", "visual-target") if p.suffix == ".png" else ("", "docs")
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        mock_val.assert_not_called()
+        mock_draft.assert_not_called()
+        capsys.readouterr()
+
+        written = (tmp_path / "SPEC.md").read_text()
+        refs_block = written.split("\n## References\n", 1)[1].split("\n## ", 1)[0]
+        assert "- ref/shot.png" in refs_block
+        assert "- ref/notes.pdf" in refs_block
+        assert "role: visual-target" in refs_block
+        assert "role: docs" in refs_block
+        assert refs_block.count("proposed: true") == 2
 
     def test_fetch_failure_canonicalizes_url_before_writing(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
