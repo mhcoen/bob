@@ -102,10 +102,6 @@ def scan_directory(ref_dir: Path | str = ".") -> ScanResult:
         return result
 
     for path in sorted(root.iterdir()):
-        if path.name.startswith(".") and path.is_dir():
-            continue
-        if path.is_dir() and path.name in _SKIP_DIRS:
-            continue
         if path.is_dir():
             continue
         _classify_file(path, result)
