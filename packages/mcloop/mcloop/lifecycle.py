@@ -58,8 +58,15 @@ def _save_interrupt_state() -> None:
 def _check_interrupted(
     project_dir: Path,
     checklist_path: Path,
+    active_paths: list[Path] | None = None,
 ) -> str | None:
     """Check for interrupted.json and prompt the user.
+
+    ``active_paths`` is a priority-ordered list of files that may
+    contain the interrupted task (e.g. BUGS.md, CURRENT_PLAN.md,
+    PLAN.md). The skip/describe actions mutate the first file that
+    contains the task as unchecked. When omitted, falls back to
+    ``[checklist_path]`` for backward compatibility.
 
     Returns:
         "retry" to proceed normally
@@ -75,6 +82,7 @@ def _check_interrupted(
     except (OSError, _json.JSONDecodeError):
         state_file.unlink(missing_ok=True)
         return None
+    search_paths = active_paths if active_paths else [checklist_path]
 
     phase = state.get("phase", "task")
     label = state.get("task_label", "?")
@@ -138,11 +146,21 @@ def _check_interrupted(
         sys.exit(0)
 
     if choice == "s":
-        # Mark task as failed
-        tasks = parse(checklist_path)
-        for t in _all_tasks(tasks):
-            if t.text.strip() == text.strip() and not t.checked:
-                mark_failed(checklist_path, t)
+        # Mark task as failed in the first split-plan file that contains
+        # it as unchecked. The master PLAN.md is only consulted as a
+        # fallback; marking [!] there has no effect because run_loop
+        # reads from CURRENT_PLAN.md / BUGS.md.
+        for p in search_paths:
+            if not p.exists():
+                continue
+            tasks = parse(p)
+            found = False
+            for t in _all_tasks(tasks):
+                if t.text.strip() == text.strip() and not t.checked:
+                    mark_failed(p, t)
+                    found = True
+                    break
+            if found:
                 break
         state_file.unlink(missing_ok=True)
         return "skip"
@@ -163,8 +181,23 @@ def _check_interrupted(
             pass
         description = " ".join(lines).strip()
         if description:
+            # Write [RULEDOUT] under the task in whichever split-plan
+            # file contains it. Falls back to checklist_path.
+            target_path: Path | None = None
+            for p in search_paths:
+                if not p.exists():
+                    continue
+                tasks = parse(p)
+                for t in _all_tasks(tasks):
+                    if t.text.strip() == text.strip():
+                        target_path = p
+                        break
+                if target_path is not None:
+                    break
+            if target_path is None:
+                target_path = checklist_path
             _write_ruledout_to_plan(
-                checklist_path,
+                target_path,
                 text,
                 description,
             )

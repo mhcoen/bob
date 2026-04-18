@@ -705,6 +705,93 @@ def test_check_interrupted_retry_on_r(tmp_path, monkeypatch):
     assert result == "retry"
 
 
+def test_check_interrupted_skip_marks_active_file_not_master(tmp_path, monkeypatch):
+    """Skip marks [!] in CURRENT_PLAN.md when task lives there, not master PLAN.md."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "phase": "task",
+        "task_label": "1",
+        "task_text": "Fix something",
+        "elapsed_seconds": 5,
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    master = tmp_path / "PLAN.md"
+    master.write_text("## Stage 1\n- [ ] Fix something\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("## Stage 1\n- [ ] Fix something\n")
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text("## Bugs\n\n")
+
+    monkeypatch.setattr("builtins.input", lambda _="": "s")
+    result = _check_interrupted(
+        tmp_path,
+        master,
+        active_paths=[bugs, current, master],
+    )
+    assert result == "skip"
+    assert "- [!] Fix something" in current.read_text()
+    assert "- [!]" not in master.read_text()
+
+
+def test_check_interrupted_skip_marks_bugs_over_current(tmp_path, monkeypatch):
+    """Skip prefers BUGS.md when the task is unchecked there."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "phase": "task",
+        "task_label": "B1",
+        "task_text": "Crash on startup",
+        "elapsed_seconds": 5,
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    master = tmp_path / "PLAN.md"
+    master.write_text("## Stage 1\n- [ ] Other\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("## Stage 1\n- [ ] Other\n")
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text("## Bugs\n\n- [ ] Crash on startup\n")
+
+    monkeypatch.setattr("builtins.input", lambda _="": "s")
+    result = _check_interrupted(
+        tmp_path,
+        master,
+        active_paths=[bugs, current, master],
+    )
+    assert result == "skip"
+    assert "- [!] Crash on startup" in bugs.read_text()
+    assert "- [!]" not in current.read_text()
+    assert "- [!]" not in master.read_text()
+
+
+def test_check_interrupted_d_writes_ruledout_to_active_file(tmp_path, monkeypatch):
+    """Describe writes [RULEDOUT] under the task in CURRENT_PLAN.md, not master."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    state = {
+        "phase": "task",
+        "task_label": "1",
+        "task_text": "Fix crash",
+        "elapsed_seconds": 5,
+    }
+    (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
+    master = tmp_path / "PLAN.md"
+    master.write_text("## Stage 1\n- [ ] Fix crash\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("## Stage 1\n- [ ] Fix crash\n")
+
+    inputs = iter(["d", "tried restarting", ""])
+    monkeypatch.setattr("builtins.input", lambda _="": next(inputs))
+    result = _check_interrupted(
+        tmp_path,
+        master,
+        active_paths=[current, master],
+    )
+    assert result == "retry"
+    assert "[RULEDOUT] tried restarting" in current.read_text()
+    assert "[RULEDOUT]" not in master.read_text()
+
+
 # ── register_signal_handlers ──
 
 

@@ -609,8 +609,18 @@ def run_loop(
     bugs_path = project_dir / BUGS_FILE
     description = parse_description(master_path)
 
-    # Check for interrupted state from a previous Ctrl-C
-    interrupt_action = _check_interrupted(project_dir, checklist_path)
+    # Check for interrupted state from a previous Ctrl-C. Pass the
+    # split-plan files in priority order so skip/describe actions mark
+    # the task in the file the loop actually reads from, not just the
+    # master PLAN.md.
+    _interrupt_active_paths = [
+        p for p in (bugs_path, current_plan_path, master_path) if p.exists()
+    ]
+    interrupt_action = _check_interrupted(
+        project_dir,
+        checklist_path,
+        active_paths=_interrupt_active_paths,
+    )
     if interrupt_action == "quit":
         _build_and_write_summary(
             project_dir,

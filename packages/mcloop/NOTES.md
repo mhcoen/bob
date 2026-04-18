@@ -49,6 +49,24 @@ shell pid leaves the `sleep` child running. With the fix, killpg on the
 group takes out both. Reproduction script kept at
 `/tmp/claude/verify_orphan_fix.py` for reference (not committed).
 
+### [3] Interrupted skip now targets the active split-plan file (2026-04-17)
+`_check_interrupted` previously called `mark_failed(checklist_path, t)` with
+checklist_path = master PLAN.md. Under the split-plan design the loop only
+reads CURRENT_PLAN.md and BUGS.md, so the [!] landed in a file the loop no
+longer consults and the "skipped" task was retried on the next run.
+
+Fix: added an `active_paths` parameter (priority-ordered: BUGS.md,
+CURRENT_PLAN.md, PLAN.md) and the skip/describe branches now mutate the
+first path in that list that contains the task as unchecked. The fallback
+to `[checklist_path]` preserves pre-split-plan test behavior. run_loop
+filters active_paths to existing files before passing; on a fresh clone
+with only PLAN.md this correctly degrades to master-only.
+
+Edge case left intentional: if the task text matches in multiple split
+files (e.g. duplicated between BUGS.md and CURRENT_PLAN.md), only the
+first unchecked hit is marked. The bug-priority ordering matches how
+find_next picks tasks in run_loop, so behavior stays consistent.
+
 ## Hypotheses
 
 ## Eliminated
