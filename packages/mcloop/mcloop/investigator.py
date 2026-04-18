@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from mcloop.checks import detect_app_type
+from mcloop.checks import detect_app_type, detect_run
 
 DEBUGGING_PLAYBOOK = (
     "1. Reproduce the problem.\n"
@@ -226,11 +227,16 @@ def _verify_step(app_type: str) -> str:
     return "re-run the failing scenario to confirm the fix"
 
 
-def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
+def _find_recent_crash_report(
+    max_age_seconds: int = 3600,
+    process_name: str | None = None,
+) -> str:
     """Find the most recent .ips crash report from DiagnosticReports.
 
     Returns the contents of the newest .ips file modified within
-    max_age_seconds, or an empty string if none found.
+    max_age_seconds, or an empty string if none found. When
+    ``process_name`` is provided, only .ips files whose filename
+    starts with that name are considered.
     """
     reports_dir = Path.home() / "Library" / "Logs" / "DiagnosticReports"
     if not reports_dir.is_dir():
@@ -242,8 +248,11 @@ def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
             mtime = entry.stat().st_mtime
         except OSError:
             continue
-        if entry.suffix == ".ips" and (now - mtime) < max_age_seconds:
-            candidates.append(entry)
+        if entry.suffix != ".ips" or (now - mtime) >= max_age_seconds:
+            continue
+        if process_name and not entry.name.startswith(process_name):
+            continue
+        candidates.append(entry)
     if not candidates:
         return ""
     newest = max(candidates, key=lambda p: p.stat().st_mtime)
@@ -251,6 +260,25 @@ def _find_recent_crash_report(max_age_seconds: int = 3600) -> str:
         return newest.read_text()
     except OSError:
         return ""
+
+
+def _derive_process_name(project_dir: Path) -> str:
+    """Derive a process name to filter crash reports by.
+
+    For GUI apps launched via ``open X.app``, returns ``X``.
+    Otherwise falls back to the project directory name.
+    """
+    run_cmd = detect_run(project_dir)
+    if run_cmd:
+        try:
+            parts = shlex.split(run_cmd)
+        except ValueError:
+            parts = []
+        if parts and parts[0] == "open":
+            for p in parts[1:]:
+                if p.endswith(".app"):
+                    return Path(p).stem
+    return project_dir.name
 
 
 def gather_bug_context(
@@ -270,7 +298,7 @@ def gather_bug_context(
     - ~/Library/Logs/DiagnosticReports/: most recent macOS crash report
     - detect_app_type: classify the project as gui/cli/web
     """
-    crash_report = _find_recent_crash_report()
+    crash_report = _find_recent_crash_report(process_name=_derive_process_name(project_dir))
 
     # Collect failure history from log sources
     failure_parts: list[str] = []

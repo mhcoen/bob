@@ -2362,6 +2362,37 @@ def test_find_recent_crash_report_ignores_non_ips(tmp_path):
     assert result == ""
 
 
+def test_find_recent_crash_report_filters_by_process_name(tmp_path):
+    """Only .ips files starting with process_name are returned."""
+    reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "OtherApp-1.ips").write_text("unrelated crash")
+    (reports_dir / "MyApp-1.ips").write_text("my crash")
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
+        result = _find_recent_crash_report(process_name="MyApp")
+    assert result == "my crash"
+
+
+def test_find_recent_crash_report_no_match_for_process_name(tmp_path):
+    """Returns empty when no .ips file starts with process_name."""
+    reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "OtherApp.ips").write_text("unrelated crash")
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
+        result = _find_recent_crash_report(process_name="MyApp")
+    assert result == ""
+
+
+def test_find_recent_crash_report_none_keeps_old_behavior(tmp_path):
+    """Without process_name the newest .ips regardless of name wins."""
+    reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "Whatever.ips").write_text("some crash")
+    with patch("mcloop.investigator.Path.home", return_value=tmp_path):
+        result = _find_recent_crash_report()
+    assert result == "some crash"
+
+
 # --- gather_bug_context ---
 
 
@@ -2407,7 +2438,7 @@ def test_gather_bug_context_crash_report(tmp_path):
     """Picks up crash report from DiagnosticReports."""
     reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
     reports_dir.mkdir(parents=True)
-    (reports_dir / "MyCrash.ips").write_text("crash data here")
+    (reports_dir / f"{tmp_path.name}-20240101.ips").write_text("crash data here")
     with (
         patch("mcloop.investigator.Path.home", return_value=tmp_path),
         patch("mcloop.investigator.detect_app_type", return_value=""),
@@ -2423,12 +2454,25 @@ def test_gather_bug_context_app_type(tmp_path):
     assert ctx.app_type == "gui"
 
 
+def test_gather_bug_context_ignores_unrelated_crash(tmp_path):
+    """Crash reports for other processes are filtered out."""
+    reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "SomeOtherApp-20240101.ips").write_text("unrelated")
+    with (
+        patch("mcloop.investigator.Path.home", return_value=tmp_path),
+        patch("mcloop.investigator.detect_app_type", return_value=""),
+    ):
+        ctx = gather_bug_context(tmp_path)
+    assert ctx.crash_report == ""
+
+
 def test_gather_bug_context_all_sources(tmp_path):
     """All sources combined into a single BugContext."""
     # Setup crash report
     reports_dir = tmp_path / "Library" / "Logs" / "DiagnosticReports"
     reports_dir.mkdir(parents=True)
-    (reports_dir / "App.ips").write_text("crash info")
+    (reports_dir / f"{tmp_path.name}-20240101.ips").write_text("crash info")
 
     # Setup last-run.log
     mcloop_dir = tmp_path / ".mcloop"
