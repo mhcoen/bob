@@ -19,7 +19,7 @@ declarations to SPEC.md.
 
 - [x] Extend BuildPreferences to support multiple stacks. In build_prefs.py, change parse_build_preferences to accept the structured entries from the spec parser when available, falling back to LLM extraction from prose when no structured entries exist. Return a list of BuildPreferences instead of a single instance. Update architecture_hash and validation. Update all callers in main.py to handle the list. Write tests in test_build_prefs.py.
 
-- [ ] Wire the resolver into the pipeline. In main.py, after loading preferences, call resolve_profiles() for each BuildPreferences in the list. Collect the union of matched profiles. Pass them downstream to the planner and CLAUDE.md writer. Write a test confirming resolve_profiles is called and its output is threaded through.
+- [x] Wire the resolver into the pipeline. In main.py, after loading preferences, call resolve_profiles() for each BuildPreferences in the list. Collect the union of matched profiles. Pass them downstream to the planner and CLAUDE.md writer. Write a test confirming resolve_profiles is called and its output is threaded through.
 
 - [ ] Wire platform rules into the planner system prompt. In planner.py, add a platform_addendum parameter to generate_phase_plan and generate_next_phase_plan. When provided, append it to the system prompt string before calling query(). The caller in main.py passes format_planner_system_addendum(profiles). Write tests in test_planner.py: mock query(), verify system prompt contains platform rules when addendum is provided, verify it does not when addendum is empty.
 
