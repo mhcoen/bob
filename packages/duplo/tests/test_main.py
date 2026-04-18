@@ -7532,6 +7532,213 @@ class TestLoadPreferences:
         assert result[1].platform == "linux"
 
 
+class TestResolvePlatformProfiles:
+    """Tests for _resolve_platform_profiles and pipeline wiring."""
+
+    def _profile(self, pid: str, display: str | None = None):
+        from duplo.platforms.schema import PlatformProfile
+
+        return PlatformProfile(id=pid, display_name=display or pid)
+
+    def test_calls_resolver_once_per_preference(self):
+        from duplo.main import _resolve_platform_profiles
+
+        prefs = [
+            BuildPreferences(platform="macos", language="Swift"),
+            BuildPreferences(platform="linux", language="Python"),
+        ]
+        a = self._profile("macos-swiftui-spm", "SwiftUI")
+        b = self._profile("linux-python-cli", "Python CLI")
+
+        with patch(
+            "duplo.main.resolve_profiles",
+            side_effect=[[a], [b]],
+        ) as mock_resolve:
+            result = _resolve_platform_profiles(prefs)
+
+        assert mock_resolve.call_count == 2
+        assert [c.args[0] for c in mock_resolve.call_args_list] == prefs
+        assert [p.id for p in result] == ["macos-swiftui-spm", "linux-python-cli"]
+
+    def test_union_dedupes_by_id(self):
+        from duplo.main import _resolve_platform_profiles
+
+        prefs = [
+            BuildPreferences(platform="macos", language="Swift"),
+            BuildPreferences(platform="macos", language="Swift"),
+        ]
+        shared = self._profile("macos-swiftui-spm", "SwiftUI")
+
+        with patch("duplo.main.resolve_profiles", return_value=[shared]):
+            result = _resolve_platform_profiles(prefs)
+
+        assert [p.id for p in result] == ["macos-swiftui-spm"]
+
+    def test_empty_preferences_returns_empty(self):
+        from duplo.main import _resolve_platform_profiles
+
+        with patch("duplo.main.resolve_profiles") as mock_resolve:
+            result = _resolve_platform_profiles([])
+
+        assert result == []
+        mock_resolve.assert_not_called()
+
+    def test_no_matches_returns_empty(self):
+        from duplo.main import _resolve_platform_profiles
+
+        prefs = [BuildPreferences(platform="unknown", language="unknown")]
+        with patch("duplo.main.resolve_profiles", return_value=[]):
+            result = _resolve_platform_profiles(prefs)
+
+        assert result == []
+
+    def test_main_pipeline_threads_profiles_through(self, capsys, tmp_path, monkeypatch):
+        """main() calls resolve_profiles and announces matched profiles."""
+        from duplo.build_prefs import architecture_hash
+        from duplo.spec_reader import PlatformEntry, ProductSpec
+
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {
+                    "name": "Export",
+                    "description": "Export data",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+            "preferences": [
+                {
+                    "platform": "macos",
+                    "language": "Swift",
+                    "constraints": [],
+                    "preferences": ["build: spm"],
+                },
+            ],
+        }
+        entries = [PlatformEntry(platform="macos", language="Swift", build="spm")]
+        arch_prose = "Native macOS app using SwiftUI."
+        data["architecture_hash"] = architecture_hash(arch_prose, structured_entries=entries)
+
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        spec = ProductSpec(
+            purpose="stub",
+            scope="stub",
+            behavior_contracts=[],
+            architecture=arch_prose,
+            design=MagicMock(auto_generated=""),
+            sources=[],
+            platform_entries=entries,
+        )
+
+        profile = self._profile("macos-swiftui-spm", "macOS SwiftUI")
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "Export works",
+            },
+        ]
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(errors=[], warnings=[]),
+            ),
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._analyze_new_files", return_value=UpdateSummary()),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.resolve_profiles", return_value=[profile]) as mock_resolve,
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        assert mock_resolve.call_count >= 1
+        prefs_arg = mock_resolve.call_args_list[0].args[0]
+        assert prefs_arg.platform == "macos"
+        assert prefs_arg.language == "Swift"
+        out = capsys.readouterr().out
+        assert "Platform profiles: macOS SwiftUI" in out
+
+    def test_main_pipeline_announces_when_no_profiles_match(self, capsys, tmp_path, monkeypatch):
+        """Empty resolver output produces a 'no profiles' status message."""
+        from duplo.build_prefs import architecture_hash
+        from duplo.spec_reader import ProductSpec
+
+        arch_prose = "Unknown stack, details TBD."
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {
+                    "name": "Export",
+                    "description": "Export data",
+                    "category": "core",
+                    "status": "pending",
+                    "implemented_in": "",
+                },
+            ],
+            "preferences": [
+                {
+                    "platform": "unknown",
+                    "language": "unknown",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            ],
+            "architecture_hash": architecture_hash(arch_prose),
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        spec = ProductSpec(
+            purpose="stub",
+            scope="stub",
+            behavior_contracts=[],
+            architecture=arch_prose,
+            design=MagicMock(auto_generated=""),
+            sources=[],
+            platform_entries=[],
+        )
+
+        fake_roadmap = [
+            {
+                "phase": 0,
+                "title": "Export",
+                "goal": "Add export",
+                "features": ["Export"],
+                "test": "Export works",
+            },
+        ]
+        with (
+            patch("duplo.main.read_spec", return_value=spec),
+            patch(
+                "duplo.main.validate_for_run",
+                return_value=MagicMock(errors=[], warnings=[]),
+            ),
+            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.main._analyze_new_files", return_value=UpdateSummary()),
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.resolve_profiles", return_value=[]) as mock_resolve,
+            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        assert mock_resolve.call_count >= 1
+        out = capsys.readouterr().out
+        assert "No platform profiles matched" in out
+
+
 class TestScrapeDeclaredSources:
     """Tests for _scrape_declared_sources multi-source iteration."""
 

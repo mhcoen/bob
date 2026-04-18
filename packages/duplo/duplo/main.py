@@ -241,6 +241,8 @@ from duplo.build_prefs import (
     parse_build_preferences,
     validate_build_preferences,
 )
+from duplo.platforms.resolver import resolve_profiles
+from duplo.platforms.schema import PlatformProfile
 from duplo.questioner import BuildPreferences
 from duplo.roadmap import format_roadmap, generate_roadmap
 
@@ -381,6 +383,36 @@ def _load_preferences(data: dict, spec) -> list[BuildPreferences]:
     for w in validate_build_preferences(prefs):
         print(f"Warning: {w}")
     return prefs
+
+
+def _resolve_platform_profiles(
+    prefs_list: list[BuildPreferences],
+) -> list[PlatformProfile]:
+    """Return the union of platform profiles matched across *prefs_list*.
+
+    Calls :func:`resolve_profiles` for each entry and concatenates the
+    results, preserving per-entry best-match order while dropping
+    duplicates by ``profile.id``.  Returns an empty list when no entry
+    matches any registered profile.
+    """
+    seen: set[str] = set()
+    union: list[PlatformProfile] = []
+    for prefs in prefs_list:
+        for profile in resolve_profiles(prefs):
+            if profile.id in seen:
+                continue
+            seen.add(profile.id)
+            union.append(profile)
+    return union
+
+
+def _announce_profiles(profiles: list[PlatformProfile]) -> None:
+    """Print the matched platform profiles, or note that none matched."""
+    if not profiles:
+        print("No platform profiles matched; planner will run without platform rules.")
+        return
+    names = ", ".join(p.display_name for p in profiles)
+    print(f"Platform profiles: {names}")
 
 
 def _run_video_frame_pipeline(
@@ -1841,6 +1873,8 @@ def _subsequent_run() -> None:
             return
         source_url = _source_url_from_spec(spec) or data.get("source_url", "")
         preferences = _load_preferences(data, spec)
+        profiles = _resolve_platform_profiles(preferences)
+        _announce_profiles(profiles)
         history = _build_completion_history(data)
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
@@ -1901,6 +1935,8 @@ def _subsequent_run() -> None:
     source_url = _source_url_from_spec(spec) or data.get("source_url", "")
     features = [_feature_from_dict(f) for f in data.get("features", [])]
     preferences = _load_preferences(data, spec)
+    profiles = _resolve_platform_profiles(preferences)
+    _announce_profiles(profiles)
 
     print(f"Generating {phase_label} PLAN.md \u2026")
     design_data = data.get("design_requirements", {})
