@@ -1083,8 +1083,6 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Assert: all tests pass; no test file references deleted modules or functions.
   - [x] If any test fails, the task fails and mcloop will retry.
 
-## Bugs
-
 # Phase 8: Platform Knowledge Library
 
 Duplo generates platform-naive tasks and scaffold. Claude Code in -p mode
