@@ -71,7 +71,7 @@ def query_with_images(
     Raises:
         ClaudeCliError: If the CLI exits with a non-zero code.
     """
-    image_lines = [f"- {path}" for path in image_paths]
+    image_lines = [f"- {Path(path).resolve()}" for path in image_paths]
     full_prompt = (
         "Read the following image files using the Read tool, "
         "then analyze them as instructed.\n\n"

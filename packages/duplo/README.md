@@ -601,6 +601,15 @@ ruff format --check .     # Format check
 pytest                    # Tests
 ```
 
+### CLAUDE.md is tracked
+
+CLAUDE.md is committed to the repository on purpose. It holds project
+build instructions, conventions, and platform rules, not personal
+configuration or transient state. It updates infrequently, only when
+the build, platform, or application functionality changes in a way
+collaborators need to see. Anyone working on the project benefits from
+reading it, whether or not they use Claude Code.
+
 ## Task batching
 
 Duplo marks parent tasks with `[BATCH]` when it determines that all

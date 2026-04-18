@@ -95,6 +95,21 @@ class TestQueryWithImages:
             with pytest.raises(ClaudeCliError, match="err"):
                 query_with_images("go", [Path("/x.png")])
 
+    def test_resolves_relative_paths_to_absolute(self, tmp_path):
+        rel = Path(".duplo/video_frames/frame.png")
+        with patch("duplo.claude_cli.subprocess.run", return_value=_completed("ok")) as m:
+            query_with_images("analyze", [rel])
+        prompt = m.call_args.kwargs["input"]
+        assert str(rel.resolve()) in prompt
+        assert f"- {rel.resolve()}" in prompt
+
+    def test_absolute_paths_remain_absolute(self):
+        abs_path = Path("/tmp/screenshots/frame.png")
+        with patch("duplo.claude_cli.subprocess.run", return_value=_completed("ok")) as m:
+            query_with_images("analyze", [abs_path])
+        prompt = m.call_args.kwargs["input"]
+        assert "- /tmp/screenshots/frame.png" in prompt
+
     def test_raises_claude_cli_error_on_timeout(self):
         with patch(
             "duplo.claude_cli.subprocess.run",
