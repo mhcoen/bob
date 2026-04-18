@@ -210,6 +210,8 @@ def generate_next_phase_plan(
     current_plan: str,
     feedback: str,
     issues_text: str = "",
+    *,
+    platform_addendum: str = "",
 ) -> str:
     """Return the next phase PLAN.md content as a string.
 
@@ -220,6 +222,8 @@ def generate_next_phase_plan(
         current_plan: Markdown content of the just-completed PLAN.md.
         feedback: User feedback collected after testing the phase.
         issues_text: Optional visual issues text (e.g. from ISSUES.md).
+        platform_addendum: Optional platform-rules text appended to the
+            system prompt when non-empty.
 
     Returns:
         Markdown string suitable for writing to ``PLAN.md``.
@@ -242,7 +246,8 @@ User feedback:
 Generate Phase {next_phase} PLAN.md now.
 """
 
-    return _strip_fences(query(prompt, system=_NEXT_PHASE_SYSTEM))
+    system = _NEXT_PHASE_SYSTEM + platform_addendum if platform_addendum else _NEXT_PHASE_SYSTEM
+    return _strip_fences(query(prompt, system=system))
 
 
 def generate_phase_plan(
@@ -255,6 +260,7 @@ def generate_phase_plan(
     design_section: str = "",
     phase_number: int | None = None,
     spec_text: str = "",
+    platform_addendum: str = "",
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
 
@@ -271,6 +277,8 @@ def generate_phase_plan(
         phase_number: Override for the phase number in the heading.
             When provided, this is used instead of ``phase["phase"]``.
             Derived from the length of the ``phases`` history + 1.
+        platform_addendum: Optional platform-rules text appended to the
+            system prompt when non-empty.
 
     Returns:
         Markdown string suitable for writing to PLAN.md.
@@ -339,7 +347,8 @@ Features for this phase:
 Generate the PLAN.md now.
 """
 
-    return _strip_fences(query(prompt, system=_PHASE_SYSTEM))
+    system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
+    return _strip_fences(query(prompt, system=system))
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:

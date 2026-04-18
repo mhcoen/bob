@@ -460,6 +460,74 @@ class TestGenerateNextPhasePlan:
         assert "No visual issues reported" in prompt
 
 
+_PLATFORM_ADDENDUM = (
+    "\n## Platform-specific rules (from duplo platform knowledge)\n"
+    "\n- Use Swift Package Manager for dependencies\n"
+)
+
+
+class TestPlatformAddendum:
+    def test_phase_plan_appends_addendum_to_system_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                platform_addendum=_PLATFORM_ADDENDUM,
+            )
+        system = mock_query.call_args.kwargs["system"]
+        assert _PHASE_SYSTEM in system
+        assert _PLATFORM_ADDENDUM in system
+
+    def test_phase_plan_empty_addendum_leaves_system_unchanged(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                platform_addendum="",
+            )
+        system = mock_query.call_args.kwargs["system"]
+        assert system == _PHASE_SYSTEM
+
+    def test_phase_plan_default_has_no_addendum(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        system = mock_query.call_args.kwargs["system"]
+        assert system == _PHASE_SYSTEM
+
+    def test_next_phase_plan_appends_addendum_to_system_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(
+                _SAMPLE_CURRENT_PLAN,
+                "feedback",
+                platform_addendum=_PLATFORM_ADDENDUM,
+            )
+        system = mock_query.call_args.kwargs["system"]
+        assert _NEXT_PHASE_SYSTEM in system
+        assert _PLATFORM_ADDENDUM in system
+
+    def test_next_phase_plan_empty_addendum_leaves_system_unchanged(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(
+                _SAMPLE_CURRENT_PLAN,
+                "feedback",
+                platform_addendum="",
+            )
+        system = mock_query.call_args.kwargs["system"]
+        assert system == _NEXT_PHASE_SYSTEM
+
+    def test_next_phase_plan_default_has_no_addendum(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
+            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
+        system = mock_query.call_args.kwargs["system"]
+        assert system == _NEXT_PHASE_SYSTEM
+
+
 class TestAppendTestTasks:
     def test_appends_tasks_to_plan(self):
         plan = "# Phase 1\n- [ ] Build core"

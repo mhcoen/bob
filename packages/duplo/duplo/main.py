@@ -241,6 +241,7 @@ from duplo.build_prefs import (
     parse_build_preferences,
     validate_build_preferences,
 )
+from duplo.platforms.formatter import format_planner_system_addendum
 from duplo.platforms.resolver import resolve_profiles
 from duplo.platforms.schema import PlatformProfile
 from duplo.questioner import BuildPreferences
@@ -1956,6 +1957,7 @@ def _subsequent_run() -> None:
         design_section=design_section,
         phase_number=history_phase_number,
         spec_text=spec_prompt,
+        platform_addendum=format_planner_system_addendum(profiles),
     )
     # Append verification tasks from video frame descriptions.
     frame_descs = load_frame_descriptions()
