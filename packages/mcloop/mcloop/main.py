@@ -1212,19 +1212,16 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    # No-op: session ran but produced no changes and
-                    # checks fail on the existing code.  Treat as a
-                    # retryable failure so the next attempt gets the
-                    # error context via prior_errors.
+                    # No-op + checks fail: terminal failure (no retry).
                     last_error = (
                         "Session produced no file changes."
                         f" Checks failing: {noop_check.command}\n" + _tail(noop_check.output, 30)
                     )
                     print(
-                        formatting.error_msg(f"No-op task (attempt {attempt}/{max_retries})"),
+                        formatting.error_msg("No-op task with failing checks"),
                         flush=True,
                     )
-                    continue
+                    break
 
                 _lifecycle._current_phase = "checks"
                 run_autofix(project_dir)
@@ -1386,6 +1383,7 @@ def run_loop(
     if bug_only:
         if terminal_failure is None and stopped_early == "one":
             # --stop-after-one: exit cleanly after one bug fix
+            _checkpoint(project_dir)
             total = time.monotonic() - run_start
             _stop_msg = "Stopped after one task as requested"
             notify(_stop_msg)
@@ -1441,6 +1439,7 @@ def run_loop(
                     errors_path = project_dir / ".mcloop" / "errors.json"
                     if errors_path.is_file():
                         errors_path.unlink()
+        _checkpoint(project_dir)
         total = time.monotonic() - run_start
         _print_summary(
             completed,
@@ -1506,6 +1505,7 @@ def run_loop(
 
     # --stop-after-one: skip post-loop processing entirely
     if stopped_early == "one" and terminal_failure is None:
+        _checkpoint(project_dir)
         total = time.monotonic() - run_start
         _stop_msg = "Stopped after one task as requested"
         notify(_stop_msg)
@@ -1607,6 +1607,7 @@ def run_loop(
         )
 
     # --- Single exit point for all non-bug-only paths ---
+    _checkpoint(project_dir)
     total = time.monotonic() - run_start
     _phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
     _stop_reason = (
