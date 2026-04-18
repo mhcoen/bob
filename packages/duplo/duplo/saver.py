@@ -1104,7 +1104,7 @@ def save_raw_content(
     raw_pages: dict[str, str],
     page_records: list[PageRecord],
     *,
-    target_dir: Path = Path.cwd(),
+    target_dir: Path | str = ".",
 ) -> None:
     """Save raw HTML content for each scraped page.
 
