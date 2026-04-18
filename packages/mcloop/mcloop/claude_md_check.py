@@ -1,9 +1,12 @@
-"""Check and auto-update CLAUDE.md alongside source file changes.
+"""Check CLAUDE.md freshness and append LLM diff summaries to NOTES.md.
+
+CLAUDE.md (the project manifest) is treated as read-only by this
+module.  ``check_claude_md_freshness`` only inspects it to decide
+whether source changes went in without a matching manifest update.
 
 The auto-update sends ONLY the git diff to a cheap LLM and asks
-for a brief summary of what changed.  That summary is appended to
-the end of CLAUDE.md.  The existing CLAUDE.md content is never sent
-to the LLM and never rewritten.
+for a brief summary.  That summary is appended to NOTES.md, which
+is a human-readable changelog.  CLAUDE.md is never written to.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from mcloop.formatting import strip_code_fences
 
 
 class SyncResult(enum.Enum):
-    """Outcome of a CLAUDE.md auto-update attempt."""
+    """Outcome of an auto-update attempt."""
 
     OK = "ok"
     NO_WORK = "no_work"
@@ -105,7 +108,7 @@ def check_claude_md_freshness(
 
 
 def _get_diff_text(project_dir: Path, commit_sha: str = "") -> str:
-    """Return the diff for the CLAUDE.md summary LLM.
+    """Return the diff to feed to the summary LLM.
 
     When *commit_sha* is provided, returns the diff of that commit
     (for post-commit sync).  Otherwise falls back to uncommitted changes.
@@ -121,7 +124,7 @@ def _get_diff_text(project_dir: Path, commit_sha: str = "") -> str:
 
 
 def _load_update_config() -> dict | None:
-    """Load config for CLAUDE.md auto-update from ~/.mcloop/config.json.
+    """Load config for diff-summary auto-update from ~/.mcloop/config.json.
 
     Uses the reviewer config (model, base_url, api_key) since the same
     OpenRouter setup works for both. Returns None if not configured.
@@ -203,12 +206,12 @@ def _call_deepseek(config: dict, diff_text: str) -> str | None:
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read().decode())
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        print(f"  CLAUDE.md summary call failed: {exc}", flush=True)
+        print(f"  NOTES.md summary call failed: {exc}", flush=True)
         return None
 
     content = _parse_llm_response(body)
     if content is None:
-        print("  CLAUDE.md summary: empty response", flush=True)
+        print("  NOTES.md summary: empty response", flush=True)
     return content
 
 
@@ -229,33 +232,35 @@ def _call_sonnet_fallback(diff_text: str) -> str | None:
             env=env,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
-        print(f"  CLAUDE.md Sonnet fallback failed: {exc}", flush=True)
+        print(f"  NOTES.md Sonnet fallback failed: {exc}", flush=True)
         return None
 
     if result.returncode != 0:
-        print(f"  CLAUDE.md Sonnet fallback exited {result.returncode}", flush=True)
+        print(f"  NOTES.md Sonnet fallback exited {result.returncode}", flush=True)
         return None
 
     content = strip_code_fences(result.stdout).strip()
 
     if not content:
-        print("  CLAUDE.md Sonnet fallback: empty response", flush=True)
+        print("  NOTES.md Sonnet fallback: empty response", flush=True)
         return None
     return content
 
 
 def auto_update_claude_md(project_dir: Path, commit_sha: str = "") -> SyncResult:
-    """Auto-update CLAUDE.md by appending an LLM-generated diff summary.
+    """Append an LLM-generated diff summary to NOTES.md.
 
     Sends ONLY the git diff to a cheap LLM (DeepSeek via OpenRouter,
     with Sonnet fallback) and asks for a brief summary.  The summary
-    is appended to the end of CLAUDE.md.  The existing CLAUDE.md
-    content is never sent to the LLM and never rewritten.
+    is appended to NOTES.md.  CLAUDE.md is never read or written.
+
+    The function name is retained for callsite compatibility; the
+    behavior now targets NOTES.md exclusively.
 
     Returns a :class:`SyncResult` indicating the outcome.
     """
-    claude_md = project_dir / "CLAUDE.md"
-    if not claude_md.exists():
+    notes_md = project_dir / "NOTES.md"
+    if not notes_md.exists():
         return SyncResult.NO_WORK
 
     config = _load_update_config()
@@ -268,26 +273,24 @@ def auto_update_claude_md(project_dir: Path, commit_sha: str = "") -> SyncResult
     if not diff_text:
         return SyncResult.NO_WORK
 
-    # Send only the diff to the LLM for summarization.
     summary = _call_deepseek(config, diff_text)
     if summary is None:
         time.sleep(_DEEPSEEK_RETRY_SLEEP)
         summary = _call_deepseek(config, diff_text)
 
     if summary is None:
-        print("  CLAUDE.md: DeepSeek failed twice, trying Sonnet fallback...", flush=True)
+        print("  NOTES.md: DeepSeek failed twice, trying Sonnet fallback...", flush=True)
         summary = _call_sonnet_fallback(diff_text)
 
     if summary is None:
-        print("  CLAUDE.md auto-update: all providers failed", flush=True)
+        print("  NOTES.md auto-update: all providers failed", flush=True)
         return SyncResult.TRANSIENT_FAILED
 
-    # Append the summary to the end of CLAUDE.md.
     short_sha = commit_sha[:7] if commit_sha else "unknown"
-    existing = claude_md.read_text()
+    existing = notes_md.read_text()
     if not existing.endswith("\n"):
         existing += "\n"
     existing += f"\n{short_sha}: {summary}\n"
-    claude_md.write_text(existing)
-    print("  CLAUDE.md auto-updated by LLM", flush=True)
+    notes_md.write_text(existing)
+    print("  NOTES.md auto-updated by LLM", flush=True)
     return SyncResult.OK

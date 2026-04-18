@@ -210,8 +210,8 @@ class TestAutoUpdateClaudeMdTypeError:
     """TypeError is caught when API response contains None in the chain."""
 
     def test_none_message_returns_transient_failed(self, tmp_path):
-        claude_md = tmp_path / "CLAUDE.md"
-        claude_md.write_text("# Project\n")
+        notes_md = tmp_path / "NOTES.md"
+        notes_md.write_text("# Notes\n")
 
         with (
             patch(
@@ -232,8 +232,8 @@ class TestAutoUpdateClaudeMdTypeError:
 
 def test_auto_update_both_providers_fail_returns_transient(tmp_path):
     """When both DeepSeek and Sonnet fail, returns TRANSIENT_FAILED."""
-    claude_md = tmp_path / "CLAUDE.md"
-    claude_md.write_text("# Project\n")
+    notes_md = tmp_path / "NOTES.md"
+    notes_md.write_text("# Notes\n")
 
     with (
         patch(
@@ -253,10 +253,13 @@ def test_auto_update_both_providers_fail_returns_transient(tmp_path):
 
 
 def test_auto_update_appends_summary(tmp_path):
-    """On success, the summary is appended to CLAUDE.md (not rewritten)."""
+    """On success, the summary is appended to NOTES.md and CLAUDE.md is left alone."""
+    notes_md = tmp_path / "NOTES.md"
+    original = "# Notes\n\nExisting content.\n"
+    notes_md.write_text(original)
     claude_md = tmp_path / "CLAUDE.md"
-    original = "# Project\n\nExisting content.\n"
-    claude_md.write_text(original)
+    claude_md_original = "# Manifest\n\n## Core Modules\n"
+    claude_md.write_text(claude_md_original)
 
     with (
         patch(
@@ -276,11 +279,11 @@ def test_auto_update_appends_summary(tmp_path):
         result = auto_update_claude_md(tmp_path, commit_sha="abc1234def")
 
     assert result is SyncResult.OK
-    content = claude_md.read_text()
-    # Original content preserved
-    assert content.startswith("# Project\n\nExisting content.\n")
-    # Summary appended with short SHA
-    assert "abc1234: Fixed a bug in the parser." in content
+    notes_content = notes_md.read_text()
+    assert notes_content.startswith("# Notes\n\nExisting content.\n")
+    assert "abc1234: Fixed a bug in the parser." in notes_content
+    # CLAUDE.md must be untouched.
+    assert claude_md.read_text() == claude_md_original
 
 
 class TestParseLlmResponse:
