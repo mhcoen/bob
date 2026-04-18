@@ -447,6 +447,8 @@ def run_gui(
     Returns:
         GUIResult with crash/hang status and diagnostics.
     """
+    pre_pids = set(pgrep(process_name))
+
     proc = subprocess.Popen(
         command,
         shell=True,
@@ -458,8 +460,8 @@ def run_gui(
     try:
         time.sleep(settle_seconds)
 
-        pids = pgrep(process_name)
-        if not pids:
+        new_pids = [p for p in pgrep(process_name) if p not in pre_pids]
+        if not new_pids:
             crash_rpt = read_crash_report(process_name)
             return GUIResult(
                 crashed=True,
@@ -468,7 +470,7 @@ def run_gui(
                 crash_report=crash_rpt,
             )
 
-        pid = pids[0]
+        pid = new_pids[0]
 
         while True:
             elapsed = time.monotonic() - start
@@ -498,9 +500,11 @@ def run_gui(
     finally:
         if kill_on_return:
             # Kill the actual GUI app (not just the shell wrapper).
-            gui_pids = pgrep(process_name)
-            for gui_pid in gui_pids:
-                kill(gui_pid)
+            # Only kill PIDs that were NOT running before launch, to avoid
+            # killing a pre-existing user instance of the same app.
+            for gui_pid in pgrep(process_name):
+                if gui_pid not in pre_pids:
+                    kill(gui_pid)
             if proc.poll() is None:
                 proc.terminate()
                 try:

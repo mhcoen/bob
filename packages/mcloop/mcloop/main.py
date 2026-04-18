@@ -1208,14 +1208,10 @@ def run_loop(
                     # error context via prior_errors.
                     last_error = (
                         "Session produced no file changes."
-                        f" Checks failing: {noop_check.command}\n"
-                        + _tail(noop_check.output, 30)
+                        f" Checks failing: {noop_check.command}\n" + _tail(noop_check.output, 30)
                     )
                     print(
-                        formatting.error_msg(
-                            f"No-op task"
-                            f" (attempt {attempt}/{max_retries})"
-                        ),
+                        formatting.error_msg(f"No-op task (attempt {attempt}/{max_retries})"),
                         flush=True,
                     )
                     continue

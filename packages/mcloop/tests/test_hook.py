@@ -112,9 +112,7 @@ class TestLoadSession:
     def test_expired_session_deletes_file(self, tmp_path, monkeypatch):
         """Expired sessions (>24h) return empty AND delete the stale file."""
         session_file = tmp_path / "session.json"
-        session_file.write_text(
-            json.dumps({"created": 0, "patterns": ["Bash:pytest"]})
-        )
+        session_file.write_text(json.dumps({"created": 0, "patterns": ["Bash:pytest"]}))
         monkeypatch.setattr(_hook, "SESSION_FILE", session_file)
         assert _hook._load_session() == set()
         assert not session_file.exists()
@@ -124,9 +122,7 @@ class TestLoadSession:
         import time as _time
 
         session_file = tmp_path / "session.json"
-        session_file.write_text(
-            json.dumps({"created": _time.time(), "patterns": ["Bash:pytest"]})
-        )
+        session_file.write_text(json.dumps({"created": _time.time(), "patterns": ["Bash:pytest"]}))
         monkeypatch.setattr(_hook, "SESSION_FILE", session_file)
         assert _hook._load_session() == {"Bash:pytest"}
         assert session_file.exists()

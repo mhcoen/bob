@@ -348,7 +348,7 @@ class TestIsMainThreadStuck:
 class TestRunGUI:
     @patch("mcloop.process_monitor.sample", return_value="healthy output")
     @patch("mcloop.process_monitor.is_alive", return_value=True)
-    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("mcloop.process_monitor.pgrep", side_effect=[[], [12345], [12345]])
     @patch("mcloop.process_monitor.read_crash_report", return_value=None)
     @patch("subprocess.Popen")
     @patch("time.sleep")
@@ -395,7 +395,7 @@ class TestRunGUI:
 
     @patch("mcloop.process_monitor.read_crash_report", return_value="crash!")
     @patch("mcloop.process_monitor.is_alive", return_value=False)
-    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("mcloop.process_monitor.pgrep", side_effect=[[], [12345], [12345]])
     @patch("subprocess.Popen")
     @patch("time.sleep")
     def test_crash_during_monitoring(
@@ -423,7 +423,7 @@ class TestRunGUI:
         return_value="Thread 0\n  mach_msg_trap",
     )
     @patch("mcloop.process_monitor.is_alive", return_value=True)
-    @patch("mcloop.process_monitor.pgrep", return_value=[12345])
+    @patch("mcloop.process_monitor.pgrep", side_effect=[[], [12345], [12345]])
     @patch("subprocess.Popen")
     @patch("time.sleep")
     def test_hung_app(
@@ -445,6 +445,63 @@ class TestRunGUI:
         assert result.crashed is False
         assert result.hung is True
         assert result.sample_output is not None
+
+    @patch("mcloop.process_monitor.kill")
+    @patch("mcloop.process_monitor.sample", return_value="healthy")
+    @patch("mcloop.process_monitor.is_alive", return_value=True)
+    @patch(
+        "mcloop.process_monitor.pgrep",
+        side_effect=[[1000], [1000, 2000], [1000, 2000]],
+    )
+    @patch("mcloop.process_monitor.read_crash_report", return_value=None)
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_preexisting_pid_not_killed(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_crash,
+        mock_pgrep,
+        mock_alive,
+        mock_sample,
+        mock_kill,
+    ):
+        result = process_monitor.run_gui(
+            "open MyApp",
+            "MyApp",
+            timeout_seconds=0.01,
+            check_interval=0.005,
+            settle_seconds=0.0,
+        )
+        assert result.crashed is False
+        killed = [c.args[0] for c in mock_kill.call_args_list]
+        assert 1000 not in killed
+        assert 2000 in killed
+
+    @patch("mcloop.process_monitor.kill")
+    @patch(
+        "mcloop.process_monitor.pgrep",
+        side_effect=[[1000], [1000], [1000]],
+    )
+    @patch("mcloop.process_monitor.read_crash_report", return_value="crash!")
+    @patch("subprocess.Popen")
+    @patch("time.sleep")
+    def test_preexisting_pid_only_is_treated_as_crash(
+        self,
+        mock_sleep,
+        mock_popen,
+        mock_crash,
+        mock_pgrep,
+        mock_kill,
+    ):
+        result = process_monitor.run_gui(
+            "open MyApp",
+            "MyApp",
+            settle_seconds=0.0,
+        )
+        assert result.crashed is True
+        killed = [c.args[0] for c in mock_kill.call_args_list]
+        assert 1000 not in killed
 
 
 class TestRunCLIMocked:
