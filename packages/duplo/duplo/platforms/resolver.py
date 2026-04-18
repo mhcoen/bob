@@ -16,8 +16,8 @@ from duplo.questioner import BuildPreferences
 
 # Side-effect imports: ensure every platform module has registered
 # its profile before resolve_profiles() is called.
-import duplo.platforms.macos.swiftui_spm as _  # noqa: F401
-import duplo.platforms.macos.python_cli as _  # noqa: F401
+import duplo.platforms.macos.swiftui_spm as _swiftui  # noqa: F401
+import duplo.platforms.macos.python_cli as _pycli  # noqa: F401
 
 
 def resolve_profiles(prefs: BuildPreferences) -> list[PlatformProfile]:
