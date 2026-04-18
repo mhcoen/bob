@@ -263,8 +263,8 @@ def append_sources(
 
 
 def _normalize_ref_path(path: str) -> str:
-    """Compare-as-is with trailing slash stripped."""
-    return path.rstrip("/")
+    """Compare-as-is with trailing slash and surrounding quotes stripped."""
+    return path.strip('"').strip("'").rstrip("/")
 
 
 def _references_section_range(text: str) -> tuple[int, int] | None:
