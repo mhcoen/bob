@@ -1137,3 +1137,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 1f047e7: Added structured platform entries to support multi-stack projects. The parser now accepts a list of PlatformEntry objects, bypassing LLM extraction when structured data is present. Build preferences are now stored and validated per stack, with caching that includes both prose and structured entries. Downstream code temporarily uses only the first entry until the parser is fully wired.
 
 852f88d: Added platform profile resolution to the main pipeline. The system now matches build preferences against registered platform profiles, deduplicates results, and announces matched profiles or notes when none are found. This enables platform-specific rules to influence roadmap generation and planning.
+
+4abf331: Added platform-specific rules to the planner's system prompts. The phase plan and next-phase plan functions now accept an optional platform addendum parameter, which appends platform knowledge (like using Swift Package Manager) to the system prompt when provided. This ensures generated plans adhere to platform constraints.

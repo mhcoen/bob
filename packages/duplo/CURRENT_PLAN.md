@@ -21,7 +21,7 @@ declarations to SPEC.md.
 
 - [x] Wire the resolver into the pipeline. In main.py, after loading preferences, call resolve_profiles() for each BuildPreferences in the list. Collect the union of matched profiles. Pass them downstream to the planner and CLAUDE.md writer. Write a test confirming resolve_profiles is called and its output is threaded through.
 
-- [ ] Wire platform rules into the planner system prompt. In planner.py, add a platform_addendum parameter to generate_phase_plan and generate_next_phase_plan. When provided, append it to the system prompt string before calling query(). The caller in main.py passes format_planner_system_addendum(profiles). Write tests in test_planner.py: mock query(), verify system prompt contains platform rules when addendum is provided, verify it does not when addendum is empty.
+- [x] Wire platform rules into the planner system prompt. In planner.py, add a platform_addendum parameter to generate_phase_plan and generate_next_phase_plan. When provided, append it to the system prompt string before calling query(). The caller in main.py passes format_planner_system_addendum(profiles). Write tests in test_planner.py: mock query(), verify system prompt contains platform rules when addendum is provided, verify it does not when addendum is empty.
 
 - [ ] Wire scaffold generation into the pipeline. In main.py, before the first call to generate_phase_plan for a new project, call write_scaffold(profiles, project_name, target_dir). Pass format_scaffold_notice(written) into the planner as part of the platform addendum. Write tests in test_scaffold confirming: run.sh is created with correct content and executable bit, existing files are not overwritten, gitignore entries are appended without duplication.
 
