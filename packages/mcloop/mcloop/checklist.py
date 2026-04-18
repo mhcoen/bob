@@ -590,6 +590,30 @@ def mark_failed(path: str | Path, task: Task) -> None:
     p.write_text("\n".join(lines) + "\n")
 
 
+def clear_failed_markers(path: str | Path) -> int:
+    """Rewrite every `- [!]` back to `- [ ]` in *path*.
+
+    Returns the number of lines changed. Missing files return 0.
+    Used by ``mcloop --retry`` to reset previously-failed tasks so the
+    loop picks them up again on the next run. The file is only written
+    when at least one line actually changes, to avoid spurious mtime
+    bumps.
+    """
+    p = Path(path)
+    if not p.exists():
+        return 0
+    lines = p.read_text().splitlines()
+    changed = 0
+    for i, line in enumerate(lines):
+        new_line = re.sub(r"- \[!\]", "- [ ]", line, count=1)
+        if new_line != line:
+            lines[i] = new_line
+            changed += 1
+    if changed:
+        p.write_text("\n".join(lines) + "\n")
+    return changed
+
+
 def _check_line(lines: list[str], line_number: int) -> None:
     """Replace `- [ ]` with `- [x]` on the given line."""
     line = lines[line_number]

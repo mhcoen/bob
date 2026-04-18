@@ -3,6 +3,7 @@
 from mcloop.checklist import (
     PlanCorruptionError,
     check_off,
+    clear_failed_markers,
     find_next,
     find_parent,
     get_batch_children,
@@ -1802,3 +1803,38 @@ def test_parse_error_message_includes_path(tmp_path):
     with pytest.raises(PlanCorruptionError) as exc_info:
         parse(f)
     assert str(f) in str(exc_info.value)
+
+
+def test_clear_failed_markers_flips_bang_to_space(tmp_path):
+    f = tmp_path / "plan.md"
+    f.write_text("- [ ] A\n- [!] B\n- [x] C\n- [!] D\n")
+    n = clear_failed_markers(f)
+    assert n == 2
+    assert f.read_text() == "- [ ] A\n- [ ] B\n- [x] C\n- [ ] D\n"
+
+
+def test_clear_failed_markers_preserves_indentation(tmp_path):
+    f = tmp_path / "plan.md"
+    f.write_text("- [ ] Parent\n  - [!] Child\n    - [!] Grandchild\n")
+    n = clear_failed_markers(f)
+    assert n == 2
+    assert f.read_text() == "- [ ] Parent\n  - [ ] Child\n    - [ ] Grandchild\n"
+
+
+def test_clear_failed_markers_returns_zero_on_missing_file(tmp_path):
+    missing = tmp_path / "does_not_exist.md"
+    assert clear_failed_markers(missing) == 0
+
+
+def test_clear_failed_markers_no_op_preserves_mtime(tmp_path):
+    f = tmp_path / "plan.md"
+    f.write_text("- [ ] A\n- [x] B\n")
+    mtime_before = f.stat().st_mtime_ns
+    # Forge a later mtime to detect whether a write occurred.
+    import os
+
+    os.utime(f, ns=(mtime_before, mtime_before))
+    n = clear_failed_markers(f)
+    assert n == 0
+    # File should not have been rewritten since nothing changed.
+    assert f.stat().st_mtime_ns == mtime_before

@@ -9320,6 +9320,101 @@ def test_parse_args_stop_flags_default_false():
     assert args.stop_after_one is False
 
 
+def test_parse_args_retry():
+    """--retry flag is parsed correctly."""
+    args = _parse("--retry")
+    assert args.retry is True
+
+
+def test_parse_args_retry_default_false():
+    args = _parse()
+    assert args.retry is False
+
+
+def test_run_loop_retry_resets_failed_markers(tmp_path):
+    """run_loop(retry=True) flips [!] back to [ ] in active files before picking tasks."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] unrelated master task\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("# Plan\n- [!] failed feature\n- [ ] next feature\n")
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text("- [!] failed bug\n")
+    (tmp_path / ".git").mkdir()
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit", return_value=""),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        mock_checks.return_value = MagicMock(passed=True)
+
+        def runner_side_effect(*a, **kw):
+            content = bugs.read_text()
+            content = content.replace("- [ ] failed bug", "- [x] failed bug", 1)
+            bugs.write_text(content)
+            return MagicMock(success=True, output="done", exit_code=0)
+
+        mock_run.side_effect = runner_side_effect
+
+        run_loop(plan, max_retries=3, stop_after_one=True, retry=True)
+
+    assert "- [!]" not in current.read_text()
+    assert "- [ ] failed feature" in current.read_text()
+    assert "- [!]" not in bugs.read_text()
+
+
+def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
+    """Without --retry, failed markers remain intact."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n- [ ] unrelated master task\n")
+    current = tmp_path / "CURRENT_PLAN.md"
+    current.write_text("# Plan\n- [!] failed feature\n- [ ] next feature\n")
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text("- [!] failed bug\n")
+    (tmp_path / ".git").mkdir()
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit", return_value=""),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        mock_checks.return_value = MagicMock(passed=True)
+
+        def runner_side_effect(*a, **kw):
+            content = current.read_text()
+            content = content.replace("- [ ] next feature", "- [x] next feature", 1)
+            current.write_text(content)
+            return MagicMock(success=True, output="done", exit_code=0)
+
+        mock_run.side_effect = runner_side_effect
+
+        run_loop(plan, max_retries=3, stop_after_one=True, retry=False)
+
+    # The [!] markers must survive when --retry is not passed.
+    assert "- [!] failed feature" in current.read_text()
+    assert "- [!] failed bug" in bugs.read_text()
+
+
 def test_stop_after_one_exits_after_single_task(tmp_path):
     """--stop-after-one runs one task then exits with success."""
     plan = tmp_path / "PLAN.md"

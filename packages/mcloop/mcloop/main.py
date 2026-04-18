@@ -18,6 +18,7 @@ from mcloop.checklist import (
     PlanCorruptionError,
     Task,
     check_off,
+    clear_failed_markers,
     count_unchecked,
     find_next,
     find_parent,
@@ -267,6 +268,7 @@ def _main() -> None:
         stop_after_stage=args.stop_after_stage,
         stop_after_one=args.stop_after_one,
         task_timeout=args.timeout,
+        retry=args.retry,
     )
     if not result.ok:
         sys.exit(1)
@@ -595,6 +597,7 @@ def run_loop(
     stop_after_stage: bool = False,
     stop_after_one: bool = False,
     task_timeout: int | None = None,
+    retry: bool = False,
 ) -> RunStatus:
     """Run the main loop. Returns a RunStatus indicating outcome."""
     import mcloop.runner as _runner
@@ -613,6 +616,24 @@ def run_loop(
     current_plan_path = project_dir / CURRENT_PLAN
     bugs_path = project_dir / BUGS_FILE
     description = parse_description(master_path)
+
+    # --retry: flip every [!] back to [ ] in the active files so
+    # previously-failed tasks are eligible again this run. Runs before
+    # ensure_current_plan so a freshly extracted CURRENT_PLAN.md is
+    # already clean, and before the interrupt check so skipped tasks
+    # from a prior Ctrl-C also get reset.
+    if retry:
+        cleared_current = clear_failed_markers(current_plan_path)
+        cleared_bugs = clear_failed_markers(bugs_path)
+        total = cleared_current + cleared_bugs
+        if total:
+            print(
+                formatting.system_msg(
+                    f"--retry: reset {total} failed task marker"
+                    f"{'s' if total != 1 else ''}"
+                ),
+                flush=True,
+            )
 
     # Check for interrupted state from a previous Ctrl-C. Pass the
     # split-plan files in priority order so skip/describe actions mark
@@ -1717,6 +1738,11 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Per-task timeout in seconds (default: 1800 = 30 minutes)",
+    )
+    parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="Reset failed-task markers ([!] back to [ ]) in CURRENT_PLAN.md and BUGS.md before starting the loop",
     )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
