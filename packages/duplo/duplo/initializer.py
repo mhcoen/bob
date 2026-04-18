@@ -32,7 +32,7 @@ def create_project_dir(project_dir: Path | str) -> Path:
     path.mkdir(parents=True)
     (path / ".duplo").mkdir()
     gitignore = path / ".gitignore"
-    gitignore.write_text(".duplo/\n")
+    gitignore.write_text(".duplo/\nlocal.md\n")
     result = subprocess.run(
         ["git", "init", str(path)],
         capture_output=True,

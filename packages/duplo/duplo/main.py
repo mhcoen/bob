@@ -241,7 +241,7 @@ from duplo.build_prefs import (
     parse_build_preferences,
     validate_build_preferences,
 )
-from duplo.platforms.formatter import format_planner_system_addendum
+from duplo.platforms.formatter import format_local_overrides, format_planner_system_addendum
 from duplo.platforms.resolver import resolve_profiles
 from duplo.platforms.scaffold import format_scaffold_notice, write_scaffold
 from duplo.platforms.schema import PlatformProfile
@@ -416,6 +416,21 @@ def _announce_profiles(profiles: list[PlatformProfile]) -> None:
         return
     names = ", ".join(p.display_name for p in profiles)
     print(f"Platform profiles: {names}")
+
+
+def _read_local_md(target_dir: Path | str = ".") -> str:
+    """Return the contents of ``local.md`` in *target_dir*, or ``""`` if absent.
+
+    ``local.md`` is a user-owned, gitignored file holding project-specific
+    overrides that flow into both the planner prompt and CLAUDE.md.
+    """
+    path = Path(target_dir) / "local.md"
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _run_video_frame_pipeline(
@@ -1965,11 +1980,20 @@ def _subsequent_run() -> None:
                     print(f"  Scaffold: {p}")
         scaffold_notice = format_scaffold_notice(written, target_dir=Path.cwd())
 
+    local_md_content = _read_local_md(Path.cwd())
+    local_overrides = format_local_overrides(local_md_content)
+
     # Refresh CLAUDE.md whenever platform profiles are present so it
     # stays in sync with the resolved stack. On first-phase runs this
     # creates the file; on later runs it overwrites with current rules.
     if profiles:
-        write_claude_md(profiles, preferences, app_name, target_dir=Path.cwd())
+        write_claude_md(
+            profiles,
+            preferences,
+            app_name,
+            local_md_content=local_md_content,
+            target_dir=Path.cwd(),
+        )
 
     content = generate_phase_plan(
         source_url,
@@ -1980,7 +2004,9 @@ def _subsequent_run() -> None:
         design_section=design_section,
         phase_number=history_phase_number,
         spec_text=spec_prompt,
-        platform_addendum=format_planner_system_addendum(profiles) + scaffold_notice,
+        platform_addendum=(
+            format_planner_system_addendum(profiles) + scaffold_notice + local_overrides
+        ),
     )
     # Append verification tasks from video frame descriptions.
     frame_descs = load_frame_descriptions()

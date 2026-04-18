@@ -12613,3 +12613,110 @@ class TestNoInitializerImportsInPipeline:
 
         assert not hasattr(duplo.saver, "create_project_dir")
         assert not hasattr(duplo.saver, "project_name_from_url")
+
+
+class TestReadLocalMd:
+    """Unit tests for _read_local_md helper."""
+
+    def test_returns_content_when_file_exists(self, tmp_path):
+        from duplo.main import _read_local_md
+
+        (tmp_path / "local.md").write_text("project override\n", encoding="utf-8")
+        assert _read_local_md(tmp_path) == "project override\n"
+
+    def test_returns_empty_when_file_absent(self, tmp_path):
+        from duplo.main import _read_local_md
+
+        assert _read_local_md(tmp_path) == ""
+
+
+class TestLocalMdWiring:
+    """Phase 8.8: local.md flows into planner prompt and CLAUDE.md."""
+
+    _BASE_DATA = {
+        "source_url": "https://example.com",
+        "features": [{"name": "Search", "description": "search", "category": "core"}],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+        "roadmap": [
+            {
+                "phase": 0,
+                "title": "Core",
+                "goal": "Core",
+                "features": ["Search"],
+                "test": "ok",
+            },
+        ],
+        "current_phase": 0,
+    }
+
+    def _run_main(self, tmp_path):
+        from duplo.platforms.schema import PlatformProfile
+
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        profile = PlatformProfile(id="web-python", display_name="Web Python")
+        with (
+            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.main.resolve_profiles", return_value=[profile]),
+            patch("duplo.main.write_scaffold", return_value=[]),
+            patch("duplo.main.format_scaffold_notice", return_value=""),
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.main.select_issues", return_value=[]),
+            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n") as mock_plan,
+            patch(
+                "duplo.main.write_claude_md",
+                return_value=tmp_path / "CLAUDE.md",
+            ) as mock_claude,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+        return mock_plan, mock_claude
+
+    def test_local_overrides_present_when_local_md_exists(self, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        (tmp_path / "local.md").write_text(
+            "Prefer tabs over spaces in this project.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+
+        mock_plan, mock_claude = self._run_main(tmp_path)
+
+        addendum = mock_plan.call_args.kwargs["platform_addendum"]
+        assert "Local overrides" in addendum
+        assert "Prefer tabs over spaces" in addendum
+
+        assert (
+            mock_claude.call_args.kwargs["local_md_content"]
+            == "Prefer tabs over spaces in this project.\n"
+        )
+
+    def test_local_overrides_absent_when_local_md_missing(self, tmp_path, monkeypatch):
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        monkeypatch.chdir(tmp_path)
+
+        mock_plan, mock_claude = self._run_main(tmp_path)
+
+        addendum = mock_plan.call_args.kwargs["platform_addendum"]
+        assert "Local overrides" not in addendum
+
+        assert mock_claude.call_args.kwargs["local_md_content"] == ""
+
+
+class TestInitializerLocalMdGitignore:
+    """Phase 8.8: create_project_dir ignores local.md."""
+
+    def test_gitignore_includes_local_md(self, tmp_path):
+        from duplo.initializer import create_project_dir
+
+        target = tmp_path / "proj"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            create_project_dir(target)
+        gitignore = (target / ".gitignore").read_text(encoding="utf-8")
+        assert "local.md" in gitignore.splitlines()
