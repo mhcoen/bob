@@ -239,39 +239,6 @@ def _parse_design_markdown(text: str) -> dict:
     return result
 
 
-def _merge_design_dicts(a: dict, b: dict) -> dict:
-    """Merge two design dicts, unioning their contents.
-
-    For dict-valued keys (colors, fonts, spacing, layout), entries from
-    *a* take precedence on key collision.  For ``components``, lists are
-    concatenated and deduplicated by ``name`` (first occurrence wins).
-    """
-    merged: dict = {}
-    for key in ("colors", "fonts", "spacing", "layout"):
-        av = a.get(key, {})
-        bv = b.get(key, {})
-        if av or bv:
-            combined = dict(bv) if isinstance(bv, dict) else {}
-            if isinstance(av, dict):
-                combined.update(av)  # a wins on collision
-            merged[key] = combined
-
-    ac = a.get("components", [])
-    bc = b.get("components", [])
-    if ac or bc:
-        seen: set[str] = set()
-        merged_comps: list[dict] = []
-        for comp in list(ac) + list(bc):
-            if not isinstance(comp, dict):
-                continue
-            name = comp.get("name", "")
-            if name and name not in seen:
-                seen.add(name)
-                merged_comps.append(comp)
-        merged["components"] = merged_comps
-
-    return merged
-
 
 def detect_design_gaps(
     plan_content: str,

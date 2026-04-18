@@ -1345,21 +1345,23 @@ class TestDetectAndAppendGaps:
             {
                 "source_url": "https://example.com",
                 "features": [{"name": "UI", "description": "User interface.", "category": "core"}],
-                "design_requirements": {
-                    "colors": {"primary": "#ff0000"},
-                    "fonts": {},
-                    "components": [],
-                },
             },
         )
         plan = "# Phase 0: Core\n- [ ] Build UI\n"
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
         from duplo.gap_detector import GapResult
+        from duplo.spec_reader import DesignBlock, ProductSpec
 
+        spec = ProductSpec(
+            raw="",
+            design=DesignBlock(
+                auto_generated="### Colors\n- **primary**: `#ff0000`",
+            ),
+        )
         gap_result = GapResult(missing_features=[], missing_examples=[])
         with patch("duplo.main.detect_gaps", return_value=gap_result):
-            _detect_and_append_gaps()
+            _detect_and_append_gaps(spec=spec)
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert "Update color palette: primary: #ff0000" in updated
@@ -1484,11 +1486,6 @@ class TestDetectAndAppendGaps:
                 "features": [
                     {"name": "Websocket", "description": "Real-time.", "category": "core"}
                 ],
-                "design_requirements": {
-                    "colors": {"accent": "#00ff00"},
-                    "fonts": {},
-                    "components": [],
-                },
             },
         )
         plan = (
@@ -1501,13 +1498,20 @@ class TestDetectAndAppendGaps:
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
         from duplo.gap_detector import GapResult, MissingFeature
+        from duplo.spec_reader import DesignBlock, ProductSpec
 
+        spec = ProductSpec(
+            raw="",
+            design=DesignBlock(
+                auto_generated="### Colors\n- **accent**: `#00ff00`",
+            ),
+        )
         gap_result = GapResult(
             missing_features=[MissingFeature(name="Websocket", reason="Not covered")],
             missing_examples=[],
         )
         with patch("duplo.main.detect_gaps", return_value=gap_result):
-            _detect_and_append_gaps()
+            _detect_and_append_gaps(spec=spec)
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         # The original plan content must appear as a prefix (modulo trailing ws).
@@ -2491,8 +2495,8 @@ class TestDetectGapsReturnsCounts:
         assert dr == 0
         assert ta == 2
 
-    def test_spec_auto_generated_design_merged(self, tmp_path, monkeypatch):
-        """Design gaps read from SPEC.md AUTO-GENERATED block AND duplo.json."""
+    def test_spec_auto_generated_design_used(self, tmp_path, monkeypatch):
+        """Design gaps read from SPEC.md AUTO-GENERATED block only."""
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(
             tmp_path,
@@ -2500,9 +2504,6 @@ class TestDetectGapsReturnsCounts:
                 "features": [
                     {"name": "Auth", "description": "Login.", "category": "core"},
                 ],
-                "design_requirements": {
-                    "colors": {"primary": "#ff0000"},
-                },
             },
         )
         (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Build UI\n", encoding="utf-8")
@@ -2524,10 +2525,8 @@ class TestDetectGapsReturnsCounts:
             with patch("duplo.main.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
                 _detect_and_append_gaps(spec=spec)
 
-        # detect_design_gaps should have been called with the merged dict.
+        # detect_design_gaps should have been called with spec design only.
         call_design = mock_ddg.call_args[0][1]
-        # duplo.json's primary wins, spec's accent is added.
-        assert call_design["colors"]["primary"] == "#ff0000"
         assert call_design["colors"]["accent"] == "#0000ff"
         assert call_design["fonts"]["body"] == "Roboto"
 
@@ -2562,8 +2561,8 @@ class TestDetectGapsReturnsCounts:
         call_design = mock_ddg.call_args[0][1]
         assert call_design["colors"]["primary"] == "#123456"
 
-    def test_no_spec_falls_back_to_duplo_json_only(self, tmp_path, monkeypatch):
-        """Without spec, design gaps use duplo.json's design_requirements only."""
+    def test_no_spec_produces_no_design_gaps(self, tmp_path, monkeypatch):
+        """Without spec, no design gaps are detected."""
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(
             tmp_path,
@@ -2585,8 +2584,8 @@ class TestDetectGapsReturnsCounts:
             with patch("duplo.main.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
                 _detect_and_append_gaps(spec=None)
 
-        call_design = mock_ddg.call_args[0][1]
-        assert call_design == {"colors": {"primary": "#ff0000"}}
+        # detect_design_gaps should not have been called (no spec = no design data).
+        mock_ddg.assert_not_called()
 
 
 class TestSubsequentRunSummary:

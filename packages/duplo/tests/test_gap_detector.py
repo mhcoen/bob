@@ -14,7 +14,6 @@ from duplo.gap_detector import (
     MissingFeature,
     _format_examples,
     _format_features,
-    _merge_design_dicts,
     _parse_design_markdown,
     _parse_result,
     detect_design_gaps,
@@ -575,110 +574,46 @@ class TestParseDesignMarkdown:
 
 
 # ---------------------------------------------------------------------------
-# _merge_design_dicts
+# Pipeline: _parse_design_markdown + detect_design_gaps (SPEC.md only)
 # ---------------------------------------------------------------------------
 
 
-class TestMergeDesignDicts:
-    def test_empty_both(self):
-        assert _merge_design_dicts({}, {}) == {}
+class TestDesignGapsSpecOnly:
+    """Verify detect_design_gaps finds gaps from SPEC.md AUTO-GENERATED block only."""
 
-    def test_a_only(self):
-        a = {"colors": {"primary": "#ff0000"}}
-        assert _merge_design_dicts(a, {}) == a
-
-    def test_b_only(self):
-        b = {"fonts": {"body": "Inter"}}
-        assert _merge_design_dicts({}, b) == b
-
-    def test_a_wins_on_collision(self):
-        a = {"colors": {"primary": "#ff0000"}}
-        b = {"colors": {"primary": "#0000ff", "secondary": "#00ff00"}}
-        result = _merge_design_dicts(a, b)
-        assert result["colors"]["primary"] == "#ff0000"
-        assert result["colors"]["secondary"] == "#00ff00"
-
-    def test_components_concatenated_and_deduped(self):
-        a = {"components": [{"name": "card", "style": "rounded"}]}
-        b = {
-            "components": [{"name": "button", "style": "pill"}, {"name": "card", "style": "flat"}]
-        }
-        result = _merge_design_dicts(a, b)
-        names = [c["name"] for c in result["components"]]
-        assert names == ["card", "button"]
-        # a's version wins for card
-        assert result["components"][0]["style"] == "rounded"
-
-    def test_merges_different_keys(self):
-        a = {"colors": {"primary": "#ff0000"}}
-        b = {"fonts": {"body": "Inter"}}
-        result = _merge_design_dicts(a, b)
-        assert result["colors"] == {"primary": "#ff0000"}
-        assert result["fonts"] == {"body": "Inter"}
-
-    def test_skips_non_dict_components(self):
-        a = {"components": ["not a dict"]}
-        b = {"components": [{"name": "card", "style": "rounded"}]}
-        result = _merge_design_dicts(a, b)
-        assert len(result["components"]) == 1
-        assert result["components"][0]["name"] == "card"
-
-
-# ---------------------------------------------------------------------------
-# Pipeline: _parse_design_markdown + _merge_design_dicts + detect_design_gaps
-# ---------------------------------------------------------------------------
-
-
-class TestDesignGapsDualSource:
-    """Verify detect_design_gaps finds gaps from both AUTO-GENERATED and duplo.json."""
-
-    def test_gaps_from_both_sources(self):
-        """Items from both spec markdown and duplo.json dict produce gaps."""
+    def test_gaps_from_spec_markdown(self):
+        """Items from spec markdown produce gaps when not in the plan."""
         spec_markdown = "### Colors\n- **accent**: `#0000ff`\n\n### Typography\n- **body**: Roboto"
-        duplo_json_design = {
-            "colors": {"primary": "#ff0000"},
-            "components": [{"name": "card", "style": "rounded"}],
-        }
         spec_design = _parse_design_markdown(spec_markdown)
-        merged = _merge_design_dicts(duplo_json_design, spec_design)
         plan = "# Phase 0\n- [ ] Build basic UI\n"
-        gaps = detect_design_gaps(plan, merged)
+        gaps = detect_design_gaps(plan, spec_design)
         categories = {g.category for g in gaps}
         details = {g.detail for g in gaps}
-        # duplo.json contributed primary color and card component.
         assert "color" in categories
-        assert any("#ff0000" in d for d in details)
-        assert "component" in categories
-        assert any("card" in d for d in details)
-        # spec contributed accent color and Roboto font.
         assert any("#0000ff" in d for d in details)
         assert "font" in categories
         assert any("Roboto" in d for d in details)
 
-    def test_no_gaps_when_plan_covers_both_sources(self):
-        """No gaps reported when the plan mentions items from both sources."""
+    def test_no_gaps_when_plan_covers_spec(self):
+        """No gaps reported when the plan mentions items from the spec."""
         spec_markdown = "### Colors\n- **accent**: `#0000ff`"
-        duplo_json_design = {"colors": {"primary": "#ff0000"}}
         spec_design = _parse_design_markdown(spec_markdown)
-        merged = _merge_design_dicts(duplo_json_design, spec_design)
-        plan = "Use #ff0000 for primary and #0000ff for accent."
-        gaps = detect_design_gaps(plan, merged)
+        plan = "Use #0000ff for accent."
+        gaps = detect_design_gaps(plan, spec_design)
         assert gaps == []
 
-    def test_duplo_json_only_when_spec_empty(self):
-        """Empty spec markdown means only duplo.json items produce gaps."""
+    def test_empty_spec_produces_no_gaps(self):
+        """Empty spec markdown means no design gaps."""
         spec_design = _parse_design_markdown("")
-        duplo_json_design = {"fonts": {"heading": "Montserrat"}}
-        merged = _merge_design_dicts(duplo_json_design, spec_design)
-        gaps = detect_design_gaps("# Plan", merged)
-        assert len(gaps) == 1
-        assert "Montserrat" in gaps[0].detail
+        gaps = detect_design_gaps("# Plan", spec_design)
+        assert gaps == []
 
-    def test_spec_only_when_duplo_json_empty(self):
-        """Empty duplo.json design means only spec items produce gaps."""
-        spec_markdown = "### Colors\n- **bg**: `#fafafa`"
+    def test_spec_colors_and_components(self):
+        """Spec with colors and components both produce gaps."""
+        spec_markdown = "### Colors\n- **bg**: `#fafafa`\n\n### Component Styles\n- **card**: rounded corners"
         spec_design = _parse_design_markdown(spec_markdown)
-        merged = _merge_design_dicts({}, spec_design)
-        gaps = detect_design_gaps("# Plan", merged)
-        assert len(gaps) == 1
-        assert "#fafafa" in gaps[0].detail
+        gaps = detect_design_gaps("# Plan", spec_design)
+        assert len(gaps) == 2
+        categories = {g.category for g in gaps}
+        assert "color" in categories
+        assert "component" in categories
