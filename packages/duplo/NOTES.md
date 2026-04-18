@@ -1139,3 +1139,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 852f88d: Added platform profile resolution to the main pipeline. The system now matches build preferences against registered platform profiles, deduplicates results, and announces matched profiles or notes when none are found. This enables platform-specific rules to influence roadmap generation and planning.
 
 4abf331: Added platform-specific rules to the planner's system prompts. The phase plan and next-phase plan functions now accept an optional platform addendum parameter, which appends platform knowledge (like using Swift Package Manager) to the system prompt when provided. This ensures generated plans adhere to platform constraints.
+
+37f3c2b: Added platform scaffolding to generate project files like run.sh and .gitignore entries during the first phase. This ensures tasks can reference these artifacts instead of recreating them. The scaffolding respects existing files and avoids duplication.
