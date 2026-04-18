@@ -20,7 +20,9 @@ from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 from duplo.planner import CompletedTask
 from duplo.questioner import BuildPreferences
+from duplo.platforms.schema import PlatformProfile
 from duplo.saver import (
+    CLAUDE_MD_FILENAME,
     DUPLO_JSON,
     EXAMPLES_DIR,
     PRODUCT_JSON,
@@ -55,6 +57,7 @@ from duplo.saver import (
     save_sources,
     save_selections,
     store_accepted_frames,
+    write_claude_md,
 )
 
 
@@ -3568,3 +3571,110 @@ class TestAppendPhaseToHistoryStageRegex:
         data = json.loads(result_path.read_text(encoding="utf-8"))
         phase_title = data["phases"][-1]["phase"]
         assert "Phase 3" in phase_title
+
+
+class TestWriteClaudeMd:
+    @pytest.fixture()
+    def swift_profile(self) -> PlatformProfile:
+        return PlatformProfile(
+            id="macos-swiftui-spm",
+            display_name="macOS SwiftUI (SPM)",
+            claude_md_rules=[
+                "Run ./run.sh to launch the app bundle.",
+                "Do not invoke .build/debug/<binary> directly.",
+            ],
+            failure_modes=["Running binary directly produces no UI."],
+        )
+
+    @pytest.fixture()
+    def swift_prefs(self) -> BuildPreferences:
+        return BuildPreferences(
+            platform="macos",
+            language="Swift/SwiftUI",
+            constraints=["macOS 14+"],
+            preferences=["build: Swift Package Manager"],
+        )
+
+    def test_creates_file_at_project_root(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        assert path == (tmp_path / CLAUDE_MD_FILENAME).resolve()
+        assert path.exists()
+
+    def test_contains_project_name_heading(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert content.startswith("# MyApp")
+
+    def test_contains_stack_section_with_prefs(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert "## Stack" in content
+        assert "macos / Swift/SwiftUI" in content
+        assert "build: Swift Package Manager" in content
+        assert "constraint: macOS 14+" in content
+
+    def test_contains_platform_rules_section(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert "## Platform rules" in content
+        assert "Run ./run.sh to launch the app bundle." in content
+        assert "Running binary directly produces no UI." in content
+
+    def test_omits_platform_rules_when_no_profiles(self, tmp_path, swift_prefs):
+        path = write_claude_md([], [swift_prefs], "MyApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert "## Platform rules" not in content
+        assert "## Stack" in content
+
+    def test_local_overrides_included_when_provided(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md(
+            [swift_profile],
+            [swift_prefs],
+            "MyApp",
+            local_md_content="Prefer 4-space indentation.",
+            target_dir=tmp_path,
+        )
+        content = path.read_text(encoding="utf-8")
+        assert "## Local overrides" in content
+        assert "Prefer 4-space indentation." in content
+
+    def test_local_overrides_absent_when_blank(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md(
+            [swift_profile],
+            [swift_prefs],
+            "MyApp",
+            local_md_content="   \n\n",
+            target_dir=tmp_path,
+        )
+        content = path.read_text(encoding="utf-8")
+        assert "## Local overrides" not in content
+
+    def test_multiple_stacks_enumerated(self, tmp_path, swift_profile):
+        prefs_list = [
+            BuildPreferences(platform="macos", language="Swift", preferences=[]),
+            BuildPreferences(platform="web", language="TypeScript", preferences=[]),
+        ]
+        path = write_claude_md([swift_profile], prefs_list, "MultiApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert "Stack 1: macos / Swift" in content
+        assert "Stack 2: web / TypeScript" in content
+
+    def test_overwrites_existing_file(self, tmp_path, swift_profile, swift_prefs):
+        existing = tmp_path / CLAUDE_MD_FILENAME
+        existing.write_text("stale hand-edited content\n", encoding="utf-8")
+        write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        content = existing.read_text(encoding="utf-8")
+        assert "stale hand-edited content" not in content
+        assert "# MyApp" in content
+
+    def test_file_ends_with_single_newline(self, tmp_path, swift_profile, swift_prefs):
+        path = write_claude_md([swift_profile], [swift_prefs], "MyApp", target_dir=tmp_path)
+        text = path.read_text(encoding="utf-8")
+        assert text.endswith("\n")
+        assert not text.endswith("\n\n")
+
+    def test_empty_preferences_list(self, tmp_path):
+        path = write_claude_md([], [], "MyApp", target_dir=tmp_path)
+        content = path.read_text(encoding="utf-8")
+        assert "# MyApp" in content
+        assert "## Stack" in content

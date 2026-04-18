@@ -297,6 +297,7 @@ from duplo.saver import (
     save_roadmap,
     save_sources,
     store_accepted_frames,
+    write_claude_md,
 )
 from duplo.task_matcher import match_unannotated_tasks
 from duplo.selector import select_features, select_issues
@@ -1963,6 +1964,12 @@ def _subsequent_run() -> None:
                 except ValueError:
                     print(f"  Scaffold: {p}")
         scaffold_notice = format_scaffold_notice(written, target_dir=Path.cwd())
+
+    # Refresh CLAUDE.md whenever platform profiles are present so it
+    # stays in sync with the resolved stack. On first-phase runs this
+    # creates the file; on later runs it overwrites with current rules.
+    if profiles:
+        write_claude_md(profiles, preferences, app_name, target_dir=Path.cwd())
 
     content = generate_phase_plan(
         source_url,
