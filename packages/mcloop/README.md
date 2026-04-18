@@ -92,6 +92,13 @@ between sessions:
 These files live in the repo alongside your code and are the mechanism
 by which one session's knowledge reaches the next.
 
+**CLAUDE.md is tracked in git on purpose.** It contains project build
+instructions, conventions, and the source-file manifest, not personal
+configuration or transient state. It updates infrequently, only when
+the build, platform, or application functionality changes in a way
+collaborators need to see. Anyone working on the project benefits from
+reading it, whether or not they use Claude Code.
+
 McLoop is designed for the long haul. Start with a few tasks, let it run
 while you do something else, add more tasks when you think of them, re-run.
 It's a persistent task queue backed by a text file, not a one-shot build
