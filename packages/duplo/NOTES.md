@@ -2,6 +2,20 @@
 
 ## Observations
 
+### [8.2] Documented structured platform entries without a parser — 2026-04-18
+
+CURRENT_PLAN.md marks 8.1 complete (`[x]`), but `duplo/spec_reader.py`
+still captures the `## Architecture` body as a single prose string.
+There is no `PlatformEntry`/`architecture_entries` field on
+`ProductSpec`, no list-item parser under Architecture, and no tests
+covering `platform:`/`language:`/`build:` fields. 8.2 just updated
+`SPEC-template.md` and `SPEC-guide.md` to describe the structured
+syntax promised by 8.1, so the docs now describe a format the parser
+does not yet accept. Either re-open 8.1 to implement the parser, or
+amend the docs to say the structured form is forthcoming. Also affects
+downstream tasks 8.3+ that assume the structured field is available on
+`ProductSpec`.
+
 ### [7.9.1-7.9.4] Dead code sweep — 2026-04-17
 
 Removed functions / constants with no production callers:

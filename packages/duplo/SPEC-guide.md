@@ -213,6 +213,44 @@ Examples:
     TypeScript, React, Vite. No state management library — plain
     useState and useReducer only. Tailwind for styling.
 
+#### Structured platform entries
+
+Architecture may begin with one or more structured list-item
+entries before any free-form prose. Each entry has:
+
+- `platform:` — target platform (e.g. `macos`, `linux`, `ios`,
+  `web`).
+- `language:` — implementation language (e.g. `swift`, `python`,
+  `typescript`).
+- `build:` — build system (e.g. `spm`, `poetry`, `npm`, `vite`).
+
+Multiple entries are supported for multi-stack projects (e.g. a
+server plus a client, or a shared core with platform-specific
+frontends). Free-form prose can follow the structured entries and
+still supplies version bounds, dependency constraints, and
+anything the structured fields do not capture.
+
+Single-entry example:
+
+    - platform: macos
+      language: swift
+      build: spm
+
+    Swift 5.9+, macOS 14+. No external dependencies.
+
+Multi-stack example:
+
+    - platform: web
+      language: typescript
+      build: vite
+
+    - platform: linux
+      language: python
+      build: poetry
+
+    Postgres for persistence. JWT for auth between the two stacks.
+    Pytest on the backend; Vitest on the frontend.
+
 
 ### `## Design`
 

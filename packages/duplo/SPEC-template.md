@@ -46,6 +46,14 @@ See SPEC-guide.md for details.
 
 <FILL IN: language, framework, platform, constraints>
 
+<!-- Example with a structured platform entry:
+- platform: macos
+  language: swift
+  build: spm
+
+Swift 5.9+, macOS 14+. No external dependencies.
+-->
+
 
 ## Design
 
