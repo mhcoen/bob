@@ -29,6 +29,6 @@ declarations to SPEC.md.
 
 - [x] Add local.md support. In main.py, check for local.md in the target project root. If present, read its content and pass it through format_local_overrides() into both the planner addendum and the CLAUDE.md writer. Add local.md to the gitignore entries written by initializer.py create_project_dir(). Write tests confirming local overrides appear in planner prompt and CLAUDE.md when local.md exists and are absent when it does not.
 
-- [ ] Add integration test for the full platform knowledge flow. Create test_platform_integration.py. Given a SPEC.md with a SwiftUI architecture entry, mock the LLM calls and verify that: resolve_profiles returns the swiftui_spm profile, the planner system prompt contains platform rules, a run.sh file exists on disk, CLAUDE.md contains the platform rules section, and gitignore contains .build/ and *.app/ entries.
+- [x] Add integration test for the full platform knowledge flow. Create test_platform_integration.py. Given a SPEC.md with a SwiftUI architecture entry, mock the LLM calls and verify that: resolve_profiles returns the swiftui_spm profile, the planner system prompt contains platform rules, a run.sh file exists on disk, CLAUDE.md contains the platform rules section, and gitignore contains .build/ and *.app/ entries.
 
 - [ ] Run the full test suite and confirm all tests pass. Execute pytest -x against the duplo repo. If any test fails, the task fails and mcloop will retry.
