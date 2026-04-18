@@ -903,6 +903,62 @@ class TestAnalyzeNewFiles:
         out = capsys.readouterr().out
         assert out == ""
 
+    def test_gates_pdf_and_text_on_spec_role(self, tmp_path, monkeypatch):
+        """PDFs/text with role counter-example, ignore, or proposed=true
+        must not be read into collected_text; files absent from References
+        fall through (backward compat)."""
+        from duplo.spec_reader import ProductSpec, ReferenceEntry
+
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        docs_pdf = ref_dir / "docs.pdf"
+        docs_pdf.write_bytes(b"%PDF-docs")
+        bad_pdf = ref_dir / "bad.pdf"
+        bad_pdf.write_bytes(b"%PDF-bad")
+        ignored_pdf = ref_dir / "ignored.pdf"
+        ignored_pdf.write_bytes(b"%PDF-ignored")
+        proposed_pdf = ref_dir / "proposed.pdf"
+        proposed_pdf.write_bytes(b"%PDF-proposed")
+        stray_txt = ref_dir / "stray.txt"
+        stray_txt.write_text("stray-content")
+        bad_txt = ref_dir / "bad.txt"
+        bad_txt.write_text("bad-content")
+
+        spec = ProductSpec(
+            raw="",
+            references=[
+                ReferenceEntry(path=Path("ref/docs.pdf"), roles=["docs"]),
+                ReferenceEntry(path=Path("ref/bad.pdf"), roles=["counter-example"]),
+                ReferenceEntry(path=Path("ref/ignored.pdf"), roles=["ignore"]),
+                ReferenceEntry(path=Path("ref/proposed.pdf"), roles=["docs"], proposed=True),
+                ReferenceEntry(path=Path("ref/bad.txt"), roles=["counter-example"]),
+            ],
+        )
+
+        with patch("duplo.main.extract_pdf_text", return_value="DOCS-PDF") as mock_pdf:
+            summary = _analyze_new_files(
+                [
+                    "ref/docs.pdf",
+                    "ref/bad.pdf",
+                    "ref/ignored.pdf",
+                    "ref/proposed.pdf",
+                    "ref/stray.txt",
+                    "ref/bad.txt",
+                ],
+                spec=spec,
+            )
+
+        passed_pdfs = mock_pdf.call_args[0][0]
+        assert [p.name for p in passed_pdfs] == ["docs.pdf"]
+        assert "DOCS-PDF" in summary.collected_text
+        assert "bad-content" not in summary.collected_text
+        assert "stray-content" in summary.collected_text
+        assert summary.pdfs_extracted == 1
+        assert summary.text_files_read == 1
+
     def test_does_not_move_references(self, tmp_path, monkeypatch):
         """ref/ files are durable user inputs and must stay in place;
         SPEC.md paths point at ref/ and break if files are relocated."""

@@ -1029,6 +1029,44 @@ def _fix_mode(args: argparse.Namespace) -> None:
         print("Run mcloop to start fixing.")
 
 
+def _readable_text_refs(
+    paths: list[Path],
+    spec: ProductSpec | None,
+) -> list[Path]:
+    """Filter PDFs/text files against SPEC.md reference roles.
+
+    When *spec* is None, all *paths* are returned unchanged. When
+    provided, paths listed in ``## References`` are dropped if they are
+    ``proposed: true`` or their only roles are ``counter-example`` and/or
+    ``ignore``. Paths not listed in ``## References`` pass through
+    unchanged (backward compat).
+    """
+    if spec is None:
+        return list(paths)
+    index: dict[str, tuple[list[str], bool]] = {}
+    for entry in spec.references:
+        index[str(entry.path)] = (list(entry.roles), entry.proposed)
+    kept: list[Path] = []
+    for p in paths:
+        key = str(p)
+        match = index.get(key)
+        if match is None:
+            for ref_path, value in index.items():
+                parts = ref_path.split("/")
+                if len(parts) >= 2 and parts[0] == "ref" and parts[-1] == p.name:
+                    match = value
+                    break
+        if match is None:
+            kept.append(p)
+            continue
+        roles, proposed = match
+        if proposed:
+            continue
+        if any(r not in ("counter-example", "ignore") for r in roles):
+            kept.append(p)
+    return kept
+
+
 def _analyze_new_files(
     file_names: list[str],
     spec: ProductSpec | None = None,
@@ -1128,28 +1166,30 @@ def _analyze_new_files(
         )
         print("\nDesign autogen block already exists in SPEC.md; skipping Vision.")
 
-    # Extract text from new PDFs.
-    if scan.pdfs:
-        print(f"\nExtracting text from {len(scan.pdfs)} new PDF(s) \u2026")
-        pdf_text = extract_pdf_text(scan.pdfs)
+    # Extract text from new PDFs (skipping counter-example/ignore/proposed refs).
+    readable_pdfs = _readable_text_refs(scan.pdfs, spec)
+    if readable_pdfs:
+        print(f"\nExtracting text from {len(readable_pdfs)} new PDF(s) \u2026")
+        pdf_text = extract_pdf_text(readable_pdfs)
         if pdf_text:
             summary.collected_text += pdf_text + "\n"
-            print(f"  Extracted text from {len(scan.pdfs)} PDF(s).")
-            summary.pdfs_extracted = len(scan.pdfs)
+            print(f"  Extracted text from {len(readable_pdfs)} PDF(s).")
+            summary.pdfs_extracted = len(readable_pdfs)
             analyzed_anything = True
 
-    # Collect text from new text files.
-    if scan.text_files:
+    # Collect text from new text files (same SPEC-role gating).
+    readable_text_files = _readable_text_refs(scan.text_files, spec)
+    if readable_text_files:
         text_content = ""
-        for tf in scan.text_files:
+        for tf in readable_text_files:
             try:
                 text_content += tf.read_text(encoding="utf-8", errors="ignore") + "\n"
             except OSError:
                 pass
         if text_content.strip():
             summary.collected_text += text_content
-            print(f"\nRead {len(scan.text_files)} new text file(s).")
-            summary.text_files_read = len(scan.text_files)
+            print(f"\nRead {len(readable_text_files)} new text file(s).")
+            summary.text_files_read = len(readable_text_files)
             analyzed_anything = True
 
     if not analyzed_anything:
