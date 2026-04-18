@@ -108,7 +108,7 @@ class TestQueryWithImages:
         with patch("duplo.claude_cli.subprocess.run", return_value=_completed("ok")) as m:
             query_with_images("analyze", [abs_path])
         prompt = m.call_args.kwargs["input"]
-        assert "- /tmp/screenshots/frame.png" in prompt
+        assert f"- {abs_path.resolve()}" in prompt
 
     def test_raises_claude_cli_error_on_timeout(self):
         with patch(
