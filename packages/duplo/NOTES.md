@@ -1143,3 +1143,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 37f3c2b: Added platform scaffolding to generate project files like run.sh and .gitignore entries during the first phase. This ensures tasks can reference these artifacts instead of recreating them. The scaffolding respects existing files and avoids duplication.
 
 63356ea: Added automatic generation of CLAUDE.md file to keep platform rules synchronized with the resolved stack. The file includes project name, stack configuration, platform-specific rules, and optional local overrides. It's regenerated whenever platform profiles are present to ensure consistency across runs.
+
+36ce4ab: Added support for a user-owned `local.md` file that holds project-specific overrides. The file is automatically git-ignored and its contents flow into both the planner prompt and CLAUDE.md, allowing per-project customization without affecting the shared configuration.
