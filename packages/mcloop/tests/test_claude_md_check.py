@@ -252,6 +252,37 @@ def test_auto_update_both_providers_fail_returns_transient(tmp_path):
         assert auto_update_claude_md(tmp_path) is SyncResult.TRANSIENT_FAILED
 
 
+def test_auto_update_appends_summary(tmp_path):
+    """On success, the summary is appended to CLAUDE.md (not rewritten)."""
+    claude_md = tmp_path / "CLAUDE.md"
+    original = "# Project\n\nExisting content.\n"
+    claude_md.write_text(original)
+
+    with (
+        patch(
+            "mcloop.claude_md_check._load_update_config",
+            return_value={
+                "base_url": "https://api.example.com/v1",
+                "model": "test-model",
+                "api_key": "sk-test",
+            },
+        ),
+        patch("mcloop.claude_md_check._get_diff_text", return_value="some diff"),
+        patch(
+            "mcloop.claude_md_check._call_deepseek",
+            return_value="Fixed a bug in the parser.",
+        ),
+    ):
+        result = auto_update_claude_md(tmp_path, commit_sha="abc1234def")
+
+    assert result is SyncResult.OK
+    content = claude_md.read_text()
+    # Original content preserved
+    assert content.startswith("# Project\n\nExisting content.\n")
+    # Summary appended with short SHA
+    assert "abc1234: Fixed a bug in the parser." in content
+
+
 class TestParseLlmResponse:
     """Pure-function tests for _parse_llm_response."""
 
@@ -302,12 +333,19 @@ class TestParseLlmResponse:
         result = _parse_llm_response(body)
         assert result == "x" * 200
 
-    def test_short_content_returns_none(self):
+    def test_short_content_returns_content(self):
         body = {"choices": [{"message": {"content": "short"}}]}
-        assert _parse_llm_response(body) is None
+        assert _parse_llm_response(body) == "short"
 
     def test_strips_markdown_fences(self):
-        body = {"choices": [{"message": {"content": "```markdown\n" + "x" * 200 + "\n```"}}]}
+        body = {"choices": [{"message": {"content": "```markdown\nSummary of changes\n```"}}]}
         result = _parse_llm_response(body)
-        assert result is not None
-        assert not result.startswith("```")
+        assert result == "Summary of changes"
+
+    def test_empty_content_returns_none(self):
+        body = {"choices": [{"message": {"content": ""}}]}
+        assert _parse_llm_response(body) is None
+
+    def test_whitespace_content_returns_none(self):
+        body = {"choices": [{"message": {"content": "   \n  "}}]}
+        assert _parse_llm_response(body) is None
