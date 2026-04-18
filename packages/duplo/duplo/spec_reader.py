@@ -484,6 +484,21 @@ class ReferenceEntry:
 
 
 @dataclass
+class PlatformEntry:
+    """A structured platform declaration from ``## Architecture``.
+
+    Populated by the list-item parser (``- platform: ... \\n language: ...
+    \\n build: ...``).  Each entry maps to one target stack; multi-stack
+    projects have multiple entries.  Free-form prose after the entries
+    remains in :attr:`ProductSpec.architecture`.
+    """
+
+    platform: str = ""
+    language: str = ""
+    build: str = ""
+
+
+@dataclass
 class DesignBlock:
     """Parsed contents of the ## Design section."""
 
@@ -508,6 +523,7 @@ class ProductSpec:
     behavior: str = ""
     behavior_contracts: list[BehaviorContract] = field(default_factory=list)
     architecture: str = ""
+    platform_entries: list[PlatformEntry] = field(default_factory=list)
     design: DesignBlock = field(default_factory=DesignBlock)
     references: list[ReferenceEntry] = field(default_factory=list)
     sources: list[SourceEntry] = field(default_factory=list)

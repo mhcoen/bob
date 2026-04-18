@@ -329,30 +329,54 @@ def _prefs_from_dict(prefs_data: dict) -> BuildPreferences:
     )
 
 
-def _load_preferences(data: dict, spec) -> BuildPreferences:
+def _prefs_list_from_data(prefs_data: object) -> list[BuildPreferences]:
+    """Decode ``data["preferences"]`` into a list of :class:`BuildPreferences`.
+
+    Accepts both storage formats: a single dict (legacy, pre-multi-stack)
+    is wrapped into a one-element list; a list of dicts is parsed
+    element-wise.  Anything else returns an empty list.
+    """
+    if isinstance(prefs_data, list):
+        return [_prefs_from_dict(d) for d in prefs_data if isinstance(d, dict)]
+    if isinstance(prefs_data, dict):
+        return [_prefs_from_dict(prefs_data)]
+    return []
+
+
+def _primary_prefs(prefs: list[BuildPreferences]) -> BuildPreferences:
+    """Return the first entry in *prefs* or an all-defaults BuildPreferences."""
+    if prefs:
+        return prefs[0]
+    return BuildPreferences(platform="", language="", constraints=[], preferences=[])
+
+
+def _load_preferences(data: dict, spec) -> list[BuildPreferences]:
     """Load build preferences with architecture-hash invalidation.
 
-    If ``spec.architecture`` is present and its hash differs from the
-    stored ``architecture_hash`` in *data*, re-parses preferences via
-    LLM and persists the result.  Otherwise returns cached preferences.
+    Returns one :class:`BuildPreferences` per target stack declared in
+    ``## Architecture``.  If ``spec.architecture`` is present and its
+    hash (combined with any structured platform entries) differs from
+    the stored ``architecture_hash`` in *data*, re-parses preferences
+    and persists the result.  Otherwise returns cached preferences.
     """
-    prefs_data = data.get("preferences", {})
-    cached = _prefs_from_dict(prefs_data)
+    prefs_data = data.get("preferences", [])
+    cached = _prefs_list_from_data(prefs_data)
 
     if not spec or not spec.architecture:
         return cached
 
-    current_hash = architecture_hash(spec.architecture)
+    structured = list(getattr(spec, "platform_entries", []) or [])
+    current_hash = architecture_hash(spec.architecture, structured_entries=structured)
     stored_hash = data.get("architecture_hash", "")
 
     if current_hash == stored_hash:
         return cached
 
     # Hash changed — re-parse from the updated architecture prose.
-    prefs = parse_build_preferences(spec.architecture)
+    prefs = parse_build_preferences(spec.architecture, structured_entries=structured)
     save_build_preferences(prefs, current_hash)
     # Update in-memory data so later accesses in the same run see it.
-    data["preferences"] = dataclasses.asdict(prefs)
+    data["preferences"] = [dataclasses.asdict(p) for p in prefs]
     data["architecture_hash"] = current_hash
     for w in validate_build_preferences(prefs):
         print(f"Warning: {w}")
@@ -1400,9 +1424,9 @@ def _detect_and_append_gaps(
 
     examples = load_examples()
 
-    prefs = data.get("preferences", {})
-    platform = prefs.get("platform", "")
-    language = prefs.get("language", "")
+    primary = _primary_prefs(_prefs_list_from_data(data.get("preferences", [])))
+    platform = primary.platform
+    language = primary.language
 
     print("\nComparing features and examples against PLAN.md \u2026")
     result = detect_gaps(
@@ -1822,7 +1846,7 @@ def _subsequent_run() -> None:
         new_roadmap = generate_roadmap(
             source_url,
             remaining,
-            preferences,
+            _primary_prefs(preferences),
             completion_history=history,
             spec_text=spec_prompt,
         )
@@ -1890,7 +1914,7 @@ def _subsequent_run() -> None:
     content = generate_phase_plan(
         source_url,
         features,
-        preferences,
+        _primary_prefs(preferences),
         phase=phase_info,
         project_name=app_name,
         design_section=design_section,

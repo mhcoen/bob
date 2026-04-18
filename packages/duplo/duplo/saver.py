@@ -207,20 +207,21 @@ def save_selections(
 
 
 def save_build_preferences(
-    preferences: BuildPreferences,
+    preferences: list[BuildPreferences],
     arch_hash: str,
     *,
     target_dir: Path | str = ".",
 ) -> Path:
     """Update ``preferences`` and ``architecture_hash`` in *duplo.json*.
 
-    Read-modify-write: preserves all other keys in the file.
-    Returns the path to the updated file.
+    Persists the full list of preferences (one per target stack) as a
+    JSON array.  Read-modify-write: preserves all other keys in the
+    file.  Returns the path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data: dict = _safe_read_json(path)
-    data["preferences"] = dataclasses.asdict(preferences)
+    data["preferences"] = [dataclasses.asdict(p) for p in preferences]
     if arch_hash:
         data["architecture_hash"] = arch_hash
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

@@ -1,14 +1,15 @@
-"""Parse BuildPreferences from ## Architecture prose via an LLM call.
+"""Parse BuildPreferences from ## Architecture via structured entries or LLM.
 
 This module replaces the interactive ``ask_preferences()`` flow in
-``questioner.py``.  Instead of prompting the user, it extracts
-structured build preferences from the free-form ``## Architecture``
-section of SPEC.md.
+``questioner.py``.  It prefers structured ``PlatformEntry`` rows parsed
+out of ``## Architecture`` (one per target stack) and falls back to an
+LLM extraction pass over the free-form prose when no structured entries
+are present.
 
 Results are cached in ``.duplo/duplo.json`` under ``preferences``.
-The cache is invalidated when the SHA-256 of the comment-stripped
-``spec.architecture`` content changes (stored as
-``architecture_hash`` in duplo.json).
+The cache is invalidated when the SHA-256 over the comment-stripped
+``spec.architecture`` prose plus any structured entries changes (stored
+as ``architecture_hash`` in duplo.json).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from duplo.claude_cli import ClaudeCliError, query
 from duplo.diagnostics import record_failure
 from duplo.parsing import extract_json
 from duplo.questioner import BuildPreferences
+from duplo.spec_reader import PlatformEntry
 
 _SYSTEM = """\
 You are a software architect assistant. Given free-form prose
@@ -55,18 +57,27 @@ Rules:
 """
 
 
-def parse_build_preferences(architecture_prose: str) -> BuildPreferences:
-    """Parse free-form ## Architecture into structured fields.
+def parse_build_preferences(
+    architecture_prose: str,
+    *,
+    structured_entries: list[PlatformEntry] | None = None,
+) -> list[BuildPreferences]:
+    """Return one :class:`BuildPreferences` per target stack.
 
-    Calls Claude with a structured-output prompt asking for
-    platform, language, constraints, and preferences extracted
-    from the prose.
+    When *structured_entries* is non-empty, each entry maps directly to
+    one :class:`BuildPreferences` — no LLM call is made.  Otherwise the
+    LLM is asked to extract a single set of preferences from
+    *architecture_prose*.
 
-    Returns :class:`BuildPreferences` with whatever fields the LLM
-    could populate.  Missing fields stay at default values.
+    The list always has at least one element so downstream code can
+    index ``[0]`` without a length check: empty prose and no entries
+    yield a single all-defaults entry.
     """
+    if structured_entries:
+        return [_entry_to_preferences(e) for e in structured_entries]
+
     if not architecture_prose.strip():
-        return BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        return [_defaults()]
 
     try:
         raw = query(architecture_prose, system=_SYSTEM)
@@ -76,20 +87,53 @@ def parse_build_preferences(architecture_prose: str) -> BuildPreferences:
             "llm",
             f"LLM call failed: {exc}",
         )
-        return BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        return [_defaults()]
 
-    return _parse_response(raw)
+    return [_parse_response(raw)]
 
 
-def architecture_hash(architecture_prose: str) -> str:
-    """Return the SHA-256 hex digest of *architecture_prose*.
+def architecture_hash(
+    architecture_prose: str,
+    *,
+    structured_entries: list[PlatformEntry] | None = None,
+) -> str:
+    """Return the SHA-256 digest of the architecture content.
 
-    The input should be the comment-stripped ``spec.architecture``
-    string.  The hash is stored in duplo.json as
-    ``architecture_hash`` so that changes to ``## Architecture``
-    trigger re-parsing.
+    Combines *architecture_prose* with a canonical serialization of
+    *structured_entries* so the cache invalidates whenever either piece
+    of ``## Architecture`` changes.  When *structured_entries* is empty
+    or ``None``, the digest reduces to ``sha256(architecture_prose)`` —
+    same as before structured entries existed.
     """
-    return hashlib.sha256(architecture_prose.encode("utf-8")).hexdigest()
+    content = architecture_prose
+    if structured_entries:
+        entries_repr = "\n".join(
+            f"{e.platform}|{e.language}|{e.build}" for e in structured_entries
+        )
+        content = content + "\n---entries---\n" + entries_repr
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _entry_to_preferences(entry: PlatformEntry) -> BuildPreferences:
+    """Map a :class:`PlatformEntry` to :class:`BuildPreferences`.
+
+    The ``build`` field becomes a preference string (``build: <value>``)
+    so downstream consumers that only look at
+    ``platform``/``language``/``preferences`` still see it.
+    """
+    prefs: list[str] = []
+    if entry.build:
+        prefs.append(f"build: {entry.build}")
+    return BuildPreferences(
+        platform=entry.platform,
+        language=entry.language,
+        constraints=[],
+        preferences=prefs,
+    )
+
+
+def _defaults() -> BuildPreferences:
+    return BuildPreferences(platform="", language="", constraints=[], preferences=[])
 
 
 def _parse_response(raw: str) -> BuildPreferences:
@@ -102,10 +146,10 @@ def _parse_response(raw: str) -> BuildPreferences:
             "llm",
             f"Failed to parse LLM response as JSON: {raw[:200]}",
         )
-        return BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        return _defaults()
 
     if not isinstance(data, dict):
-        return BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        return _defaults()
 
     platform = str(data.get("platform", "") or "")
     language = str(data.get("language", "") or "")
@@ -144,21 +188,36 @@ def is_all_defaults(prefs: BuildPreferences) -> bool:
     )
 
 
-def validate_build_preferences(prefs: BuildPreferences) -> list[str]:
-    """Return warning strings for *prefs*.
+def validate_build_preferences(prefs: list[BuildPreferences]) -> list[str]:
+    """Return warning strings for a list of :class:`BuildPreferences`.
 
-    Returns a one-element list when all fields are at their defaults
-    (the LLM extracted nothing useful).  Returns an empty list when
-    at least one field is populated.
+    Emits one warning per all-defaults entry.  A single-entry list with
+    an all-defaults entry produces the original "all defaults" message;
+    multi-entry lists tag each warning with a stack index so the user
+    can tell which stack needs more detail.
     """
-    if is_all_defaults(prefs):
+    if not prefs:
         return [
             "Build preferences are all defaults — "
             "## Architecture may be too vague for the LLM to extract "
             "platform, language, or constraints. "
             "Plan generation will proceed but with less context."
         ]
-    return []
+    if len(prefs) == 1 and is_all_defaults(prefs[0]):
+        return [
+            "Build preferences are all defaults — "
+            "## Architecture may be too vague for the LLM to extract "
+            "platform, language, or constraints. "
+            "Plan generation will proceed but with less context."
+        ]
+    warnings: list[str] = []
+    for i, p in enumerate(prefs):
+        if is_all_defaults(p):
+            warnings.append(
+                f"Stack {i + 1}: build preferences are all defaults — "
+                "this structured platform entry has no usable fields."
+            )
+    return warnings
 
 
 def _str_list(value: object) -> list[str]:

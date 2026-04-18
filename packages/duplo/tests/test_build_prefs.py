@@ -15,18 +15,22 @@ from duplo.build_prefs import (
 )
 from duplo.claude_cli import ClaudeCliError
 from duplo.questioner import BuildPreferences
+from duplo.spec_reader import PlatformEntry
+
+
+_DEFAULT = BuildPreferences(platform="", language="", constraints=[], preferences=[])
 
 
 class TestParseBuildPreferences:
     """Tests for parse_build_preferences()."""
 
-    def test_empty_prose_returns_defaults(self) -> None:
+    def test_empty_prose_returns_single_defaults(self) -> None:
         result = parse_build_preferences("")
-        assert result == BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        assert result == [_DEFAULT]
 
-    def test_whitespace_only_returns_defaults(self) -> None:
+    def test_whitespace_only_returns_single_defaults(self) -> None:
         result = parse_build_preferences("   \n  ")
-        assert result == BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        assert result == [_DEFAULT]
 
     @patch("duplo.build_prefs.query")
     def test_successful_parse(self, mock_query: object) -> None:
@@ -40,16 +44,17 @@ class TestParseBuildPreferences:
             }
         )
         result = parse_build_preferences("Web app using React and PostgreSQL")
-        assert result.platform == "web"
-        assert result.language == "TypeScript/React"
-        assert result.constraints == ["PostgreSQL"]
-        assert result.preferences == ["prefer functional style"]
+        assert len(result) == 1
+        assert result[0].platform == "web"
+        assert result[0].language == "TypeScript/React"
+        assert result[0].constraints == ["PostgreSQL"]
+        assert result[0].preferences == ["prefer functional style"]
 
     @patch("duplo.build_prefs.query")
-    def test_llm_failure_returns_defaults(self, mock_query: object) -> None:
+    def test_llm_failure_returns_single_defaults(self, mock_query: object) -> None:
         mock_query.side_effect = ClaudeCliError("timeout")  # type: ignore[union-attr]
         result = parse_build_preferences("Some architecture prose")
-        assert result == BuildPreferences(platform="", language="", constraints=[], preferences=[])
+        assert result == [_DEFAULT]
 
     @patch("duplo.build_prefs.query")
     def test_llm_failure_records_diagnostic(self, mock_query: object) -> None:
@@ -69,6 +74,62 @@ class TestParseBuildPreferences:
         _, kwargs = mock_query.call_args  # type: ignore[union-attr]
         assert "system" in kwargs
         assert kwargs["system"]  # non-empty system prompt
+
+
+class TestParseBuildPreferencesStructuredEntries:
+    """Structured PlatformEntry inputs bypass the LLM entirely."""
+
+    @patch("duplo.build_prefs.query")
+    def test_single_entry_no_llm_call(self, mock_query: object) -> None:
+        entries = [PlatformEntry(platform="macos", language="swift", build="spm")]
+        result = parse_build_preferences("ignored prose", structured_entries=entries)
+        mock_query.assert_not_called()  # type: ignore[union-attr]
+        assert len(result) == 1
+        assert result[0].platform == "macos"
+        assert result[0].language == "swift"
+        assert result[0].preferences == ["build: spm"]
+        assert result[0].constraints == []
+
+    @patch("duplo.build_prefs.query")
+    def test_multiple_entries_returns_one_per_stack(self, mock_query: object) -> None:
+        entries = [
+            PlatformEntry(platform="web", language="typescript", build="vite"),
+            PlatformEntry(platform="linux", language="python", build="poetry"),
+        ]
+        result = parse_build_preferences("", structured_entries=entries)
+        mock_query.assert_not_called()  # type: ignore[union-attr]
+        assert len(result) == 2
+        assert result[0].platform == "web"
+        assert result[0].language == "typescript"
+        assert result[0].preferences == ["build: vite"]
+        assert result[1].platform == "linux"
+        assert result[1].language == "python"
+        assert result[1].preferences == ["build: poetry"]
+
+    def test_entry_without_build_yields_empty_preferences(self) -> None:
+        entries = [PlatformEntry(platform="cli", language="rust", build="")]
+        result = parse_build_preferences("", structured_entries=entries)
+        assert len(result) == 1
+        assert result[0].preferences == []
+
+    @patch("duplo.build_prefs.query")
+    def test_empty_structured_list_falls_back_to_llm(self, mock_query: object) -> None:
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {"platform": "cli", "language": "Go"}
+        )
+        result = parse_build_preferences("Go CLI tool.", structured_entries=[])
+        mock_query.assert_called_once()  # type: ignore[union-attr]
+        assert len(result) == 1
+        assert result[0].platform == "cli"
+
+    @patch("duplo.build_prefs.query")
+    def test_none_structured_falls_back_to_llm(self, mock_query: object) -> None:
+        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+            {"platform": "cli", "language": "Go"}
+        )
+        result = parse_build_preferences("Go CLI tool.", structured_entries=None)
+        mock_query.assert_called_once()  # type: ignore[union-attr]
+        assert len(result) == 1
 
 
 class TestParseResponse:
@@ -215,6 +276,34 @@ class TestArchitectureHash:
         assert all(c in "0123456789abcdef" for c in h)
         assert len(h) == 64
 
+    def test_empty_entries_same_as_prose_only(self) -> None:
+        """Backward compat: None/[] entries reduce to the prose-only hash."""
+        h_bare = architecture_hash("prose")
+        h_none = architecture_hash("prose", structured_entries=None)
+        h_empty = architecture_hash("prose", structured_entries=[])
+        assert h_bare == h_none == h_empty
+
+    def test_structured_entries_change_hash(self) -> None:
+        prose = "some prose"
+        h_bare = architecture_hash(prose)
+        h_with = architecture_hash(
+            prose,
+            structured_entries=[PlatformEntry(platform="macos", language="swift", build="spm")],
+        )
+        assert h_bare != h_with
+
+    def test_different_entries_different_hash(self) -> None:
+        prose = "prose"
+        h1 = architecture_hash(
+            prose,
+            structured_entries=[PlatformEntry(platform="web", language="ts", build="vite")],
+        )
+        h2 = architecture_hash(
+            prose,
+            structured_entries=[PlatformEntry(platform="macos", language="swift", build="spm")],
+        )
+        assert h1 != h2
+
 
 class TestStrList:
     """Tests for _str_list()."""
@@ -274,21 +363,41 @@ class TestIsAllDefaults:
 class TestValidateBuildPreferences:
     """Tests for validate_build_preferences()."""
 
-    def test_all_defaults_emits_warning(self) -> None:
-        prefs = BuildPreferences(platform="", language="", constraints=[], preferences=[])
-        warnings = validate_build_preferences(prefs)
+    def test_single_all_defaults_emits_warning(self) -> None:
+        warnings = validate_build_preferences([_DEFAULT])
+        assert len(warnings) == 1
+        assert "all defaults" in warnings[0]
+
+    def test_empty_list_emits_warning(self) -> None:
+        warnings = validate_build_preferences([])
         assert len(warnings) == 1
         assert "all defaults" in warnings[0]
 
     def test_populated_prefs_no_warning(self) -> None:
-        prefs = BuildPreferences(platform="cli", language="Rust", constraints=[], preferences=[])
+        prefs = [BuildPreferences(platform="cli", language="Rust", constraints=[], preferences=[])]
         warnings = validate_build_preferences(prefs)
         assert warnings == []
 
     def test_only_constraints_no_warning(self) -> None:
-        prefs = BuildPreferences(platform="", language="", constraints=["Redis"], preferences=[])
+        prefs = [BuildPreferences(platform="", language="", constraints=["Redis"], preferences=[])]
         warnings = validate_build_preferences(prefs)
         assert warnings == []
+
+    def test_multi_stack_all_populated_no_warning(self) -> None:
+        prefs = [
+            BuildPreferences(platform="web", language="ts", constraints=[], preferences=[]),
+            BuildPreferences(platform="cli", language="py", constraints=[], preferences=[]),
+        ]
+        assert validate_build_preferences(prefs) == []
+
+    def test_multi_stack_one_empty_entry_flagged_with_index(self) -> None:
+        prefs = [
+            BuildPreferences(platform="web", language="ts", constraints=[], preferences=[]),
+            BuildPreferences(platform="", language="", constraints=[], preferences=[]),
+        ]
+        warnings = validate_build_preferences(prefs)
+        assert len(warnings) == 1
+        assert "Stack 2" in warnings[0]
 
 
 class TestParseResponseAllDefaults:
@@ -336,7 +445,8 @@ class TestParseResponseAllDefaults:
             }
         )
         result = parse_build_preferences("Some vague prose with no tech details")
-        assert is_all_defaults(result)
+        assert len(result) == 1
+        assert is_all_defaults(result[0])
 
 
 class TestTypicalArchitectureProse:
@@ -357,10 +467,11 @@ class TestTypicalArchitectureProse:
             "Native macOS desktop app built with Swift and SwiftUI. "
             "Uses CoreData for persistence. Targets macOS 14+."
         )
-        assert result.platform == "desktop"
-        assert result.language == "Swift/SwiftUI"
-        assert result.constraints == ["CoreData"]
-        assert result.preferences == ["macOS only", "minimum macOS 14"]
+        assert len(result) == 1
+        assert result[0].platform == "desktop"
+        assert result[0].language == "Swift/SwiftUI"
+        assert result[0].constraints == ["CoreData"]
+        assert result[0].preferences == ["macOS only", "minimum macOS 14"]
 
     @patch("duplo.build_prefs.query")
     def test_missing_fields_default(self, mock_query: object) -> None:
@@ -372,10 +483,11 @@ class TestTypicalArchitectureProse:
             }
         )
         result = parse_build_preferences("Command-line tool written in Go.")
-        assert result.platform == "cli"
-        assert result.language == "Go"
-        assert result.constraints == []
-        assert result.preferences == []
+        assert len(result) == 1
+        assert result[0].platform == "cli"
+        assert result[0].language == "Go"
+        assert result[0].constraints == []
+        assert result[0].preferences == []
 
     @patch("duplo.build_prefs.query")
     def test_web_fullstack(self, mock_query: object) -> None:
@@ -393,11 +505,12 @@ class TestTypicalArchitectureProse:
             "PostgreSQL via Prisma. Tailwind CSS for styling. "
             "Prefer server components where possible."
         )
-        assert result.platform == "web"
-        assert result.language == "TypeScript/Next.js"
-        assert "PostgreSQL" in result.constraints
-        assert "Tailwind CSS" in result.constraints
-        assert result.preferences == ["prefer server components"]
+        assert len(result) == 1
+        assert result[0].platform == "web"
+        assert result[0].language == "TypeScript/Next.js"
+        assert "PostgreSQL" in result[0].constraints
+        assert "Tailwind CSS" in result[0].constraints
+        assert result[0].preferences == ["prefer server components"]
 
 
 class TestCommentStrippingAndHash:
@@ -445,7 +558,7 @@ class TestCacheHitAvoidsLlmCall:
 
         arch = "Swift macOS app with SwiftUI and CoreData."
         h = architecture_hash(arch)
-        spec = type("Spec", (), {"architecture": arch})()
+        spec = type("Spec", (), {"architecture": arch, "platform_entries": []})()
         data = {
             "preferences": {
                 "platform": "desktop",
@@ -458,8 +571,9 @@ class TestCacheHitAvoidsLlmCall:
         with patch("duplo.main.parse_build_preferences") as mock_parse:
             result = _load_preferences(data, spec)
             mock_parse.assert_not_called()
-        assert result.platform == "desktop"
-        assert result.language == "Swift/SwiftUI"
+        assert len(result) == 1
+        assert result[0].platform == "desktop"
+        assert result[0].language == "Swift/SwiftUI"
 
     def test_changed_architecture_triggers_reparse(self, tmp_path, monkeypatch) -> None:
         from duplo.main import _load_preferences
@@ -468,7 +582,7 @@ class TestCacheHitAvoidsLlmCall:
         old_arch = "Python CLI tool."
         new_arch = "Swift macOS app with SwiftUI."
         old_hash = architecture_hash(old_arch)
-        spec = type("Spec", (), {"architecture": new_arch})()
+        spec = type("Spec", (), {"architecture": new_arch, "platform_entries": []})()
         data = {
             "preferences": {
                 "platform": "cli",
@@ -478,12 +592,14 @@ class TestCacheHitAvoidsLlmCall:
             },
             "architecture_hash": old_hash,
         }
-        new_prefs = BuildPreferences(
-            platform="desktop",
-            language="Swift/SwiftUI",
-            constraints=[],
-            preferences=["macOS only"],
-        )
+        new_prefs = [
+            BuildPreferences(
+                platform="desktop",
+                language="Swift/SwiftUI",
+                constraints=[],
+                preferences=["macOS only"],
+            )
+        ]
         with (
             patch(
                 "duplo.main.parse_build_preferences",
@@ -492,17 +608,17 @@ class TestCacheHitAvoidsLlmCall:
             patch("duplo.main.save_build_preferences"),
         ):
             result = _load_preferences(data, spec)
-            mock_parse.assert_called_once_with(new_arch)
-        assert result.platform == "desktop"
-        assert result.language == "Swift/SwiftUI"
+            mock_parse.assert_called_once_with(new_arch, structured_entries=[])
+        assert len(result) == 1
+        assert result[0].platform == "desktop"
+        assert result[0].language == "Swift/SwiftUI"
 
 
 class TestAllDefaultsWarningViaValidate:
     """All-defaults BuildPreferences emits warning via validate_build_preferences."""
 
     def test_all_defaults_warning_message_content(self) -> None:
-        prefs = BuildPreferences(platform="", language="", constraints=[], preferences=[])
-        warnings = validate_build_preferences(prefs)
+        warnings = validate_build_preferences([_DEFAULT])
         assert len(warnings) == 1
         assert "all defaults" in warnings[0]
         assert "## Architecture" in warnings[0]
@@ -521,16 +637,19 @@ class TestAllDefaultsWarningViaValidate:
             }
         )
         prefs = parse_build_preferences("vague text with no specifics")
-        assert is_all_defaults(prefs)
+        assert len(prefs) == 1
+        assert is_all_defaults(prefs[0])
         warnings = validate_build_preferences(prefs)
         assert len(warnings) == 1
 
     def test_populated_prefs_no_warning(self) -> None:
-        prefs = BuildPreferences(
-            platform="desktop",
-            language="Swift/SwiftUI",
-            constraints=["CoreData"],
-            preferences=["macOS only"],
-        )
+        prefs = [
+            BuildPreferences(
+                platform="desktop",
+                language="Swift/SwiftUI",
+                constraints=["CoreData"],
+                preferences=["macOS only"],
+            )
+        ]
         warnings = validate_build_preferences(prefs)
         assert warnings == []

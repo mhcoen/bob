@@ -279,17 +279,39 @@ class TestSaveBuildPreferences:
             sample_prefs,
             target_dir=tmp_path,
         )
-        new_prefs = BuildPreferences(
-            platform="cli",
-            language="Rust",
-            constraints=[],
-            preferences=[],
-        )
+        new_prefs = [
+            BuildPreferences(
+                platform="cli",
+                language="Rust",
+                constraints=[],
+                preferences=[],
+            )
+        ]
         save_build_preferences(new_prefs, "newhash", target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
-        assert data["preferences"]["platform"] == "cli"
-        assert data["preferences"]["language"] == "Rust"
+        assert isinstance(data["preferences"], list)
+        assert data["preferences"][0]["platform"] == "cli"
+        assert data["preferences"][0]["language"] == "Rust"
         assert data["architecture_hash"] == "newhash"
+
+    def test_stores_multi_stack_list(self, tmp_path, sample_features, sample_prefs):
+        save_selections(
+            "https://example.com",
+            sample_features,
+            sample_prefs,
+            target_dir=tmp_path,
+        )
+        new_prefs = [
+            BuildPreferences(
+                platform="web", language="TypeScript", constraints=[], preferences=[]
+            ),
+            BuildPreferences(platform="linux", language="Python", constraints=[], preferences=[]),
+        ]
+        save_build_preferences(new_prefs, "newhash", target_dir=tmp_path)
+        data = json.loads((tmp_path / DUPLO_JSON).read_text())
+        assert len(data["preferences"]) == 2
+        assert data["preferences"][0]["platform"] == "web"
+        assert data["preferences"][1]["platform"] == "linux"
 
     def test_preserves_other_keys(self, tmp_path, sample_features, sample_prefs):
         save_selections(
@@ -298,7 +320,9 @@ class TestSaveBuildPreferences:
             sample_prefs,
             target_dir=tmp_path,
         )
-        new_prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        new_prefs = [
+            BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        ]
         save_build_preferences(new_prefs, "hash2", target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["source_url"] == "https://example.com"
@@ -311,7 +335,9 @@ class TestSaveBuildPreferences:
             sample_prefs,
             target_dir=tmp_path,
         )
-        new_prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        new_prefs = [
+            BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
+        ]
         save_build_preferences(new_prefs, "", target_dir=tmp_path)
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert "architecture_hash" not in data

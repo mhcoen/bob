@@ -2,6 +2,25 @@
 
 ## Observations
 
+### [8.3] PlatformEntry dataclass added, parser still missing — 2026-04-18
+
+8.3 added the `PlatformEntry` dataclass and `platform_entries` field
+on `ProductSpec` so `parse_build_preferences` can accept structured
+entries. The field defaults to `[]` and the spec parser does NOT
+populate it yet — list-item rows under `## Architecture` (e.g.
+`- platform: macos` / `language: swift` / `build: spm`) are still
+only captured as free-form prose in `spec.architecture`. Until the
+8.1 parser work lands, the structured-entries branch in
+`parse_build_preferences` is only exercised when a caller builds
+entries manually (tests do this). Re-open 8.1 to wire up the
+list-item parser so real SPEC.md files populate
+`spec.platform_entries`.
+
+Downstream callers in `main.py` currently collapse the list to the
+first entry via `_primary_prefs()` before passing to
+`generate_roadmap` / `generate_phase_plan`. 8.4 (wire resolver) is
+the planned iteration that consumes the full list.
+
 ### [8.2] Documented structured platform entries without a parser — 2026-04-18
 
 CURRENT_PLAN.md marks 8.1 complete (`[x]`), but `duplo/spec_reader.py`
