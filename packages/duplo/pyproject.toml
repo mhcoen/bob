@@ -6,13 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "duplo"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["mcloop", "httpx>=0.27", "beautifulsoup4>=4.12", "lxml>=5.0", "playwright>=1.40", "anthropic>=0.40", "pypdf>=4.0", "Pillow>=10.0"]
+dependencies = [
+    "mcloop",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "playwright>=1.40",
+    "anthropic>=0.40",
+    "pypdf>=4.0",
+    "Pillow>=10.0",
+    "pytest>=8.0",
+    "pytest-xdist>=3.5",
+]
 
 [tool.setuptools]
 packages = ["duplo"]
 
 [project.scripts]
 duplo = "duplo.main:main"
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
 
 [tool.ruff]
 target-version = "py311"

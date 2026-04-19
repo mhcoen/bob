@@ -2,6 +2,7 @@
   "checks": [
     "ruff check .",
     "ruff format --check .",
-    "pytest"
-  ]
+    "pytest -x -n auto"
+  ],
+  "check_timeout": 600
 }
