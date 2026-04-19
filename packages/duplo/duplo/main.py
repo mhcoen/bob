@@ -1916,8 +1916,12 @@ def _subsequent_run() -> None:
         print("All features implemented. Nothing to do.")
         return
 
-    # Phase number = number of completed phases + 1.
-    history_phase_number = len(data.get("phases", [])) + 1
+    # On first runs (no completed phases) the roadmap's own phase keys
+    # (starting at 0 for the scaffold) are the authoritative phase
+    # numbers.  On subsequent runs we continue numbering from the
+    # completion history so labels don't collide with phases already
+    # recorded in ``phases``.
+    phases_completed = len(data.get("phases", []))
 
     # Shared inputs used for every phase's plan generation.
     source_url = _source_url_from_spec(spec) or data.get("source_url", "")
@@ -1939,7 +1943,7 @@ def _subsequent_run() -> None:
     # artifacts (run.sh, .gitignore entries, etc.) before the planner
     # runs, so tasks can reference them instead of recreating them.
     scaffold_notice = ""
-    if history_phase_number == 1 and profiles:
+    if phases_completed == 0 and profiles:
         written = write_scaffold(profiles, app_name, target_dir=Path.cwd())
         if written:
             for p in written:
@@ -1972,7 +1976,14 @@ def _subsequent_run() -> None:
     # result to PLAN.md. mcloop will consume the phases in order.
     total_phases = len(roadmap)
     for idx, phase_dict in enumerate(roadmap):
-        phase_number_i = history_phase_number + idx
+        if phases_completed == 0:
+            # First run: honour the roadmap's own phase numbers so the
+            # scaffold plan is labelled "Phase 0".
+            phase_number_i = phase_dict.get("phase", idx)
+        else:
+            # Subsequent run: continue numbering from the history so
+            # new plans never collide with already-completed phases.
+            phase_number_i = phases_completed + idx + 1
         phase_title = phase_dict.get("title", "")
         phase_label_i = (
             f"Phase {phase_number_i}: {phase_title}" if phase_title else f"Phase {phase_number_i}"
