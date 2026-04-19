@@ -1117,5 +1117,3 @@ declarations to SPEC.md.
 - [x] Add integration test for the full platform knowledge flow. Create test_platform_integration.py. Given a SPEC.md with a SwiftUI architecture entry, mock the LLM calls and verify that: resolve_profiles returns the swiftui_spm profile, the planner system prompt contains platform rules, a run.sh file exists on disk, CLAUDE.md contains the platform rules section, and gitignore contains .build/ and *.app/ entries.
 
 - [x] Run the full test suite and confirm all tests pass. Execute pytest -x against the duplo repo. If any test fails, the task fails and mcloop will retry.
-
-## Bugs
