@@ -16,6 +16,7 @@ from duplo.planner import (
     _PHASE_SYSTEM,
     _PLAN_FILENAME,
     _detect_next_phase_number,
+    _ensure_h1_heading,
     _inject_bugs_section,
     _strip_fences,
     append_test_tasks,
@@ -241,6 +242,120 @@ class TestGeneratePhasePlan:
             )
         prompt = mock_query.call_args[0][0]
         assert "Phase 2:" in prompt
+
+
+class TestGeneratePhasePlanH1Heading:
+    """Verify generate_phase_plan() always returns content starting with '# '."""
+
+    def test_returned_content_starts_with_h1(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        assert result.startswith("# ")
+
+    def test_prepends_h1_when_missing(self):
+        no_h1 = "Some preamble describing the phase.\n\n- [ ] Build thing"
+        with patch("duplo.planner.query", return_value=no_h1):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="Numi",
+                phase_number=0,
+            )
+        assert result.startswith("# Numi")
+        first_line = result.split("\n", 1)[0]
+        assert "Phase 0:" in first_line
+        assert "Some preamble describing the phase." in result
+
+    def test_prepends_h1_when_h2_at_start(self):
+        h2_only = "## Subsection heading\n\n- [ ] Task"
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "Polish it",
+            "features": ["Dashboard"],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=h2_only):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+                project_name="MyApp",
+            )
+        assert result.startswith("# MyApp")
+        first_line = result.split("\n", 1)[0]
+        assert "Phase 2:" in first_line
+        assert "Polish" in first_line
+        assert "## Subsection heading" in result
+
+    def test_preserves_existing_h1(self):
+        with_h1 = "# LLM Heading — Phase 1: Core\n\n- [ ] Task"
+        with patch("duplo.planner.query", return_value=with_h1):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="Different",
+            )
+        assert result == with_h1
+
+    def test_prepended_heading_uses_phase_number_and_title(self):
+        no_h1 = "- [ ] Task"
+        phase = {
+            "phase": 5,
+            "title": "Integrations",
+            "goal": "Wire it up",
+            "features": [],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=no_h1):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+                project_name="Widget",
+            )
+        first_line = result.split("\n", 1)[0]
+        assert first_line == "# Widget — Phase 5: Integrations"
+
+
+class TestEnsureH1Heading:
+    def test_content_with_h1_stripped_of_leading_ws(self):
+        assert _ensure_h1_heading("\n\n# App — Phase 1: Core\n", "X", 1, "Core") == (
+            "# App — Phase 1: Core\n"
+        )
+
+    def test_prepends_when_no_heading(self):
+        result = _ensure_h1_heading("plain text\n", "Widget", 2, "Polish")
+        assert result.startswith("# Widget — Phase 2: Polish\n\nplain text")
+
+    def test_prepends_when_h2_only(self):
+        result = _ensure_h1_heading("## sub\n\n- [ ] x", "App", 0, "Scaffold")
+        assert result.startswith("# App — Phase 0: Scaffold\n\n## sub")
+
+    def test_empty_content_produces_heading_only(self):
+        assert _ensure_h1_heading("", "App", 0, "Scaffold") == "# App — Phase 0: Scaffold\n"
+
+    def test_empty_project_name_uses_fallback(self):
+        result = _ensure_h1_heading("- [ ] Task", "", 1, "Core")
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_hash_without_space_is_not_h1(self):
+        # "#foo" is not a valid markdown heading in CommonMark.
+        result = _ensure_h1_heading("#foo\n", "App", 1, "Core")
+        assert result.startswith("# App — Phase 1: Core\n\n#foo")
+
+    def test_empty_h1_line_is_not_accepted(self):
+        # "# \n" (hash + space + newline, no heading text) should not qualify.
+        result = _ensure_h1_heading("# \n- [ ] Task", "App", 1, "Core")
+        assert result.startswith("# App — Phase 1: Core")
 
 
 class TestPhaseSystemPromptAnnotations:

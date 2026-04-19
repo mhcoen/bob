@@ -129,11 +129,36 @@ _FENCE_RE = re.compile(
     re.DOTALL,
 )
 
+_H1_HEADING_RE = re.compile(r"^# \S")
+
 
 def _strip_fences(text: str) -> str:
     """Remove outer triple-backtick fences if the LLM wrapped the plan."""
     m = _FENCE_RE.match(text)
     return m.group(1) if m else text
+
+
+def _ensure_h1_heading(
+    content: str,
+    project_name: str,
+    phase_num: int,
+    phase_title: str,
+) -> str:
+    """Ensure *content* starts with a proper H1 markdown heading.
+
+    If the first non-whitespace line does not begin with ``# `` followed by
+    heading text, prepend ``# <project_name> — Phase <num>: <title>`` so
+    mcloop's phase parser can reliably locate the phase heading at the top
+    of PLAN.md.
+    """
+    stripped = content.lstrip()
+    if _H1_HEADING_RE.match(stripped):
+        return stripped
+    app_name = project_name or "App"
+    heading = f"# {app_name} — Phase {phase_num}: {phase_title}"
+    if stripped:
+        return f"{heading}\n\n{stripped}"
+    return f"{heading}\n"
 
 
 @dataclasses.dataclass
@@ -342,7 +367,8 @@ Generate the PLAN.md now.
 """
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
-    return _strip_fences(query(prompt, system=system))
+    raw = _strip_fences(query(prompt, system=system))
+    return _ensure_h1_heading(raw, project_name, phase_num, phase_title)
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
