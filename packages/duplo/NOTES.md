@@ -893,6 +893,32 @@ Next checkbox (CURRENT_PLAN.md line 44) calls for deleting
 delete any file" project rule, this is flagged here for the user to
 decide. Leaving both files in place until explicitly directed.
 
+### [3] mypy not installed; type-error sweep deferred — 2026-04-19
+
+Task 3 asked to add `[tool.mypy]` to pyproject.toml, run mypy against
+the codebase, and fix any type errors that surface. The mypy config
+block and `tests/test_mypy.py` (which runs `python -m mypy duplo` via
+subprocess, skipping if mypy is unavailable) are in place. However,
+`mypy` is not installed in `.venv` or on PATH, and the project
+instructions forbid installing tools. Concretely:
+
+- `/Users/mhcoen/proj/duplo/.venv/bin/pip list | grep -i mypy` → empty
+- `which mypy` → not found
+- `python -m mypy --version` → `No module named mypy`
+
+Consequences:
+- The "run mypy and fix errors that surface" step could not be
+  performed. No type annotations were adjusted.
+- `tests/test_mypy.py::test_mypy_clean` will currently be skipped in
+  CI. Once mypy is installed (`pip install mypy`), the test will
+  execute and may report real type errors that still need to be fixed.
+
+Recommended user follow-up:
+1. `pip install mypy` (or add to dev dependencies).
+2. Run `python -m mypy duplo` and address the reported errors with
+   type-annotation-only fixes, matching the intent of task 3.
+3. Re-run `pytest tests/test_mypy.py` to confirm zero errors.
+
 ## Hypotheses
 
 ### [7.1.2] Dispatch and _subsequent_run assumptions block _first_run removal — 2026-04-17
