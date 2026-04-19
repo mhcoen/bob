@@ -1119,3 +1119,7 @@ declarations to SPEC.md.
 - [x] Run the full test suite and confirm all tests pass. Execute pytest -x against the duplo repo. If any test fails, the task fails and mcloop will retry.
 
 ## Bugs
+
+- [ ] duplo generates only one phase plan per invocation, requiring the user to re-run duplo between each phase. The roadmap is already fully generated with all phases, goals, features, and test criteria. duplo should loop through all roadmap phases and generate their plans into PLAN.md so mcloop can execute them continuously without user intervention.
+
+- [ ] LLM calls during plan generation (planner.py query() calls) produce no output while running, making it look like duplo has hung. Print a progress indicator or periodic status message during long-running LLM calls so the user knows work is in progress.
