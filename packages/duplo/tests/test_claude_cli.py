@@ -131,14 +131,44 @@ class TestQuery:
 
     def test_raises_claude_cli_error_on_timeout(self, monkeypatch):
         # poll never completes; monotonic jumps past the timeout.
+        # Retries up to 3 times, so supply monotonic values for every attempt.
         monkeypatch.setattr(
             "duplo.claude_cli.subprocess.Popen",
             _popen_factory(poll_results=[None, None, None, None]),
         )
-        times = iter([0.0, 100.0, 601.0, 602.0])
+        times = iter([0.0, 100.0, 601.0] * 3)
         monkeypatch.setattr("duplo.claude_cli.time.monotonic", lambda: next(times))
         with pytest.raises(ClaudeCliError, match="timed out"):
             query("prompt")
+
+    def test_retries_on_failure_then_succeeds(self, monkeypatch):
+        """query() retries on ClaudeCliError and returns a later successful attempt."""
+        calls = {"n": 0}
+        fail_class = _popen_factory(stderr_text="boom", poll_results=[1], final_returncode=1)
+        success_class = _popen_factory(stdout_text="ok", poll_results=[0])
+
+        def dispatch(cmd, **kwargs):
+            calls["n"] += 1
+            cls = fail_class if calls["n"] <= 2 else success_class
+            return cls(cmd, **kwargs)
+
+        monkeypatch.setattr("duplo.claude_cli.subprocess.Popen", dispatch)
+        assert query("prompt") == "ok"
+        assert calls["n"] == 3
+
+    def test_raises_after_three_failed_attempts(self, monkeypatch):
+        """query() re-raises ClaudeCliError when every attempt fails."""
+        calls = {"n": 0}
+        fail_class = _popen_factory(stderr_text="boom", poll_results=[1], final_returncode=1)
+
+        def dispatch(cmd, **kwargs):
+            calls["n"] += 1
+            return fail_class(cmd, **kwargs)
+
+        monkeypatch.setattr("duplo.claude_cli.subprocess.Popen", dispatch)
+        with pytest.raises(ClaudeCliError, match="boom"):
+            query("prompt")
+        assert calls["n"] == 3
 
     def test_raises_when_claude_cli_missing(self, monkeypatch):
         monkeypatch.setattr(
@@ -219,3 +249,26 @@ class TestQueryWithImages:
         ):
             with pytest.raises(ClaudeCliError, match="timed out"):
                 query_with_images("go", [Path("/x.png")])
+
+    def test_retries_on_timeout_then_succeeds(self):
+        """query_with_images() retries TimeoutExpired and returns a later success."""
+        side_effects = [
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+            _completed("result"),
+        ]
+        with patch("duplo.claude_cli.subprocess.run", side_effect=side_effects) as m:
+            assert query_with_images("go", [Path("/x.png")]) == "result"
+        assert m.call_count == 3
+
+    def test_raises_after_three_timeouts(self):
+        """query_with_images() re-raises ClaudeCliError after 3 timeouts."""
+        side_effects = [
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+        ]
+        with patch("duplo.claude_cli.subprocess.run", side_effect=side_effects) as m:
+            with pytest.raises(ClaudeCliError, match="timed out"):
+                query_with_images("go", [Path("/x.png")])
+        assert m.call_count == 3

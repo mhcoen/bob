@@ -12,6 +12,8 @@ from pathlib import Path
 _DOT_INTERVAL_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.5
 _TIMEOUT_SECONDS = 600
+_MAX_ATTEMPTS = 3
+_RETRY_SLEEP_SECONDS = 5.0
 
 
 class ClaudeCliError(Exception):
@@ -32,13 +34,37 @@ def _drain_stream(stream, sink: list[str]) -> None:
         pass
 
 
+def _with_retry(func, *args, **kwargs):
+    """Call ``func`` with up to ``_MAX_ATTEMPTS`` attempts on ClaudeCliError.
+
+    Sleeps ``_RETRY_SLEEP_SECONDS`` between attempts and prints a progress
+    message to stderr before each retry. Re-raises the last ClaudeCliError
+    if every attempt fails.
+    """
+    last_err: ClaudeCliError | None = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return func(*args, **kwargs)
+        except ClaudeCliError as err:
+            last_err = err
+            if attempt < _MAX_ATTEMPTS:
+                sys.stderr.write(
+                    f"claude CLI attempt {attempt}/{_MAX_ATTEMPTS} timed out, retrying...\n"
+                )
+                sys.stderr.flush()
+                time.sleep(_RETRY_SLEEP_SECONDS)
+    assert last_err is not None
+    raise last_err
+
+
 def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     """Send a text prompt to ``claude -p`` and return the response text.
 
     Runs the CLI via ``subprocess.Popen`` and prints a dot to stderr every
     ``_DOT_INTERVAL_SECONDS`` while the call is in flight so the user sees
     progress during long-running generations. A trailing newline is printed
-    once the call completes.
+    once the call completes. On failure (timeout or non-zero exit) the call
+    is retried up to ``_MAX_ATTEMPTS`` times.
 
     Args:
         prompt: The user prompt to send.
@@ -49,8 +75,12 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
         The response text stripped of leading/trailing whitespace.
 
     Raises:
-        ClaudeCliError: If the CLI exits with a non-zero code or times out.
+        ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
+    return _with_retry(_query_once, prompt, system=system, model=model)
+
+
+def _query_once(prompt: str, *, system: str, model: str) -> str:
     cmd = ["claude", "-p", "--model", model]
     if system:
         cmd.extend(["--system-prompt", system])
@@ -121,7 +151,8 @@ def query_with_images(
     """Send a prompt with image file references to ``claude -p``.
 
     Instructs Claude to read each image file using the Read tool,
-    then respond based on the system prompt.
+    then respond based on the system prompt. On failure (timeout or
+    non-zero exit) the call is retried up to ``_MAX_ATTEMPTS`` times.
 
     Args:
         prompt: The analysis instructions.
@@ -133,8 +164,18 @@ def query_with_images(
         The response text stripped of leading/trailing whitespace.
 
     Raises:
-        ClaudeCliError: If the CLI exits with a non-zero code.
+        ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
+    return _with_retry(_query_with_images_once, prompt, image_paths, system=system, model=model)
+
+
+def _query_with_images_once(
+    prompt: str,
+    image_paths: list[Path],
+    *,
+    system: str,
+    model: str,
+) -> str:
     image_lines = [f"- {Path(path).resolve()}" for path in image_paths]
     full_prompt = (
         "Read the following image files using the Read tool, "
