@@ -1254,3 +1254,5 @@ d0ee5a9: The monolithic main.py was split into three modules: main.py (CLI dispa
 f772c16: Fixed a stale test that mocked time values below the updated CLI timeout, causing a StopIteration error instead of the expected timeout exception. Removed design requirement injection into PLAN.md, as visual design specifications are now written to CLAUDE.md to avoid breaking mcloop's phase parser. Updated tests to reflect that design blocks are no longer inserted into the plan.
 
 dc48670: Added deduplication to verification case extraction, preventing duplicate input/expected pairs from multiple frames. Fixed a stale test mocking outdated CLI timeouts and moved design specifications from PLAN.md to CLAUDE.md to avoid parser conflicts. Updated tests to verify deduplication behavior and reflect the design block relocation.
+
+18df8b8: Added retry logic to the Claude CLI wrapper functions. Both query() and query_with_images() now attempt up to 3 retries with a 5-second delay between attempts when they encounter timeouts or non-zero exit codes. This improves reliability for transient failures.

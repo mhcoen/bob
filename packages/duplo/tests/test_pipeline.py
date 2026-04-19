@@ -429,6 +429,69 @@ class TestPhaseCompletionFlow:
         assert mock_save.call_count == len(fresh_roadmap)
 
 
+class TestSubsequentRunPhaseLoopClaudeCliError:
+    """Plan-generation loop must tolerate ClaudeCliError mid-loop.
+
+    Retry logic inside query() can still exhaust all attempts. When that
+    happens, earlier phases already appended to PLAN.md via save_plan()
+    must survive: the exception must be swallowed, the loop must break,
+    and the summary must reflect the partial save.
+    """
+
+    def test_claude_cli_error_on_third_phase_preserves_first_two(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        from duplo.claude_cli import ClaudeCliError
+
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 2, "title": "Polish", "goal": "g", "features": [], "test": "ok"},
+        ]
+        data = {
+            "source_url": "https://example.com",
+            "features": [],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "roadmap": roadmap,
+            "current_phase": 0,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        call_count = {"n": 0}
+
+        def fake_generate(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 3:
+                raise ClaudeCliError("simulated retry exhaustion")
+            return f"# Phase {kwargs.get('phase_number', call_count['n'])}\n- [ ] task\n"
+
+        with (
+            patch("duplo.pipeline.generate_phase_plan", side_effect=fake_generate) as mock_gen,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+        ):
+            # Must not propagate the ClaudeCliError out of main().
+            main()
+
+        # Third call raised, so generate_phase_plan ran three times total.
+        assert mock_gen.call_count == 3
+        # Only the first two phases were saved -- the third failed before
+        # save_plan could be called.
+        assert mock_save.call_count == 2
+
+        out = capsys.readouterr().out
+        # Failure message reports the partial save count.
+        assert "plan generation failed after retries" in out
+        assert "2 of 3 phases saved to PLAN.md" in out
+        # Closing summary reports the actual saved count, not the total.
+        assert "Plan ready for 2 of 3 phases." in out
+
+
 class TestSubsequentRunFileChanges:
     """Tests for file change detection on subsequent runs."""
 

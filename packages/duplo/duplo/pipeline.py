@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
+from duplo.claude_cli import ClaudeCliError
 from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
 from duplo.diagnostics import record_failure
@@ -1549,6 +1550,7 @@ def _subsequent_run() -> None:
     # Generate a plan for every phase in the roadmap and append each
     # result to PLAN.md. mcloop will consume the phases in order.
     total_phases = len(roadmap)
+    saved_count = 0
     for idx, phase_dict in enumerate(roadmap):
         if phases_completed == 0:
             # First run: honour the roadmap's own phase numbers so the
@@ -1563,37 +1565,52 @@ def _subsequent_run() -> None:
             f"Phase {phase_number_i}: {phase_title}" if phase_title else f"Phase {phase_number_i}"
         )
         print(f"Generating {phase_label_i} PLAN.md \u2026")
-        content = generate_phase_plan(
-            source_url,
-            features,
-            _primary_prefs(preferences),
-            phase=phase_dict,
-            project_name=app_name,
-            phase_number=phase_number_i,
-            spec_text=spec_prompt,
-            platform_addendum=platform_addendum,
-        )
-        # Verification tasks are authored once against the first phase;
-        # they describe product-level behavior, not per-phase scope.
-        if idx == 0:
-            frame_descs = load_frame_descriptions()
-            if frame_descs:
-                print("Extracting verification cases from demo video \u2026")
-                vcases = extract_verification_cases(frame_descs)
-                if vcases:
-                    vtasks = format_verification_tasks(vcases)
-                    content = content.rstrip() + "\n" + vtasks
-                    print(f"  {len(vcases)} verification case(s) added.")
-            spec_vtasks = ""
-            if spec:
-                spec_vtasks = format_contracts_as_verification(spec)
-            if spec_vtasks:
-                content = content.rstrip() + "\n" + spec_vtasks
-                print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
-        saved = save_plan(content)
+        try:
+            content = generate_phase_plan(
+                source_url,
+                features,
+                _primary_prefs(preferences),
+                phase=phase_dict,
+                project_name=app_name,
+                phase_number=phase_number_i,
+                spec_text=spec_prompt,
+                platform_addendum=platform_addendum,
+            )
+            # Verification tasks are authored once against the first phase;
+            # they describe product-level behavior, not per-phase scope.
+            if idx == 0:
+                frame_descs = load_frame_descriptions()
+                if frame_descs:
+                    print("Extracting verification cases from demo video \u2026")
+                    vcases = extract_verification_cases(frame_descs)
+                    if vcases:
+                        vtasks = format_verification_tasks(vcases)
+                        content = content.rstrip() + "\n" + vtasks
+                        print(f"  {len(vcases)} verification case(s) added.")
+                spec_vtasks = ""
+                if spec:
+                    spec_vtasks = format_contracts_as_verification(spec)
+                if spec_vtasks:
+                    content = content.rstrip() + "\n" + spec_vtasks
+                    print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
+            saved = save_plan(content)
+        except ClaudeCliError:
+            # Previously this crashed the whole pipeline and any phases
+            # already written to PLAN.md were reported as if lost. Earlier
+            # save_plan() calls persisted to disk, so stop cleanly and
+            # report how many phases made it.
+            print(
+                f"Phase {phase_number_i}: plan generation failed after retries. "
+                f"{idx} of {total_phases} phases saved to PLAN.md."
+            )
+            break
+        saved_count += 1
         print(f"{phase_label_i} plan saved to {saved}")
 
-    print(f"\nPlan ready for all {total_phases} phases.")
+    if saved_count == total_phases:
+        print(f"\nPlan ready for all {total_phases} phases.")
+    else:
+        print(f"\nPlan ready for {saved_count} of {total_phases} phases.")
     print("Run mcloop to start building.")
 
 
