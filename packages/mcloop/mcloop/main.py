@@ -1226,8 +1226,21 @@ def run_loop(
                     continue
 
                 if not _has_meaningful_changes(project_dir):
-                    # No file changes — but maybe the work was already done.
-                    # Run checks: if they pass, auto-check the task.
+                    if active_file == bugs_path:
+                        last_error = (
+                            "Bug task produced no file changes. A bug task"
+                            " must actually modify code; treating this as"
+                            " a failure rather than auto-checking."
+                        )
+                        print(
+                            formatting.error_msg(
+                                "Bug task produced no changes - treating as failure"
+                            ),
+                            flush=True,
+                        )
+                        break
+                    # Non-bug tasks: no file changes — but maybe the work
+                    # was already done. Run checks: if they pass, auto-check.
                     noop_check = run_checks(project_dir)
                     if noop_check.passed:
                         check_off(active_file, task)

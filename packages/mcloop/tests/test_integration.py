@@ -350,6 +350,66 @@ def test_noop_task_checks_pass_auto_checks(
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_bug_task_noop_is_failure_even_when_checks_pass(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """Bug task + no file changes: failure even if checks pass.
+
+    A BUGS.md entry asserts the code is broken; a session that exits
+    without editing anything has not fixed it, regardless of whether
+    checks happen to pass on the unchanged tree.
+    """
+    md = _make_project(tmp_path, "- [x] Already done plan task\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n\n- [ ] Fix the thing\n")
+    mock_run.return_value = _ok_run_result()
+
+    result = run_loop(md, max_retries=3)
+
+    assert not result.ok
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    # Bug branch short-circuits before run_checks is called on the
+    # no-change path. run_checks may still run elsewhere (e.g. not at
+    # all here, since the loop exits on terminal failure), but must
+    # never be invoked via the no-change code path for a bug task.
+    assert mock_checks.call_count == 0
+
+    bugs_content = (tmp_path / "BUGS.md").read_text()
+    assert "- [!] Fix the thing" in bugs_content
+
+    calls = _notify_calls(mock_notify)
+    assert len(calls) == 1
+    assert calls[0] == ("Giving up on: Fix the thing", "error")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_non_bug_noop_still_auto_checks(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """Regression pin: plan-task no-op + checks-pass still auto-checks."""
+    md = _make_project(tmp_path, "- [ ] Already done plan task\n")
+    mock_run.return_value = _ok_run_result()
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert result.ok
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    content = md.read_text()
+    assert "- [x] Already done plan task" in content
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
 @patch("mcloop.main.run_task")
 def test_noop_then_checks_fail_is_terminal(
     mock_run, mock_commit, mock_checkpoint, mock_notify, tmp_path
