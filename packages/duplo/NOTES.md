@@ -1211,3 +1211,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 7f71fca: Fixed a bug where visual design requirements were placed before the phase heading in PLAN.md, causing mcloop's phase parser to treat them as a preamble and break task dispatch. Now design sections are inserted after the Phase 0 heading, ensuring they are correctly recognized as part of the phase body.
 
 de79987: Added a helper to ensure generated phase plans start with a proper H1 heading, improving compatibility with downstream parsing. Updated the plan generation to prepend a formatted heading when missing, using project name, phase number, and title. Added comprehensive tests to verify heading detection, fallback behavior, and edge cases.
+
+d0ee5a9: The monolithic main.py was split into three modules: main.py (CLI dispatch and signal handling), pipeline.py (orchestration and fix mode), and status.py (display helpers). This improves code organization and maintainability while preserving backward compatibility for existing test patches. A bulk script updated over 1000 test patches to point to the new module locations.
