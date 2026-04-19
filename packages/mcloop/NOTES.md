@@ -70,3 +70,5 @@ find_next picks tasks in run_loop, so behavior stays consistent.
 ## Hypotheses
 
 ## Eliminated
+
+6c95f88: Parallelized check execution to improve performance by running independent commands concurrently. Updated tests to handle non-deterministic execution order and added a concurrency test to verify parallel behavior.
