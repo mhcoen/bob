@@ -262,6 +262,56 @@ def _build_shared_parts(
     return parts
 
 
+def _build_bug_task_prompt(
+    task_text: str,
+    description: str,
+    task_label: str,
+    session_context: str,
+    check_commands: list[str] | None,
+    eliminated: list[str] | None = None,
+) -> str:
+    """Build prompt for a first-attempt bug task from BUGS.md.
+
+    Unlike ``_build_normal_prompt``, this tells the session that
+    the described behavior is confirmed broken and code changes
+    are mandatory.  A session that exits without modifying files
+    will be treated as a failure by the orchestrator.
+    """
+    parts = []
+    if description:
+        parts.append(f"Project context:\n{description}")
+    parts.append(
+        "BUG FIX (MANDATORY CODE CHANGE): This task comes"
+        " from BUGS.md. The behavior described below is"
+        " confirmed broken. You MUST modify code to fix it."
+        " Do not exit without making changes. If a function"
+        " mentioned in the task already exists, that does not"
+        " mean the bug is fixed -- read the task carefully,"
+        " it describes what the function should do differently"
+        " from what it does now. Exiting without file changes"
+        " means you failed."
+    )
+    if session_context:
+        parts.append(f"Recent session history:\n{session_context}")
+    parts.append(f"Task: {task_text}")
+    parts.append(
+        "Fix the bug with a targeted change. Write or update"
+        " tests to cover the new behavior so it cannot regress."
+    )
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    if eliminated:
+        elim_text = "\n".join(eliminated)
+        parts.append(
+            "RULED OUT APPROACHES: The following approaches"
+            " have already been tried for this task and"
+            " failed. Do not repeat any of them. If you"
+            " find yourself heading toward a ruled out"
+            " approach, stop and try a fundamentally"
+            " different strategy.\n" + elim_text
+        )
+    return "\n\n".join(parts)
+
+
 def _build_normal_prompt(
     task_text: str,
     description: str,
@@ -382,6 +432,7 @@ def run_task(
     allowed_tools: str | None = None,
     eliminated: list[str] | None = None,
     timeout: int = DEFAULT_TASK_TIMEOUT,
+    is_bug_task: bool = False,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult."""
     project_dir = Path(project_dir)
@@ -396,6 +447,15 @@ def run_task(
             session_context,
             check_commands,
             prior_errors,
+            eliminated,
+        )
+    elif is_bug_task:
+        prompt = _build_bug_task_prompt(
+            task_text,
+            description,
+            task_label,
+            session_context,
+            check_commands,
             eliminated,
         )
     else:

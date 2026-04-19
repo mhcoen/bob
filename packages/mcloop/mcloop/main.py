@@ -629,8 +629,7 @@ def run_loop(
         if total:
             print(
                 formatting.system_msg(
-                    f"--retry: reset {total} failed task marker"
-                    f"{'s' if total != 1 else ''}"
+                    f"--retry: reset {total} failed task marker{'s' if total != 1 else ''}"
                 ),
                 flush=True,
             )
@@ -1112,6 +1111,7 @@ def run_loop(
                     allowed_tools=allowed_tools,
                     eliminated=eliminated,
                     timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
+                    is_bug_task=(active_file == bugs_path),
                 )
 
                 if is_session_limited(
@@ -1755,7 +1755,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--retry",
         action="store_true",
-        help="Reset failed-task markers ([!] back to [ ]) in CURRENT_PLAN.md and BUGS.md before starting the loop",
+        help=(
+            "Reset failed-task markers ([!] back to [ ]) in"
+            " CURRENT_PLAN.md and BUGS.md before starting the loop"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
