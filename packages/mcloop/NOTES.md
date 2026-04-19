@@ -72,3 +72,5 @@ find_next picks tasks in run_loop, so behavior stays consistent.
 ## Eliminated
 
 6c95f88: Parallelized check execution to improve performance by running independent commands concurrently. Updated tests to handle non-deterministic execution order and added a concurrency test to verify parallel behavior.
+
+756c468: Re-enabled the CHECK COMMANDS block in the runner prompt generation, which provides mandatory check instructions to the inner Claude when check_commands are supplied. Updated corresponding tests to verify the block appears when check_commands are provided and is omitted when they are not. This restores the ability for the inner session to run checks and catch failures itself.
