@@ -185,6 +185,7 @@ mcloop --cli codex        # Use Codex instead of Claude Code
 mcloop --no-audit         # Skip the post-completion bug audit
 mcloop --reviewer         # Enable background code reviewer
 mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
+mcloop --retry                # Reset failed [!] markers and retry
 mcloop --stop-after-stage # Complete current stage then exit
 mcloop --stop-after-one   # Run exactly one task then exit
 mcloop sync               # Sync PLAN.md with the codebase
@@ -416,6 +417,10 @@ mcloop --stop-after-stage   # Complete the current stage, then exit
 mcloop --stop-after-one     # Run exactly one task, then exit
 ```
 
+**`--retry`** resets all failed-task markers (`[!]` back to `[ ]`) in
+CURRENT_PLAN.md and BUGS.md before starting, so previously failed tasks
+are retried. Use after fixing the underlying cause of a failure.
+
 **`--stop-after-stage`** runs the current stage to completion (including
 the full-suite check and build at the stage boundary), then exits with
 success instead of advancing to the next stage. Use this for overnight
@@ -597,6 +602,20 @@ order and skips auto-detection entirely:
 }
 ```
 
+```json
+{
+  "checks": ["ruff check .", "ruff format --check .", "pytest"],
+  "check_timeout": 600
+}
+```
+
+The `check_timeout` key sets the per-command timeout in seconds
+(default: 300). Increase this for projects with large test suites.
+
+Check commands run in parallel using `concurrent.futures`, so the
+total check time is the duration of the slowest command, not the
+sum of all commands.
+
 ### Auto-detection rules
 
 If no `checks` array is present (or `mcloop.json` doesn't exist),
@@ -636,6 +655,17 @@ so you know exactly how to launch what was built. Both fields are
 optional.
 
 See [CHECKS.md](CHECKS.md) for complete examples.
+
+### Pytest optimizations
+
+At the start of every run, mcloop checks the target project's
+`pyproject.toml` for parallel test execution support. If
+`pytest-xdist` is not configured, mcloop adds it along with
+`pytest-timeout` to the project's dependencies and configures
+`addopts = "-n auto"` and a 60-second per-test timeout in
+`[tool.pytest.ini_options]`. This is idempotent and ensures every
+project mcloop works on benefits from parallel, timeout-guarded
+tests from the first run.
 
 ### Stages
 
@@ -889,6 +919,21 @@ work once bugs are clear.
 
 If you say no, McLoop skips the bugs and continues with normal
 feature work. The bugs stay in `.mcloop/errors.json` for next time.
+
+Bug tasks (from BUGS.md) are treated differently from feature tasks:
+
+- **Mandatory code changes.** Bug tasks receive a prompt that
+  explicitly states the described behavior is confirmed broken and
+  code modifications are required. A session that exits without
+  changing files is treated as a failure, not as "already satisfied."
+  This prevents sessions from falsely concluding a bug is fixed
+  because a named function already exists.
+
+- **No auto-check on zero diff.** For feature tasks, if a session
+  produces no file changes but all checks pass, mcloop infers the
+  work was already done and auto-checks the task. This heuristic
+  is disabled for bug tasks. If you filed a bug, it's broken;
+  a zero-diff session means the fix wasn't applied.
 
 BUGS.md has absolute priority. If it contains unchecked items,
 `find_next` returns those before any feature tasks in CURRENT_PLAN.md.
