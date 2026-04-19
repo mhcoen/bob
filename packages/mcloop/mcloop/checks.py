@@ -337,6 +337,7 @@ def _detect_commands(
 
     # Built-in: Python (needs content inspection)
     pyproject = project_dir / "pyproject.toml"
+    has_mypy_section = False
     if pyproject.exists():
         toml_text = pyproject.read_text()
         if "ruff" in toml_text:
@@ -344,6 +345,10 @@ def _detect_commands(
             commands.append("ruff format --check .")
         if "pytest" in toml_text:
             commands.append("pytest")
+        if "[tool.mypy]" in toml_text:
+            has_mypy_section = True
+    if has_mypy_section or (project_dir / "mypy.ini").exists():
+        commands.append("mypy .")
 
     # Built-in: Node (needs content inspection)
     pkg_json = project_dir / "package.json"

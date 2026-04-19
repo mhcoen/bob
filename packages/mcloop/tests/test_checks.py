@@ -31,6 +31,51 @@ def test_detect_commands_pyproject_ruff_only(tmp_path):
     assert "pytest" not in cmds
 
 
+def test_detect_commands_mypy_from_pyproject(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.mypy]\nstrict = false\n")
+    cmds = _detect_commands(tmp_path, {})
+    assert "mypy ." in cmds
+
+
+def test_detect_commands_mypy_from_mypy_ini(tmp_path):
+    (tmp_path / "mypy.ini").write_text("[mypy]\nstrict = False\n")
+    cmds = _detect_commands(tmp_path, {})
+    assert "mypy ." in cmds
+
+
+def test_detect_commands_mypy_absent(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
+    cmds = _detect_commands(tmp_path, {})
+    assert "mypy ." not in cmds
+
+
+def test_detect_commands_mypy_with_ruff_and_pytest(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n[tool.mypy]\nstrict = false\n"
+    )
+    cmds = _detect_commands(tmp_path, {})
+    assert "ruff check ." in cmds
+    assert "pytest" in cmds
+    assert "mypy ." in cmds
+
+
+def test_detect_commands_mypy_ini_without_pyproject(tmp_path):
+    (tmp_path / "mypy.ini").write_text("[mypy]\n")
+    cmds = _detect_commands(tmp_path, {})
+    assert "mypy ." in cmds
+    # No pyproject.toml means no ruff/pytest detection
+    assert "ruff check ." not in cmds
+    assert "pytest" not in cmds
+
+
+def test_detect_commands_mypy_not_double_added(tmp_path):
+    """Both [tool.mypy] and mypy.ini present should still only add one 'mypy .'."""
+    (tmp_path / "pyproject.toml").write_text("[tool.mypy]\n")
+    (tmp_path / "mypy.ini").write_text("[mypy]\n")
+    cmds = _detect_commands(tmp_path, {})
+    assert cmds.count("mypy .") == 1
+
+
 def test_detect_commands_package_json(tmp_path):
     (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}')
     cmds = _detect_commands(tmp_path, {})

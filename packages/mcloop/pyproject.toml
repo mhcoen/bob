@@ -38,3 +38,9 @@ timeout = 60
 markers = [
     "integration: marks tests as integration tests (deselect with '-m not integration')",
 ]
+
+[tool.mypy]
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
