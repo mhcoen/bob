@@ -455,7 +455,9 @@ class TestPhaseCompletionFlow:
         out = capsys.readouterr().out
         assert "Completing Phase 0: Core" in out
         assert "Run mcloop to start building" in out
-        mock_gen.assert_called_once()
+        # _BASE_DATA has two phases in the roadmap, so after completing the
+        # first phase the pipeline generates plans for both roadmap phases.
+        assert mock_gen.call_count == len(self._BASE_DATA["roadmap"])
 
     def test_feedback_collected_during_completion(self, tmp_path, monkeypatch):
         """Feedback is collected and saved when a phase completes."""
@@ -494,10 +496,11 @@ class TestPhaseCompletionFlow:
         out = capsys.readouterr().out
         assert "Generating Phase 1: Core PLAN.md" in out
         assert "Run mcloop to start building" in out
-        mock_gen.assert_called_once()
+        # The pipeline now generates a plan for every phase in the roadmap.
+        assert mock_gen.call_count == len(self._BASE_DATA["roadmap"])
 
     def test_phase_number_from_history(self, tmp_path, monkeypatch):
-        """Phase number passed to generate_phase_plan = len(phases) + 1."""
+        """Phase number passed to generate_phase_plan = len(phases) + idx + 1."""
         data = {
             **self._BASE_DATA,
             "phases": [
@@ -517,7 +520,43 @@ class TestPhaseCompletionFlow:
         ):
             main()
 
-        assert mock_gen.call_args.kwargs["phase_number"] == 3
+        # Two completed phases + two roadmap phases => phase_number 3 then 4.
+        phase_numbers = [c.kwargs["phase_number"] for c in mock_gen.call_args_list]
+        assert phase_numbers == [3, 4]
+
+    def test_loops_over_every_roadmap_phase(self, capsys, tmp_path, monkeypatch):
+        """Pipeline must call save_plan once per roadmap phase and print
+        ``Plan ready for all N phases.`` after the loop."""
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 2, "title": "Polish", "goal": "g", "features": [], "test": "ok"},
+        ]
+        data = {
+            **self._BASE_DATA,
+            "roadmap": roadmap,
+            "current_phase": 0,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.generate_roadmap", return_value=roadmap) as mock_roadmap,
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+        ):
+            main()
+
+        # save_plan (and generate_phase_plan) is called once per phase.
+        assert mock_save.call_count == len(roadmap)
+        assert mock_gen.call_count == len(roadmap)
+        # generate_roadmap is not re-invoked when the stored roadmap is valid.
+        mock_roadmap.assert_not_called()
+        out = capsys.readouterr().out
+        assert f"Plan ready for all {len(roadmap)} phases." in out
 
 
 class TestSubsequentRunFileChanges:

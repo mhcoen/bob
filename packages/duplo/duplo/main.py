@@ -300,7 +300,7 @@ from duplo.saver import (
     write_claude_md,
 )
 from duplo.task_matcher import match_unannotated_tasks
-from duplo.selector import select_features, select_issues
+from duplo.selector import select_features, select_issues  # noqa: F401
 
 _DUPLO_JSON = ".duplo/duplo.json"
 # Files that are project artifacts, not user-provided reference materials.
@@ -1909,6 +1909,7 @@ def _subsequent_run() -> None:
         print(format_roadmap(new_roadmap))
         # Reload state after saving roadmap.
         data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+        roadmap = data.get("roadmap", [])
         phase_num, phase_info = get_current_phase()
 
     if phase_info is None:
@@ -1917,46 +1918,14 @@ def _subsequent_run() -> None:
 
     # Phase number = number of completed phases + 1.
     history_phase_number = len(data.get("phases", [])) + 1
-    phase_label = (
-        f"Phase {history_phase_number}: {phase_info['title']}"
-        if phase_info
-        else f"Phase {history_phase_number}"
-    )
 
-    # Let the user confirm/adjust which features go into this phase.
-    remaining = _unimplemented_features(data)
-    phase_feature_names = phase_info.get("features", [])
-    if remaining:
-        selected = select_features(
-            remaining, recommended=phase_feature_names, phase_label=phase_label
-        )
-        if not selected:
-            print("No features selected. Nothing to do.")
-            return
-        # Update phase_info to reflect user's selection.
-        phase_info = dict(phase_info)
-        phase_info["features"] = [f.name for f in selected]
-
-    # Include open issues in the phase plan.
-    all_issues = data.get("issues", [])
-    open_issues = [i for i in all_issues if i.get("status", "open") == "open"]
-    if open_issues:
-        print(f"\n{len(open_issues)} open issue(s) will be included in this phase:")
-        for iss in open_issues:
-            print(f"  - {iss['description']}")
-        selected_issues = select_issues(all_issues)
-        if selected_issues:
-            phase_info = dict(phase_info)
-            phase_info["issues"] = [iss["description"] for iss in selected_issues]
-
-    # Generate plan for current phase.
+    # Shared inputs used for every phase's plan generation.
     source_url = _source_url_from_spec(spec) or data.get("source_url", "")
     features = [_feature_from_dict(f) for f in data.get("features", [])]
     preferences = _load_preferences(data, spec)
     profiles = _resolve_platform_profiles(preferences)
     _announce_profiles(profiles)
 
-    print(f"Generating {phase_label} PLAN.md \u2026")
     design_data = data.get("design_requirements", {})
     design_section = ""
     if design_data:
@@ -1995,38 +1964,53 @@ def _subsequent_run() -> None:
             target_dir=Path.cwd(),
         )
 
-    content = generate_phase_plan(
-        source_url,
-        features,
-        _primary_prefs(preferences),
-        phase=phase_info,
-        project_name=app_name,
-        design_section=design_section,
-        phase_number=history_phase_number,
-        spec_text=spec_prompt,
-        platform_addendum=(
-            format_planner_system_addendum(profiles) + scaffold_notice + local_overrides
-        ),
+    platform_addendum = (
+        format_planner_system_addendum(profiles) + scaffold_notice + local_overrides
     )
-    # Append verification tasks from video frame descriptions.
-    frame_descs = load_frame_descriptions()
-    if frame_descs:
-        print("Extracting verification cases from demo video \u2026")
-        vcases = extract_verification_cases(frame_descs)
-        if vcases:
-            vtasks = format_verification_tasks(vcases)
-            content = content.rstrip() + "\n" + vtasks
-            print(f"  {len(vcases)} verification case(s) added.")
-    # Append verification tasks from SPEC.md behavior contracts.
-    spec_vtasks = ""
-    if spec:
-        spec_vtasks = format_contracts_as_verification(spec)
-    if spec_vtasks:
-        content = content.rstrip() + "\n" + spec_vtasks
-        print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
-    saved = save_plan(content)
-    print(f"{phase_label} plan saved to {saved}")
-    _plan_ready(phase_label)
+
+    # Generate a plan for every phase in the roadmap and append each
+    # result to PLAN.md. mcloop will consume the phases in order.
+    total_phases = len(roadmap)
+    for idx, phase_dict in enumerate(roadmap):
+        phase_number_i = history_phase_number + idx
+        phase_title = phase_dict.get("title", "")
+        phase_label_i = (
+            f"Phase {phase_number_i}: {phase_title}" if phase_title else f"Phase {phase_number_i}"
+        )
+        print(f"Generating {phase_label_i} PLAN.md \u2026")
+        content = generate_phase_plan(
+            source_url,
+            features,
+            _primary_prefs(preferences),
+            phase=phase_dict,
+            project_name=app_name,
+            design_section=design_section,
+            phase_number=phase_number_i,
+            spec_text=spec_prompt,
+            platform_addendum=platform_addendum,
+        )
+        # Verification tasks are authored once against the first phase;
+        # they describe product-level behavior, not per-phase scope.
+        if idx == 0:
+            frame_descs = load_frame_descriptions()
+            if frame_descs:
+                print("Extracting verification cases from demo video \u2026")
+                vcases = extract_verification_cases(frame_descs)
+                if vcases:
+                    vtasks = format_verification_tasks(vcases)
+                    content = content.rstrip() + "\n" + vtasks
+                    print(f"  {len(vcases)} verification case(s) added.")
+            spec_vtasks = ""
+            if spec:
+                spec_vtasks = format_contracts_as_verification(spec)
+            if spec_vtasks:
+                content = content.rstrip() + "\n" + spec_vtasks
+                print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
+        saved = save_plan(content)
+        print(f"{phase_label_i} plan saved to {saved}")
+
+    print(f"\nPlan ready for all {total_phases} phases.")
+    print("Run mcloop to start building.")
 
 
 def _partition_features(

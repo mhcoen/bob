@@ -1962,12 +1962,13 @@ class TestSubsequentRunRefOnlySpec:
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert "## Bugs" in content
 
-    def test_select_features_called(self, tmp_path, monkeypatch):
-        """select_features is called during plan generation."""
+    def test_select_features_not_called(self, tmp_path, monkeypatch):
+        """Per-phase interactive feature selection was removed when the
+        pipeline switched to generating plans for every roadmap phase."""
         self._setup(tmp_path, monkeypatch)
         mocks = self._run_with_mocks()
 
-        mocks["select_features"].assert_called_once()
+        mocks["select_features"].assert_not_called()
 
     def test_extract_design_not_called(self, tmp_path, monkeypatch):
         """extract_design is not called for ref-only subsequent run.
