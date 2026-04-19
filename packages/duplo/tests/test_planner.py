@@ -305,6 +305,41 @@ class TestGeneratePhasePlanH1Heading:
             )
         assert result == with_h1
 
+    def test_strips_llm_preamble_before_h1(self):
+        """generate_phase_plan() strips LLM meta-commentary before the H1.
+
+        Reproduces the numi Phase 4 regression: the LLM prefixed the plan
+        with 'The PLAN.md content is ready. Here it is...' followed by
+        a '---' separator before the real heading. After _strip_fences(),
+        that preamble must be discarded so mcloop parses a single clean
+        phase heading.
+        """
+        with_preamble = (
+            "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
+            "\n"
+            "---\n"
+            "\n"
+            "# Numi — Phase 4: Advanced\n"
+            "\n"
+            "Python/SwiftUI calculator app.\n"
+            "\n"
+            "- [ ] Build advanced scientific functions\n"
+        )
+        with patch("duplo.planner.query", return_value=with_preamble):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="Numi",
+                phase_number=4,
+            )
+        assert result.startswith("# Numi — Phase 4: Advanced")
+        assert "The PLAN.md content is ready" not in result
+        assert "append to PLAN.md" not in result
+        # Only one H1 heading in the result.
+        h1_lines = [ln for ln in result.splitlines() if ln.startswith("# ")]
+        assert len(h1_lines) == 1
+
     def test_prepended_heading_uses_phase_number_and_title(self):
         no_h1 = "- [ ] Task"
         phase = {
@@ -356,6 +391,31 @@ class TestEnsureH1Heading:
         # "# \n" (hash + space + newline, no heading text) should not qualify.
         result = _ensure_h1_heading("# \n- [ ] Task", "App", 1, "Core")
         assert result.startswith("# App — Phase 1: Core")
+
+    def test_strips_preamble_before_h1(self):
+        # Regression: numi Phase 4 output had LLM meta-commentary before the
+        # real phase heading. Previously _ensure_h1_heading would prepend a
+        # new heading while leaving the original intact (two H1s, preamble
+        # garbage in between). It must discard everything up to the H1 line.
+        content = (
+            "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
+            "\n"
+            "---\n"
+            "\n"
+            "# Numi — Phase 4: Advanced\n"
+            "\n"
+            "- [ ] First task\n"
+        )
+        result = _ensure_h1_heading(content, "Ignored", 99, "Ignored")
+        assert result.startswith("# Numi — Phase 4: Advanced")
+        assert "The PLAN.md content is ready" not in result
+        assert "---" not in result
+        assert result.count("# ") == 1  # no duplicate H1 heading
+
+    def test_strips_preamble_with_separator_only(self):
+        content = "---\n\n# App — Phase 2: Core\n\n- [ ] Task"
+        result = _ensure_h1_heading(content, "Ignored", 99, "Ignored")
+        assert result == "# App — Phase 2: Core\n\n- [ ] Task"
 
 
 class TestPhaseSystemPromptAnnotations:

@@ -146,16 +146,22 @@ def _ensure_h1_heading(
 ) -> str:
     """Ensure *content* starts with a proper H1 markdown heading.
 
-    If the first non-whitespace line does not begin with ``# `` followed by
-    heading text, prepend ``# <project_name> — Phase <num>: <title>`` so
-    mcloop's phase parser can reliably locate the phase heading at the top
-    of PLAN.md.
+    Scans *content* for the first line that begins with ``# `` followed by
+    heading text and discards everything before it. This strips LLM
+    meta-commentary (e.g. "Here is the plan:") and separator lines (``---``)
+    that some models emit before the real phase heading.
+
+    If no H1 heading is found, prepends
+    ``# <project_name> — Phase <num>: <title>`` so mcloop's phase parser can
+    reliably locate the phase heading at the top of PLAN.md.
     """
-    stripped = content.lstrip()
-    if _H1_HEADING_RE.match(stripped):
-        return stripped
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if _H1_HEADING_RE.match(line):
+            return "".join(lines[i:])
     app_name = project_name or "App"
     heading = f"# {app_name} — Phase {phase_num}: {phase_title}"
+    stripped = content.lstrip()
     if stripped:
         return f"{heading}\n\n{stripped}"
     return f"{heading}\n"
