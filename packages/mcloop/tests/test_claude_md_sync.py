@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from mcloop.claude_md_check import SyncResult
 from mcloop.claude_md_sync import _pending_path, handle_sync, reconcile_pending
@@ -32,9 +31,10 @@ class TestHandleSync:
                 return_value=SyncResult.TRANSIENT_FAILED,
             ),
         ):
-            result = handle_sync(project, "abc1234def", task_label="1.6")
+            thread = handle_sync(project, "abc1234def", task_label="1.6")
+            assert thread is not None
+            thread.join(timeout=5)
 
-        assert result is SyncResult.TRANSIENT_FAILED
         pending = _pending_path(project)
         assert pending.exists()
         entry = json.loads(pending.read_text())
@@ -51,17 +51,18 @@ class TestHandleSync:
                 return_value=SyncResult.PERMANENT_FAILED,
             ),
         ):
-            result = handle_sync(project, "abc1234")
+            thread = handle_sync(project, "abc1234")
+            assert thread is not None
+            thread.join(timeout=5)
 
-        assert result is SyncResult.PERMANENT_FAILED
         assert not _pending_path(project).exists()
 
     def test_no_work_does_not_write_pending(self, tmp_path):
         project = _setup_project(tmp_path)
         with patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=True):
-            result = handle_sync(project, "abc1234")
+            thread = handle_sync(project, "abc1234")
 
-        assert result is SyncResult.NO_WORK
+        assert thread is None
         assert not _pending_path(project).exists()
 
     def test_ok_clears_existing_pending(self, tmp_path):
@@ -72,12 +73,13 @@ class TestHandleSync:
             patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
             patch("mcloop.claude_md_sync.auto_update_claude_md", return_value=SyncResult.OK),
         ):
-            result = handle_sync(project, "new1234")
+            thread = handle_sync(project, "new1234")
+            assert thread is not None
+            thread.join(timeout=5)
 
-        assert result is SyncResult.OK
         assert not pending.exists()
 
-    def test_cap_exceeded_halts_and_notifies(self, tmp_path):
+    def test_cap_exceeded_notifies(self, tmp_path):
         project = _setup_project(tmp_path)
         pending = _pending_path(project)
         pending.write_text(
@@ -98,15 +100,57 @@ class TestHandleSync:
             ),
             patch("mcloop.claude_md_sync.notify") as mock_notify,
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                handle_sync(project, "second_sha", task_label="1.7")
+            thread = handle_sync(project, "second_sha", task_label="1.7")
+            assert thread is not None
+            thread.join(timeout=5)
 
-        assert "2 commits behind" in str(exc_info.value)
         mock_notify.assert_called_once()
         call_args = mock_notify.call_args
         assert "2 commits behind" in call_args[0][0]
         assert "1.7" in call_args[0][0]
         assert call_args[1]["level"] == "error"
+
+    def test_returns_quickly_when_llm_is_slow(self, tmp_path):
+        """handle_sync must not block on the LLM call.
+
+        Mocks auto_update_claude_md with a 2-second sleep and asserts
+        handle_sync returns in well under that time.
+        """
+        project = _setup_project(tmp_path)
+
+        def slow_llm(*args, **kwargs):
+            time.sleep(2.0)
+            return SyncResult.OK
+
+        with (
+            patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
+            patch("mcloop.claude_md_sync.auto_update_claude_md", side_effect=slow_llm),
+        ):
+            start = time.monotonic()
+            thread = handle_sync(project, "abc1234")
+            elapsed = time.monotonic() - start
+
+        assert elapsed < 0.5, f"handle_sync blocked for {elapsed:.3f}s"
+        assert thread is not None
+        thread.join(timeout=5)
+
+    def test_background_thread_exception_does_not_propagate(self, tmp_path):
+        """If the LLM call raises, the background thread logs and exits cleanly."""
+        project = _setup_project(tmp_path)
+
+        with (
+            patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
+            patch(
+                "mcloop.claude_md_sync.auto_update_claude_md",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            thread = handle_sync(project, "abc1234")
+            assert thread is not None
+            thread.join(timeout=5)
+
+        # No pending file written; main thread survived.
+        assert not _pending_path(project).exists()
 
 
 class TestReconcilePending:

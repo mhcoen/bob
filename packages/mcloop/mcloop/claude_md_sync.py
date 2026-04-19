@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,31 +18,27 @@ def _pending_path(project_dir: Path) -> Path:
     return project_dir / ".mcloop" / _PENDING_FILENAME
 
 
-def handle_sync(
+def _run_sync_in_background(
     project_dir: Path,
     commit_sha: str,
-    *,
-    task_label: str = "",
-) -> SyncResult:
-    """Run CLAUDE.md sync after a code commit.
+    task_label: str,
+) -> None:
+    """Body of the daemon thread that performs the LLM call.
 
-    On TRANSIENT_FAILED, writes a pending entry.  If a pending entry
-    already exists (cap=1 exceeded), halts with a Telegram notification.
-
-    Returns the SyncResult from auto_update_claude_md, or NO_WORK if
-    CLAUDE.md was already fresh.
+    Catches all exceptions so a failing thread does not block the main loop.
     """
-    sha = commit_sha if isinstance(commit_sha, str) else ""
-    changed = _committed_files(project_dir, sha) if sha else []
-    if check_claude_md_freshness(changed, project_dir):
-        return SyncResult.NO_WORK
-
-    result = auto_update_claude_md(project_dir, sha)
+    try:
+        result = auto_update_claude_md(project_dir, commit_sha)
+    except Exception as exc:
+        print(
+            f"  CLAUDE.md sync background thread failed: {exc}",
+            flush=True,
+        )
+        return
 
     if result is SyncResult.TRANSIENT_FAILED:
         pending = _pending_path(project_dir)
         if pending.exists():
-            # Cap exceeded — second consecutive failure.
             short_sha = commit_sha[:7] if commit_sha else "unknown"
             msg = (
                 f"mcloop: CLAUDE.md sync 2 commits behind. "
@@ -49,9 +46,8 @@ def handle_sync(
                 f"Run paused at {task_label or short_sha}."
             )
             notify(msg, level="error")
-            raise SystemExit(msg)
+            return
 
-        # Write pending entry.
         pending.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "commit_sha": commit_sha,
@@ -65,12 +61,39 @@ def handle_sync(
         )
 
     elif result is SyncResult.OK:
-        # Sync succeeded — clear any pending entry from a prior run.
         pending = _pending_path(project_dir)
         if pending.exists():
             pending.unlink()
 
-    return result
+
+def handle_sync(
+    project_dir: Path,
+    commit_sha: str,
+    *,
+    task_label: str = "",
+) -> threading.Thread | None:
+    """Kick off CLAUDE.md sync after a code commit.
+
+    The freshness check runs synchronously; the LLM call (which can take
+    5-15 seconds) runs in a daemon thread so the main loop is not blocked.
+
+    Returns the spawned thread, or None if there was no work to do.  The
+    thread reference is provided mainly so tests can ``.join()`` on it;
+    production callers do not need to wait for completion.
+    """
+    sha = commit_sha if isinstance(commit_sha, str) else ""
+    changed = _committed_files(project_dir, sha) if sha else []
+    if check_claude_md_freshness(changed, project_dir):
+        return None
+
+    thread = threading.Thread(
+        target=_run_sync_in_background,
+        args=(project_dir, commit_sha, task_label),
+        daemon=True,
+        name="mcloop-claude-md-sync",
+    )
+    thread.start()
+    return thread
 
 
 def reconcile_pending(project_dir: Path) -> None:
