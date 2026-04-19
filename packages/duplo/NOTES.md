@@ -1169,3 +1169,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 271c4ab: Replaced subprocess.run with Popen to stream output and show progress dots during long-running Claude CLI calls. Added timeout handling, proper stdin writing, and concurrent stream draining. Updated tests to mock Popen behavior and verify progress indicators.
 
 7f71fca: Fixed a bug where visual design requirements were placed before the phase heading in PLAN.md, causing mcloop's phase parser to treat them as a preamble and break task dispatch. Now design sections are inserted after the Phase 0 heading, ensuring they are correctly recognized as part of the phase body.
+
+de79987: Added a helper to ensure generated phase plans start with a proper H1 heading, improving compatibility with downstream parsing. Updated the plan generation to prepend a formatted heading when missing, using project name, phase number, and title. Added comprehensive tests to verify heading detection, fallback behavior, and edge cases.
