@@ -1907,9 +1907,12 @@ def _subsequent_run() -> None:
             return
         save_roadmap(new_roadmap)
         print(format_roadmap(new_roadmap))
-        # Reload state after saving roadmap.
+        # Use the freshly generated roadmap directly so the first-run
+        # path loops over every phase (starting at Phase 0) even if the
+        # save/reload round-trip drops entries.  Reload `data` so later
+        # steps see the persisted current_phase and any other state.
+        roadmap = new_roadmap
         data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
-        roadmap = data.get("roadmap", [])
         phase_num, phase_info = get_current_phase()
 
     if phase_info is None:

@@ -2,6 +2,24 @@
 
 ## Observations
 
+### [BUGS.md#1] First-run all-phases loop was already in place — 2026-04-19
+
+BUGS.md entry 1 claimed the first-run plan-generation path still called
+`generate_phase_plan()` for a single `phase_info`. In reality the
+mcloop checkpoint `2c810fe` already unified the first-run and
+subsequent-run paths into one loop over `roadmap` in
+`_subsequent_run()` (duplo/main.py:~1977), and the per-iteration
+phase number already falls back to `phase_dict.get("phase", idx)` when
+`phases_completed == 0`, so the scaffold phase is labelled "Phase 0".
+The real gap was missing test coverage: no existing test exercised the
+branch where `generate_roadmap()` is invoked in-run (all existing
+tests pre-populated `roadmap` in `_BASE_DATA`). Added
+`test_first_run_fresh_roadmap_generates_all_phases` in
+`tests/test_main.py` to cover that branch, and changed the
+post-`save_roadmap()` block to use the freshly generated roadmap
+directly (`roadmap = new_roadmap`) rather than relying on the
+save/reload round-trip to repopulate it.
+
 ### [8.3] PlatformEntry dataclass added, parser still missing — 2026-04-18
 
 8.3 added the `PlatformEntry` dataclass and `platform_entries` field

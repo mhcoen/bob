@@ -92,6 +92,7 @@ class TestMainFirstRun:
         assert exc_info.value.code == 0
         assert "duplo init" in capsys.readouterr().out
 
+
 class TestMainSubsequentRun:
     """Subsequent runs: .duplo/duplo.json exists."""
 
@@ -326,6 +327,57 @@ class TestPhaseCompletionFlow:
         mock_roadmap.assert_not_called()
         out = capsys.readouterr().out
         assert f"Plan ready for all {len(roadmap)} phases." in out
+
+    def test_first_run_fresh_roadmap_generates_all_phases(self, capsys, tmp_path, monkeypatch):
+        """First run with no stored roadmap: generate_roadmap() is invoked
+        and the pipeline then loops over every returned phase, calling
+        generate_phase_plan() and save_plan() once per phase. The final
+        summary line must be ``Plan ready for all N phases.`` and the
+        loop must start from the roadmap's Phase 0 scaffold."""
+        fresh_roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "g", "features": ["Search"], "test": "ok"},
+            {"phase": 2, "title": "Polish", "goal": "g", "features": [], "test": "ok"},
+        ]
+        # Base data has features but NO "roadmap" key and NO "phases" key,
+        # so this exercises the fresh-roadmap first-run branch.
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {"name": "Search", "description": "Full-text search.", "category": "core"}
+            ],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fresh_roadmap) as mock_roadmap,
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+        ):
+            main()
+
+        # Roadmap is freshly generated exactly once.
+        mock_roadmap.assert_called_once()
+        # generate_phase_plan/save_plan run once per fresh-roadmap phase.
+        assert mock_gen.call_count == len(fresh_roadmap)
+        assert mock_save.call_count == len(fresh_roadmap)
+        # Phase numbers passed to generate_phase_plan start at 0 and cover
+        # every phase in the fresh roadmap.
+        phase_numbers = [c.kwargs["phase_number"] for c in mock_gen.call_args_list]
+        assert phase_numbers == [0, 1, 2]
+        out = capsys.readouterr().out
+        assert f"Plan ready for all {len(fresh_roadmap)} phases." in out
+        assert "Run mcloop to start building" in out
 
 
 class TestSubsequentRunFileChanges:
@@ -8307,6 +8359,7 @@ class TestSpecSourceOfTruth:
         # But SPEC.md should have the discovered URL appended.
         content = spec_path.read_text(encoding="utf-8")
         assert "https://new-link.com" in content
+
 
 # ------------------------------------------------------------------
 # Integration tests per PIPELINE-design.md § "Test plan"
