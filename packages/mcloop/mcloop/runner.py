@@ -177,35 +177,30 @@ def _build_shared_parts(
         " and note it in NOTES.md for the user to"
         " decide."
     )
-    # CHECK COMMANDS mandate disabled 2026-04-15: was forcing the
-    # inner Claude to run the full pytest suite (5m 40s for 2474
-    # tests) before every task. The orchestrator's run_checks runs
-    # targeted tests after the session anyway, and retry rate is
-    # 1.7%. Re-enable by uncommenting after test suite is pruned.
-    # if check_commands:
-    #     cmds = ", ".join(check_commands)
-    #     parts.append(
-    #         "CHECK COMMANDS (mandatory, strict rules):\n"
-    #         f"Commands: {cmds}\n"
-    #         "1. Run each check command EXACTLY ONCE before finishing.\n"
-    #         "2. Run the command exactly as listed. Do not append"
-    #         " | tail, | head, or any pipe. Do not truncate output."
-    #         " Do not modify the command in any way.\n"
-    #         "3. If a check fails, fix the issue, then re-run that"
-    #         " same exact check command ONCE.\n"
-    #         "4. Maximum 3 total runs of any single check command."
-    #         " If it still fails after 3 runs, stop and report"
-    #         " what is failing.\n"
-    #         "5. NEVER run the same check command twice in a row"
-    #         " without making a code change between runs."
-    #         " Re-running a passing test is forbidden.\n"
-    #         "6. ONLY run the exact check commands listed above."
-    #         " Do not run subsets, individual test files, or"
-    #         " any variation. Do not run pytest on a single file."
-    #         " Do not run any test command other than the ones"
-    #         " listed here. The orchestrator runs its own"
-    #         " verification after this session ends."
-    #     )
+    if check_commands:
+        cmds = ", ".join(check_commands)
+        parts.append(
+            "CHECK COMMANDS (mandatory, strict rules):\n"
+            f"Commands: {cmds}\n"
+            "1. Run each check command EXACTLY ONCE before finishing.\n"
+            "2. Run the command exactly as listed. Do not append"
+            " | tail, | head, or any pipe. Do not truncate output."
+            " Do not modify the command in any way.\n"
+            "3. If a check fails, fix the issue, then re-run that"
+            " same exact check command ONCE.\n"
+            "4. Maximum 3 total runs of any single check command."
+            " If it still fails after 3 runs, stop and report"
+            " what is failing.\n"
+            "5. NEVER run the same check command twice in a row"
+            " without making a code change between runs."
+            " Re-running a passing test is forbidden.\n"
+            "6. ONLY run the exact check commands listed above."
+            " Do not run subsets, individual test files, or"
+            " any variation. Do not run pytest on a single file."
+            " Do not run any test command other than the ones"
+            " listed here. The orchestrator runs its own"
+            " verification after this session ends."
+        )
     # rtk instruction disabled 2026-04-15: rtk is disabled in the
     # mcloop hook (telegram-permission-hook.py), so instructing the
     # inner Claude to use rtk would be misleading.

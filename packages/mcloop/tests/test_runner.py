@@ -1536,9 +1536,8 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "ABSOLUTELY FORBIDDEN" not in prompt
-        # CHECK COMMANDS block disabled 2026-04-15 (in runner.py).
-        # Even when check_commands is provided, the block is no longer
-        # added to the prompt.
+        # Without check_commands, the CHECK COMMANDS block is omitted.
+        assert "CHECK COMMANDS" not in prompt
     with patch("mcloop.runner._run_session") as mock_session:
         mock_session.return_value = ("output", 0)
         run_task(
@@ -1552,7 +1551,10 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
         assert "ABSOLUTELY FORBIDDEN" not in prompt
-        assert "CHECK COMMANDS" not in prompt
+        # When check_commands is provided, the block is included so
+        # the inner session runs checks and catches failures itself.
+        assert "CHECK COMMANDS" in prompt
+        assert "pytest" in prompt
 
 
 def test_bug_prompt_errors_before_task(tmp_path):
@@ -1595,12 +1597,97 @@ def test_bug_prompt_includes_shared_instructions(tmp_path):
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
-        # CHECK COMMANDS block disabled 2026-04-15 (in runner.py); no
-        # longer appears in prompts. Other shared instructions remain.
-        assert "CHECK COMMANDS" not in prompt
+        # CHECK COMMANDS block is included when check_commands is
+        # provided. Other shared instructions remain.
+        assert "CHECK COMMANDS" in prompt
+        assert "ruff check ." in prompt
+        assert "pytest" in prompt
         assert "mcloop:wrap" in prompt
         assert "accessibility" in prompt.lower()
         assert "NOTES.md" in prompt
+
+
+def test_check_commands_included_when_provided(tmp_path):
+    """CHECK COMMANDS block is present in all prompt variants when check_commands is provided."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    cmds = ["ruff check .", "pytest -q"]
+
+    # Normal prompt
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Add a feature",
+            "claude",
+            project_dir,
+            log_dir,
+            check_commands=cmds,
+        )
+        prompt = mock_session.call_args[0][0][2]
+    assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
+    assert "ruff check ." in prompt
+    assert "pytest -q" in prompt
+
+    # Bug-task prompt (is_bug_task=True)
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the known bug",
+            "claude",
+            project_dir,
+            log_dir,
+            check_commands=cmds,
+            is_bug_task=True,
+        )
+        prompt = mock_session.call_args[0][0][2]
+    assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
+    assert "ruff check ." in prompt
+
+    # Bug-investigation prompt (prior_errors set)
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Fix the failing test",
+            "claude",
+            project_dir,
+            log_dir,
+            prior_errors="AssertionError",
+            check_commands=cmds,
+        )
+        prompt = mock_session.call_args[0][0][2]
+    assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
+    assert "pytest -q" in prompt
+
+
+def test_check_commands_omitted_when_not_provided(tmp_path):
+    """CHECK COMMANDS block is absent when check_commands is None/empty."""
+    log_dir = tmp_path / "logs"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Add a feature",
+            "claude",
+            project_dir,
+            log_dir,
+        )
+        prompt = mock_session.call_args[0][0][2]
+    assert "CHECK COMMANDS" not in prompt
+
+    with patch("mcloop.runner._run_session") as mock_session:
+        mock_session.return_value = ("output", 0)
+        run_task(
+            "Add a feature",
+            "claude",
+            project_dir,
+            log_dir,
+            check_commands=[],
+        )
+        prompt = mock_session.call_args[0][0][2]
+    assert "CHECK COMMANDS" not in prompt
 
 
 def test_bug_prompt_with_eliminated(tmp_path):
