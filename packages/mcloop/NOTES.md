@@ -74,3 +74,5 @@ find_next picks tasks in run_loop, so behavior stays consistent.
 6c95f88: Parallelized check execution to improve performance by running independent commands concurrently. Updated tests to handle non-deterministic execution order and added a concurrency test to verify parallel behavior.
 
 756c468: Re-enabled the CHECK COMMANDS block in the runner prompt generation, which provides mandatory check instructions to the inner Claude when check_commands are supplied. Updated corresponding tests to verify the block appears when check_commands are provided and is omitted when they are not. This restores the ability for the inner session to run checks and catch failures itself.
+
+a05a67d: The CLAUDE.md sync process was moved to a background thread to prevent blocking the main loop during LLM calls. The sync function now returns a thread reference instead of waiting for completion, and error handling was updated to log failures without crashing. Tests were added to verify non-blocking behavior and proper exception handling in the background thread.
