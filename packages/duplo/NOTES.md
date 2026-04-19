@@ -1147,3 +1147,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 36ce4ab: Added support for a user-owned `local.md` file that holds project-specific overrides. The file is automatically git-ignored and its contents flow into both the planner prompt and CLAUDE.md, allowing per-project customization without affecting the shared configuration.
 
 8168e7e: Changed plan generation to produce a complete multi-phase PLAN.md covering all roadmap phases at once, rather than interactively selecting features for a single phase. Verification tasks are now added only to the first phase's plan. The pipeline now loops through each roadmap phase, generating and saving its plan sequentially, and prints a summary when all phases are ready.
+
+271c4ab: Replaced subprocess.run with Popen to stream output and show progress dots during long-running Claude CLI calls. Added timeout handling, proper stdin writing, and concurrent stream draining. Updated tests to mock Popen behavior and verify progress indicators.
