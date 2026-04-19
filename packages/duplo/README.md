@@ -17,13 +17,13 @@ Typical workflow:
 ```
 duplo init https://numi.app       # one-time: create a spec from a live product
 vim SPEC.md                        # review and customize (architecture, scope, design)
-duplo                              # extract features, generate Phase 1 build plan
-mcloop                             # build it
+duplo                              # extract features, generate all-phases build plan
+mcloop                             # build it (runs all phases continuously)
 # ... test the result ...
 duplo fix "colors are wrong"       # diagnose bugs, append fix tasks
 mcloop                             # apply fixes
-duplo                              # detect gaps, generate Phase 2
-mcloop                             # build Phase 2
+duplo                              # detect gaps, generate next phases
+mcloop                             # build next phases
 ```
 
 No source code from the reference product is used. Duplo works from
@@ -83,7 +83,7 @@ edit SPEC.md to describe what you're building, then run `duplo`.
 
 5. **Run `duplo`** to scrape the declared sources, analyze
    references, extract features and visual design, and generate
-   `PLAN.md`.
+   `PLAN.md` with all phases.
 
 6. **Run `mcloop`** (a separate tool) to build against the plan.
    Test the result, add more reference material if needed, edit
@@ -257,10 +257,13 @@ All forms accept the `--deep` and `--force` flags below.
     `SPEC.md` contains behavior contracts, those become
     additional verification tasks.
 
-12. **Generates Phase 1 plan.** Writes a PLAN.md for Phase 1,
-    CLAUDE.md, and mcloop.json. The product spec is included in
-    the plan generation prompt. Prints "Run mcloop to start
-    building." and exits. You run mcloop separately.
+12. **Generates all phase plans.** Loops over every phase in the
+    roadmap and generates a plan for each, appending them all to
+    PLAN.md. Platform rules are injected into every plan. Scaffold
+    artifacts (run.sh, .gitignore) are created before Phase 0.
+    CLAUDE.md is written with platform rules for Claude Code.
+    Prints "Plan ready for all N phases." and exits.
+    You run mcloop separately.
 
 13. **Saves state.** Saves a file hash manifest for detecting
     changes on subsequent runs. Reference files in `ref/` stay
@@ -560,6 +563,21 @@ How each section is used:
 - **Architecture:** Injected into roadmap and plan generation
   prompts. Parsed by `build_prefs.parse_build_preferences` into
   the structured `BuildPreferences` that the pipeline consumes.
+  Supports structured platform entries (see below) for
+  deterministic stack matching, with LLM extraction from prose
+  as a fallback.
+
+  Structured entries in `## Architecture`:
+
+  ```markdown
+  - platform: macOS desktop
+    language: Swift/SwiftUI
+    build: Swift Package Manager
+  ```
+
+  Multiple entries are supported for multi-stack projects. Each
+  entry is matched against duplo's platform knowledge library to
+  inject platform-specific rules into the planner and CLAUDE.md.
 - **Design:** Injected into plan generation. Supplements or
   overrides what the design extractor finds from screenshots.
 - **References:** Tells the LLM which reference materials are
@@ -569,6 +587,35 @@ Content under unrecognised headings or outside any heading is
 preserved and still injected into prompts as general guidance.
 The spec is authoritative: when it conflicts with scraped content,
 the spec wins.
+
+## Platform knowledge
+
+Duplo ships a library of platform-specific operational knowledge
+that bridges the gap between "code that compiles" and "a running
+thing you can see and interact with." When it detects your stack
+from `## Architecture` (via structured entries or LLM extraction),
+it automatically:
+
+- **Injects platform rules into the planner prompt** so generated
+  tasks use correct build/launch procedures from the start (e.g.,
+  "always use ./run.sh" for SwiftUI apps instead of running the
+  binary directly).
+- **Generates CLAUDE.md** in the target project with platform
+  rules as a safety net for Claude Code sessions.
+- **Creates scaffold artifacts** (run.sh, .gitignore entries)
+  during Phase 0 so every subsequent task can reference them.
+
+Current profiles: macOS + SwiftUI + SPM, macOS + Python CLI +
+pyproject.toml. Adding a new profile is a single Python file in
+`duplo/platforms/` — no framework changes needed.
+
+### local.md
+
+For machine-specific facts that no shipped profile can anticipate
+(custom toolchain paths, GPU flags, port conflicts), create a
+`local.md` file in the project root. Its contents are injected
+into both the planner prompt and CLAUDE.md. This file is
+gitignored by default.
 
 ## Requirements
 

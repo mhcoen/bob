@@ -11,7 +11,7 @@ from pathlib import Path
 
 _DOT_INTERVAL_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.5
-_TIMEOUT_SECONDS = 300
+_TIMEOUT_SECONDS = 600
 
 
 class ClaudeCliError(Exception):
@@ -151,13 +151,13 @@ def query_with_images(
             input=full_prompt,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=_TIMEOUT_SECONDS,
             env=env,
         )
     except FileNotFoundError:
         raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
     except subprocess.TimeoutExpired:
-        raise ClaudeCliError("claude CLI timed out after 300 seconds")
+        raise ClaudeCliError(f"claude CLI timed out after {_TIMEOUT_SECONDS} seconds")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
     return result.stdout.strip()
