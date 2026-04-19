@@ -379,6 +379,58 @@ class TestPhaseCompletionFlow:
         assert f"Plan ready for all {len(fresh_roadmap)} phases." in out
         assert "Run mcloop to start building" in out
 
+    def test_first_run_persists_roadmap_and_passes_each_phase_dict(
+        self, tmp_path, monkeypatch
+    ):
+        """First-run regression test: after generate_roadmap() returns a
+        fresh roadmap, the pipeline must (a) persist the full roadmap
+        plus ``current_phase = 0`` to duplo.json, and (b) invoke
+        generate_phase_plan() with each roadmap entry in order -- not
+        just the first one. This guards against a revert to the old
+        single-phase first-run behavior described in BUGS.md.
+        """
+        fresh_roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "s", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "c", "features": ["Search"], "test": "ok"},
+            {"phase": 2, "title": "Polish", "goal": "p", "features": [], "test": "ok"},
+        ]
+        data = {
+            "source_url": "https://example.com",
+            "features": [
+                {"name": "Search", "description": "Full-text search.", "category": "core"}
+            ],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("duplo.main.generate_roadmap", return_value=fresh_roadmap),
+            patch(
+                "duplo.main.generate_phase_plan",
+                return_value="# Phase\n- [ ] task",
+            ) as mock_gen,
+            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+        ):
+            main()
+
+        # The fresh roadmap and current_phase=0 are persisted to disk.
+        saved = _read_duplo_json(tmp_path)
+        assert saved["roadmap"] == fresh_roadmap
+        assert saved["current_phase"] == 0
+
+        # Every roadmap entry is passed to generate_phase_plan in order.
+        phases_passed = [c.kwargs["phase"] for c in mock_gen.call_args_list]
+        assert phases_passed == fresh_roadmap
+
+        # save_plan fires once per phase so each plan is appended.
+        assert mock_save.call_count == len(fresh_roadmap)
+
 
 class TestSubsequentRunFileChanges:
     """Tests for file change detection on subsequent runs."""

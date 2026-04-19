@@ -1878,7 +1878,7 @@ def _subsequent_run() -> None:
         return
 
     # State 3: No PLAN.md \u2192 generate plan for current phase.
-    phase_num, phase_info = get_current_phase()
+    _, phase_info = get_current_phase()
 
     # If no roadmap exists or the existing one is fully consumed,
     # regenerate from remaining unimplemented features.
@@ -1913,9 +1913,14 @@ def _subsequent_run() -> None:
         # steps see the persisted current_phase and any other state.
         roadmap = new_roadmap
         data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
-        phase_num, phase_info = get_current_phase()
 
-    if phase_info is None:
+    # Bail out only if the regen block failed to leave us with a
+    # usable roadmap. We intentionally key off ``roadmap`` rather than
+    # ``phase_info`` so the first-run path always proceeds into the
+    # loop below (which iterates over every roadmap entry starting at
+    # Phase 0) instead of short-circuiting on a missing ``current_phase``
+    # pointer.
+    if not roadmap:
         print("All features implemented. Nothing to do.")
         return
 
