@@ -107,6 +107,7 @@ from mcloop.plan_split import (
     get_current_phase_name,
     transition_phase,
 )
+from mcloop.pytest_optimizations import ensure_pytest_optimizations
 from mcloop.ratelimit import (
     SESSION_LIMIT_POLL,
     RateLimitState,
@@ -674,6 +675,12 @@ def run_loop(
     # Ensure the target project has a conftest.py guard that blocks
     # real claude/codex subprocess calls during pytest. Idempotent.
     if ensure_conftest_guard(project_dir):
+        _stage_safe(project_dir)
+        _checkpoint(project_dir)
+
+    # Ensure pyproject.toml has pytest-xdist parallelism + a timeout so
+    # the suite runs in seconds instead of minutes. Idempotent.
+    if ensure_pytest_optimizations(project_dir):
         _stage_safe(project_dir)
         _checkpoint(project_dir)
 

@@ -73,6 +73,8 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/prompts.py** - Prompt builders and output parsers for AI CLI sessions. Audit prompts reference `.mcloop/audit-report.md`.
 
+**mcloop/pytest_optimizations.py** - Ensure the target project's `pyproject.toml` has `[tool.pytest.ini_options]` addopts with `-n auto`, a `timeout`, and `pytest-xdist` / `pytest-timeout` dev deps. Idempotent; called once at `run_loop()` startup after `ensure_conftest_guard()`.
+
 **mcloop/ratelimit.py** - Rate limit detection and CLI fallover.
 
 **mcloop/review_integration.py** - Reviewer subprocess spawn/collect/cleanup. Reviewer findings append to BUGS.md. `_purge_all_reviews` removes review files when reviewer is disabled.
@@ -134,6 +136,8 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 **tests/test_plan_split.py** - Tests for `mcloop.plan_split`: extract_next_phase, mark_phase_complete, get_current_phase_name, ensure_current_plan, transition_phase, ensure_bugs_file, full three-phase round-trip, idempotency, and corruption surfacing.
 
 **tests/test_process_monitor.py** - Tests for subprocess launching and monitoring: GUI launch with pre-existing PIDs, kill_process_group, start_new_session, run_cli group-kill paths.
+
+**tests/test_pytest_optimizations.py** - Tests for `ensure_pytest_optimizations`: missing pyproject no-op, missing pytest section added, existing section with missing xdist dep, fully configured idempotent, partial addopts extension, and malformed TOML no-op.
 
 **tests/test_ratelimit.py** - Tests for rate limit detection.
 
