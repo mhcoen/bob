@@ -39,9 +39,9 @@ Rules for the plan:
   those boundaries, but the intent should be clear in the plan.
 - The description at the top of PLAN.md should include the
   platform, language, build system, and any constraints.
-- If visual design requirements are provided, include them
-  verbatim as a section in the plan so the builder knows the
-  exact colors, fonts, spacing, and component styles to use.
+- Do NOT emit a separate visual-design section. Any design
+  requirements are injected into PLAN.md by the caller, after
+  the phase heading.
 - If known issues are provided, generate fix tasks for each one.
   Order fix tasks before new feature work when a feature depends
   on the fix (e.g. a broken API must be fixed before building a
@@ -257,7 +257,6 @@ def generate_phase_plan(
     phase: dict | None = None,
     *,
     project_name: str = "",
-    design_section: str = "",
     phase_number: int | None = None,
     spec_text: str = "",
     platform_addendum: str = "",
@@ -272,8 +271,6 @@ def generate_phase_plan(
             features, and test. If None, generates a generic
             Phase 1 plan.
         project_name: Name for the project.
-        design_section: Optional Markdown section with visual design
-            requirements extracted from reference images.
         phase_number: Override for the phase number in the heading.
             When provided, this is used instead of ``phase["phase"]``.
             Derived from the length of the ``phases`` history + 1.
@@ -281,7 +278,10 @@ def generate_phase_plan(
             system prompt when non-empty.
 
     Returns:
-        Markdown string suitable for writing to PLAN.md.
+        Markdown string suitable for writing to PLAN.md. The caller
+        injects any visual-design section after the phase heading; this
+        function never emits design prose as a preamble before the
+        heading, which would confuse mcloop's phase parser.
     """
     prefs_dict = dataclasses.asdict(preferences)
     constraints_text = (
@@ -311,12 +311,6 @@ def generate_phase_plan(
         phase_test = ""
         phase_issues = []
 
-    design_block = ""
-    if design_section:
-        design_block = (
-            f"\nVisual design requirements (from reference screenshots):\n{design_section}\n"
-        )
-
     issues_block = ""
     if phase_issues:
         issues_text = "\n".join(f"- {desc}" for desc in phase_issues)
@@ -343,7 +337,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-{design_block}{issues_block}{spec_block}
+{issues_block}{spec_block}
 Generate the PLAN.md now.
 """
 

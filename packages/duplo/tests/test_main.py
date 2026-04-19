@@ -141,6 +141,87 @@ class TestMainSubsequentRun:
         assert "Run mcloop to start building" in out
 
 
+class TestPlanStartsWithPhaseHeading:
+    """PLAN.md must start with a phase heading (# line), not design prose.
+
+    The visual design section must be injected INSIDE the Phase 0 body,
+    after the heading.  Any preamble before the first H1 is treated by
+    mcloop's phase parser as outside any phase and breaks task dispatch.
+    """
+
+    def test_insert_design_after_heading_places_design_after_h1(self):
+        from duplo.main import _insert_design_after_heading
+
+        content = "# Phase 0: Core\n\n- [ ] task\n"
+        design = "## Visual Design Requirements\n\n### Colors\n- **primary**: `#ff0000`\n"
+        result = _insert_design_after_heading(content, design)
+
+        first_non_blank = next(line for line in result.splitlines() if line.strip())
+        assert first_non_blank.startswith("# "), first_non_blank
+        heading_idx = result.index("# Phase 0: Core")
+        design_idx = result.index("## Visual Design Requirements")
+        task_idx = result.index("- [ ] task")
+        assert heading_idx < design_idx < task_idx
+
+    def test_insert_design_empty_is_no_op(self):
+        from duplo.main import _insert_design_after_heading
+
+        content = "# Phase 0\n\n- [ ] task\n"
+        assert _insert_design_after_heading(content, "") == content
+        assert _insert_design_after_heading(content, "   \n  ") == content
+
+    def test_phase_zero_plan_md_starts_with_heading(self, tmp_path, monkeypatch):
+        """End-to-end: PLAN.md's first non-blank line is the phase heading."""
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "features": [
+                    {
+                        "name": "Search",
+                        "description": "Full-text search.",
+                        "category": "core",
+                    },
+                ],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {
+                        "phase": 0,
+                        "title": "Core",
+                        "goal": "Scaffold",
+                        "features": ["Search"],
+                        "test": "ok",
+                    },
+                ],
+                "current_phase": 0,
+                "design_requirements": {
+                    "colors": {"primary": "#ff0000"},
+                    "fonts": {"body": "Inter"},
+                    "layout": {"grid": "12-col"},
+                },
+            },
+        )
+        monkeypatch.chdir(tmp_path)
+
+        llm_output = "# Phase 0: Core\n\n- [ ] Scaffold project\n"
+        with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
+            with patch("duplo.main.generate_phase_plan", return_value=llm_output):
+                main()
+
+        written = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        first_non_blank = next(line for line in written.splitlines() if line.strip())
+        assert first_non_blank.startswith("# "), (
+            f"PLAN.md must start with a phase heading, got: {first_non_blank!r}"
+        )
+        assert "Visual Design Requirements" in written
+        assert "#ff0000" in written
+
+
 class TestSubsequentRunResume:
     """Tests for resuming an interrupted phase."""
 
@@ -379,9 +460,7 @@ class TestPhaseCompletionFlow:
         assert f"Plan ready for all {len(fresh_roadmap)} phases." in out
         assert "Run mcloop to start building" in out
 
-    def test_first_run_persists_roadmap_and_passes_each_phase_dict(
-        self, tmp_path, monkeypatch
-    ):
+    def test_first_run_persists_roadmap_and_passes_each_phase_dict(self, tmp_path, monkeypatch):
         """First-run regression test: after generate_roadmap() returns a
         fresh roadmap, the pipeline must (a) persist the full roadmap
         plus ``current_phase = 0`` to duplo.json, and (b) invoke
