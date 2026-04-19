@@ -4,15 +4,41 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
+
+_DOT_INTERVAL_SECONDS = 5.0
+_POLL_INTERVAL_SECONDS = 0.5
+_TIMEOUT_SECONDS = 300
 
 
 class ClaudeCliError(Exception):
     """Raised when the claude CLI returns a non-zero exit code."""
 
 
+def _drain_stream(stream, sink: list[str]) -> None:
+    """Read chunks from ``stream`` into ``sink`` until EOF."""
+    if stream is None:
+        return
+    try:
+        while True:
+            chunk = stream.read(4096)
+            if not chunk:
+                break
+            sink.append(chunk)
+    except (ValueError, OSError):
+        pass
+
+
 def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     """Send a text prompt to ``claude -p`` and return the response text.
+
+    Runs the CLI via ``subprocess.Popen`` and prints a dot to stderr every
+    ``_DOT_INTERVAL_SECONDS`` while the call is in flight so the user sees
+    progress during long-running generations. A trailing newline is printed
+    once the call completes.
 
     Args:
         prompt: The user prompt to send.
@@ -23,28 +49,66 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
         The response text stripped of leading/trailing whitespace.
 
     Raises:
-        ClaudeCliError: If the CLI exits with a non-zero code.
+        ClaudeCliError: If the CLI exits with a non-zero code or times out.
     """
     cmd = ["claude", "-p", "--model", model]
     if system:
         cmd.extend(["--system-prompt", system])
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
-            input=prompt,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=300,
             env=env,
         )
     except FileNotFoundError:
         raise ClaudeCliError("claude CLI not found. Install it from https://claude.ai/download")
-    except subprocess.TimeoutExpired:
-        raise ClaudeCliError("claude CLI timed out after 300 seconds")
-    if result.returncode != 0:
-        raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
-    return result.stdout.strip()
+
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    stdout_thread = threading.Thread(
+        target=_drain_stream, args=(process.stdout, stdout_parts), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_drain_stream, args=(process.stderr, stderr_parts), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    if process.stdin is not None:
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+    start = time.monotonic()
+    last_dot = start
+    try:
+        while process.poll() is None:
+            now = time.monotonic()
+            if now - start > _TIMEOUT_SECONDS:
+                process.kill()
+                raise ClaudeCliError(f"claude CLI timed out after {_TIMEOUT_SECONDS} seconds")
+            if now - last_dot >= _DOT_INTERVAL_SECONDS:
+                sys.stderr.write(".")
+                sys.stderr.flush()
+                last_dot = now
+            time.sleep(_POLL_INTERVAL_SECONDS)
+    finally:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+        stdout_thread.join()
+        stderr_thread.join()
+
+    if process.returncode != 0:
+        raise ClaudeCliError(
+            f"claude exited with code {process.returncode}: {''.join(stderr_parts)}"
+        )
+    return "".join(stdout_parts).strip()
 
 
 def query_with_images(
