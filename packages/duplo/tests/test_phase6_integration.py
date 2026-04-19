@@ -950,7 +950,7 @@ class TestInitThenDuploRunWorksEndToEnd:
         in later 6.25 subtasks.
         """
         from duplo.init import run_init
-        from duplo.main import _subsequent_run
+        from duplo.pipeline import _subsequent_run
         from duplo.validator import ValidationResult
 
         monkeypatch.chdir(tmp_path)
@@ -995,15 +995,15 @@ class TestInitThenDuploRunWorksEndToEnd:
         # --- Action 3: _subsequent_run against the same tmpdir. ------------
         # The fetch_site fixture reused here is the same one run_init
         # consumed; _scrape_declared_sources will re-fetch the URL
-        # declared in SPEC.md via the patched duplo.main.fetch_site and
+        # declared in SPEC.md via the patched duplo.pipeline.fetch_site and
         # receive the same deterministic tuple.
         with (
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=_fetch_site_identified_fixture(),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_make_end_to_end_features(),
             ),
             # save_features's own early-return handles the empty-
@@ -1016,11 +1016,11 @@ class TestInitThenDuploRunWorksEndToEnd:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_make_end_to_end_roadmap(),
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_make_end_to_end_plan_content(),
             ),
         ):
@@ -1073,7 +1073,7 @@ class TestInitThenDuploRunWorksEndToEnd:
         import json
 
         from duplo.init import run_init
-        from duplo.main import _subsequent_run
+        from duplo.pipeline import _subsequent_run
         from duplo.migration import _MIGRATION_MESSAGE
         from duplo.validator import ValidationResult
 
@@ -1109,11 +1109,11 @@ class TestInitThenDuploRunWorksEndToEnd:
 
         with (
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=_fetch_site_identified_fixture(),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=features,
             ),
             patch("duplo.saver._find_duplicate_groups", return_value=[]),
@@ -1122,11 +1122,11 @@ class TestInitThenDuploRunWorksEndToEnd:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_make_end_to_end_roadmap(),
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=plan_content,
             ),
         ):
@@ -1175,12 +1175,12 @@ class TestInitThenDuploRunWorksEndToEnd:
         instead of surfacing as a confusing failure in the end-to-end
         test.  Three mocks, three checks:
 
-        * ``fetch_site`` patched at ``duplo.main.fetch_site`` — this is
+        * ``fetch_site`` patched at ``duplo.pipeline.fetch_site`` — this is
           the binding :func:`_scrape_declared_sources` sees.  Called
           explicitly with ``scrape_depth="deep"`` here because that is
           the depth the 6.25 end-to-end flow uses (SPEC.md declares
           ``scrape: deep`` on the one source).
-        * ``extract_features`` patched at ``duplo.main.extract_features``
+        * ``extract_features`` patched at ``duplo.pipeline.extract_features``
           — the binding :func:`_subsequent_run` closes over when it
           calls ``extract_features(combined_text, ...)``.
         * ``select_features`` and ``select_issues`` patched at
@@ -1199,9 +1199,9 @@ class TestInitThenDuploRunWorksEndToEnd:
         sentinel_issue = {"description": "sentinel issue", "status": "open"}
 
         with (
-            patch("duplo.main.fetch_site", return_value=fetch_fixture) as mock_fetch,
+            patch("duplo.pipeline.fetch_site", return_value=fetch_fixture) as mock_fetch,
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=features_fixture,
             ) as mock_extract,
             patch(
@@ -1214,10 +1214,12 @@ class TestInitThenDuploRunWorksEndToEnd:
             ) as mock_select_issues,
         ):
             from duplo.main import (
-                extract_features as patched_extract,
-                fetch_site as patched_fetch,
                 select_features as patched_select_features,
                 select_issues as patched_select_issues,
+            )
+            from duplo.pipeline import (
+                extract_features as patched_extract,
+                fetch_site as patched_fetch,
             )
 
             fetch_result = patched_fetch(_IDENTIFIED_FIXTURE_URL, scrape_depth="deep")

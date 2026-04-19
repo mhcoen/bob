@@ -13,31 +13,35 @@ from duplo.design_extractor import DesignRequirements
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
 from duplo.gap_detector import detect_design_gaps
-from duplo.main import (
+from duplo.main import main
+from duplo.pipeline import (
     ScrapeResult,
     UpdateSummary,
     _analyze_new_files,
-    _build_completion_history,
-    _complete_phase,
-    _current_phase_content,
     _detect_and_append_gaps,
     _download_site_media,
-    _investigation_context,
     _load_preferences,
-    _partition_features,
     _persist_scrape_result,
-    _plan_has_unchecked_tasks,
-    _plan_is_complete,
-    _prefs_from_dict,
-    _print_feature_status,
-    _print_status,
     _print_summary,
     _rescrape_product_url,
     _scrape_declared_sources,
-    _unimplemented_features,
+)
+from duplo.pipeline import (
+    _build_completion_history,
+    _complete_phase,
+    _investigation_context,
+    _partition_features,
+    _prefs_from_dict,
     _source_url_from_spec,
+    _unimplemented_features,
     _visual_target_video_frames,
-    main,
+)
+from duplo.status import (
+    _current_phase_content,
+    _plan_has_unchecked_tasks,
+    _plan_is_complete,
+    _print_feature_status,
+    _print_status,
 )
 from duplo.questioner import BuildPreferences
 
@@ -122,8 +126,10 @@ class TestMainSubsequentRun:
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save:
+            with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch(
+                    "duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"
+                ) as mock_save:
                     main()
 
         mock_save.assert_called_once()
@@ -133,8 +139,8 @@ class TestMainSubsequentRun:
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+            with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                     main()
 
         out = capsys.readouterr().out
@@ -150,7 +156,7 @@ class TestPlanStartsWithPhaseHeading:
     """
 
     def test_insert_design_after_heading_places_design_after_h1(self):
-        from duplo.main import _insert_design_after_heading
+        from duplo.pipeline import _insert_design_after_heading
 
         content = "# Phase 0: Core\n\n- [ ] task\n"
         design = "## Visual Design Requirements\n\n### Colors\n- **primary**: `#ff0000`\n"
@@ -164,7 +170,7 @@ class TestPlanStartsWithPhaseHeading:
         assert heading_idx < design_idx < task_idx
 
     def test_insert_design_empty_is_no_op(self):
-        from duplo.main import _insert_design_after_heading
+        from duplo.pipeline import _insert_design_after_heading
 
         content = "# Phase 0\n\n- [ ] task\n"
         assert _insert_design_after_heading(content, "") == content
@@ -210,7 +216,7 @@ class TestPlanStartsWithPhaseHeading:
 
         llm_output = "# Phase 0: Core\n\n- [ ] Scaffold project\n"
         with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
-            with patch("duplo.main.generate_phase_plan", return_value=llm_output):
+            with patch("duplo.pipeline.generate_phase_plan", return_value=llm_output):
                 main()
 
         written = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -245,8 +251,8 @@ class TestSubsequentRunResume:
         (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan") as mock_gen:
-            with patch("duplo.main.notify_phase_complete"):
+        with patch("duplo.pipeline.generate_phase_plan") as mock_gen:
+            with patch("duplo.pipeline.notify_phase_complete"):
                 main()
 
         mock_gen.assert_not_called()
@@ -289,15 +295,15 @@ class TestPhaseCompletionFlow:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.notify_phase_complete"),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.notify_phase_complete"),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 1: Next\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -315,13 +321,13 @@ class TestPhaseCompletionFlow:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.collect_feedback", return_value="great work"),
-            patch("duplo.main.save_feedback") as mock_save_fb,
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 1\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.collect_feedback", return_value="great work"),
+            patch("duplo.pipeline.save_feedback") as mock_save_fb,
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 1\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -335,10 +341,10 @@ class TestPhaseCompletionFlow:
 
         with (
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 0: Core\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -364,10 +370,10 @@ class TestPhaseCompletionFlow:
 
         with (
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Core\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -392,12 +398,12 @@ class TestPhaseCompletionFlow:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.generate_roadmap", return_value=roadmap) as mock_roadmap,
+            patch("duplo.pipeline.generate_roadmap", return_value=roadmap) as mock_roadmap,
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
             main()
 
@@ -438,12 +444,12 @@ class TestPhaseCompletionFlow:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.generate_roadmap", return_value=fresh_roadmap) as mock_roadmap,
+            patch("duplo.pipeline.generate_roadmap", return_value=fresh_roadmap) as mock_roadmap,
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
             main()
 
@@ -489,12 +495,12 @@ class TestPhaseCompletionFlow:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.generate_roadmap", return_value=fresh_roadmap),
+            patch("duplo.pipeline.generate_roadmap", return_value=fresh_roadmap),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
             main()
 
@@ -536,8 +542,8 @@ class TestSubsequentRunFileChanges:
         (ref_dir / "new_ref.png").write_bytes(b"PNG image data")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                 main()
 
         out = capsys.readouterr().out
@@ -558,9 +564,9 @@ class TestSubsequentRunFileChanges:
         # Modify the file.
         (tmp_path / "notes.txt").write_text("modified content")
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.extract_features", return_value=[]):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.pipeline.extract_features", return_value=[]):
                     main()
 
         out = capsys.readouterr().out
@@ -580,8 +586,8 @@ class TestSubsequentRunFileChanges:
         # Remove the file.
         (tmp_path / "old.txt").unlink()
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                 main()
 
         out = capsys.readouterr().out
@@ -597,10 +603,10 @@ class TestSubsequentRunFileChanges:
         (tmp_path / "stray.png").write_bytes(b"PNG image data")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._analyze_new_files") as mock_analyze:
+        with patch("duplo.pipeline._analyze_new_files") as mock_analyze:
             mock_analyze.return_value = UpdateSummary()
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+            with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                     main()
 
         # File change detected and printed.
@@ -619,8 +625,8 @@ class TestSubsequentRunFileChanges:
         hashes = compute_hashes(tmp_path)
         save_hashes(hashes, directory=tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                 main()
 
         out = capsys.readouterr().out
@@ -635,9 +641,9 @@ class TestSubsequentRunFileChanges:
         (ref_dir / "new.txt").write_text("hello")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.extract_features", return_value=[]):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.pipeline.extract_features", return_value=[]):
                     main()
 
         # ref/ files are durable user inputs and stay in place; the hash
@@ -665,7 +671,7 @@ class TestAnalyzeNewFiles:
             fonts={"body": "Arial"},
             source_images=["new_screen.png"],
         )
-        with patch("duplo.main.extract_design", return_value=design) as mock_design:
+        with patch("duplo.pipeline.extract_design", return_value=design) as mock_design:
             _analyze_new_files(["new_screen.png"])
 
         mock_design.assert_called_once()
@@ -678,7 +684,7 @@ class TestAnalyzeNewFiles:
         pdf = tmp_path / "spec.pdf"
         pdf.write_bytes(b"%PDF" * 100)
 
-        with patch("duplo.main.extract_pdf_text", return_value="PDF content") as mock_pdf:
+        with patch("duplo.pipeline.extract_pdf_text", return_value="PDF content") as mock_pdf:
             _analyze_new_files(["spec.pdf"])
 
         mock_pdf.assert_called_once()
@@ -693,7 +699,7 @@ class TestAnalyzeNewFiles:
         txt = tmp_path / "urls.txt"
         txt.write_text("Check https://newsite.com for the product details")
 
-        with patch("duplo.main.fetch_site") as mock_fetch:
+        with patch("duplo.pipeline.fetch_site") as mock_fetch:
             summary = _analyze_new_files(["urls.txt"])
 
         mock_fetch.assert_not_called()
@@ -740,7 +746,7 @@ class TestAnalyzeNewFiles:
             ],
         )
 
-        with patch("duplo.main.extract_pdf_text", return_value="DOCS-PDF") as mock_pdf:
+        with patch("duplo.pipeline.extract_pdf_text", return_value="DOCS-PDF") as mock_pdf:
             summary = _analyze_new_files(
                 [
                     "ref/docs.pdf",
@@ -773,7 +779,7 @@ class TestAnalyzeNewFiles:
             colors={"primary": "#000"},
             source_images=["ref.png"],
         )
-        with patch("duplo.main.extract_design", return_value=design):
+        with patch("duplo.pipeline.extract_design", return_value=design):
             _analyze_new_files(["ref.png"])
 
         assert img.exists()
@@ -813,9 +819,9 @@ class TestAnalyzeNewFiles:
         monkeypatch.chdir(tmp_path)
 
         design = DesignRequirements(colors={"primary": "#abc"}, source_images=["ref/new.png"])
-        with patch("duplo.main.extract_design", return_value=design):
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch("duplo.pipeline.extract_design", return_value=design):
+            with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                     main()
 
         out = capsys.readouterr().out
@@ -833,11 +839,11 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
         ) as mock_fetch:
-            with patch("duplo.main.save_reference_urls") as mock_save_urls:
-                with patch("duplo.main.save_raw_content") as mock_save_raw:
+            with patch("duplo.pipeline.save_reference_urls") as mock_save_urls:
+                with patch("duplo.pipeline.save_raw_content") as mock_save_raw:
                     _rescrape_product_url()
 
         mock_fetch.assert_called_once_with("https://example.com")
@@ -851,7 +857,7 @@ class TestRescrapeProductUrl:
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "", "features": []})
 
-        with patch("duplo.main.fetch_site") as mock_fetch:
+        with patch("duplo.pipeline.fetch_site") as mock_fetch:
             _rescrape_product_url()
 
         mock_fetch.assert_not_called()
@@ -860,7 +866,7 @@ class TestRescrapeProductUrl:
     def test_skips_when_no_duplo_json(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.fetch_site") as mock_fetch:
+        with patch("duplo.pipeline.fetch_site") as mock_fetch:
             _rescrape_product_url()
 
         mock_fetch.assert_not_called()
@@ -869,7 +875,7 @@ class TestRescrapeProductUrl:
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
 
-        with patch("duplo.main.fetch_site", side_effect=Exception("network error")):
+        with patch("duplo.pipeline.fetch_site", side_effect=Exception("network error")):
             _rescrape_product_url()
 
         out = capsys.readouterr().out
@@ -882,10 +888,10 @@ class TestRescrapeProductUrl:
 
         examples = [{"input": "1+1", "expected_output": "2", "source_url": "", "language": "py"}]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", examples, None, [], {}),
         ):
-            with patch("duplo.main.save_examples") as mock_save_ex:
+            with patch("duplo.pipeline.save_examples") as mock_save_ex:
                 _rescrape_product_url()
 
         mock_save_ex.assert_called_once_with(examples)
@@ -911,10 +917,10 @@ class TestRescrapeProductUrl:
             PageRecord("https://example.com/docs", "t2", "def"),
         ]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {}),
         ):
-            with patch("duplo.main.save_reference_urls") as mock_save:
+            with patch("duplo.pipeline.save_reference_urls") as mock_save:
                 pages, ex, text = _rescrape_product_url()
 
         mock_save.assert_not_called()
@@ -939,11 +945,11 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t2", "new")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
         ):
-            with patch("duplo.main.save_reference_urls") as mock_save:
-                with patch("duplo.main.save_raw_content"):
+            with patch("duplo.pipeline.save_reference_urls") as mock_save:
+                with patch("duplo.pipeline.save_raw_content"):
                     pages, ex, text = _rescrape_product_url()
 
         mock_save.assert_called_once()
@@ -962,11 +968,11 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
         ):
-            with patch("duplo.main.save_reference_urls") as mock_save:
-                with patch("duplo.main.save_raw_content"):
+            with patch("duplo.pipeline.save_reference_urls") as mock_save:
+                with patch("duplo.pipeline.save_raw_content"):
                     pages, ex, text = _rescrape_product_url()
 
         mock_save.assert_called_once()
@@ -987,7 +993,7 @@ class TestRescrapeProductUrl:
             },
         )
 
-        with patch("duplo.main.fetch_site") as mock_fetch:
+        with patch("duplo.pipeline.fetch_site") as mock_fetch:
             pages, ex, text = _rescrape_product_url()
 
         mock_fetch.assert_not_called()
@@ -1013,11 +1019,11 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
         ):
-            with patch("duplo.main.save_reference_urls"):
-                with patch("duplo.main.save_raw_content"):
+            with patch("duplo.pipeline.save_reference_urls"):
+                with patch("duplo.pipeline.save_raw_content"):
                     pages, ex, text = _rescrape_product_url()
 
         assert pages == 1
@@ -1036,11 +1042,11 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {"https://example.com": "<html/>"}),
         ):
-            with patch("duplo.main.save_reference_urls"):
-                with patch("duplo.main.save_raw_content"):
+            with patch("duplo.pipeline.save_reference_urls"):
+                with patch("duplo.pipeline.save_raw_content"):
                     _rescrape_product_url()
 
         data = _read_duplo_json(tmp_path)
@@ -1065,7 +1071,7 @@ class TestRescrapeProductUrl:
 
         records = [PageRecord("https://example.com", "t2", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, records, {}),
         ):
             _rescrape_product_url()
@@ -1101,10 +1107,10 @@ class TestRescrapeProductUrl:
         records = [PageRecord("https://example.com", "t2", "abc")]
         with (
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=("text", [], None, records, {}),
             ),
-            patch("duplo.main.extract_features") as mock_extract,
+            patch("duplo.pipeline.extract_features") as mock_extract,
         ):
             main()
 
@@ -1136,7 +1142,7 @@ class TestRescrapeProductUrl:
         # Create PLAN.md with unchecked tasks so _subsequent_run hits State 2 and returns.
         (tmp_path / "PLAN.md").write_text("# Phase 1\n- [ ] Build UI\n", encoding="utf-8")
 
-        with patch("duplo.main.fetch_site") as mock_fetch:
+        with patch("duplo.pipeline.fetch_site") as mock_fetch:
             main()
 
         mock_fetch.assert_not_called()
@@ -1162,9 +1168,11 @@ class TestRescrapeProductUrl:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")) as mock_rescrape:
-            with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch(
+            "duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")
+        ) as mock_rescrape:
+            with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                     main()
 
         mock_rescrape.assert_called_once()
@@ -1193,7 +1201,7 @@ class TestDetectAndAppendGaps:
             missing_features=[MissingFeature(name="Search", reason="Not in plan")],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps()
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1223,7 +1231,7 @@ class TestDetectAndAppendGaps:
             ),
         )
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps(spec=spec)
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1245,7 +1253,7 @@ class TestDetectAndAppendGaps:
         from duplo.gap_detector import GapResult
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps()
 
         out = capsys.readouterr().out
@@ -1256,7 +1264,7 @@ class TestDetectAndAppendGaps:
         _write_duplo_json(tmp_path, {"source_url": "", "features": []})
         (tmp_path / "PLAN.md").write_text("# Plan\n", encoding="utf-8")
 
-        with patch("duplo.main.detect_gaps") as mock_detect:
+        with patch("duplo.pipeline.detect_gaps") as mock_detect:
             _detect_and_append_gaps()
 
         mock_detect.assert_not_called()
@@ -1268,7 +1276,7 @@ class TestDetectAndAppendGaps:
             {"source_url": "", "features": [{"name": "X", "description": "x", "category": "c"}]},
         )
 
-        with patch("duplo.main.detect_gaps") as mock_detect:
+        with patch("duplo.pipeline.detect_gaps") as mock_detect:
             _detect_and_append_gaps()
 
         mock_detect.assert_not_called()
@@ -1297,7 +1305,7 @@ class TestDetectAndAppendGaps:
             missing_features=[MissingFeature(name="Auth", reason="Not covered")],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps()
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1331,7 +1339,7 @@ class TestDetectAndAppendGaps:
             missing_features=[MissingFeature(name="Export", reason="Missing")],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps()
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1373,7 +1381,7 @@ class TestDetectAndAppendGaps:
             missing_features=[MissingFeature(name="Websocket", reason="Not covered")],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps(spec=spec)
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1402,7 +1410,7 @@ class TestDetectAndAppendGaps:
             missing_features=[MissingFeature(name="API", reason="Missing")],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             _detect_and_append_gaps()
 
         updated = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -1432,7 +1440,7 @@ class TestDetectAndAppendGaps:
         from duplo.gap_detector import GapResult
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result) as mock_detect:
             _detect_and_append_gaps(scope_exclude=["Plugin API"])
 
         # detect_gaps should have been called with only 2 features
@@ -1461,7 +1469,7 @@ class TestDetectAndAppendGaps:
         from duplo.gap_detector import GapResult
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result) as mock_detect:
             _detect_and_append_gaps(scope_exclude=None)
 
         call_features = mock_detect.call_args[0][1]
@@ -1493,7 +1501,7 @@ class TestDetectAndAppendGaps:
         from duplo.gap_detector import GapResult
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result) as mock_detect:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result) as mock_detect:
             _detect_and_append_gaps(scope_exclude=["plugin API"])
 
         # "Core Editing" has "plugin API" in its description so it
@@ -1517,7 +1525,7 @@ class TestDetectAndAppendGaps:
         )
         (tmp_path / "PLAN.md").write_text("# Phase 0\n", encoding="utf-8")
 
-        with patch("duplo.main.detect_gaps") as mock_detect:
+        with patch("duplo.pipeline.detect_gaps") as mock_detect:
             _detect_and_append_gaps(scope_exclude=["Plugin API"])
 
         mock_detect.assert_not_called()
@@ -1551,10 +1559,12 @@ class TestDetectAndAppendGaps:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)) as mock_gaps:
+        with patch(
+            "duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)
+        ) as mock_gaps:
             with patch("duplo.main.select_features", side_effect=lambda f, **kw: f):
-                with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-                    with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+                    with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                         main()
 
         mock_gaps.assert_called_once()
@@ -1636,7 +1646,7 @@ class TestAnalyzeNewFilesReturnsSummary:
         (tmp_path / "shot.png").write_bytes(b"PNG" * 500)
         monkeypatch.chdir(tmp_path)
         design = DesignRequirements(colors={"primary": "#abc"}, source_images=["shot.png"])
-        with patch("duplo.main.extract_design", return_value=design):
+        with patch("duplo.pipeline.extract_design", return_value=design):
             result = _analyze_new_files(["shot.png"])
         assert result.images_analyzed == 1
 
@@ -1667,12 +1677,12 @@ class TestAnalyzeNewFilesReturnsSummary:
         )
 
         with (
-            patch("duplo.main.extract_all_videos", return_value=[vid_result]),
-            patch("duplo.main.filter_frames", return_value=[decision]),
-            patch("duplo.main.apply_filter", return_value=[frame]),
-            patch("duplo.main.describe_frames", return_value=[desc]),
-            patch("duplo.main.store_accepted_frames", return_value=["frame001.png"]),
-            patch("duplo.main.extract_design", return_value=design) as mock_design,
+            patch("duplo.pipeline.extract_all_videos", return_value=[vid_result]),
+            patch("duplo.pipeline.filter_frames", return_value=[decision]),
+            patch("duplo.pipeline.apply_filter", return_value=[frame]),
+            patch("duplo.pipeline.describe_frames", return_value=[desc]),
+            patch("duplo.pipeline.store_accepted_frames", return_value=["frame001.png"]),
+            patch("duplo.pipeline.extract_design", return_value=design) as mock_design,
         ):
             result = _analyze_new_files(["shot.png", "demo.mp4"])
 
@@ -1710,12 +1720,12 @@ class TestAnalyzeNewFilesReturnsSummary:
         )
 
         with (
-            patch("duplo.main.extract_all_videos", return_value=[vid_result]),
-            patch("duplo.main.filter_frames", return_value=[decision]),
-            patch("duplo.main.apply_filter", return_value=[frame]),
-            patch("duplo.main.describe_frames", return_value=[desc]),
-            patch("duplo.main.store_accepted_frames", return_value=["frame001.png"]),
-            patch("duplo.main.extract_design", return_value=design) as mock_design,
+            patch("duplo.pipeline.extract_all_videos", return_value=[vid_result]),
+            patch("duplo.pipeline.filter_frames", return_value=[decision]),
+            patch("duplo.pipeline.apply_filter", return_value=[frame]),
+            patch("duplo.pipeline.describe_frames", return_value=[desc]),
+            patch("duplo.pipeline.store_accepted_frames", return_value=["frame001.png"]),
+            patch("duplo.pipeline.extract_design", return_value=design) as mock_design,
         ):
             result = _analyze_new_files(["demo.mp4"])
 
@@ -1850,10 +1860,10 @@ class TestAnalyzeNewFilesWithSpec:
         )
         with (
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[img],
             ) as mock_cdi,
-            patch("duplo.main.extract_design", return_value=design),
+            patch("duplo.pipeline.extract_design", return_value=design),
         ):
             _analyze_new_files(["ref/design.png"], spec=spec)
 
@@ -1869,7 +1879,7 @@ class TestAnalyzeNewFilesWithSpec:
             colors={"primary": "#fff"},
             source_images=["shot.png"],
         )
-        with patch("duplo.main.extract_design", return_value=design) as mock_design:
+        with patch("duplo.pipeline.extract_design", return_value=design) as mock_design:
             _analyze_new_files(["shot.png"])
 
         mock_design.assert_called_once()
@@ -1914,10 +1924,10 @@ class TestBehavioralVideoFiltering:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
                 return_value=[],
             ) as mock_extract,
-            patch("duplo.main.scan_files") as mock_scan,
+            patch("duplo.pipeline.scan_files") as mock_scan,
         ):
             from duplo.scanner import ScanResult
 
@@ -1952,7 +1962,7 @@ class TestBehavioralVideoFiltering:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
                 return_value=[],
             ) as mock_extract,
         ):
@@ -1991,9 +2001,9 @@ class TestBehavioralVideoFiltering:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
             ) as mock_extract,
-            patch("duplo.main.scan_files") as mock_scan,
+            patch("duplo.pipeline.scan_files") as mock_scan,
         ):
             from duplo.scanner import ScanResult
 
@@ -2039,9 +2049,9 @@ class TestBehavioralVideoFiltering:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
             ) as mock_extract,
-            patch("duplo.main.scan_files") as mock_scan,
+            patch("duplo.pipeline.scan_files") as mock_scan,
         ):
             from duplo.scanner import ScanResult
 
@@ -2076,12 +2086,12 @@ class TestRescrapeReturnsCounts:
         records = [PageRecord("https://example.com", "t", "abc")]
         examples = [{"input": "1+1", "expected_output": "2", "source_url": "", "language": "py"}]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", examples, None, records, {"https://example.com": "<html/>"}),
         ):
-            with patch("duplo.main.save_reference_urls"):
-                with patch("duplo.main.save_raw_content"):
-                    with patch("duplo.main.save_examples"):
+            with patch("duplo.pipeline.save_reference_urls"):
+                with patch("duplo.pipeline.save_raw_content"):
+                    with patch("duplo.pipeline.save_examples"):
                         pages, ex, text = _rescrape_product_url()
         assert pages == 1
         assert ex == 1
@@ -2123,7 +2133,7 @@ class TestDetectGapsReturnsCounts:
             ],
             missing_examples=[],
         )
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
             mf, me, dr, ta = _detect_and_append_gaps()
         assert mf == 2
         assert me == 0
@@ -2156,8 +2166,8 @@ class TestDetectGapsReturnsCounts:
         )
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
-            with patch("duplo.main.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
+            with patch("duplo.pipeline.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
                 _detect_and_append_gaps(spec=spec)
 
         # detect_design_gaps should have been called with spec design only.
@@ -2189,8 +2199,8 @@ class TestDetectGapsReturnsCounts:
         )
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
-            with patch("duplo.main.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
+            with patch("duplo.pipeline.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
                 _detect_and_append_gaps(spec=spec)
 
         call_design = mock_ddg.call_args[0][1]
@@ -2215,8 +2225,8 @@ class TestDetectGapsReturnsCounts:
         from duplo.gap_detector import GapResult
 
         gap_result = GapResult(missing_features=[], missing_examples=[])
-        with patch("duplo.main.detect_gaps", return_value=gap_result):
-            with patch("duplo.main.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
+        with patch("duplo.pipeline.detect_gaps", return_value=gap_result):
+            with patch("duplo.pipeline.detect_design_gaps", wraps=detect_design_gaps) as mock_ddg:
                 _detect_and_append_gaps(spec=None)
 
         # detect_design_gaps should not have been called (no spec = no design data).
@@ -2244,9 +2254,9 @@ class TestSubsequentRunSummary:
         (tmp_path / "notes.txt").write_text("some notes")
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
-                with patch("duplo.main.extract_features", return_value=[]):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
+                with patch("duplo.pipeline.extract_features", return_value=[]):
                     main()
 
         out = capsys.readouterr().out
@@ -2262,8 +2272,8 @@ class TestSubsequentRunSummary:
         hashes = compute_hashes(tmp_path)
         save_hashes(hashes, directory=tmp_path)
 
-        with patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"):
-            with patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"):
+        with patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"):
+            with patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"):
                 main()
 
         out = capsys.readouterr().out
@@ -2278,17 +2288,17 @@ class TestRescrapeReturnsText:
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
         records = [PageRecord("https://example.com", "t", "abc")]
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("product content", [], None, records, {}),
         ):
-            with patch("duplo.main.save_reference_urls"):
+            with patch("duplo.pipeline.save_reference_urls"):
                 pages, ex, text = _rescrape_product_url()
         assert text == "product content"
 
     def test_returns_empty_on_failure(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
-        with patch("duplo.main.fetch_site", side_effect=Exception("fail")):
+        with patch("duplo.pipeline.fetch_site", side_effect=Exception("fail")):
             pages, ex, text = _rescrape_product_url()
         assert text == ""
 
@@ -2326,15 +2336,15 @@ class TestSubsequentRunReextractsFeatures:
         new_feature = Feature(name="Search", description="Find things.", category="core")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[new_feature]) as mock_extract,
-            patch("duplo.main.save_features") as mock_save,
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.extract_features", return_value=[new_feature]) as mock_extract,
+            patch("duplo.pipeline.save_features") as mock_save,
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2351,12 +2361,12 @@ class TestSubsequentRunReextractsFeatures:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main.extract_features") as mock_extract,
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline.extract_features") as mock_extract,
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2378,12 +2388,12 @@ class TestCompletePhaseIssues:
         (tmp_path / "PLAN.md").write_text("- [x] task\n")
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
             patch(
-                "duplo.main.collect_issues",
+                "duplo.pipeline.collect_issues",
                 return_value=[
                     "Button misaligned",
                     "Color wrong",
@@ -2409,11 +2419,11 @@ class TestCompletePhaseIssues:
         (tmp_path / "PLAN.md").write_text("- [x] task\n")
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
         ):
             _complete_phase("- [x] task\n", "", "Phase 2")
 
@@ -2679,10 +2689,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap) as mock_gen,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2711,10 +2721,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap) as mock_gen,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2739,7 +2749,7 @@ class TestRoadmapRegeneration:
         _write_duplo_json(tmp_path, data)
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_roadmap") as mock_gen:
+        with patch("duplo.pipeline.generate_roadmap") as mock_gen:
             main()
 
         mock_gen.assert_not_called()
@@ -2751,8 +2761,8 @@ class TestRoadmapRegeneration:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.generate_roadmap", return_value=[]),
-            patch("duplo.main.generate_phase_plan") as mock_plan,
+            patch("duplo.pipeline.generate_roadmap", return_value=[]),
+            patch("duplo.pipeline.generate_phase_plan") as mock_plan,
         ):
             main()
 
@@ -2807,10 +2817,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap) as mock_gen,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2854,10 +2864,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap) as mock_gen,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap) as mock_gen,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2903,10 +2913,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -2950,13 +2960,13 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n- [ ] task",
             ) as mock_gen,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
             main()
 
@@ -3019,10 +3029,10 @@ class TestRoadmapRegeneration:
             },
         ]
         with (
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -3053,7 +3063,7 @@ class TestRoadmapRegeneration:
         _write_duplo_json(tmp_path, data)
         monkeypatch.chdir(tmp_path)
 
-        with patch("duplo.main.generate_roadmap") as mock_gen:
+        with patch("duplo.pipeline.generate_roadmap") as mock_gen:
             main()
 
         mock_gen.assert_not_called()
@@ -3125,10 +3135,10 @@ class TestRescrapeDocStructures:
 
         doc_structs = {"feature_tables": [{"heading": "API", "rows": []}]}
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], doc_structs, [], {}),
         ):
-            with patch("duplo.main.save_doc_structures") as mock_save_docs:
+            with patch("duplo.pipeline.save_doc_structures") as mock_save_docs:
                 _rescrape_product_url()
 
         mock_save_docs.assert_called_once_with(doc_structs)
@@ -3138,10 +3148,10 @@ class TestRescrapeDocStructures:
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
 
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, [], {}),
         ):
-            with patch("duplo.main.save_doc_structures") as mock_save_docs:
+            with patch("duplo.pipeline.save_doc_structures") as mock_save_docs:
                 _rescrape_product_url()
 
         mock_save_docs.assert_not_called()
@@ -3162,7 +3172,7 @@ class TestRescrapeDownloadsSiteMedia:
             "https://example.com": "<html><img src='pic.png'/></html>",
         }
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=(
                 "text",
                 [],
@@ -3172,7 +3182,7 @@ class TestRescrapeDownloadsSiteMedia:
             ),
         ):
             with patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([Path("a.png")], []),
             ) as mock_dl:
                 _rescrape_product_url()
@@ -3186,10 +3196,10 @@ class TestRescrapeDownloadsSiteMedia:
         _write_duplo_json(tmp_path, {"source_url": "https://example.com", "features": []})
 
         with patch(
-            "duplo.main.fetch_site",
+            "duplo.pipeline.fetch_site",
             return_value=("text", [], None, [], {}),
         ):
-            with patch("duplo.main._download_site_media") as mock_dl:
+            with patch("duplo.pipeline._download_site_media") as mock_dl:
                 _rescrape_product_url()
 
         mock_dl.assert_not_called()
@@ -3468,15 +3478,15 @@ class TestSubsequentRunFeatureCountingIntegration:
         new_feat = Feature(name="Search", description="Find.", category="core")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[new_feat]),
+            patch("duplo.pipeline.extract_features", return_value=[new_feat]),
             # Let save_features actually run so counting logic works
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -3495,14 +3505,14 @@ class TestSubsequentRunFeatureCountingIntegration:
         dup_feat = Feature(name="Auth", description="Login again.", category="core")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[dup_feat]),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.extract_features", return_value=[dup_feat]),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -3526,10 +3536,10 @@ class TestSubsequentRunFeatureCountingIntegration:
 
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", side_effect=corrupt_json),
+            patch("duplo.pipeline.extract_features", side_effect=corrupt_json),
         ):
             main()
 
@@ -3547,14 +3557,14 @@ class TestSubsequentRunFeatureCountingIntegration:
 
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[]),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.extract_features", return_value=[]),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -3715,13 +3725,13 @@ class TestCompletePhaseTaskMatching:
         plan_content = self._plan_with_annotations()
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
                 return_value=(["Export"], []),
             ) as mock_match,
         ):
@@ -3751,13 +3761,13 @@ class TestCompletePhaseTaskMatching:
         plan_content = "- [x] Build search UI\n- [x] Wire export button\n"
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
                 return_value=(["Search", "Export"], ["Custom theme"]),
             ),
         ):
@@ -3774,13 +3784,13 @@ class TestCompletePhaseTaskMatching:
         _write_duplo_json(tmp_path, {"features": []})
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
             ) as mock_match,
         ):
             _complete_phase("- [x] task\n", "", "Phase 1")
@@ -3794,13 +3804,13 @@ class TestCompletePhaseTaskMatching:
         plan_content = '- [x] Add search [feat: "Search"]\n'
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
             ) as mock_match,
         ):
             _complete_phase(plan_content, "", "Phase 1")
@@ -3812,13 +3822,13 @@ class TestCompletePhaseTaskMatching:
         _write_duplo_json(tmp_path, {"features": self._FEATURES})
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
                 return_value=([], []),
             ),
         ):
@@ -3873,13 +3883,13 @@ class TestCompletePhaseScoping:
         )
 
         with (
-            patch("duplo.main.append_phase_to_history") as mock_append,
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history") as mock_append,
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
                 return_value=([], []),
             ),
         ):
@@ -3923,13 +3933,13 @@ class TestCompletePhaseScoping:
         )
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
             patch(
-                "duplo.main.match_unannotated_tasks",
+                "duplo.pipeline.match_unannotated_tasks",
                 return_value=([], []),
             ) as mock_match,
         ):
@@ -3980,11 +3990,11 @@ class TestCompletePhaseScoping:
         )
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
         ):
             _complete_phase(plan_content, "", "Phase 2: Extras")
 
@@ -4005,12 +4015,12 @@ class TestCompletePhaseAppshotTimeout:
         (tmp_path / "PLAN.md").write_text("- [x] task\n")
 
         with (
-            patch("duplo.main.append_phase_to_history"),
-            patch("duplo.main.advance_phase"),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.capture_appshot", return_value=-2),
+            patch("duplo.pipeline.append_phase_to_history"),
+            patch("duplo.pipeline.advance_phase"),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.capture_appshot", return_value=-2),
         ):
             _complete_phase("- [x] task\n", "MyApp", "Phase 1")
 
@@ -4089,9 +4099,9 @@ class TestGapDetectorSkipsWithUncheckedTasks:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
             patch(
-                "duplo.main._detect_and_append_gaps",
+                "duplo.pipeline._detect_and_append_gaps",
                 return_value=(0, 0, 0, 0),
             ) as mock_gaps,
         ):
@@ -4107,14 +4117,14 @@ class TestGapDetectorSkipsWithUncheckedTasks:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
             patch(
-                "duplo.main._detect_and_append_gaps",
+                "duplo.pipeline._detect_and_append_gaps",
                 return_value=(0, 0, 0, 0),
             ) as mock_gaps,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -4167,7 +4177,7 @@ class TestFixMode:
             summary="Two bugs.",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4204,7 +4214,7 @@ class TestFixMode:
             summary="Three bugs.",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4237,7 +4247,7 @@ class TestFixMode:
             summary="One bug.",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4258,7 +4268,7 @@ class TestFixMode:
 
         result = InvestigationResult(diagnoses=[], summary="No diagnoses")
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         data = _read_duplo_json(tmp_path)
@@ -4329,7 +4339,7 @@ class TestFixModeDiagnosis:
             summary="One bug found.",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4370,7 +4380,7 @@ class TestFixModeDiagnosis:
             summary="Two bugs found.",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4395,7 +4405,7 @@ class TestFixModeDiagnosis:
             summary="Investigation failed: connection timeout",
         )
 
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         plan = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
@@ -4431,7 +4441,7 @@ class TestFixModeDiagnosis:
             summary="One diagnosis.",
         )
 
-        mock_inv = patch("duplo.main.investigate", return_value=result)
+        mock_inv = patch("duplo.pipeline.investigate", return_value=result)
         with mock_inv as inv:
             main()
 
@@ -4463,7 +4473,7 @@ class TestFixModeDiagnosis:
             summary="Could not determine root cause",
         )
 
-        mock_inv = patch("duplo.main.investigate", return_value=result)
+        mock_inv = patch("duplo.pipeline.investigate", return_value=result)
         with mock_inv as inv:
             main()
 
@@ -4544,7 +4554,7 @@ class TestFixModeSpecContext:
             summary="One bug.",
         )
 
-        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+        with patch("duplo.pipeline.investigate", return_value=result) as mock_inv:
             main()
 
         # investigate() was called with counter_examples kwarg.
@@ -4586,7 +4596,7 @@ class TestFixModeSpecContext:
             summary="One bug.",
         )
 
-        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+        with patch("duplo.pipeline.investigate", return_value=result) as mock_inv:
             main()
 
         # investigate() was called with behavior_contracts kwarg.
@@ -4633,7 +4643,7 @@ class TestFixModeSpecContext:
             summary="One bug.",
         )
 
-        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+        with patch("duplo.pipeline.investigate", return_value=result) as mock_inv:
             main()
 
         assert mock_inv.call_count == 1
@@ -4682,7 +4692,7 @@ class TestFixModeSpecContext:
             summary="One bug.",
         )
 
-        with patch("duplo.main.investigate", return_value=result) as mock_inv:
+        with patch("duplo.pipeline.investigate", return_value=result) as mock_inv:
             main()
 
         assert mock_inv.call_count == 1
@@ -4709,10 +4719,10 @@ class TestCompareWithReferences:
         current.write_bytes(b"PNG" * 100)
 
         from duplo.comparator import ComparisonResult
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         result = ComparisonResult(similar=True, summary="ok", details=[])
-        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+        with patch("duplo.pipeline.compare_screenshots", return_value=result) as mock_cmp:
             _compare_with_references(current)
 
         # Should have used the 2 duplo reference images.
@@ -4733,10 +4743,10 @@ class TestCompareWithReferences:
         current.write_bytes(b"PNG" * 100)
 
         from duplo.comparator import ComparisonResult
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         result = ComparisonResult(similar=True, summary="ok", details=[])
-        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+        with patch("duplo.pipeline.compare_screenshots", return_value=result) as mock_cmp:
             _compare_with_references(current)
 
         refs = mock_cmp.call_args[0][1]
@@ -4749,7 +4759,7 @@ class TestCompareWithReferences:
         current = tmp_path / "main.png"
         current.write_bytes(b"PNG" * 100)
 
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         _compare_with_references(current)
         out = capsys.readouterr().out
@@ -4768,10 +4778,10 @@ class TestCompareWithReferences:
         current.write_bytes(b"PNG" * 100)
 
         from duplo.comparator import ComparisonResult
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         result = ComparisonResult(similar=True, summary="ok", details=[])
-        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+        with patch("duplo.pipeline.compare_screenshots", return_value=result) as mock_cmp:
             _compare_with_references(current)
 
         refs = mock_cmp.call_args[0][1]
@@ -4794,10 +4804,10 @@ class TestCompareWithReferences:
         current.write_bytes(b"PNG" * 100)
 
         from duplo.comparator import ComparisonResult
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         result = ComparisonResult(similar=True, summary="ok", details=[])
-        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+        with patch("duplo.pipeline.compare_screenshots", return_value=result) as mock_cmp:
             _compare_with_references(current)
 
         refs = mock_cmp.call_args[0][1]
@@ -4816,10 +4826,10 @@ class TestCompareWithReferences:
         current.write_bytes(b"PNG" * 100)
 
         from duplo.comparator import ComparisonResult
-        from duplo.main import _compare_with_references
+        from duplo.pipeline import _compare_with_references
 
         result = ComparisonResult(similar=True, summary="ok", details=[])
-        with patch("duplo.main.compare_screenshots", return_value=result) as mock_cmp:
+        with patch("duplo.pipeline.compare_screenshots", return_value=result) as mock_cmp:
             _compare_with_references(current)
 
         refs = mock_cmp.call_args[0][1]
@@ -4903,8 +4913,8 @@ class TestPhase2NotStartedRunDuplo:
         (tmp_path / "PLAN.md").write_text(self._PHASE2_PLAN, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
         ):
             main()
 
@@ -4939,9 +4949,9 @@ class TestPhase2NotStartedRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.generate_phase_plan") as mock_gen,
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.generate_phase_plan") as mock_gen,
         ):
             main()
 
@@ -4954,9 +4964,9 @@ class TestPhase2NotStartedRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.append_phase_to_history") as mock_append,
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.append_phase_to_history") as mock_append,
         ):
             main()
 
@@ -5100,21 +5110,21 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
-            patch("duplo.main.match_unannotated_tasks") as mock_matcher,
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
+            patch("duplo.pipeline.match_unannotated_tasks") as mock_matcher,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5141,20 +5151,20 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5175,20 +5185,20 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=["Search is slow"]) as mock_issues,
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=["Search is slow"]) as mock_issues,
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5209,20 +5219,20 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ) as mock_roadmap,
         ):
@@ -5245,17 +5255,17 @@ class TestPhase2CompleteRunDuplo:
         )
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
-            patch("duplo.main.generate_phase_plan", return_value=phase3_plan) as mock_plan,
+            patch("duplo.pipeline.generate_phase_plan", return_value=phase3_plan) as mock_plan,
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5280,20 +5290,20 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5317,21 +5327,21 @@ class TestPhase2CompleteRunDuplo:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.collect_feedback", return_value=""),
-            patch("duplo.main.collect_issues", return_value=[]),
-            patch("duplo.main.notify_phase_complete"),
-            patch("duplo.main.capture_appshot", return_value=-1),
-            patch("duplo.main.match_unannotated_tasks", return_value=([], [])) as mock_matcher,
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.collect_feedback", return_value=""),
+            patch("duplo.pipeline.collect_issues", return_value=[]),
+            patch("duplo.pipeline.notify_phase_complete"),
+            patch("duplo.pipeline.capture_appshot", return_value=-1),
+            patch("duplo.pipeline.match_unannotated_tasks", return_value=([], [])) as mock_matcher,
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 3\n- [ ] task",
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=self._new_roadmap(),
             ),
         ):
@@ -5568,18 +5578,18 @@ class TestSubsequentRunSpecVerificationIndependent:
         spec = self._make_spec()
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
-            patch("duplo.main.load_frame_descriptions", return_value=[]),
+            patch("duplo.pipeline.read_spec", return_value=spec),
+            patch("duplo.pipeline.load_frame_descriptions", return_value=[]),
             patch(
-                "duplo.main.format_contracts_as_verification",
+                "duplo.pipeline.format_contracts_as_verification",
                 return_value=self._SPEC_VTASKS,
             ) as mock_fmt,
             patch("duplo.main.select_features", return_value=[feat]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 1\n- [ ] task\n",
             ),
-            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value="PLAN.md") as mock_save,
         ):
             main()
 
@@ -5596,22 +5606,22 @@ class TestSubsequentRunSpecVerificationIndependent:
         spec = self._make_spec()
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[{"state": "home"}],
             ),
-            patch("duplo.main.extract_verification_cases", return_value=[]),
+            patch("duplo.pipeline.extract_verification_cases", return_value=[]),
             patch(
-                "duplo.main.format_contracts_as_verification",
+                "duplo.pipeline.format_contracts_as_verification",
                 return_value=self._SPEC_VTASKS,
             ),
             patch("duplo.main.select_features", return_value=[feat]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 1\n- [ ] task\n",
             ),
-            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value="PLAN.md") as mock_save,
         ):
             main()
 
@@ -5628,25 +5638,25 @@ class TestSubsequentRunSpecVerificationIndependent:
         vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
 
         with (
-            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.pipeline.read_spec", return_value=None),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[{"state": "home"}],
             ),
             patch(
-                "duplo.main.extract_verification_cases",
+                "duplo.pipeline.extract_verification_cases",
                 return_value=vcases,
             ),
             patch(
-                "duplo.main.format_verification_tasks",
+                "duplo.pipeline.format_verification_tasks",
                 return_value="\n- [ ] Verify: type `1+1`, expect `2`\n",
             ),
             patch("duplo.main.select_features", return_value=[feat]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 1\n- [ ] task\n",
             ),
-            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value="PLAN.md") as mock_save,
         ):
             main()
 
@@ -5665,29 +5675,29 @@ class TestSubsequentRunSpecVerificationIndependent:
         spec = self._make_spec()
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[{"state": "home"}],
             ),
             patch(
-                "duplo.main.extract_verification_cases",
+                "duplo.pipeline.extract_verification_cases",
                 return_value=vcases,
             ),
             patch(
-                "duplo.main.format_verification_tasks",
+                "duplo.pipeline.format_verification_tasks",
                 return_value="\n- [ ] Verify: type `1+1`, expect `2`\n",
             ),
             patch(
-                "duplo.main.format_contracts_as_verification",
+                "duplo.pipeline.format_contracts_as_verification",
                 return_value=self._SPEC_VTASKS,
             ),
             patch("duplo.main.select_features", return_value=[feat]),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase 1\n- [ ] task\n",
             ),
-            patch("duplo.main.save_plan", return_value="PLAN.md") as mock_save,
+            patch("duplo.pipeline.save_plan", return_value="PLAN.md") as mock_save,
         ):
             main()
 
@@ -5713,8 +5723,8 @@ class TestValidateForRunWiring:
         )
 
         with (
-            patch("duplo.main.read_spec", return_value=mock_spec),
-            patch("duplo.main.validate_for_run", return_value=vr),
+            patch("duplo.pipeline.read_spec", return_value=mock_spec),
+            patch("duplo.pipeline.validate_for_run", return_value=vr),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
@@ -5729,13 +5739,13 @@ class TestValidateForRunWiring:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.read_spec", return_value=None),
-            patch("duplo.main.validate_for_run") as mock_validate,
-            patch("duplo.main.load_hashes", return_value={}),
-            patch("duplo.main.compute_hashes", return_value={}),
-            patch("duplo.main.diff_hashes") as mock_diff,
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main.save_hashes"),
+            patch("duplo.pipeline.read_spec", return_value=None),
+            patch("duplo.pipeline.validate_for_run") as mock_validate,
+            patch("duplo.pipeline.load_hashes", return_value={}),
+            patch("duplo.pipeline.compute_hashes", return_value={}),
+            patch("duplo.pipeline.diff_hashes") as mock_diff,
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline.save_hashes"),
         ):
             mock_diff.return_value = type("D", (), {"added": [], "changed": [], "removed": []})()
             # _subsequent_run will proceed past validation into the
@@ -5773,9 +5783,9 @@ class TestFillInPurposeBlocksRun:
         monkeypatch.chdir(tmp_path)
 
         with (
-            patch("duplo.main.compute_hashes") as mock_hash,
-            patch("duplo.main.fetch_site") as mock_fetch,
-            patch("duplo.main.extract_features") as mock_extract,
+            patch("duplo.pipeline.compute_hashes") as mock_hash,
+            patch("duplo.pipeline.fetch_site") as mock_fetch,
+            patch("duplo.pipeline.extract_features") as mock_extract,
         ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
@@ -5841,7 +5851,7 @@ class TestMigrationDispatchOrder:
         )
 
         result = InvestigationResult(diagnoses=[], summary="", raw_response="")
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         assert called == []
@@ -5882,7 +5892,7 @@ class TestMigrationDispatchOrder:
         )
 
         result = InvestigationResult(diagnoses=[], summary="", raw_response="")
-        with patch("duplo.main.investigate", return_value=result):
+        with patch("duplo.pipeline.investigate", return_value=result):
             main()
 
         assert called == []
@@ -5931,7 +5941,7 @@ class TestMigrationDispatchOrder:
 
         subsequent_run_called = []
         monkeypatch.setattr(
-            "duplo.main._subsequent_run",
+            "duplo.pipeline._subsequent_run",
             lambda: subsequent_run_called.append(True),
         )
 
@@ -5965,7 +5975,7 @@ class TestMigrationDispatchOrder:
 
         subsequent_run_called = []
         monkeypatch.setattr(
-            "duplo.main._subsequent_run",
+            "duplo.pipeline._subsequent_run",
             lambda: subsequent_run_called.append(True),
         )
 
@@ -5998,7 +6008,7 @@ class TestMigrationDispatchOrder:
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
         subsequent_run_called = []
         monkeypatch.setattr(
-            "duplo.main._subsequent_run",
+            "duplo.pipeline._subsequent_run",
             lambda: subsequent_run_called.append(True),
         )
         main()
@@ -6011,7 +6021,7 @@ class TestMigrationDispatchOrder:
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
         subsequent_run_called = []
         monkeypatch.setattr(
-            "duplo.main._subsequent_run",
+            "duplo.pipeline._subsequent_run",
             lambda: subsequent_run_called.append(True),
         )
         main()
@@ -6055,7 +6065,7 @@ class TestMigrationDispatchOrder:
 
         fix_mode_called = []
         monkeypatch.setattr(
-            "duplo.main._fix_mode",
+            "duplo.pipeline._fix_mode",
             lambda args: fix_mode_called.append(args),
         )
 
@@ -6088,7 +6098,7 @@ class TestMigrationDispatchOrder:
 
         fix_mode_called = []
         monkeypatch.setattr(
-            "duplo.main._fix_mode",
+            "duplo.pipeline._fix_mode",
             lambda args: fix_mode_called.append(args),
         )
 
@@ -6124,40 +6134,40 @@ class TestDocsTextInFeatureExtraction:
         )
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=type("V", (), {"warnings": [], "errors": []})(),
             ),
             patch(
-                "duplo.main.compute_hashes",
+                "duplo.pipeline.compute_hashes",
                 return_value={"a.txt": "abc"},
             ),
-            patch("duplo.main.load_hashes", return_value={"a.txt": "abc"}),
+            patch("duplo.pipeline.load_hashes", return_value={"a.txt": "abc"}),
             patch(
-                "duplo.main.diff_hashes",
+                "duplo.pipeline.diff_hashes",
                 return_value=type(
                     "D",
                     (),
                     {"added": [], "changed": [], "removed": []},
                 )(),
             ),
-            patch("duplo.main.save_hashes"),
+            patch("duplo.pipeline.save_hashes"),
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(0, [], "rescraped"),
             ),
             patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value="docs text from md",
             ) as mock_docs,
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=[Feature(name="F1", description="d", category="c")],
             ) as mock_ef,
-            patch("duplo.main.save_features"),
-            patch("duplo.main._detect_and_append_gaps"),
-            patch("duplo.main._print_summary"),
+            patch("duplo.pipeline.save_features"),
+            patch("duplo.pipeline._detect_and_append_gaps"),
+            patch("duplo.pipeline._print_summary"),
         ):
             # PLAN.md with unchecked tasks -> state 2 (tells user
             # to run mcloop).
@@ -6219,18 +6229,18 @@ class TestScopeExcludeAtOrchestratorLevel:
         excluded = Feature(name="CLI tool", description="Command line.", category="other")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[kept, excluded]),
-            patch("duplo.main.save_features") as mock_save,
+            patch("duplo.pipeline.extract_features", return_value=[kept, excluded]),
+            patch("duplo.pipeline.save_features") as mock_save,
             patch(
-                "duplo.main._detect_and_append_gaps",
+                "duplo.pipeline._detect_and_append_gaps",
                 return_value=(0, 0, 0, 0),
             ),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -6247,18 +6257,18 @@ class TestScopeExcludeAtOrchestratorLevel:
         feat_b = Feature(name="CLI tool", description="Command line.", category="other")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[feat_a, feat_b]),
-            patch("duplo.main.save_features") as mock_save,
+            patch("duplo.pipeline.extract_features", return_value=[feat_a, feat_b]),
+            patch("duplo.pipeline.save_features") as mock_save,
             patch(
-                "duplo.main._detect_and_append_gaps",
+                "duplo.pipeline._detect_and_append_gaps",
                 return_value=(0, 0, 0, 0),
             ),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -6282,18 +6292,18 @@ class TestScopeExcludeAtOrchestratorLevel:
         excluded = Feature(name="CLI tool", description="Command line.", category="other")
         with (
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(1, 0, "product text"),
             ),
-            patch("duplo.main.extract_features", return_value=[excluded]),
-            patch("duplo.main.save_features") as mock_save,
+            patch("duplo.pipeline.extract_features", return_value=[excluded]),
+            patch("duplo.pipeline.save_features") as mock_save,
             patch(
-                "duplo.main._detect_and_append_gaps",
+                "duplo.pipeline._detect_and_append_gaps",
                 return_value=(0, 0, 0, 0),
             ),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -6521,8 +6531,8 @@ class TestInvestigationContext:
         )
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
-            patch("duplo.main.investigate", return_value=result) as mock_inv,
+            patch("duplo.pipeline.read_spec", return_value=spec),
+            patch("duplo.pipeline.investigate", return_value=result) as mock_inv,
         ):
             main()
 
@@ -6609,7 +6619,7 @@ class TestLoadPreferences:
             },
             "architecture_hash": h,
         }
-        with patch("duplo.main.parse_build_preferences") as mock_parse:
+        with patch("duplo.pipeline.parse_build_preferences") as mock_parse:
             result = _load_preferences(data, spec)
             mock_parse.assert_not_called()
         assert len(result) == 1
@@ -6639,10 +6649,10 @@ class TestLoadPreferences:
         ]
         with (
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=new_prefs,
             ) as mock_parse,
-            patch("duplo.main.save_build_preferences") as mock_save,
+            patch("duplo.pipeline.save_build_preferences") as mock_save,
         ):
             result = _load_preferences(data, spec)
             mock_parse.assert_called_once_with("CLI tool in Rust", structured_entries=[])
@@ -6674,10 +6684,10 @@ class TestLoadPreferences:
         ]
         with (
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=new_prefs,
             ) as mock_parse,
-            patch("duplo.main.save_build_preferences"),
+            patch("duplo.pipeline.save_build_preferences"),
         ):
             result = _load_preferences(data, spec)
             mock_parse.assert_called_once()
@@ -6708,10 +6718,10 @@ class TestLoadPreferences:
         ]
         with (
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=new_prefs,
             ),
-            patch("duplo.main.save_build_preferences"),
+            patch("duplo.pipeline.save_build_preferences"),
         ):
             _load_preferences(data, spec)
         assert isinstance(data["preferences"], list)
@@ -6734,10 +6744,10 @@ class TestLoadPreferences:
         ]
         with (
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=returned,
             ) as mock_parse,
-            patch("duplo.main.save_build_preferences"),
+            patch("duplo.pipeline.save_build_preferences"),
         ):
             result = _load_preferences(data, spec)
         _, kwargs = mock_parse.call_args
@@ -6778,7 +6788,7 @@ class TestResolvePlatformProfiles:
         return PlatformProfile(id=pid, display_name=display or pid)
 
     def test_calls_resolver_once_per_preference(self):
-        from duplo.main import _resolve_platform_profiles
+        from duplo.pipeline import _resolve_platform_profiles
 
         prefs = [
             BuildPreferences(platform="macos", language="Swift"),
@@ -6788,7 +6798,7 @@ class TestResolvePlatformProfiles:
         b = self._profile("linux-python-cli", "Python CLI")
 
         with patch(
-            "duplo.main.resolve_profiles",
+            "duplo.pipeline.resolve_profiles",
             side_effect=[[a], [b]],
         ) as mock_resolve:
             result = _resolve_platform_profiles(prefs)
@@ -6798,7 +6808,7 @@ class TestResolvePlatformProfiles:
         assert [p.id for p in result] == ["macos-swiftui-spm", "linux-python-cli"]
 
     def test_union_dedupes_by_id(self):
-        from duplo.main import _resolve_platform_profiles
+        from duplo.pipeline import _resolve_platform_profiles
 
         prefs = [
             BuildPreferences(platform="macos", language="Swift"),
@@ -6806,25 +6816,25 @@ class TestResolvePlatformProfiles:
         ]
         shared = self._profile("macos-swiftui-spm", "SwiftUI")
 
-        with patch("duplo.main.resolve_profiles", return_value=[shared]):
+        with patch("duplo.pipeline.resolve_profiles", return_value=[shared]):
             result = _resolve_platform_profiles(prefs)
 
         assert [p.id for p in result] == ["macos-swiftui-spm"]
 
     def test_empty_preferences_returns_empty(self):
-        from duplo.main import _resolve_platform_profiles
+        from duplo.pipeline import _resolve_platform_profiles
 
-        with patch("duplo.main.resolve_profiles") as mock_resolve:
+        with patch("duplo.pipeline.resolve_profiles") as mock_resolve:
             result = _resolve_platform_profiles([])
 
         assert result == []
         mock_resolve.assert_not_called()
 
     def test_no_matches_returns_empty(self):
-        from duplo.main import _resolve_platform_profiles
+        from duplo.pipeline import _resolve_platform_profiles
 
         prefs = [BuildPreferences(platform="unknown", language="unknown")]
-        with patch("duplo.main.resolve_profiles", return_value=[]):
+        with patch("duplo.pipeline.resolve_profiles", return_value=[]):
             result = _resolve_platform_profiles(prefs)
 
         assert result == []
@@ -6882,19 +6892,19 @@ class TestResolvePlatformProfiles:
             },
         ]
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(errors=[], warnings=[]),
             ),
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._analyze_new_files", return_value=UpdateSummary()),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.resolve_profiles", return_value=[profile]) as mock_resolve,
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._analyze_new_files", return_value=UpdateSummary()),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.resolve_profiles", return_value=[profile]) as mock_resolve,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -6955,19 +6965,19 @@ class TestResolvePlatformProfiles:
             },
         ]
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(errors=[], warnings=[]),
             ),
-            patch("duplo.main._rescrape_product_url", return_value=(0, 0, "")),
-            patch("duplo.main._analyze_new_files", return_value=UpdateSummary()),
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.resolve_profiles", return_value=[]) as mock_resolve,
-            patch("duplo.main.generate_roadmap", return_value=fake_roadmap),
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline._analyze_new_files", return_value=UpdateSummary()),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.resolve_profiles", return_value=[]) as mock_resolve,
+            patch("duplo.pipeline.generate_roadmap", return_value=fake_roadmap),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n"),
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
 
@@ -7002,9 +7012,9 @@ class TestScrapeDeclaredSources:
             return ("text", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7044,9 +7054,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7073,9 +7083,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7104,9 +7114,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_deep, src_shallow],
             ),
         ):
@@ -7147,9 +7157,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_prod, src_docs],
             ),
         ):
@@ -7179,9 +7189,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7216,9 +7226,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7244,9 +7254,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7276,9 +7286,9 @@ class TestScrapeDeclaredSources:
             return fetch_results[idx]
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7291,7 +7301,7 @@ class TestScrapeDeclaredSources:
     def test_empty_sources_returns_empty_result(self):
         """No scrapeable sources returns empty ScrapeResult."""
         spec = self._make_spec([])
-        with patch("duplo.main.scrapeable_sources", return_value=[]):
+        with patch("duplo.pipeline.scrapeable_sources", return_value=[]):
             result = _scrape_declared_sources(spec)
 
         assert result.combined_text == ""
@@ -7313,9 +7323,9 @@ class TestScrapeDeclaredSources:
             return ("b_text", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7336,9 +7346,9 @@ class TestScrapeDeclaredSources:
             return (f"text-{url}", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -7365,9 +7375,9 @@ class TestScrapeDeclaredSources:
             return ("hello world", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src],
             ),
         ):
@@ -7379,7 +7389,7 @@ class TestScrapeDeclaredSources:
     def test_empty_sources_no_source_records(self):
         """No scrapeable sources produces no source_records."""
         spec = self._make_spec([])
-        with patch("duplo.main.scrapeable_sources", return_value=[]):
+        with patch("duplo.pipeline.scrapeable_sources", return_value=[]):
             result = _scrape_declared_sources(spec)
         assert result.source_records == []
 
@@ -7391,10 +7401,10 @@ class TestPersistScrapeResult:
         monkeypatch.chdir(tmp_path)
         result = ScrapeResult(all_code_examples=["ex1"])
         with (
-            patch("duplo.main.save_examples") as mock_save,
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples") as mock_save,
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
         ):
             _persist_scrape_result(result)
         mock_save.assert_called_once_with(["ex1"])
@@ -7407,10 +7417,10 @@ class TestPersistScrapeResult:
             all_raw_pages={"https://a.com": "<html>A</html>"},
         )
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls") as mock_urls,
-            patch("duplo.main.save_raw_content") as mock_raw,
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls") as mock_urls,
+            patch("duplo.pipeline.save_raw_content") as mock_raw,
+            patch("duplo.pipeline.save_doc_structures"),
         ):
             _persist_scrape_result(result)
         mock_urls.assert_called_once_with([record])
@@ -7422,12 +7432,12 @@ class TestPersistScrapeResult:
         spec_path.write_text("## Sources\n", encoding="utf-8")
         result = ScrapeResult(discovered_urls=["https://discovered.com"])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
             patch(
-                "duplo.main.append_sources",
+                "duplo.pipeline.append_sources",
                 return_value="## Sources\n- https://discovered.com\n",
             ) as mock_append,
         ):
@@ -7451,11 +7461,11 @@ class TestPersistScrapeResult:
         spec_path.write_text(original, encoding="utf-8")
         result = ScrapeResult(discovered_urls=[])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
-            patch("duplo.main.append_sources") as mock_append,
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
+            patch("duplo.pipeline.append_sources") as mock_append,
         ):
             _persist_scrape_result(result)
         mock_append.assert_not_called()
@@ -7469,11 +7479,11 @@ class TestPersistScrapeResult:
         spec_path.write_text(original, encoding="utf-8")
         result = ScrapeResult(discovered_urls=["https://discovered.com"])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
-            patch("duplo.main.append_sources", return_value=original),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
+            patch("duplo.pipeline.append_sources", return_value=original),
         ):
             _persist_scrape_result(result)
         # File content unchanged.
@@ -7486,10 +7496,10 @@ class TestPersistScrapeResult:
         spec_path.write_text("## Sources\n", encoding="utf-8")
         result = ScrapeResult(discovered_urls=["https://new.example.com"])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
         ):
             _persist_scrape_result(result)
         written = spec_path.read_text(encoding="utf-8")
@@ -7505,10 +7515,10 @@ class TestPersistScrapeResult:
         spec_path.write_text("## Sources\n", encoding="utf-8")
         result = ScrapeResult(discovered_urls=["https://dedup.example.com"])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
         ):
             _persist_scrape_result(result)
             after_first = spec_path.read_text(encoding="utf-8")
@@ -7526,10 +7536,10 @@ class TestPersistScrapeResult:
         spec_path.write_text(original, encoding="utf-8")
         result = ScrapeResult(discovered_urls=["https://already.example.com"])
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
         ):
             _persist_scrape_result(result)
         # Content unchanged — dedup prevented addition.
@@ -7548,11 +7558,11 @@ class TestPersistScrapeResult:
         ]
         result = ScrapeResult(source_records=records)
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
-            patch("duplo.main.save_sources") as mock_save,
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
+            patch("duplo.pipeline.save_sources") as mock_save,
         ):
             _persist_scrape_result(result)
         mock_save.assert_called_once_with(records)
@@ -7562,11 +7572,11 @@ class TestPersistScrapeResult:
         monkeypatch.chdir(tmp_path)
         result = ScrapeResult()
         with (
-            patch("duplo.main.save_examples"),
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.save_doc_structures"),
-            patch("duplo.main.save_sources") as mock_save,
+            patch("duplo.pipeline.save_examples"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.save_doc_structures"),
+            patch("duplo.pipeline.save_sources") as mock_save,
         ):
             _persist_scrape_result(result)
         mock_save.assert_not_called()
@@ -7597,7 +7607,7 @@ class TestRunVideoFramePipelinePerSourceLookup:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
                 return_value=[
                     ExtractionResult(
                         source=vid_a,
@@ -7606,15 +7616,15 @@ class TestRunVideoFramePipelinePerSourceLookup:
                     ExtractionResult(source=vid_b, frames=[frame_b1]),
                 ],
             ),
-            patch("duplo.main.filter_frames", return_value=[]),
+            patch("duplo.pipeline.filter_frames", return_value=[]),
             patch(
-                "duplo.main.apply_filter",
+                "duplo.pipeline.apply_filter",
                 return_value=[frame_a1, frame_b1],
             ),
-            patch("duplo.main.describe_frames", return_value=[]),
-            patch("duplo.main.store_accepted_frames"),
+            patch("duplo.pipeline.describe_frames", return_value=[]),
+            patch("duplo.pipeline.store_accepted_frames"),
         ):
-            from duplo.main import _run_video_frame_pipeline
+            from duplo.pipeline import _run_video_frame_pipeline
 
             frames, lookup = _run_video_frame_pipeline([vid_a, vid_b])
 
@@ -7628,8 +7638,8 @@ class TestRunVideoFramePipelinePerSourceLookup:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".duplo" / "video_frames").mkdir(parents=True, exist_ok=True)
 
-        with patch("duplo.main.extract_all_videos", return_value=[]):
-            from duplo.main import _run_video_frame_pipeline
+        with patch("duplo.pipeline.extract_all_videos", return_value=[]):
+            from duplo.pipeline import _run_video_frame_pipeline
 
             frames, lookup = _run_video_frame_pipeline([])
 
@@ -7651,18 +7661,18 @@ class TestRunVideoFramePipelinePerSourceLookup:
 
         with (
             patch(
-                "duplo.main.extract_all_videos",
+                "duplo.pipeline.extract_all_videos",
                 return_value=[
                     ExtractionResult(source=vid, frames=[frame1]),
                 ],
             ),
-            patch("duplo.main.filter_frames", return_value=[]),
+            patch("duplo.pipeline.filter_frames", return_value=[]),
             patch(
-                "duplo.main.apply_filter",
+                "duplo.pipeline.apply_filter",
                 return_value=[],  # all rejected
             ),
         ):
-            from duplo.main import _run_video_frame_pipeline
+            from duplo.pipeline import _run_video_frame_pipeline
 
             frames, lookup = _run_video_frame_pipeline([vid])
 
@@ -7700,8 +7710,8 @@ class TestAutogenBlockSkipsVision:
             ],
         )
         with (
-            patch("duplo.main.extract_design", return_value=design),
-            patch("duplo.main.collect_design_input", return_value=[img]),
+            patch("duplo.pipeline.extract_design", return_value=design),
+            patch("duplo.pipeline.collect_design_input", return_value=[img]),
         ):
             _analyze_new_files(["ref/shot.png"], spec=spec_no_autogen)
 
@@ -7716,8 +7726,8 @@ class TestAutogenBlockSkipsVision:
             design=DesignBlock(auto_generated="colors:\n  primary: #abc"),
         )
         with (
-            patch("duplo.main.extract_design") as mock_design2,
-            patch("duplo.main.collect_design_input", return_value=[img]),
+            patch("duplo.pipeline.extract_design") as mock_design2,
+            patch("duplo.pipeline.collect_design_input", return_value=[img]),
         ):
             _analyze_new_files(["ref/shot.png"], spec=spec_with_autogen)
 
@@ -7736,7 +7746,7 @@ class TestAutogenBlockSkipsVision:
             source_images=["shot.png"],
         )
         with (
-            patch("duplo.main.extract_design", return_value=design),
+            patch("duplo.pipeline.extract_design", return_value=design),
         ):
             _analyze_new_files(["ref/shot.png"])
 
@@ -7762,9 +7772,9 @@ class TestAutogenBlockSkipsVision:
         )
 
         with (
-            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.pipeline.extract_design") as mock_design,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
         ):
             _analyze_new_files(
@@ -7808,7 +7818,7 @@ class TestAutogenBlockSkipsVision:
         raw_html = "<html><body><img src='https://a.com/img.png'></body></html>"
         with (
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=(
                     "text",
                     [],
@@ -7818,21 +7828,21 @@ class TestAutogenBlockSkipsVision:
                 ),
             ),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([tmp_path / "img.png"], []),
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[
                     tmp_path / "img.png",
                 ],
             ),
-            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.pipeline.extract_design") as mock_design,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
         ):
             _rescrape_product_url(spec=spec)
 
@@ -7865,10 +7875,10 @@ class TestAutogenBlockSkipsVision:
 
         with (
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=DesignRequirements(),
             ) as mock_design,
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
         ):
             _analyze_new_files(["ref/new_shot.png"], spec=spec)
 
@@ -7891,12 +7901,12 @@ class TestAutogenBlockSkipsVision:
         )
 
         with (
-            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.pipeline.extract_design") as mock_design,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
-            patch("duplo.main.collect_design_input", return_value=[img]),
-            patch("duplo.main.record_failure") as mock_rf,
+            patch("duplo.pipeline.collect_design_input", return_value=[img]),
+            patch("duplo.pipeline.record_failure") as mock_rf,
         ):
             _analyze_new_files(
                 ["ref/new_shot.png"],
@@ -7944,7 +7954,7 @@ class TestAutogenBlockSkipsVision:
         raw_html = "<html><body><img src='https://a.com/img.png'></body></html>"
         with (
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=(
                     "text",
                     [],
@@ -7954,22 +7964,22 @@ class TestAutogenBlockSkipsVision:
                 ),
             ),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([tmp_path / "img.png"], []),
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[
                     tmp_path / "img.png",
                 ],
             ),
-            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.pipeline.extract_design") as mock_design,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
-            patch("duplo.main.save_reference_urls"),
-            patch("duplo.main.save_raw_content"),
-            patch("duplo.main.record_failure") as mock_rf,
+            patch("duplo.pipeline.save_reference_urls"),
+            patch("duplo.pipeline.save_raw_content"),
+            patch("duplo.pipeline.record_failure") as mock_rf,
         ):
             _rescrape_product_url(spec=spec)
 
@@ -8005,9 +8015,9 @@ class TestAutogenBlockSkipsVision:
         )
 
         with (
-            patch("duplo.main.extract_design") as mock_design,
+            patch("duplo.pipeline.extract_design") as mock_design,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
         ):
             _analyze_new_files(["ref/new_shot.png"], spec=spec)
@@ -8067,43 +8077,43 @@ class TestSubsequentRunSpecSourcesIntegration:
         )
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
             patch(
-                "duplo.main._persist_scrape_result",
+                "duplo.pipeline._persist_scrape_result",
             ),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=(
                     [Path("img.png")],
                     [Path("vid.mp4")],
                 ),
             ) as mock_dl,
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8138,44 +8148,44 @@ class TestSubsequentRunSpecSourcesIntegration:
         site_vid = Path(".duplo/site_media/abc/demo.mp4")
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
             patch(
-                "duplo.main._persist_scrape_result",
+                "duplo.pipeline._persist_scrape_result",
             ),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], [site_vid]),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main._run_video_frame_pipeline",
+                "duplo.pipeline._run_video_frame_pipeline",
                 return_value=([], {}),
             ) as mock_pipeline,
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8209,42 +8219,42 @@ class TestSubsequentRunSpecSourcesIntegration:
         )
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
             patch(
-                "duplo.main._persist_scrape_result",
+                "duplo.pipeline._persist_scrape_result",
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[Path("img.png")],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
             ) as mock_extract,
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
             ) as mock_save_dr,
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8260,24 +8270,24 @@ class TestSubsequentRunSpecSourcesIntegration:
         self._setup(tmp_path, monkeypatch)
 
         with (
-            patch("duplo.main.read_spec", return_value=None),
+            patch("duplo.pipeline.read_spec", return_value=None),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[],
             ),
             patch(
-                "duplo.main._rescrape_product_url",
+                "duplo.pipeline._rescrape_product_url",
                 return_value=(0, 0, ""),
             ) as mock_rescrape,
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
             ) as mock_dl,
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8344,32 +8354,32 @@ class TestSpecSourceOfTruth:
         scrape_result = ScrapeResult(combined_text="text")
 
         with (
-            patch("duplo.main.read_spec", return_value=spec) as mock_rs,
+            patch("duplo.pipeline.read_spec", return_value=spec) as mock_rs,
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[spec.sources[0]],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
-            patch("duplo.main._persist_scrape_result"),
-            patch("duplo.main.extract_features", return_value=[]),
-            patch("duplo.main._download_site_media", return_value=([], [])),
+            patch("duplo.pipeline._persist_scrape_result"),
+            patch("duplo.pipeline.extract_features", return_value=[]),
+            patch("duplo.pipeline._download_site_media", return_value=([], [])),
             patch(
                 "duplo.main.select_features",
                 side_effect=lambda feats, **kw: feats,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8429,34 +8439,34 @@ class TestSpecSourceOfTruth:
         scrape_result = ScrapeResult(combined_text="scraped")
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[spec.sources[0]],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=[analytics_feature],
             ),
             patch(
-                "duplo.main.save_features",
+                "duplo.pipeline.save_features",
             ) as mock_save,
-            patch("duplo.main._download_site_media", return_value=([], [])),
+            patch("duplo.pipeline._download_site_media", return_value=([], [])),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -8482,7 +8492,7 @@ class TestSpecSourceOfTruth:
             discovered_urls=["https://new-link.com"],
         )
 
-        with patch("duplo.main.read_spec") as mock_rs:
+        with patch("duplo.pipeline.read_spec") as mock_rs:
             _persist_scrape_result(result)
 
         # _persist_scrape_result must NOT call read_spec.
@@ -8560,7 +8570,7 @@ class TestIntegrationUrlOnlySpec:
             product_ref_raw_pages={"https://example.com": "<html>calc</html>"},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(
@@ -8638,7 +8648,7 @@ class TestIntegrationRefOnlySpec:
             design=DesignBlock(),
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(
@@ -8716,7 +8726,7 @@ class TestIntegrationBothSourcesAndRefs:
             extract_calls.append(text)
             return [Feature("F1", "feat", "Core")]
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(
@@ -8942,7 +8952,7 @@ class TestIntegrationProposedExcluded:
             product_ref_raw_pages={},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(
@@ -9152,7 +9162,7 @@ class TestProductJsonBackwardCompat:
             product_ref_raw_pages={},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
@@ -9198,7 +9208,7 @@ class TestProductJsonBackwardCompat:
         )
         scrape_result = ScrapeResult(combined_text="features")
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
@@ -9243,7 +9253,7 @@ class TestProductJsonBackwardCompat:
         data["source_url"] = "https://legacy.com"
         (duplo_dir / "duplo.json").write_text(json.dumps(data), encoding="utf-8")
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: None)
         monkeypatch.setattr(m, "scrapeable_sources", lambda s: [])
@@ -9302,9 +9312,9 @@ class TestRemovedSourceIdempotent:
             return ("text_a", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a],
             ),
         ):
@@ -9321,9 +9331,9 @@ class TestRemovedSourceIdempotent:
             return ("text from A only", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a],
             ),
         ):
@@ -9384,9 +9394,9 @@ class TestRemovedSourceIdempotent:
             return ("text", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a],
             ),
         ):
@@ -9420,8 +9430,8 @@ class TestSourcesFieldPopulated:
             return ("page text", [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
-            patch("duplo.main.scrapeable_sources", return_value=[src]),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.scrapeable_sources", return_value=[src]),
         ):
             result = _scrape_declared_sources(spec)
 
@@ -9448,8 +9458,8 @@ class TestSourcesFieldPopulated:
             return (scraped, [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
-            patch("duplo.main.scrapeable_sources", return_value=[src]),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.scrapeable_sources", return_value=[src]),
         ):
             result = _scrape_declared_sources(spec)
 
@@ -9467,9 +9477,9 @@ class TestSourcesFieldPopulated:
             return (text, [], None, [], {})
 
         with (
-            patch("duplo.main.fetch_site", side_effect=fake_fetch),
+            patch("duplo.pipeline.fetch_site", side_effect=fake_fetch),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src_a, src_b],
             ),
         ):
@@ -9512,7 +9522,7 @@ class TestSourcesFieldPopulated:
             product_ref_raw_pages={},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
@@ -9645,38 +9655,38 @@ class TestSubsequentRunCounterExampleExcluded:
             return []
 
         with (
-            patch("duplo.main.read_spec", return_value=spec),
+            patch("duplo.pipeline.read_spec", return_value=spec),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.scrapeable_sources",
+                "duplo.pipeline.scrapeable_sources",
                 return_value=[src],
             ),
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=scrape_result,
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 side_effect=fake_extract_design,
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 side_effect=fake_extract_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value="# Phase\n",
             ),
             patch(
-                "duplo.main.save_plan",
+                "duplo.pipeline.save_plan",
                 return_value=tmp_path / "PLAN.md",
             ),
         ):
@@ -9727,7 +9737,7 @@ class TestSubsequentRunProductNameSync:
             encoding="utf-8",
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: None)
         monkeypatch.setattr(m, "scrapeable_sources", lambda s: [])
@@ -9792,7 +9802,7 @@ class TestSubsequentRunProductNameSync:
             product_ref_raw_pages={},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
         monkeypatch.setattr(m, "validate_for_run", lambda s: MagicMock(warnings=[], errors=[]))
@@ -9969,7 +9979,7 @@ class TestNoAskPreferencesInPipeline:
             product_ref_raw_pages={},
         )
 
-        import duplo.main as m
+        import duplo.pipeline as m
         import duplo.questioner as q
 
         monkeypatch.setattr(m, "read_spec", lambda: spec)
@@ -10053,13 +10063,13 @@ class TestReadLocalMd:
     """Unit tests for _read_local_md helper."""
 
     def test_returns_content_when_file_exists(self, tmp_path):
-        from duplo.main import _read_local_md
+        from duplo.pipeline import _read_local_md
 
         (tmp_path / "local.md").write_text("project override\n", encoding="utf-8")
         assert _read_local_md(tmp_path) == "project override\n"
 
     def test_returns_empty_when_file_absent(self, tmp_path):
-        from duplo.main import _read_local_md
+        from duplo.pipeline import _read_local_md
 
         assert _read_local_md(tmp_path) == ""
 
@@ -10095,18 +10105,18 @@ class TestLocalMdWiring:
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
         profile = PlatformProfile(id="web-python", display_name="Web Python")
         with (
-            patch("duplo.main._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
-            patch("duplo.main.resolve_profiles", return_value=[profile]),
-            patch("duplo.main.write_scaffold", return_value=[]),
-            patch("duplo.main.format_scaffold_notice", return_value=""),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.resolve_profiles", return_value=[profile]),
+            patch("duplo.pipeline.write_scaffold", return_value=[]),
+            patch("duplo.pipeline.format_scaffold_notice", return_value=""),
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.main.select_issues", return_value=[]),
-            patch("duplo.main.generate_phase_plan", return_value="# Phase 0\n") as mock_plan,
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n") as mock_plan,
             patch(
-                "duplo.main.write_claude_md",
+                "duplo.pipeline.write_claude_md",
                 return_value=tmp_path / "CLAUDE.md",
             ) as mock_claude,
-            patch("duplo.main.save_plan", return_value=tmp_path / "PLAN.md"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
         ):
             main()
         return mock_plan, mock_claude

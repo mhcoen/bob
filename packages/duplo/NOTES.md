@@ -2,6 +2,46 @@
 
 ## Observations
 
+### [BUGS.md] main.py split into pipeline.py + status.py — 2026-04-19
+
+Split `duplo/main.py` (was 2345 lines / 81KB) into three modules:
+`duplo/main.py` (CLI dispatch + signal/crash setup, ~376 lines),
+`duplo/pipeline.py` (`_subsequent_run` orchestration + `_fix_mode` and
+helpers, ~1801 lines), and `duplo/status.py` (display/progress helpers
+including `UpdateSummary`, `_partition_features`,
+`_print_feature_status`, `_print_status`, `_print_summary`,
+`_plan_is_complete`, `_plan_has_unchecked_tasks`, `_plan_ready`,
+`_current_phase_content`).
+
+main.py now calls `_pipeline._fix_mode(args)` /
+`_pipeline._subsequent_run()` via the imported module rather than via
+`from duplo.pipeline import _fix_mode, _subsequent_run`. This keeps
+`monkeypatch.setattr("duplo.pipeline._fix_mode", ...)` working — a
+`from … import` would have rebound the name in main and broken those
+patches.
+
+Legacy re-exports kept in main.py for backward-compat patch targets:
+`select_features`, `select_issues` (from selector),
+`save_reference_screenshots` (from screenshotter), `_check_migration`
+(from migration). These are no longer called by main itself but are
+patched by ~70 existing tests via `patch("duplo.main.X")`.
+
+`_partition_features` exists in both status.py (canonical) and
+pipeline.py (thin wrapper that delegates to status). The wrapper
+exists so pipeline-internal callers can keep importing it from
+pipeline without a circular import.
+
+Bulk test-patch retarget: a one-shot script
+(`/tmp/claude/update_test_patches.py`) rewrote 1015 string patches
+and 34 import names across `tests/test_main.py`,
+`tests/test_phase{5,6,7}_integration.py`,
+`tests/test_platform_integration.py`, and `tests/test_build_prefs.py`
+to point at the new module locations. Two additional fixes were
+needed by hand: the multi-line `from duplo.main import (extract_features as ..., fetch_site as ..., select_features as ..., select_issues as ...)` block in
+`test_phase6_integration.py:1216`, and `import duplo.main as m`
+patterns in `test_main.py` (11 occurrences) which were retargeted to
+`import duplo.pipeline as m`.
+
 ### [BUGS.md#1] First-run all-phases loop was already in place — 2026-04-19
 
 BUGS.md entry 1 claimed the first-run plan-generation path still called

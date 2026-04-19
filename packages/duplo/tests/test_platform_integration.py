@@ -110,7 +110,7 @@ class TestPlatformKnowledgeFlow:
         monkeypatch.setattr("duplo.main._check_migration", lambda target_dir: None)
 
         with patch(
-            "duplo.main.generate_phase_plan",
+            "duplo.pipeline.generate_phase_plan",
             return_value="# Integration Test App - Phase 1: Core\n- [ ] task\n",
         ) as mock_gen:
             main()

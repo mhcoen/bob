@@ -554,7 +554,7 @@ class TestCacheHitAvoidsLlmCall:
     """Cache hit avoids the LLM call (integration with _load_preferences)."""
 
     def test_matching_hash_skips_parse(self) -> None:
-        from duplo.main import _load_preferences
+        from duplo.pipeline import _load_preferences
 
         arch = "Swift macOS app with SwiftUI and CoreData."
         h = architecture_hash(arch)
@@ -568,7 +568,7 @@ class TestCacheHitAvoidsLlmCall:
             },
             "architecture_hash": h,
         }
-        with patch("duplo.main.parse_build_preferences") as mock_parse:
+        with patch("duplo.pipeline.parse_build_preferences") as mock_parse:
             result = _load_preferences(data, spec)
             mock_parse.assert_not_called()
         assert len(result) == 1
@@ -576,7 +576,7 @@ class TestCacheHitAvoidsLlmCall:
         assert result[0].language == "Swift/SwiftUI"
 
     def test_changed_architecture_triggers_reparse(self, tmp_path, monkeypatch) -> None:
-        from duplo.main import _load_preferences
+        from duplo.pipeline import _load_preferences
 
         monkeypatch.chdir(tmp_path)
         old_arch = "Python CLI tool."
@@ -602,10 +602,10 @@ class TestCacheHitAvoidsLlmCall:
         ]
         with (
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=new_prefs,
             ) as mock_parse,
-            patch("duplo.main.save_build_preferences"),
+            patch("duplo.pipeline.save_build_preferences"),
         ):
             result = _load_preferences(data, spec)
             mock_parse.assert_called_once_with(new_arch, structured_entries=[])

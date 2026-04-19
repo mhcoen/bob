@@ -19,7 +19,8 @@ from duplo.design_extractor import DesignRequirements
 from duplo.doc_tables import DocStructures
 from duplo.extractor import Feature
 from duplo.fetcher import PageRecord
-from duplo.main import ScrapeResult, main
+from duplo.main import main
+from duplo.pipeline import ScrapeResult
 from duplo.questioner import BuildPreferences
 
 # The legacy fresh-directory pipeline was removed in Phase 7.2.1. Classes
@@ -519,29 +520,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -549,15 +550,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -576,29 +577,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ) as mock_scrape,
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -606,15 +607,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -629,29 +630,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -659,15 +660,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -686,29 +687,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -716,19 +717,19 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError(
                     "fetch_site should not be called directly",
                 ),
@@ -743,29 +744,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -773,15 +774,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -797,29 +798,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result") as mock_persist,
+            patch("duplo.pipeline._persist_scrape_result") as mock_persist,
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -827,15 +828,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -892,29 +893,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -922,15 +923,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -949,29 +950,29 @@ class TestSubsequentRunUrlOnlySpec:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
@@ -979,15 +980,15 @@ class TestSubsequentRunUrlOnlySpec:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -1217,11 +1218,11 @@ class TestRefOnlyDesignExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -1229,11 +1230,11 @@ class TestRefOnlyDesignExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ) as mock_design,
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1242,25 +1243,25 @@ class TestRefOnlyDesignExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1280,11 +1281,11 @@ class TestRefOnlyDesignExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -1292,11 +1293,11 @@ class TestRefOnlyDesignExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ) as mock_design,
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1305,25 +1306,25 @@ class TestRefOnlyDesignExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1340,11 +1341,11 @@ class TestRefOnlyDesignExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -1352,11 +1353,11 @@ class TestRefOnlyDesignExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ) as mock_design,
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1365,25 +1366,25 @@ class TestRefOnlyDesignExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1440,11 +1441,11 @@ class TestRefOnlyDocsExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -1452,15 +1453,15 @@ class TestRefOnlyDocsExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ),
             patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value=_DOCS_EXTRACTED_TEXT,
             ) as mock_docs,
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1469,25 +1470,25 @@ class TestRefOnlyDocsExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1506,11 +1507,11 @@ class TestRefOnlyDocsExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -1518,15 +1519,15 @@ class TestRefOnlyDocsExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ),
             patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value=_DOCS_EXTRACTED_TEXT,
             ) as mock_docs,
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1535,25 +1536,25 @@ class TestRefOnlyDocsExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1569,11 +1570,11 @@ class TestRefOnlyDocsExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ) as mock_extract,
             patch(
@@ -1581,15 +1582,15 @@ class TestRefOnlyDocsExtraction:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ),
             patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value=_DOCS_EXTRACTED_TEXT,
             ),
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1598,25 +1599,25 @@ class TestRefOnlyDocsExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch("duplo.main.save_reference_screenshots", return_value=[]),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1666,19 +1667,19 @@ class TestRefOnlyFeatureExtraction:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ),
             patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value=_DOCS_EXTRACTED_TEXT,
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 new=mock_extract,
             ),
             patch(
@@ -1686,7 +1687,7 @@ class TestRefOnlyFeatureExtraction:
                 new=mock_select,
             ),
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="web",
                     language="TypeScript",
@@ -1695,20 +1696,20 @@ class TestRefOnlyFeatureExtraction:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
@@ -1716,7 +1717,7 @@ class TestRefOnlyFeatureExtraction:
                 return_value=[],
             ),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -1863,20 +1864,20 @@ class TestSubsequentRunRefOnlySpec:
         """
         patches = {
             "validate_for_run": patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             "docs_text_extractor": patch(
-                "duplo.main.docs_text_extractor",
+                "duplo.pipeline.docs_text_extractor",
                 return_value=_DOCS_EXTRACTED_TEXT,
             ),
             "extract_features": patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
-            "save_features": patch("duplo.main.save_features"),
+            "save_features": patch("duplo.pipeline.save_features"),
             "generate_roadmap": patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             "select_features": patch(
@@ -1884,15 +1885,15 @@ class TestSubsequentRunRefOnlySpec:
                 side_effect=_select_all_features,
             ),
             "generate_phase_plan": patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             "load_frame_descriptions": patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             "fetch_site": patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site should not be called for ref-only spec"),
             ),
         }
@@ -1981,11 +1982,11 @@ class TestSubsequentRunRefOnlySpec:
         self._setup(tmp_path, monkeypatch)
         extra = {
             "extract_design": patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_DESIGN_REQUIREMENTS,
             ),
             "collect_design_input": patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
         }
@@ -2204,10 +2205,10 @@ class TestCombinedDesignMock:
     def test_mock_returns_fixture(self):
         """Patching extract_design returns the shared fixture."""
         with patch(
-            "duplo.main.extract_design",
+            "duplo.pipeline.extract_design",
             return_value=_DESIGN_REQUIREMENTS,
         ) as mock_design:
-            from duplo.main import extract_design
+            from duplo.pipeline import extract_design
 
             result = extract_design([Path("ref/app_screenshot.png")])
 
@@ -2225,10 +2226,10 @@ class TestCombinedDesignMock:
             Path(".duplo/site_images/page2.png"),
         ]
         with patch(
-            "duplo.main.extract_design",
+            "duplo.pipeline.extract_design",
             return_value=_DESIGN_REQUIREMENTS,
         ) as mock_design:
-            from duplo.main import extract_design
+            from duplo.pipeline import extract_design
 
             result = extract_design(mixed_paths)
 
@@ -2436,33 +2437,33 @@ class TestSubsequentRunCombinedSpec:
         """
         patches = {
             "validate_for_run": patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             "scrape_declared": patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=self._scrape_result(),
             ),
-            "persist_scrape": patch("duplo.main._persist_scrape_result"),
+            "persist_scrape": patch("duplo.pipeline._persist_scrape_result"),
             "download_site_media": patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             "behavioral_refs": patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             "collect_design_input": patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             "extract_features": patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_COMBINED_FEATURES,
             ),
-            "save_features": patch("duplo.main.save_features"),
+            "save_features": patch("duplo.pipeline.save_features"),
             "generate_roadmap": patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             "select_features": patch(
@@ -2470,11 +2471,11 @@ class TestSubsequentRunCombinedSpec:
                 side_effect=_select_all_features,
             ),
             "generate_phase_plan": patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             "load_frame_descriptions": patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
         }
@@ -2549,7 +2550,7 @@ class TestSubsequentRunCombinedSpec:
 
         extra = {
             "save_features": patch(
-                "duplo.main.save_features",
+                "duplo.pipeline.save_features",
                 side_effect=_write_through_save,
             ),
         }
@@ -2830,32 +2831,32 @@ class TestCrossOriginDiscovery:
         """
         patches = {
             "validate_for_run": patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             "fetch_site": patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=_XORIGIN_FETCH_SITE_RESULT,
             ),
             "download_site_media": patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             "behavioral_refs": patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             "collect_design_input": patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             "extract_features": patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_XORIGIN_FEATURES,
             ),
-            "save_features": patch("duplo.main.save_features"),
+            "save_features": patch("duplo.pipeline.save_features"),
             "generate_roadmap": patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             "select_features": patch(
@@ -2863,11 +2864,11 @@ class TestCrossOriginDiscovery:
                 side_effect=_select_all_features,
             ),
             "generate_phase_plan": patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             "load_frame_descriptions": patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
         }
@@ -2971,32 +2972,32 @@ class TestCrossOriginDiscoveryIdempotent:
         """Run main() with fetch_site mocked but real scrape pipeline."""
         patches = {
             "validate_for_run": patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             "fetch_site": patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 return_value=_XORIGIN_FETCH_SITE_RESULT,
             ),
             "download_site_media": patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             "behavioral_refs": patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             "collect_design_input": patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             "extract_features": patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_XORIGIN_FEATURES,
             ),
-            "save_features": patch("duplo.main.save_features"),
+            "save_features": patch("duplo.pipeline.save_features"),
             "generate_roadmap": patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             "select_features": patch(
@@ -3004,11 +3005,11 @@ class TestCrossOriginDiscoveryIdempotent:
                 side_effect=_select_all_features,
             ),
             "generate_phase_plan": patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             "load_frame_descriptions": patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
         }
@@ -3195,32 +3196,32 @@ class TestCrossOriginDiscoveredPromotion:
 
         patches = {
             "validate_for_run": patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             "fetch_site": patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 **fetch_kwargs,
             ),
             "download_site_media": patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             "behavioral_refs": patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             "collect_design_input": patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[],
             ),
             "extract_features": patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_XORIGIN_FEATURES,
             ),
-            "save_features": patch("duplo.main.save_features"),
+            "save_features": patch("duplo.pipeline.save_features"),
             "generate_roadmap": patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             "select_features": patch(
@@ -3228,11 +3229,11 @@ class TestCrossOriginDiscoveredPromotion:
                 side_effect=_select_all_features,
             ),
             "generate_phase_plan": patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             "load_frame_descriptions": patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
         }
@@ -3709,37 +3710,37 @@ class TestAutogenExtractDesignCallCount:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=(
                     [Path(".duplo/site_media/img.png")],
                     [],
                 ),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[Path(".duplo/site_media/img.png")],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -3758,7 +3759,7 @@ class TestAutogenExtractDesignCallCount:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -3767,11 +3768,11 @@ class TestAutogenExtractDesignCallCount:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -3837,40 +3838,40 @@ class TestAutogenVariantASubsequentRun:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=(
                     [Path(".duplo/site_media/img.png")],
                     [],
                 ),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[Path(".duplo/site_media/img.png")],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
             patch(
-                "duplo.main.save_design_requirements",
+                "duplo.pipeline.save_design_requirements",
                 new=mock_save_design,
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -3889,7 +3890,7 @@ class TestAutogenVariantASubsequentRun:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -3898,11 +3899,11 @@ class TestAutogenVariantASubsequentRun:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -3986,36 +3987,36 @@ class TestAutogenVariantBSubsequentRun:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=(
                     [Path(".duplo/site_media/img.png")],
                     [],
                 ),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[Path(".duplo/site_media/img.png")],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -4034,7 +4035,7 @@ class TestAutogenVariantBSubsequentRun:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -4043,11 +4044,11 @@ class TestAutogenVariantBSubsequentRun:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -4178,37 +4179,37 @@ class TestAutogenVariantAEmptiedSubsequentRun:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=(
                     [Path(".duplo/site_media/img.png")],
                     [],
                 ),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.collect_design_input",
+                "duplo.pipeline.collect_design_input",
                 return_value=[Path(".duplo/site_media/img.png")],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -4227,7 +4228,7 @@ class TestAutogenVariantAEmptiedSubsequentRun:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -4236,11 +4237,11 @@ class TestAutogenVariantAEmptiedSubsequentRun:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -4447,11 +4448,11 @@ class TestProposedVisualTargetDesignInput:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_FEATURES,
             ),
             patch(
@@ -4459,11 +4460,11 @@ class TestProposedVisualTargetDesignInput:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="macOS",
                     language="Swift",
@@ -4472,20 +4473,20 @@ class TestProposedVisualTargetDesignInput:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_PLAN_CONTENT,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
@@ -4493,7 +4494,7 @@ class TestProposedVisualTargetDesignInput:
                 return_value=[],
             ),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -4656,30 +4657,30 @@ class TestProposedVisualTargetSubsequentRun:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -4698,7 +4699,7 @@ class TestProposedVisualTargetSubsequentRun:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -4707,11 +4708,11 @@ class TestProposedVisualTargetSubsequentRun:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -4819,30 +4820,30 @@ class TestProposedRemovedBothRefsInDesignInput:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main.format_behavioral_references",
+                "duplo.pipeline.format_behavioral_references",
                 return_value=[],
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -4861,7 +4862,7 @@ class TestProposedRemovedBothRefsInDesignInput:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -4870,11 +4871,11 @@ class TestProposedRemovedBothRefsInDesignInput:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -5077,30 +5078,30 @@ class TestProposedBehavioralTargetSubsequentRun:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main._run_video_frame_pipeline",
+                "duplo.pipeline._run_video_frame_pipeline",
                 new=mock_pipeline,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_AUTOGEN_DESIGN_FIXTURE,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -5119,7 +5120,7 @@ class TestProposedBehavioralTargetSubsequentRun:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -5129,11 +5130,11 @@ class TestProposedBehavioralTargetSubsequentRun:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -5204,30 +5205,30 @@ class TestProposedBehavioralRemovedBothVideosInPipeline:
 
         with (
             patch(
-                "duplo.main._scrape_declared_sources",
+                "duplo.pipeline._scrape_declared_sources",
                 return_value=_autogen_scrape_result(),
             ),
-            patch("duplo.main._persist_scrape_result"),
+            patch("duplo.pipeline._persist_scrape_result"),
             patch(
-                "duplo.main._download_site_media",
+                "duplo.pipeline._download_site_media",
                 return_value=([], []),
             ),
             patch(
-                "duplo.main._run_video_frame_pipeline",
+                "duplo.pipeline._run_video_frame_pipeline",
                 new=mock_pipeline,
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 return_value=_AUTOGEN_DESIGN_FIXTURE,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 return_value=_AUTOGEN_FEATURES,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=[
                     {
                         "phase": 1,
@@ -5246,7 +5247,7 @@ class TestProposedBehavioralRemovedBothVideosInPipeline:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=(
                     "# CalcApp — Phase 1: Core Calculator\n\n"
                     "## Bugs\n\n"
@@ -5256,11 +5257,11 @@ class TestProposedBehavioralRemovedBothVideosInPipeline:
                 ),
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
         ):
@@ -5529,15 +5530,15 @@ class TestCounterVtMockedExtractors:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_design,
             ),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 new=mock_features,
             ),
             patch(
@@ -5545,7 +5546,7 @@ class TestCounterVtMockedExtractors:
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.parse_build_preferences",
+                "duplo.pipeline.parse_build_preferences",
                 return_value=BuildPreferences(
                     platform="macOS",
                     language="Swift",
@@ -5554,20 +5555,20 @@ class TestCounterVtMockedExtractors:
                 ),
             ),
             patch(
-                "duplo.main.validate_build_preferences",
+                "duplo.pipeline.validate_build_preferences",
                 return_value=[],
             ),
             patch("builtins.input", return_value=""),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_COUNTER_VT_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_COUNTER_VT_PLAN,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
@@ -5575,7 +5576,7 @@ class TestCounterVtMockedExtractors:
                 return_value=[],
             ),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site must not be called"),
             ),
         ):
@@ -5711,37 +5712,37 @@ class TestCounterVtSubsequentRun:
 
         with (
             patch(
-                "duplo.main.validate_for_run",
+                "duplo.pipeline.validate_for_run",
                 return_value=MagicMock(warnings=[], errors=[]),
             ),
             patch(
-                "duplo.main.extract_design",
+                "duplo.pipeline.extract_design",
                 new=mock_extract_design,
             ),
-            patch("duplo.main.save_design_requirements"),
+            patch("duplo.pipeline.save_design_requirements"),
             patch(
-                "duplo.main.extract_features",
+                "duplo.pipeline.extract_features",
                 new=mock_extract_features,
             ),
-            patch("duplo.main.save_features"),
+            patch("duplo.pipeline.save_features"),
             patch(
                 "duplo.main.select_features",
                 side_effect=_select_all_features,
             ),
             patch(
-                "duplo.main.generate_roadmap",
+                "duplo.pipeline.generate_roadmap",
                 return_value=_COUNTER_VT_ROADMAP,
             ),
             patch(
-                "duplo.main.generate_phase_plan",
+                "duplo.pipeline.generate_phase_plan",
                 return_value=_COUNTER_VT_PLAN,
             ),
             patch(
-                "duplo.main.load_frame_descriptions",
+                "duplo.pipeline.load_frame_descriptions",
                 return_value=[],
             ),
             patch(
-                "duplo.main.fetch_site",
+                "duplo.pipeline.fetch_site",
                 side_effect=RuntimeError("fetch_site should not be called"),
             ),
         ):
