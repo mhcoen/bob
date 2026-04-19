@@ -102,14 +102,20 @@ def _parse_cases(raw: str) -> list[VerificationCase]:
         return []
 
     cases: list[VerificationCase] = []
+    seen: set[tuple[str, str]] = set()
     for item in data:
         if not isinstance(item, dict):
             continue
         inp = str(item.get("input", "")).strip()
         expected = str(item.get("expected", "")).strip()
         frame = str(item.get("frame", "")).strip()
-        if inp and expected:
-            cases.append(VerificationCase(input=inp, expected=expected, frame=frame))
+        if not (inp and expected):
+            continue
+        key = (inp, expected)
+        if key in seen:
+            continue
+        seen.add(key)
+        cases.append(VerificationCase(input=inp, expected=expected, frame=frame))
 
     return cases
 

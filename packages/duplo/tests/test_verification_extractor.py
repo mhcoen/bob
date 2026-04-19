@@ -81,6 +81,37 @@ class TestParseCases:
         assert len(cases) == 1
         assert cases[0].frame == ""
 
+    def test_deduplicates_by_input_and_expected(self):
+        raw = json.dumps(
+            [
+                {"input": "Price: $7 x 4", "expected": "$28", "frame": "f1.png"},
+                {"input": "Price: $7 x 4", "expected": "$28", "frame": "f2.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "f3.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "f4.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "f5.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "f6.png"},
+            ]
+        )
+        cases = _parse_cases(raw)
+        assert len(cases) == 2
+        pairs = [(c.input, c.expected) for c in cases]
+        assert pairs == [
+            ("Price: $7 x 4", "$28"),
+            ("today + 17 days", "8/9/15"),
+        ]
+        assert cases[0].frame == "f1.png"
+        assert cases[1].frame == "f3.png"
+
+    def test_deduplication_is_sensitive_to_expected(self):
+        raw = json.dumps(
+            [
+                {"input": "1+1", "expected": "2", "frame": "f1.png"},
+                {"input": "1+1", "expected": "11", "frame": "f2.png"},
+            ]
+        )
+        cases = _parse_cases(raw)
+        assert len(cases) == 2
+
 
 # ---------------------------------------------------------------------------
 # extract_verification_cases
@@ -131,6 +162,56 @@ class TestExtractVerificationCases:
         prompt = mock_q.call_args[0][0]
         assert "Shows 1+1 = 2" in prompt
         assert "f.png" in prompt
+
+    def test_deduplicates_cases_from_duplicated_frame_descriptions(self):
+        descs = [
+            {
+                "filename": "demo_0003.png",
+                "state": "Main view",
+                "detail": "'Price: $7 x 4' with result '$28'",
+            },
+            {
+                "filename": "demo_0004.png",
+                "state": "Main view",
+                "detail": "'Price: $7 x 4' with result '$28'",
+            },
+            {
+                "filename": "demo_0005.png",
+                "state": "Main view",
+                "detail": "'today + 17 days' with result '8/9/15'",
+            },
+            {
+                "filename": "demo_0006.png",
+                "state": "Main view",
+                "detail": "'today + 17 days' with result '8/9/15'",
+            },
+            {
+                "filename": "demo_0007.png",
+                "state": "Main view",
+                "detail": "'today + 17 days' with result '8/9/15'",
+            },
+            {
+                "filename": "demo_0008.png",
+                "state": "Main view",
+                "detail": "'today + 17 days' with result '8/9/15'",
+            },
+        ]
+        response = json.dumps(
+            [
+                {"input": "Price: $7 x 4", "expected": "$28", "frame": "demo_0003.png"},
+                {"input": "Price: $7 x 4", "expected": "$28", "frame": "demo_0004.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "demo_0005.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "demo_0006.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "demo_0007.png"},
+                {"input": "today + 17 days", "expected": "8/9/15", "frame": "demo_0008.png"},
+            ]
+        )
+        with patch("duplo.verification_extractor.query", return_value=response):
+            cases = extract_verification_cases(descs)
+        pairs = [(c.input, c.expected) for c in cases]
+        assert pairs.count(("Price: $7 x 4", "$28")) == 1
+        assert pairs.count(("today + 17 days", "8/9/15")) == 1
+        assert len(cases) == 2
 
     def test_handles_bad_response(self):
         descs = [
