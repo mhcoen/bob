@@ -1145,3 +1145,5 @@ Investigated whether the frame_describer bug (all frames getting "unknown" state
 63356ea: Added automatic generation of CLAUDE.md file to keep platform rules synchronized with the resolved stack. The file includes project name, stack configuration, platform-specific rules, and optional local overrides. It's regenerated whenever platform profiles are present to ensure consistency across runs.
 
 36ce4ab: Added support for a user-owned `local.md` file that holds project-specific overrides. The file is automatically git-ignored and its contents flow into both the planner prompt and CLAUDE.md, allowing per-project customization without affecting the shared configuration.
+
+8168e7e: Changed plan generation to produce a complete multi-phase PLAN.md covering all roadmap phases at once, rather than interactively selecting features for a single phase. Verification tasks are now added only to the first phase's plan. The pipeline now loops through each roadmap phase, generating and saving its plan sequentially, and prints a summary when all phases are ready.
