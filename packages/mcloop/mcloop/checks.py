@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -286,17 +287,11 @@ def run_checks(
     config = _load_config(project_dir)
     check_timeout = int(config.get("check_timeout", 300))
 
-    all_output: list[str] = []
-    for cmd in commands:
+    def _run_one(cmd: str) -> tuple[bool, str]:
         try:
             parts = shlex.split(cmd)
         except ValueError:
-            all_output.append(f"$ {cmd}\nMalformed command (unmatched quotes)")
-            return CheckResult(
-                passed=False,
-                output="\n".join(all_output),
-                command=cmd,
-            )
+            return False, "Malformed command (unmatched quotes)"
         try:
             result = subprocess.run(
                 parts,
@@ -307,14 +302,19 @@ def run_checks(
                 timeout=check_timeout,
             )
         except subprocess.TimeoutExpired:
-            all_output.append(f"$ {cmd}\nTIMEOUT after {check_timeout}s")
-            return CheckResult(
-                passed=False,
-                output="\n".join(all_output),
-                command=cmd,
-            )
-        all_output.append(f"$ {cmd}\n{result.stdout}{result.stderr}")
-        if result.returncode != 0:
+            return False, f"TIMEOUT after {check_timeout}s"
+        return result.returncode == 0, f"{result.stdout}{result.stderr}"
+
+    # Run checks in parallel; they're independent read-only operations.
+    # executor.map preserves submission order in the returned iterable
+    # so the "first failure" is reported relative to the original
+    # command list, not thread completion order.
+    with ThreadPoolExecutor(max_workers=len(commands)) as executor:
+        results = list(executor.map(_run_one, commands))
+
+    all_output = [f"$ {cmd}\n{output}" for cmd, (_, output) in zip(commands, results)]
+    for cmd, (passed, _) in zip(commands, results):
+        if not passed:
             return CheckResult(
                 passed=False,
                 output="\n".join(all_output),

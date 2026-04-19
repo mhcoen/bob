@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import threading
 from unittest.mock import patch
 
 from mcloop.checks import (
@@ -157,9 +158,10 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     assert result.passed
     # run_checks is now side-effect-free: ruff check + ruff format --check, no autofix
     assert mock_run.call_count == 2
-    calls = [c[0][0] for c in mock_run.call_args_list]
-    assert calls[0] == ["ruff", "check", "."]
-    assert calls[1] == ["ruff", "format", "--check", "."]
+    # Parallel execution means call order is non-deterministic; check as a set.
+    calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+    assert ("ruff", "check", ".") in calls
+    assert ("ruff", "format", "--check", ".") in calls
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -215,9 +217,7 @@ def test_run_checks_first_fails(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_timeout(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
-    mock_run.side_effect = [
-        subprocess.TimeoutExpired(cmd="ruff check .", timeout=300),
-    ]
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd="ruff check .", timeout=300)
     result = run_checks(tmp_path)
     assert not result.passed
     assert "TIMEOUT" in result.output
@@ -226,19 +226,58 @@ def test_run_checks_timeout(mock_run, tmp_path):
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_second_command_fails(mock_run, tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
-    mock_run.side_effect = [
-        subprocess.CompletedProcess(args="ruff check .", returncode=0, stdout="ok\n", stderr=""),
-        subprocess.CompletedProcess(
-            args="ruff format --check .", returncode=0, stdout="ok\n", stderr=""
-        ),
-        subprocess.CompletedProcess(args="pytest", returncode=1, stdout="FAILED\n", stderr=""),
-    ]
+
+    # Parallel execution means we can't rely on call-order side_effect
+    # lists; key the result off the command itself.
+    def by_cmd(args, **kwargs):
+        if args[0] == "pytest":
+            return subprocess.CompletedProcess(
+                args=args, returncode=1, stdout="FAILED\n", stderr=""
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    mock_run.side_effect = by_cmd
     result = run_checks(tmp_path)
     assert not result.passed
     assert result.command == "pytest"
 
 
 # --- _classify_run_command tests ---
+
+
+def test_run_checks_runs_commands_in_parallel(tmp_path):
+    """All check commands must start before any completes.
+
+    Uses a barrier: each command enters subprocess.run, increments a
+    counter, then blocks until all three have arrived. Serial execution
+    would deadlock (command 2 can't start until command 1 returns, but
+    command 1 is waiting for command 3). A finite timeout on the barrier
+    surfaces that deadlock as a test failure rather than hanging.
+    """
+    (tmp_path / "mcloop.json").write_text(
+        json.dumps({"checks": ["cmd-one", "cmd-two", "cmd-three"]})
+    )
+
+    lock = threading.Lock()
+    started: list[str] = []
+    all_started = threading.Event()
+
+    def fake_run(args, **kwargs):
+        with lock:
+            started.append(args[0])
+            if len(started) == 3:
+                all_started.set()
+        # Block until the other two commands have also started. If
+        # run_checks is serial, this wait will time out.
+        if not all_started.wait(timeout=3):
+            raise AssertionError("commands did not start concurrently")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    with patch("mcloop.checks.subprocess.run", side_effect=fake_run):
+        result = run_checks(tmp_path)
+
+    assert result.passed
+    assert set(started) == {"cmd-one", "cmd-two", "cmd-three"}
 
 
 @patch("mcloop.checks.subprocess.run")

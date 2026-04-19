@@ -125,11 +125,12 @@ def test_run_checks_with_targeted(tmp_path):
             changed_files=["mcloop/checks.py"],
         )
         # run_checks is side-effect-free: ruff is scoped to the changed
-        # .py files, pytest is scoped to their mapped tests.
-        calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "mcloop/checks.py"]
-        assert calls[1] == ["ruff", "format", "--check", "mcloop/checks.py"]
-        assert calls[2] == ["pytest", "tests/test_checks.py"]
+        # .py files, pytest is scoped to their mapped tests. Parallel
+        # execution means order is non-deterministic.
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "mcloop/checks.py") in calls
+        assert ("ruff", "format", "--check", "mcloop/checks.py") in calls
+        assert ("pytest", "tests/test_checks.py") in calls
 
 
 def test_run_checks_targeted_only_test_files_changed(tmp_path):
@@ -153,12 +154,13 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
             tmp_path,
             changed_files=["tests/test_foo.py"],
         )
-        # Test file included directly — ruff scoped to it, pytest scoped to it.
+        # Test file included directly: ruff scoped to it, pytest scoped to it.
+        # Parallel execution means order is non-deterministic.
         assert mock_run.call_count == 3
-        calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "tests/test_foo.py"]
-        assert calls[1] == ["ruff", "format", "--check", "tests/test_foo.py"]
-        assert calls[2] == ["pytest", "tests/test_foo.py"]
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "tests/test_foo.py") in calls
+        assert ("ruff", "format", "--check", "tests/test_foo.py") in calls
+        assert ("pytest", "tests/test_foo.py") in calls
 
 
 def test_run_checks_targeted_no_matching_tests(tmp_path):
@@ -186,12 +188,13 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
             changed_files=["mcloop/main.py"],
         )
         # No test_main.py exists, but main.py is Python: fall back to full
-        # pytest while still scoping ruff to the changed file.
+        # pytest while still scoping ruff to the changed file. Parallel
+        # execution means order is non-deterministic.
         assert mock_run.call_count == 3
-        calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "mcloop/main.py"]
-        assert calls[1] == ["ruff", "format", "--check", "mcloop/main.py"]
-        assert calls[2] == ["pytest"]
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "mcloop/main.py") in calls
+        assert ("ruff", "format", "--check", "mcloop/main.py") in calls
+        assert ("pytest",) in calls
 
 
 def test_run_checks_targeted_no_python_changes(tmp_path):
@@ -234,8 +237,9 @@ def test_run_checks_no_changed_files_runs_full(tmp_path):
             stderr="",
         )
         run_checks(tmp_path)
-        # Side-effect-free: ruff check + ruff format --check + pytest (full), no autofix
-        calls = [c[0][0] for c in mock_run.call_args_list]
-        assert calls[0] == ["ruff", "check", "."]
-        assert calls[1] == ["ruff", "format", "--check", "."]
-        assert calls[2] == ["pytest"]
+        # Side-effect-free: ruff check + ruff format --check + pytest (full),
+        # no autofix. Parallel execution means order is non-deterministic.
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", ".") in calls
+        assert ("ruff", "format", "--check", ".") in calls
+        assert ("pytest",) in calls
