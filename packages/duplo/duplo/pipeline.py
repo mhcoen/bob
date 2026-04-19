@@ -30,10 +30,8 @@ from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
 from duplo.diagnostics import record_failure
 from duplo.design_extractor import (
-    DesignRequirements,
     extract_design,
     format_design_block,
-    format_design_section,
 )
 from duplo.orchestrator import (
     _accepted_frames_by_source,
@@ -1150,33 +1148,6 @@ def _detect_and_append_gaps(
     )
 
 
-def _insert_design_after_heading(content: str, design_section: str) -> str:
-    """Return *content* with *design_section* placed after the first H1.
-
-    The design section must live INSIDE the Phase 0 plan body so that
-    mcloop's phase parser sees a phase heading as the first line of
-    PLAN.md.  A preamble above the heading would be treated as outside
-    any phase and break task dispatch.
-
-    If *content* has no H1 heading or *design_section* is empty, the
-    content is returned unchanged.
-    """
-    if not design_section.strip():
-        return content
-    lines = content.split("\n")
-    for i, line in enumerate(lines):
-        if line.lstrip().startswith("# "):
-            before = lines[: i + 1]
-            after = lines[i + 1 :]
-            block = design_section.rstrip()
-            new_lines = before + ["", block]
-            if after:
-                new_lines.append("")
-                new_lines.extend(after)
-            return "\n".join(new_lines)
-    return content
-
-
 def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 
@@ -1542,15 +1513,6 @@ def _subsequent_run() -> None:
     profiles = _resolve_platform_profiles(preferences)
     _announce_profiles(profiles)
 
-    design_data = data.get("design_requirements", {})
-    design_section = ""
-    if design_data:
-        _dfields = {f.name for f in dataclasses.fields(DesignRequirements)}
-        loaded_design = DesignRequirements(
-            **{k: v for k, v in design_data.items() if k in _dfields}
-        )
-        design_section = format_design_section(loaded_design)
-
     # On the first phase of a new project, lay down platform scaffold
     # artifacts (run.sh, .gitignore entries, etc.) before the planner
     # runs, so tasks can reference them instead of recreating them.
@@ -1611,11 +1573,6 @@ def _subsequent_run() -> None:
             spec_text=spec_prompt,
             platform_addendum=platform_addendum,
         )
-        # Inject visual-design requirements AFTER the Phase 0 heading so
-        # the section lives inside the phase rather than as a preamble
-        # (which would confuse mcloop's phase parser).
-        if phase_number_i == 0 and design_section:
-            content = _insert_design_after_heading(content, design_section)
         # Verification tasks are authored once against the first phase;
         # they describe product-level behavior, not per-phase scope.
         if idx == 0:

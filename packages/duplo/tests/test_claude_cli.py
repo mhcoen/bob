@@ -130,12 +130,12 @@ class TestQuery:
             query("prompt")
 
     def test_raises_claude_cli_error_on_timeout(self, monkeypatch):
-        # poll never completes; monotonic jumps past the 300s timeout.
+        # poll never completes; monotonic jumps past the timeout.
         monkeypatch.setattr(
             "duplo.claude_cli.subprocess.Popen",
             _popen_factory(poll_results=[None, None, None, None]),
         )
-        times = iter([0.0, 100.0, 301.0, 302.0])
+        times = iter([0.0, 100.0, 601.0, 602.0])
         monkeypatch.setattr("duplo.claude_cli.time.monotonic", lambda: next(times))
         with pytest.raises(ClaudeCliError, match="timed out"):
             query("prompt")

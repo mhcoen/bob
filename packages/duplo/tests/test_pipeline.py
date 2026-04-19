@@ -79,36 +79,16 @@ def _read_duplo_json(tmp_path: Path) -> dict:
 
 
 class TestPlanStartsWithPhaseHeading:
-    """PLAN.md must start with a phase heading (# line), not design prose.
+    """PLAN.md must start with a phase heading (# line).
 
-    The visual design section must be injected INSIDE the Phase 0 body,
-    after the heading.  Any preamble before the first H1 is treated by
-    mcloop's phase parser as outside any phase and breaks task dispatch.
+    Visual design requirements are written to CLAUDE.md, not PLAN.md.
+    mcloop extracts only the current phase content from PLAN.md, so any
+    design block injected there never reaches the code generator.
     """
 
-    def test_insert_design_after_heading_places_design_after_h1(self):
-        from duplo.pipeline import _insert_design_after_heading
-
-        content = "# Phase 0: Core\n\n- [ ] task\n"
-        design = "## Visual Design Requirements\n\n### Colors\n- **primary**: `#ff0000`\n"
-        result = _insert_design_after_heading(content, design)
-
-        first_non_blank = next(line for line in result.splitlines() if line.strip())
-        assert first_non_blank.startswith("# "), first_non_blank
-        heading_idx = result.index("# Phase 0: Core")
-        design_idx = result.index("## Visual Design Requirements")
-        task_idx = result.index("- [ ] task")
-        assert heading_idx < design_idx < task_idx
-
-    def test_insert_design_empty_is_no_op(self):
-        from duplo.pipeline import _insert_design_after_heading
-
-        content = "# Phase 0\n\n- [ ] task\n"
-        assert _insert_design_after_heading(content, "") == content
-        assert _insert_design_after_heading(content, "   \n  ") == content
-
     def test_phase_zero_plan_md_starts_with_heading(self, tmp_path, monkeypatch):
-        """End-to-end: PLAN.md's first non-blank line is the phase heading."""
+        """End-to-end: PLAN.md's first non-blank line is the phase heading,
+        and design requirements are NOT injected into PLAN.md."""
         _write_duplo_json(
             tmp_path,
             {
@@ -155,8 +135,9 @@ class TestPlanStartsWithPhaseHeading:
         assert first_non_blank.startswith("# "), (
             f"PLAN.md must start with a phase heading, got: {first_non_blank!r}"
         )
-        assert "Visual Design Requirements" in written
-        assert "#ff0000" in written
+        assert "Visual Design Requirements" not in written
+        assert "### Colors" not in written
+        assert "### Typography" not in written
 
 
 class TestSubsequentRunResume:

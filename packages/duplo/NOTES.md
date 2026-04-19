@@ -919,6 +919,17 @@ Recommended user follow-up:
    type-annotation-only fixes, matching the intent of task 3.
 3. Re-run `pytest tests/test_mypy.py` to confirm zero errors.
 
+### [1] Pre-existing test_claude_cli timeout test was stale — 2026-04-19
+
+`test_raises_claude_cli_error_on_timeout` mocked `time.monotonic` to
+return values topping out at 302.0s, but `_TIMEOUT_SECONDS` in
+`claude_cli.py` is now 600 (a previous task raised it from 300). The
+mocked iterator therefore exhausted before the timeout check ever
+fired, producing `StopIteration` rather than the expected
+`ClaudeCliError`. Bumped the mocked values to 601.0/602.0 so the
+timeout branch is exercised. This was not part of the design-section
+fix but blocked the mandatory `pytest` check.
+
 ## Hypotheses
 
 ### [7.1.2] Dispatch and _subsequent_run assumptions block _first_run removal — 2026-04-17
