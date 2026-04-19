@@ -22,8 +22,19 @@ exclude = ["telegram-permission-hook.py", "pytest-of-mhcoen"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pytest>=8.0",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-randomly>=3.15",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"
+timeout = 60
 markers = [
     "integration: marks tests as integration tests (deselect with '-m not integration')",
 ]

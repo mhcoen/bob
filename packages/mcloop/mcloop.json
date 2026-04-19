@@ -2,8 +2,9 @@
   "checks": [
     "ruff check .",
     "ruff format --check .",
-    "pytest"
+    "pytest -x -n auto"
   ],
+  "check_timeout": 600,
   "detect": [
     {"marker": "Cargo.toml", "language": "Rust", "commands": ["cargo clippy -- -D warnings", "cargo test"]},
     {"marker": "go.mod", "language": "Go", "commands": ["go vet ./...", "go test ./..."]},

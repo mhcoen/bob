@@ -283,6 +283,9 @@ def run_checks(
             command="(none)",
         )
 
+    config = _load_config(project_dir)
+    check_timeout = int(config.get("check_timeout", 300))
+
     all_output: list[str] = []
     for cmd in commands:
         try:
@@ -301,10 +304,10 @@ def run_checks(
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=check_timeout,
             )
         except subprocess.TimeoutExpired:
-            all_output.append(f"$ {cmd}\nTIMEOUT after 300s")
+            all_output.append(f"$ {cmd}\nTIMEOUT after {check_timeout}s")
             return CheckResult(
                 passed=False,
                 output="\n".join(all_output),
