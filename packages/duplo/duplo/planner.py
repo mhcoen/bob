@@ -37,8 +37,12 @@ Rules for the plan:
   Do NOT use [BATCH] if any subtask is marked [USER] or [AUTO];
   McLoop handles this automatically by stopping the batch at
   those boundaries, but the intent should be clear in the plan.
-- The description at the top of PLAN.md should include the
-  platform, language, build system, and any constraints.
+- Do NOT include a platform, language, prerequisites, or
+  build-system description paragraph at the top of the phase.
+  That information is written once in the PLAN.md project
+  header and must not be repeated per phase. Start the phase
+  content with the H1 phase heading line, then go directly to
+  task checkboxes.
 - Do NOT emit a separate visual-design section. Any design
   requirements are injected into PLAN.md by the caller, after
   the phase heading.
@@ -59,8 +63,6 @@ Output ONLY the Markdown for PLAN.md. No explanation outside it.
 Format:
 
 # <AppName> — Phase N: <Title>
-
-<Description with platform, language, constraints, and phase goal.>
 
 - [ ] Set up project structure and build system
 - [ ] [BATCH] Add user authentication [feat: "User authentication"]

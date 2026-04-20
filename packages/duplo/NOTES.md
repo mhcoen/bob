@@ -1256,3 +1256,5 @@ f772c16: Fixed a stale test that mocked time values below the updated CLI timeou
 dc48670: Added deduplication to verification case extraction, preventing duplicate input/expected pairs from multiple frames. Fixed a stale test mocking outdated CLI timeouts and moved design specifications from PLAN.md to CLAUDE.md to avoid parser conflicts. Updated tests to verify deduplication behavior and reflect the design block relocation.
 
 18df8b8: Added retry logic to the Claude CLI wrapper functions. Both query() and query_with_images() now attempt up to 3 retries with a 5-second delay between attempts when they encounter timeouts or non-zero exit codes. This improves reliability for transient failures.
+
+782a12e: Added a top-level project header to PLAN.md so it starts with the app name, description, and platform/constraints line before any phase content. This matches duplo's own structure and ensures mcloop compatibility. The header is only written when PLAN.md is created fresh, preserving existing files during resumption.

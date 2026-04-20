@@ -443,6 +443,16 @@ class TestPhaseSystemPromptAnnotations:
     def test_system_prompt_shows_fix_example_in_format(self):
         assert '[fix: "email format not checked"]' in _PHASE_SYSTEM
 
+    def test_system_prompt_forbids_platform_boilerplate_paragraph(self):
+        assert (
+            "Do NOT include a platform, language, prerequisites, or\n"
+            "  build-system description paragraph at the top of the phase.\n"
+            "  That information is written once in the PLAN.md project\n"
+            "  header and must not be repeated per phase. Start the phase\n"
+            "  content with the H1 phase heading line, then go directly to\n"
+            "  task checkboxes."
+        ) in _PHASE_SYSTEM
+
 
 class TestNextPhaseSystemPromptAnnotations:
     def test_system_prompt_requires_feat_annotation(self):
