@@ -450,6 +450,40 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
 
 _BUGS_HEADING_RE = re.compile(r"^## Bugs\s*$", re.MULTILINE)
 
+_MCLOOP_TAG_RE = re.compile(r"\[(USER|BATCH|AUTO)\]")
+_TASK_LINE_PREFIX_RE = re.compile(r"^- \[[ xX]\] ")
+_LEADING_DIRECTIVE_RE = re.compile(r"^(\s*\[(?:USER|BATCH|AUTO)\])+\s*")
+
+
+def _escape_mcloop_tags(content: str) -> str:
+    """Rewrite prose ``[USER]/[BATCH]/[AUTO]`` tokens as parenthesised form.
+
+    mcloop parses these bracketed tokens as task-level directives when they
+    appear at the start of a task body (immediately after ``- [ ] ``). When
+    the same tokens appear mid-sentence inside a task description they get
+    misinterpreted, silently changing how the task runs. To prevent that,
+    scan every task line and rewrite any non-leading occurrence to
+    ``(USER)`` / ``(BATCH)`` / ``(AUTO)``. Intentional leading directives
+    (and any stacked leading directives) are preserved unchanged; non-task
+    lines are left alone.
+    """
+    out_lines: list[str] = []
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        prefix_m = _TASK_LINE_PREFIX_RE.match(stripped)
+        if not prefix_m:
+            out_lines.append(line)
+            continue
+        indent = line[: len(line) - len(stripped)]
+        checkbox = stripped[: prefix_m.end()]
+        body = stripped[prefix_m.end() :]
+        directive_m = _LEADING_DIRECTIVE_RE.match(body)
+        directive = directive_m.group(0) if directive_m else ""
+        remainder = body[len(directive) :]
+        escaped = _MCLOOP_TAG_RE.sub(lambda m: f"({m.group(1)})", remainder)
+        out_lines.append(indent + checkbox + directive + escaped)
+    return "".join(out_lines)
+
 
 def _strip_bugs_section(content: str) -> str:
     """Remove any ``## Bugs`` heading from *content*.
@@ -484,6 +518,7 @@ def save_plan(
     Returns the path.
     """
     content = _strip_bugs_section(content)
+    content = _escape_mcloop_tags(content)
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if path.exists():
         existing = path.read_text(encoding="utf-8")

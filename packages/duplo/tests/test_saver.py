@@ -29,6 +29,7 @@ from duplo.saver import (
     RAW_PAGES_DIR,
     REFERENCES_DIR,
     _PLAN_FILENAME,
+    _escape_mcloop_tags,
     _find_duplicate_groups,
     _merge_duplicate_group,
     _task_body,
@@ -3678,3 +3679,35 @@ class TestWriteClaudeMd:
         content = path.read_text(encoding="utf-8")
         assert "# MyApp" in content
         assert "## Stack" in content
+
+
+class TestEscapeMcloopTags:
+    """Tests for _escape_mcloop_tags() and append_to_bugs_section() integration."""
+
+    def test_helper_escapes_mid_sentence_user_token(self):
+        line = "- [ ] Fix: crash when a [USER] confirmation is declined mid-flow"
+        result = _escape_mcloop_tags(line)
+        assert "[USER]" not in result
+        assert "(USER)" in result
+
+    def test_helper_preserves_leading_directive(self):
+        line = "- [ ] [USER] Run ./run.sh and verify the window appears"
+        assert _escape_mcloop_tags(line) == line
+
+    def test_helper_escapes_batch_and_auto_too(self):
+        line = "- [ ] Handle [BATCH] and [AUTO] markers inside prose"
+        result = _escape_mcloop_tags(line)
+        assert "[BATCH]" not in result
+        assert "[AUTO]" not in result
+        assert "(BATCH)" in result
+        assert "(AUTO)" in result
+
+    def test_append_to_bugs_section_escapes_mid_sentence_user_token(self, tmp_path):
+        plan = "# MyApp — Phase 1: Core\n\n- [ ] Set up project\n"
+        (tmp_path / _PLAN_FILENAME).write_text(plan, encoding="utf-8")
+        tasks = ['- [ ] Fix: guard the [USER] confirmation path [fix: "user guard"]']
+        inserted = append_to_bugs_section(tasks, target_dir=tmp_path)
+        assert inserted == 1
+        written = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "[USER]" not in written
+        assert "(USER)" in written

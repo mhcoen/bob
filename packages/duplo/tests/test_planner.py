@@ -17,6 +17,7 @@ from duplo.planner import (
     _PLAN_FILENAME,
     _detect_next_phase_number,
     _ensure_h1_heading,
+    _escape_mcloop_tags,
     _strip_bugs_section,
     _strip_fences,
     _strip_trailing_commentary,
@@ -1253,6 +1254,47 @@ class TestStripTrailingCommentary:
         assert "---" not in result
         assert "**Structure:**" not in result
         assert "Want me to write it?" not in result
+
+
+class TestEscapeMcloopTags:
+    """Tests for _escape_mcloop_tags() and its integration with save_plan()."""
+
+    def test_helper_escapes_mid_sentence_user_token(self):
+        line = "- [ ] Add a [USER] confirmation step before destructive actions\n"
+        result = _escape_mcloop_tags(line)
+        assert "[USER]" not in result
+        assert "(USER)" in result
+
+    def test_helper_preserves_leading_directive(self):
+        line = "- [ ] [USER] Run ./run.sh and confirm the window appears\n"
+        assert _escape_mcloop_tags(line) == line
+
+    def test_helper_preserves_leading_batch_but_escapes_later(self):
+        line = '- [ ] [BATCH] Wire auth and log [USER] events [feat: "Auth"]\n'
+        result = _escape_mcloop_tags(line)
+        assert result.startswith("- [ ] [BATCH] ")
+        assert "(USER)" in result
+        assert "[USER]" not in result
+
+    def test_helper_leaves_non_task_lines_alone(self):
+        content = "# Phase 1\n\nThis prose mentions [USER] but is not a task.\n"
+        assert _escape_mcloop_tags(content) == content
+
+    def test_helper_handles_indented_subtask(self):
+        line = "  - [ ] Handle [AUTO] scheduling edge case\n"
+        result = _escape_mcloop_tags(line)
+        assert result == "  - [ ] Handle (AUTO) scheduling edge case\n"
+
+    def test_save_plan_escapes_mid_sentence_user_token(self, tmp_path):
+        content = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] Prompt the user with a [USER] confirmation before deleting data\n"
+        )
+        save_plan(content, target_dir=tmp_path)
+        written = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "[USER]" not in written
+        assert "(USER)" in written
 
 
 class TestStripFences:

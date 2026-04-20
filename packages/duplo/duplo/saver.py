@@ -1236,6 +1236,40 @@ _BUGS_HEADING = "## Bugs"
 
 _PLAN_FILENAME = "PLAN.md"
 
+_MCLOOP_TAG_RE = re.compile(r"\[(USER|BATCH|AUTO)\]")
+_TASK_LINE_PREFIX_RE = re.compile(r"^- \[[ xX]\] ")
+_LEADING_DIRECTIVE_RE = re.compile(r"^(\s*\[(?:USER|BATCH|AUTO)\])+\s*")
+
+
+def _escape_mcloop_tags(content: str) -> str:
+    """Rewrite prose ``[USER]/[BATCH]/[AUTO]`` tokens as parenthesised form.
+
+    mcloop parses these bracketed tokens as task-level directives when they
+    appear at the start of a task body (immediately after ``- [ ] ``). When
+    the same tokens appear mid-sentence inside a task description they get
+    misinterpreted, silently changing how the task runs. To prevent that,
+    scan every task line and rewrite any non-leading occurrence to
+    ``(USER)`` / ``(BATCH)`` / ``(AUTO)``. Intentional leading directives
+    (and any stacked leading directives) are preserved unchanged; non-task
+    lines are left alone.
+    """
+    out_lines: list[str] = []
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        prefix_m = _TASK_LINE_PREFIX_RE.match(stripped)
+        if not prefix_m:
+            out_lines.append(line)
+            continue
+        indent = line[: len(line) - len(stripped)]
+        checkbox = stripped[: prefix_m.end()]
+        body = stripped[prefix_m.end() :]
+        directive_m = _LEADING_DIRECTIVE_RE.match(body)
+        directive = directive_m.group(0) if directive_m else ""
+        remainder = body[len(directive) :]
+        escaped = _MCLOOP_TAG_RE.sub(lambda m: f"({m.group(1)})", remainder)
+        out_lines.append(indent + checkbox + directive + escaped)
+    return "".join(out_lines)
+
 
 def _task_body(line: str) -> str:
     """Extract the text after the checkbox prefix from a task line.
@@ -1305,6 +1339,8 @@ def append_to_bugs_section(
     plan_path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if not plan_path.exists() or not tasks:
         return 0
+
+    tasks = [_escape_mcloop_tags(t) for t in tasks]
 
     content = plan_path.read_text(encoding="utf-8")
     lines = content.split("\n")
