@@ -177,6 +177,37 @@ def _primary_prefs(prefs: list[BuildPreferences]) -> BuildPreferences:
     return BuildPreferences(platform="", language="", constraints=[], preferences=[])
 
 
+def _build_plan_header(
+    app_name: str,
+    spec: ProductSpec | None,
+    prefs: BuildPreferences,
+) -> str:
+    """Build the top-level PLAN.md header block.
+
+    The block is: ``# {app_name}`` / blank line / project description
+    (from ``spec.purpose`` when available, otherwise a placeholder) /
+    blank line / a single platform/language/constraints line derived
+    from *prefs*.  mcloop and downstream tools rely on PLAN.md starting
+    with this H1 project header rather than a phase heading.
+    """
+    description = ""
+    if spec is not None and spec.purpose:
+        description = spec.purpose.strip()
+    if not description:
+        description = f"{app_name} project."
+
+    parts: list[str] = []
+    if prefs.platform:
+        parts.append(prefs.platform)
+    if prefs.language:
+        parts.append(prefs.language)
+    parts.extend(c for c in prefs.constraints if c)
+    parts.extend(p for p in prefs.preferences if p)
+    platform_line = ", ".join(parts) if parts else "Platform and constraints: TBD"
+
+    return f"# {app_name}\n\n{description}\n\n{platform_line}"
+
+
 def _load_preferences(data: dict, spec) -> list[BuildPreferences]:
     """Load build preferences with architecture-hash invalidation.
 
@@ -1546,6 +1577,20 @@ def _subsequent_run() -> None:
     platform_addendum = (
         format_planner_system_addendum(profiles) + scaffold_notice + local_overrides
     )
+
+    # Write the top-level PLAN.md header block before any phase content,
+    # so the file begins with "# {app_name}" plus a description and a
+    # platform/language/constraints line -- matching duplo's own PLAN.md
+    # structure. Only write when PLAN.md is being created fresh; if it
+    # already exists (e.g. state 1 post-completion flow), preserve the
+    # existing top of the file.
+    if not Path("PLAN.md").exists():
+        header_content = _build_plan_header(
+            app_name,
+            spec,
+            _primary_prefs(preferences),
+        )
+        save_plan(header_content)
 
     # Generate a plan for every phase in the roadmap and append each
     # result to PLAN.md. mcloop will consume the phases in order.

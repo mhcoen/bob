@@ -97,7 +97,9 @@ class TestMainSubsequentRun:
                 ) as mock_save:
                     main()
 
-        mock_save.assert_called_once()
+        # One call for the top-level project header block, plus one call
+        # for the generated phase plan.
+        assert mock_save.call_count == 2
 
     def test_prints_plan_ready(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)

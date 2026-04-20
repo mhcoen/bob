@@ -140,6 +140,85 @@ class TestPlanStartsWithPhaseHeading:
         assert "### Typography" not in written
 
 
+class TestPlanProjectHeader:
+    """PLAN.md must open with a top-level ``# {app_name}`` project header,
+    not the first phase heading.
+
+    The phase-generation loop in ``_subsequent_run`` previously wrote
+    phase content directly to PLAN.md with no project header, so the
+    file opened with ``# numi -- Phase 0: Scaffold`` on line 1. The
+    correct structure -- mirroring duplo's own PLAN.md and mcloop's
+    PLAN.md -- starts with ``# {app_name}``, a brief description, and
+    a single platform/language/constraints line before any phases.
+    """
+
+    def test_plan_md_first_line_is_project_header(self, tmp_path, monkeypatch):
+        """The very first line of PLAN.md is ``# {app_name}``, not a
+        phase heading. The description block and platform line are
+        present before any phase heading.
+        """
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://example.com",
+                "app_name": "numi",
+                "features": [],
+                "preferences": {
+                    "platform": "cli",
+                    "language": "Python 3.11+",
+                    "constraints": ["stdlib only"],
+                    "preferences": [],
+                },
+                "roadmap": [
+                    {
+                        "phase": 0,
+                        "title": "Scaffold",
+                        "goal": "Scaffold",
+                        "features": [],
+                        "test": "ok",
+                    },
+                ],
+                "current_phase": 0,
+            },
+        )
+        # Override the stub SPEC.md with one that has an explicit Purpose.
+        (tmp_path / "SPEC.md").write_text(
+            "# numi\n"
+            "\n"
+            "## Purpose\n"
+            "numi is a command-line calculator for quick arithmetic and unit "
+            "conversions. It runs in the terminal with no GUI.\n"
+            "\n"
+            "## Architecture\n"
+            "CLI written in Python 3.11+ using only the standard library.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+
+        llm_output = "# numi -- Phase 0: Scaffold\n\n- [ ] Scaffold project\n"
+        with (
+            patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
+            patch("duplo.pipeline.generate_phase_plan", return_value=llm_output),
+        ):
+            main()
+
+        written = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        lines = written.splitlines()
+        assert lines, "PLAN.md is empty"
+        # First line must be the top-level project header, not a phase heading.
+        assert lines[0] == "# numi", f"PLAN.md first line must be '# numi', got: {lines[0]!r}"
+        # The project header must appear before any phase heading in the file.
+        phase_idx = next(
+            (i for i, ln in enumerate(lines) if ln.startswith("# ") and "Phase" in ln),
+            None,
+        )
+        assert phase_idx is not None and phase_idx > 0, (
+            "Phase heading must come after the project header"
+        )
+        # The description from SPEC.md Purpose is present.
+        assert "command-line calculator" in written
+
+
 class TestSubsequentRunResume:
     """Tests for resuming an interrupted phase."""
 
@@ -319,8 +398,9 @@ class TestPhaseCompletionFlow:
         ):
             main()
 
-        # save_plan (and generate_phase_plan) is called once per phase.
-        assert mock_save.call_count == len(roadmap)
+        # save_plan is called once for the top-level project header plus
+        # once per phase; generate_phase_plan is called once per phase.
+        assert mock_save.call_count == len(roadmap) + 1
         assert mock_gen.call_count == len(roadmap)
         # generate_roadmap is not re-invoked when the stored roadmap is valid.
         mock_roadmap.assert_not_called()
@@ -367,9 +447,11 @@ class TestPhaseCompletionFlow:
 
         # Roadmap is freshly generated exactly once.
         mock_roadmap.assert_called_once()
-        # generate_phase_plan/save_plan run once per fresh-roadmap phase.
+        # generate_phase_plan runs once per fresh-roadmap phase; save_plan
+        # runs once per phase plus one extra call for the top-level
+        # project header block.
         assert mock_gen.call_count == len(fresh_roadmap)
-        assert mock_save.call_count == len(fresh_roadmap)
+        assert mock_save.call_count == len(fresh_roadmap) + 1
         # Phase numbers passed to generate_phase_plan start at 0 and cover
         # every phase in the fresh roadmap.
         phase_numbers = [c.kwargs["phase_number"] for c in mock_gen.call_args_list]
@@ -425,8 +507,9 @@ class TestPhaseCompletionFlow:
         phases_passed = [c.kwargs["phase"] for c in mock_gen.call_args_list]
         assert phases_passed == fresh_roadmap
 
-        # save_plan fires once per phase so each plan is appended.
-        assert mock_save.call_count == len(fresh_roadmap)
+        # save_plan fires once per phase so each plan is appended, plus
+        # one extra call for the top-level project header block.
+        assert mock_save.call_count == len(fresh_roadmap) + 1
 
 
 class TestSubsequentRunPhaseLoopClaudeCliError:
@@ -481,8 +564,9 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
         # Third call raised, so generate_phase_plan ran three times total.
         assert mock_gen.call_count == 3
         # Only the first two phases were saved -- the third failed before
-        # save_plan could be called.
-        assert mock_save.call_count == 2
+        # save_plan could be called. One additional save_plan call is made
+        # before the loop to write the top-level project header block.
+        assert mock_save.call_count == 2 + 1
 
         out = capsys.readouterr().out
         # Failure message reports the partial save count.
@@ -2722,10 +2806,11 @@ class TestRoadmapRegeneration:
         ):
             main()
 
-        # generate_phase_plan and save_plan must each fire once per
-        # roadmap phase, proving the loop is not short-circuited.
+        # generate_phase_plan must fire once per roadmap phase, proving
+        # the loop is not short-circuited. save_plan fires once per phase
+        # plus one extra call for the top-level project header block.
         assert mock_gen.call_count == len(fake_roadmap)
-        assert mock_save.call_count == len(fake_roadmap)
+        assert mock_save.call_count == len(fake_roadmap) + 1
 
         # Phase numbers must start at 0 (scaffold) and walk through
         # every entry in the roadmap.
