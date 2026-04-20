@@ -1258,3 +1258,5 @@ dc48670: Added deduplication to verification case extraction, preventing duplica
 18df8b8: Added retry logic to the Claude CLI wrapper functions. Both query() and query_with_images() now attempt up to 3 retries with a 5-second delay between attempts when they encounter timeouts or non-zero exit codes. This improves reliability for transient failures.
 
 782a12e: Added a top-level project header to PLAN.md so it starts with the app name, description, and platform/constraints line before any phase content. This matches duplo's own structure and ensures mcloop compatibility. The header is only written when PLAN.md is created fresh, preserving existing files during resumption.
+
+b934d90: Added a project header to PLAN.md for mcloop compatibility, ensuring it starts with app name, description, and platform/constraints. Updated planner instructions to forbid repeating platform/language boilerplate in each phase, as that information is now only in the header. Added a corresponding test to verify the new rule.

@@ -131,9 +131,7 @@ def format_verification_tasks(cases: list[VerificationCase]) -> str:
 
     lines: list[str] = []
     lines.append("")
-    lines.append("## Functional verification from demo video")
-    lines.append("")
-    lines.append("Type each expression and verify the result matches the product's demo.")
+    lines.append("<!-- Functional verification from demo video -->")
     lines.append("")
     for case in cases:
         lines.append(f"- [ ] Verify: type `{case.input}`, expect result `{case.expected}`")

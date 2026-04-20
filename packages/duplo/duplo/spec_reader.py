@@ -993,9 +993,7 @@ def format_contracts_as_verification(spec: ProductSpec) -> str:
         return ""
     lines: list[str] = [
         "",
-        "## Functional verification from product spec",
-        "",
-        "These input/output pairs are specified in SPEC.md and must hold.",
+        "<!-- Functional verification from product spec -->",
         "",
     ]
     for contract in spec.behavior_contracts:

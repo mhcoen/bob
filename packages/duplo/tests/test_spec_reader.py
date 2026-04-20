@@ -1007,10 +1007,21 @@ class TestFormatContractsAsVerification:
             ]
         )
         result = format_contracts_as_verification(spec)
-        assert "## Functional verification from product spec" in result
         assert "- [ ] Verify: type `2+3`, expect result `5`" in result
         assert "- [ ] Verify: type `10 km in miles`, expect result `6.21 mi`" in result
-        assert "SPEC.md" in result
+
+    def test_no_h2_headers_in_output(self):
+        spec = ProductSpec(
+            behavior_contracts=[
+                BehaviorContract(input="2+3", expected="5"),
+            ]
+        )
+        result = format_contracts_as_verification(spec)
+        for line in result.splitlines():
+            assert not line.startswith("## "), (
+                f"format_contracts_as_verification output must not create "
+                f"H2 sections; found: {line!r}"
+            )
 
 
 class TestSourceEntryDefaults:

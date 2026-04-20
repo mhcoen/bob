@@ -243,8 +243,23 @@ class TestFormatVerificationTasks:
             VerificationCase(input="Price: $10", expected="$10", frame="f.png"),
         ]
         text = format_verification_tasks(cases)
-        assert "## Functional verification from demo video" in text
         assert "- [ ] Verify: type `Price: $10`, expect result `$10`" in text
+
+    def test_no_h2_headers_in_output(self):
+        cases = [
+            VerificationCase(input="1+1", expected="2", frame="f1.png"),
+            VerificationCase(input="2+2", expected="4", frame="f2.png"),
+        ]
+        text = format_verification_tasks(cases)
+        for line in text.splitlines():
+            assert not line.startswith("## "), (
+                f"format_verification_tasks output must not create H2 sections; found: {line!r}"
+            )
+
+    def test_no_h2_headers_when_empty(self):
+        assert not any(
+            line.startswith("## ") for line in format_verification_tasks([]).splitlines()
+        )
 
     def test_formats_multiple_cases(self):
         cases = [

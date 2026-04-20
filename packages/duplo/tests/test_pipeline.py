@@ -5087,7 +5087,7 @@ class TestSubsequentRunSpecVerificationIndependent:
     }
 
     _SPEC_VTASKS = (
-        "\n## Functional verification from product spec\n\n"
+        "\n<!-- Functional verification from product spec -->\n\n"
         "- [ ] Verify: type `1+1`, expect result `2`\n"
     )
 
@@ -5153,7 +5153,7 @@ class TestSubsequentRunSpecVerificationIndependent:
 
         mock_fmt.assert_called_once()
         saved_content = mock_save.call_args[0][0]
-        assert "Functional verification from product spec" in saved_content
+        assert "Verify: type `1+1`, expect result `2`" in saved_content
 
     def test_frames_no_vcases_with_spec(self, capsys, tmp_path, monkeypatch):
         """(b) frame_descs non-empty, vcases empty, SPEC present → no crash."""
@@ -5184,7 +5184,7 @@ class TestSubsequentRunSpecVerificationIndependent:
             main()
 
         saved_content = mock_save.call_args[0][0]
-        assert "Functional verification from product spec" in saved_content
+        assert "Verify: type `1+1`, expect result `2`" in saved_content
 
     def test_frames_with_vcases_no_spec(self, capsys, tmp_path, monkeypatch):
         """(c) frame_descs non-empty, vcases non-empty, SPEC absent → no crash."""
@@ -5220,7 +5220,7 @@ class TestSubsequentRunSpecVerificationIndependent:
 
         saved_content = mock_save.call_args[0][0]
         assert "Verify: type `1+1`" in saved_content
-        assert "Functional verification from product spec" not in saved_content
+        assert "Verify: type `1+1`, expect result `2`" not in saved_content
 
     def test_happy_path_frames_vcases_and_spec(self, capsys, tmp_path, monkeypatch):
         """(d) frame_descs + vcases + SPEC → both appended."""
@@ -5261,7 +5261,7 @@ class TestSubsequentRunSpecVerificationIndependent:
 
         saved_content = mock_save.call_args[0][0]
         assert "Verify: type `1+1`" in saved_content
-        assert "Functional verification from product spec" in saved_content
+        assert "Verify: type `1+1`, expect result `2`" in saved_content
 
 
 class TestValidateForRunWiring:
