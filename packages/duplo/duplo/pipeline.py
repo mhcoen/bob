@@ -1643,10 +1643,12 @@ def _subsequent_run() -> None:
             # Previously this crashed the whole pipeline and any phases
             # already written to PLAN.md were reported as if lost. Earlier
             # save_plan() calls persisted to disk, so stop cleanly and
-            # report how many phases made it.
+            # report how many phases made it. Use saved_count (not idx)
+            # so the count reflects phases actually persisted even if the
+            # loop structure changes later.
             print(
                 f"Phase {phase_number_i}: plan generation failed after retries. "
-                f"{idx} of {total_phases} phases saved to PLAN.md."
+                f"{saved_count} of {total_phases} phases saved to PLAN.md."
             )
             break
         saved_count += 1

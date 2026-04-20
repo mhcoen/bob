@@ -575,6 +575,54 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
         # Closing summary reports the actual saved count, not the total.
         assert "Plan ready for 2 of 3 phases." in out
 
+    def test_claude_cli_error_on_first_phase_reports_zero_saved(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        """ClaudeCliError on the very first roadmap phase yields zero
+        phase plans saved. The loop must still break cleanly without
+        re-raising, and the summary must reflect the zero partial save.
+        """
+        from duplo.claude_cli import ClaudeCliError
+
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+        ]
+        data = {
+            "source_url": "https://example.com",
+            "features": [],
+            "preferences": {
+                "platform": "web",
+                "language": "Python",
+                "constraints": [],
+                "preferences": [],
+            },
+            "roadmap": roadmap,
+            "current_phase": 0,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        def fake_generate(*args, **kwargs):
+            raise ClaudeCliError("simulated retry exhaustion on first phase")
+
+        with (
+            patch("duplo.pipeline.generate_phase_plan", side_effect=fake_generate) as mock_gen,
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
+        ):
+            # Must not propagate the ClaudeCliError out of main().
+            main()
+
+        # First call raised, and the loop broke before a second call.
+        assert mock_gen.call_count == 1
+        # Only the pre-loop header save_plan ran; no phase content saved.
+        assert mock_save.call_count == 1
+
+        out = capsys.readouterr().out
+        assert "plan generation failed after retries" in out
+        assert "0 of 2 phases saved to PLAN.md" in out
+        assert "Plan ready for 0 of 2 phases." in out
+
 
 class TestSubsequentRunFileChanges:
     """Tests for file change detection on subsequent runs."""
