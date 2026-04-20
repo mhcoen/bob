@@ -1216,6 +1216,39 @@ class TestStripTrailingCommentary:
         content = "# Phase 1\n\nNo tasks here.\n"
         assert _strip_trailing_commentary(content) == content
 
+    def test_preserves_input_when_last_task_is_final_line(self):
+        # When there is no trailing commentary to strip, input is preserved
+        # verbatim -- including the absence of a trailing newline. This
+        # prevents unintended reformatting of already-clean LLM output.
+        content = "# Phase 1\n- [ ] Task"
+        assert _strip_trailing_commentary(content) == content
+
+    def test_strips_trailing_fence_and_qa_commentary_from_real_llm_output(self):
+        # Reproduces the exact failure mode from BUGS.md: fenced plan with
+        # trailing "---", bold "**Structure:**" summary, and "Want me to
+        # write it?" prose -- _strip_fences cannot remove the fence because
+        # _FENCE_RE anchors the closing fence at \Z, so this function must.
+        content = (
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] Scaffold project\n"
+            "- [ ] Add main window\n"
+            "- [ ] Wire up entry point\n"
+            "```\n"
+            "\n"
+            "---\n"
+            "\n"
+            "**Structure:** three tasks covering scaffold, window, entry.\n"
+            "\n"
+            "Want me to write it?\n"
+        )
+        result = _strip_trailing_commentary(content)
+        assert result.endswith("- [ ] Wire up entry point\n")
+        assert "```" not in result
+        assert "---" not in result
+        assert "**Structure:**" not in result
+        assert "Want me to write it?" not in result
+
 
 class TestStripFences:
     """Tests for _strip_fences() removing LLM code-fence wrapping."""

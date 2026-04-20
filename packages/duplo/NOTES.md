@@ -965,6 +965,26 @@ to keep the change targeted; if `duplo fix` should also stop emitting
 `## Bugs`, that is a follow-up with its own test-file churn
 (test_saver.py, test_pipeline.py fix-mode tests).
 
+### [1] `_strip_trailing_commentary` fix was already present from earlier task — 2026-04-20
+
+Task [1] in BUGS.md ("add a _strip_trailing_commentary(content) function
+...after _ensure_h1_heading()") appears to duplicate work already landed
+in commit 4e616f4. The function exists in `planner.py`, is called from
+`generate_phase_plan()` after `_ensure_h1_heading()`, and the fenced +
+trailing-prose scenario described in BUGS.md is already covered by
+`TestStripTrailingCommentary::test_truncates_after_last_task_with_fence_and_commentary`
+in `tests/test_planner.py`.
+
+An attempted "spec-strict" rewrite (always normalize to exactly one
+trailing newline) broke `TestGeneratePhasePlanH1Heading::test_preserves_existing_h1`,
+which asserts that LLM output without a trailing newline is preserved
+verbatim. The early-return branch `last_task_idx == len(lines) - 1`
+in `_strip_trailing_commentary` is therefore load-bearing: when there
+is no trailing commentary to strip, the function must preserve input
+formatting exactly. Extended tests (`test_preserves_input_when_last_task_is_final_line`
+and a second fence-plus-prose case) were added to lock in this
+invariant so a future "helpful normalization" does not regress it.
+
 ## Hypotheses
 
 ### [7.1.2] Dispatch and _subsequent_run assumptions block _first_run removal — 2026-04-17

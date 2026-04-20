@@ -151,7 +151,11 @@ def _strip_trailing_commentary(content: str) -> str:
     requires the closing fence at end-of-string. The correct invariant is
     that nothing should appear in phase content after the last task.
 
-    If no task line is found, returns *content* unchanged.
+    If no task line is found, or the last task line is already the final
+    line of *content*, returns *content* unchanged -- there is no trailing
+    commentary to strip and we preserve the exact input formatting
+    (including any absence of a trailing newline, which the caller may
+    rely on).
     """
     lines = content.splitlines()
     last_task_idx: int | None = None
