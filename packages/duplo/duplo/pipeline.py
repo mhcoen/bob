@@ -1180,6 +1180,20 @@ def _detect_and_append_gaps(
     )
 
 
+_PHASE_CREATED_FILE_RE = re.compile(r"Create .(Sources/[^`]+|Package[^`]+).")
+
+
+def _extract_created_files(content: str) -> list[str]:
+    """Return filenames the LLM told mcloop to create in *content*.
+
+    Scans *content* for task lines matching ``Create `Sources/<path>``` or
+    ``Create `Package<suffix>``` and returns the captured filenames in the
+    order they appear. Used to tell later phases what earlier phases have
+    already produced so they do not recreate the same files.
+    """
+    return _PHASE_CREATED_FILE_RE.findall(content)
+
+
 def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 
@@ -1596,6 +1610,10 @@ def _subsequent_run() -> None:
     # result to PLAN.md. mcloop will consume the phases in order.
     total_phases = len(roadmap)
     saved_count = 0
+    # Files the LLM has told mcloop to create in phases we have already
+    # generated this run. Passed into the next generate_phase_plan() call
+    # so later phases build on those files rather than recreating them.
+    prior_phases_files: list[str] = []
     for idx, phase_dict in enumerate(roadmap):
         if phases_completed == 0:
             # First run: honour the roadmap's own phase numbers so the
@@ -1620,6 +1638,7 @@ def _subsequent_run() -> None:
                 phase_number=phase_number_i,
                 spec_text=spec_prompt,
                 platform_addendum=platform_addendum,
+                prior_phases_files=list(prior_phases_files),
             )
             # Verification tasks describe product-level behavior, so they
             # are appended to the LAST phase: that is the only point at
@@ -1642,6 +1661,10 @@ def _subsequent_run() -> None:
                     content = content.rstrip() + "\n" + spec_vtasks
                     print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
             saved = save_plan(content)
+            # Accumulate files introduced by this phase so the next
+            # generate_phase_plan() call can instruct the LLM not to
+            # recreate or redefine them.
+            prior_phases_files.extend(_extract_created_files(content))
         except ClaudeCliError:
             # Previously this crashed the whole pipeline and any phases
             # already written to PLAN.md were reported as if lost. Earlier

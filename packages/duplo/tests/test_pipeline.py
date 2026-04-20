@@ -624,6 +624,66 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
         assert "Plan ready for 0 of 2 phases." in out
 
 
+class TestSubsequentRunPhaseLoopPriorFiles:
+    """Later phases must see the files introduced by earlier phases.
+
+    If generate_phase_plan() is called independently for each phase, the
+    LLM generating Phase N has no visibility into what Phase N-1 created
+    and is liable to recreate scaffold files (e.g. ``Package.swift`` from
+    the Phase 0 scaffold). The pipeline must scan each generated phase's
+    content for ``Create `Sources/<path>``` / ``Create `Package<suffix>```
+    task lines, accumulate the filenames, and pass them to the next
+    generate_phase_plan() call so the prompt tells the LLM not to
+    recreate those files.
+    """
+
+    def test_second_phase_prompt_contains_first_phase_filenames(self, tmp_path, monkeypatch):
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "g", "features": [], "test": "ok"},
+            {"phase": 1, "title": "Core", "goal": "g", "features": [], "test": "ok"},
+        ]
+        data = {
+            "source_url": "https://example.com",
+            "features": [],
+            "preferences": {
+                "platform": "macos",
+                "language": "Swift",
+                "constraints": [],
+                "preferences": [],
+            },
+            "roadmap": roadmap,
+            "current_phase": 0,
+        }
+        _write_duplo_json(tmp_path, data)
+        monkeypatch.chdir(tmp_path)
+
+        phase0_content = (
+            "# App -- Phase 0: Scaffold\n"
+            "- [ ] Create `Package.swift` with SPM manifest\n"
+            "- [ ] Create `Sources/App/App.swift` with @main entry point\n"
+        )
+        phase1_content = "# App -- Phase 1: Core\n- [ ] Wire the main view.\n"
+
+        calls: list[dict] = []
+
+        def fake_generate(*args, **kwargs):
+            calls.append(kwargs)
+            return phase0_content if len(calls) == 1 else phase1_content
+
+        with (
+            patch("duplo.pipeline.generate_phase_plan", side_effect=fake_generate),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        # First phase receives no prior files; second phase must receive
+        # the filenames extracted from phase 0's content.
+        assert calls[0].get("prior_phases_files") == []
+        phase1_prior = calls[1]["prior_phases_files"]
+        assert "Package.swift" in phase1_prior
+        assert "Sources/App/App.swift" in phase1_prior
+
+
 class TestSubsequentRunFileChanges:
     """Tests for file change detection on subsequent runs."""
 

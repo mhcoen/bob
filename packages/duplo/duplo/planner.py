@@ -317,6 +317,7 @@ def generate_phase_plan(
     phase_number: int | None = None,
     spec_text: str = "",
     platform_addendum: str = "",
+    prior_phases_files: list[str] | None = None,
 ) -> str:
     """Generate a PLAN.md for a specific roadmap phase.
 
@@ -333,6 +334,10 @@ def generate_phase_plan(
             Derived from the length of the ``phases`` history + 1.
         platform_addendum: Optional platform-rules text appended to the
             system prompt when non-empty.
+        prior_phases_files: Filenames (paths) already produced by earlier
+            phases in this run. When non-empty, the prompt instructs the
+            LLM not to recreate or redefine these files so the next phase
+            builds on prior output instead of duplicating it.
 
     Returns:
         Markdown string suitable for writing to PLAN.md. The caller
@@ -377,6 +382,14 @@ def generate_phase_plan(
     if spec_text:
         spec_block = f"\nProduct specification (authoritative, from the user):\n{spec_text}\n"
 
+    prior_files_block = ""
+    if prior_phases_files:
+        prior_files_list = "\n".join(f"- {name}" for name in prior_phases_files)
+        prior_files_block = (
+            "\nFiles already created in earlier phases -- do NOT recreate or redefine these:\n"
+            f"{prior_files_list}\n"
+        )
+
     prompt = f"""\
 Project: {project_name or source_url}
 Source: {source_url}
@@ -394,7 +407,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-{issues_block}{spec_block}
+{issues_block}{spec_block}{prior_files_block}
 Generate the PLAN.md now.
 """
 

@@ -145,6 +145,41 @@ class TestGeneratePhasePlan:
         prompt = mock_query.call_args[0][0]
         assert "Product specification" not in prompt
 
+    def test_prior_phases_files_listed_in_prompt(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                prior_phases_files=["Package.swift", "Sources/App/App.swift"],
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Files already created in earlier phases" in prompt
+        assert "do NOT recreate" in prompt
+        assert "- Package.swift" in prompt
+        assert "- Sources/App/App.swift" in prompt
+
+    def test_prior_phases_files_empty_omitted(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                prior_phases_files=[],
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Files already created in earlier phases" not in prompt
+
+    def test_prior_phases_files_none_omitted(self):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        prompt = mock_query.call_args[0][0]
+        assert "Files already created in earlier phases" not in prompt
+
     def test_includes_issues_in_prompt(self):
         phase = {
             "phase": 2,
