@@ -1138,8 +1138,7 @@ class TestInitThenDuploRunWorksEndToEnd:
         plan_path = tmp_path / "PLAN.md"
         assert plan_path.is_file()
         plan_text = plan_path.read_text()
-        # Mocked plan body must land on disk verbatim — save_plan wraps
-        # it with a trailing ``## Bugs`` section on first write but does
+        # Mocked plan body must land on disk verbatim — save_plan does
         # not touch the generated content itself.
         assert plan_content in plan_text
         for feat in features:

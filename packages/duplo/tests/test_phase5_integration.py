@@ -737,9 +737,9 @@ class TestSubsequentRunUrlOnlySpec:
         ):
             main()
 
-    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
-        """PLAN.md should contain a ## Bugs section (injected by
-        save_plan on first write)."""
+    def test_plan_has_no_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md must not contain a ## Bugs section — that is an
+        mcloop convention that duplo does not emit."""
         self._setup(tmp_path, monkeypatch)
 
         with (
@@ -789,7 +789,7 @@ class TestSubsequentRunUrlOnlySpec:
             main()
 
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "## Bugs" in content
+        assert "## Bugs" not in content
 
     def test_persist_scrape_result_called(self, tmp_path, monkeypatch):
         """_persist_scrape_result is called with the ScrapeResult
@@ -1955,13 +1955,13 @@ class TestSubsequentRunRefOnlySpec:
         assert data["roadmap"][0]["title"] == "Core Notes"
         assert data["current_phase"] == 1
 
-    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
-        """PLAN.md should contain a ## Bugs section."""
+    def test_plan_has_no_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md must not contain a ## Bugs section."""
         self._setup(tmp_path, monkeypatch)
         self._run_with_mocks()
 
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "## Bugs" in content
+        assert "## Bugs" not in content
 
     def test_select_features_not_called(self, tmp_path, monkeypatch):
         """Per-phase interactive feature selection was removed when the
@@ -2584,13 +2584,13 @@ class TestSubsequentRunCombinedSpec:
         assert len(data["roadmap"]) == 1
         assert data["current_phase"] == 1
 
-    def test_plan_has_bugs_section(self, tmp_path, monkeypatch):
-        """PLAN.md should contain a ## Bugs section."""
+    def test_plan_has_no_bugs_section(self, tmp_path, monkeypatch):
+        """PLAN.md must not contain a ## Bugs section."""
         self._setup(tmp_path, monkeypatch)
         self._run_with_mocks()
 
         content = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "## Bugs" in content
+        assert "## Bugs" not in content
 
     def test_scope_exclude_diagnostic_recorded(self, tmp_path, monkeypatch):
         """diagnostics records a scope_exclude entry for 'Plugin API'

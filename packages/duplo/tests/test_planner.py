@@ -17,7 +17,7 @@ from duplo.planner import (
     _PLAN_FILENAME,
     _detect_next_phase_number,
     _ensure_h1_heading,
-    _inject_bugs_section,
+    _strip_bugs_section,
     _strip_fences,
     append_test_tasks,
     generate_next_phase_plan,
@@ -735,8 +735,8 @@ class TestSavePlan:
         assert path.name == _PLAN_FILENAME
         text = path.read_text(encoding="utf-8")
         assert "# Phase 1" in text
-        # First write injects ## Bugs section.
-        assert "## Bugs" in text
+        # duplo must never emit a ## Bugs section.
+        assert "## Bugs" not in text
 
     def test_returns_absolute_path(self, tmp_path: Path):
         path = save_plan("# Plan", target_dir=tmp_path)
@@ -957,83 +957,83 @@ Web app built with Python/FastAPI.
         assert tasks[0].text == "Add feature"
 
 
-class TestInjectBugsSection:
-    """Tests for _inject_bugs_section()."""
+class TestStripBugsSection:
+    """Tests for _strip_bugs_section()."""
 
-    def test_bugs_after_checklist(self):
+    def test_no_bugs_heading_unchanged(self):
         content = (
             "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project\n- [ ] Add login\n"
         )
-        result = _inject_bugs_section(content)
-        assert "## Bugs" in result
-        bugs_pos = result.index("## Bugs")
-        task_pos = result.index("- [ ] Set up project")
-        assert bugs_pos > task_pos
+        result = _strip_bugs_section(content)
+        assert "## Bugs" not in result
+        assert "- [ ] Set up project" in result
+        assert "- [ ] Add login" in result
 
-    def test_bugs_after_second_heading(self):
-        content = "# MyApp — Phase 1: Core\n\nBuild the app.\n\n## Implementation\n\n- [ ] Task\n"
-        result = _inject_bugs_section(content)
-        bugs_pos = result.index("## Bugs")
-        impl_pos = result.index("## Implementation")
-        assert bugs_pos > impl_pos
+    def test_strips_empty_bugs_heading(self):
+        content = "# MyApp — Phase 1: Core\n\n- [ ] Task\n\n## Bugs\n"
+        result = _strip_bugs_section(content)
+        assert "## Bugs" not in result
+        assert "- [ ] Task" in result
 
-    def test_no_heading(self):
-        content = "Just some text\n- [ ] Task\n"
-        result = _inject_bugs_section(content)
-        assert result.endswith("## Bugs\n")
-        assert "Just some text" in result
+    def test_strips_bugs_heading_and_keeps_tasks(self):
+        content = "# MyApp — Phase 1: Core\n\n## Bugs\n\n- [ ] Set up project\n- [ ] Add login\n"
+        result = _strip_bugs_section(content)
+        assert "## Bugs" not in result
+        # Tasks that were under the LLM's ## Bugs are preserved.
+        assert "- [ ] Set up project" in result
+        assert "- [ ] Add login" in result
 
-    def test_preserves_all_content(self):
+    def test_preserves_other_content(self):
         content = "# MyApp — Phase 1: Core\n\nDescription.\n\n- [ ] First\n- [ ] Second\n"
-        result = _inject_bugs_section(content)
+        result = _strip_bugs_section(content)
         assert "- [ ] First" in result
         assert "- [ ] Second" in result
         assert "# MyApp — Phase 1: Core" in result
         assert "Description." in result
 
-    def test_llm_bugs_heading_removed_tasks_moved_above(self):
-        content = "# MyApp — Phase 1: Core\n\n## Bugs\n\n- [ ] Set up project\n- [ ] Add login\n"
-        result = _inject_bugs_section(content)
-        # Only one ## Bugs heading, at the end.
-        assert result.count("## Bugs") == 1
-        assert result.endswith("## Bugs\n")
-        # Feature tasks are above ## Bugs.
-        bugs_pos = result.index("## Bugs")
-        assert result.index("- [ ] Set up project") < bugs_pos
-        assert result.index("- [ ] Add login") < bugs_pos
 
-    def test_llm_bugs_heading_empty_section(self):
-        content = "# MyApp — Phase 1: Core\n\n- [ ] Task\n\n## Bugs\n"
-        result = _inject_bugs_section(content)
-        assert result.count("## Bugs") == 1
-        assert result.endswith("## Bugs\n")
-        assert result.index("- [ ] Task") < result.index("## Bugs")
+class TestSavePlanNeverEmitsBugsSection:
+    """save_plan output must never contain a ## Bugs section."""
 
-
-class TestSavePlanBugsSection:
-    """Tests that save_plan injects ## Bugs on first write."""
-
-    def test_first_write_injects_bugs_section(self, tmp_path):
+    def test_first_write_does_not_inject_bugs_section(self, tmp_path):
         content = "# MyApp — Phase 1: Core\n\nBuild the app.\n\n- [ ] Set up project"
         save_plan(content, target_dir=tmp_path)
         result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
-        assert "## Bugs" in result
+        assert "## Bugs" not in result
 
     def test_append_does_not_inject_bugs(self, tmp_path):
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text("# Phase 1\n\n- [ ] Existing\n", encoding="utf-8")
         save_plan("- [ ] New task", target_dir=tmp_path)
         result = plan_path.read_text(encoding="utf-8")
-        # No ## Bugs injected on append.
         assert "## Bugs" not in result
+
+    def test_llm_bugs_heading_stripped_on_first_write(self, tmp_path):
+        content = "# MyApp — Phase 1: Core\n\n## Bugs\n\n- [ ] Set up project\n- [ ] Add login\n"
+        save_plan(content, target_dir=tmp_path)
+        result = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "## Bugs" not in result
+        # Tasks survive the strip.
+        assert "- [ ] Set up project" in result
+        assert "- [ ] Add login" in result
+
+    def test_llm_bugs_heading_stripped_on_append(self, tmp_path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text("# Phase 1\n\n- [ ] Existing\n", encoding="utf-8")
+        appended = "## Bugs\n\n- [ ] New task\n"
+        save_plan(appended, target_dir=tmp_path)
+        result = plan_path.read_text(encoding="utf-8")
+        assert "## Bugs" not in result
+        assert "- [ ] New task" in result
+        assert "- [ ] Existing" in result
 
 
 class TestPlanStructureForMcloop:
     """Verify that save_plan produces PLAN.md with correct structure for mcloop.
 
-    Mcloop treats tasks under the H1 phase heading as feature work and
-    tasks under ## Bugs as bug-fix work.  The regression was: LLM output
-    placed feature tasks under ## Bugs, so mcloop saw zero feature tasks.
+    Mcloop treats tasks under the H1 phase heading as feature work.
+    duplo-generated PLAN.md must never contain a ``## Bugs`` section;
+    that is an mcloop-internal convention added at runtime.
     """
 
     # Realistic LLM output: feature tasks under H1, no ## Bugs heading.
@@ -1060,23 +1060,8 @@ class TestPlanStructureForMcloop:
         '- [ ] Build dashboard [feat: "Dashboard"]\n'
     )
 
-    def _bugs_section_tasks(self, text: str) -> list[str]:
-        """Return task lines that appear under the ## Bugs heading."""
-        lines = text.splitlines()
-        in_bugs = False
-        tasks: list[str] = []
-        for line in lines:
-            if line.strip().lower() == "## bugs":
-                in_bugs = True
-                continue
-            if in_bugs and re.match(r"^#{1,2}\s", line):
-                break
-            if in_bugs and line.lstrip().startswith("- ["):
-                tasks.append(line)
-        return tasks
-
     def _feature_section_tasks(self, text: str) -> list[str]:
-        """Return task lines that appear between the H1 heading and ## Bugs."""
+        """Return task lines that appear after the H1 heading."""
         lines = text.splitlines()
         past_h1 = False
         tasks: list[str] = []
@@ -1084,24 +1069,23 @@ class TestPlanStructureForMcloop:
             if line.startswith("# "):
                 past_h1 = True
                 continue
-            if past_h1 and line.strip().lower() == "## bugs":
-                break
             if past_h1 and line.lstrip().startswith("- ["):
                 tasks.append(line)
         return tasks
 
-    def test_good_llm_output_has_feature_tasks_above_bugs(self, tmp_path):
+    def test_good_llm_output_preserves_feature_tasks(self, tmp_path):
         save_plan(self._LLM_GOOD, target_dir=tmp_path)
         text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
         assert len(self._feature_section_tasks(text)) == 3
-        assert self._bugs_section_tasks(text) == []
+        assert "## Bugs" not in text
 
-    def test_bad_llm_output_rescued_by_inject(self, tmp_path):
-        """When LLM puts tasks under ## Bugs, save_plan moves them above."""
+    def test_bad_llm_output_has_bugs_heading_stripped(self, tmp_path):
+        """When LLM includes ## Bugs, save_plan strips the heading and
+        keeps the tasks that were under it."""
         save_plan(self._LLM_BAD, target_dir=tmp_path)
         text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
+        assert "## Bugs" not in text
         assert len(self._feature_section_tasks(text)) == 3
-        assert self._bugs_section_tasks(text) == []
 
     def test_parse_completed_tasks_sees_feature_work(self, tmp_path):
         """After save_plan, checked tasks are parsed as feature work."""
@@ -1117,15 +1101,22 @@ class TestPlanStructureForMcloop:
         # None are parsed as fixes (bugs).
         assert all(t.fixes == [] for t in tasks)
 
-    def test_bugs_section_empty_after_first_write(self, tmp_path):
-        """First write always produces an empty ## Bugs section at the end."""
-        save_plan(self._LLM_GOOD, target_dir=tmp_path)
-        text = (tmp_path / _PLAN_FILENAME).read_text(encoding="utf-8")
-        assert "## Bugs" in text
-        bugs_idx = text.index("## Bugs")
-        after_bugs = text[bugs_idx + len("## Bugs") :].strip()
-        # Nothing after ## Bugs except whitespace.
-        assert after_bugs == ""
+    def test_save_plan_output_never_contains_bugs_section(self, tmp_path):
+        """Regression: duplo must never emit ``## Bugs`` via save_plan,
+        whether the content lacks the heading, has an empty one, or has
+        tasks placed beneath it."""
+        inputs = [
+            self._LLM_GOOD,
+            self._LLM_BAD,
+            "# Phase 1\n\n- [ ] Task\n\n## Bugs\n",
+            "# Phase 1\n\n- [ ] Task\n",
+        ]
+        for i, content in enumerate(inputs):
+            subdir = tmp_path / f"case_{i}"
+            subdir.mkdir()
+            save_plan(content, target_dir=subdir)
+            text = (subdir / _PLAN_FILENAME).read_text(encoding="utf-8")
+            assert "## Bugs" not in text, f"case {i} leaked ## Bugs"
 
 
 class TestStripFences:

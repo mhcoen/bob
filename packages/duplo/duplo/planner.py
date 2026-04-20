@@ -404,25 +404,19 @@ def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
 _BUGS_HEADING_RE = re.compile(r"^## Bugs\s*$", re.MULTILINE)
 
 
-def _inject_bugs_section(content: str) -> str:
-    """Insert an empty ``## Bugs`` section into plan content.
+def _strip_bugs_section(content: str) -> str:
+    """Remove any ``## Bugs`` heading from *content*.
 
-    Places it after all checklist items so feature tasks remain under
-    the phase H1 heading.  The ``## Bugs`` section is empty on first
-    write; mcloop inserts runtime-bug fix tasks into it later.
-
-    If the LLM already generated a ``## Bugs`` heading, it is removed
-    and any tasks that were placed under it are moved above the new
-    canonical ``## Bugs`` section at the end.
+    ``## Bugs`` is an mcloop convention; duplo-generated PLAN.md must
+    never emit it. If the LLM produced one, drop the heading and keep
+    any task lines that were under it so feature work is not lost.
     """
     m = _BUGS_HEADING_RE.search(content)
     if m:
         before = content[: m.start()]
         after = content[m.end() :]
-        # Move any content that was under the LLM's ## Bugs back up.
         content = before.rstrip("\n") + "\n" + after.strip("\n")
-    trimmed = content.rstrip("\n")
-    return trimmed + "\n\n## Bugs\n"
+    return content.rstrip("\n") + "\n"
 
 
 def save_plan(
@@ -435,18 +429,18 @@ def save_plan(
     If PLAN.md already exists, new content is appended after a blank
     line so that existing checked and unchecked items are preserved.
 
-    On first write (file does not exist), an empty ``## Bugs`` section
-    is appended after all checklist items, so feature tasks remain
-    under the phase H1 heading and mcloop can insert bug fix tasks
-    into the Bugs section later.
+    The written content never contains a ``## Bugs`` section: if *content*
+    (e.g. from an LLM) includes one, the heading is stripped and any
+    tasks that were under it are kept above. ``## Bugs`` is an mcloop
+    convention that duplo does not emit.
 
     Returns the path.
     """
+    content = _strip_bugs_section(content)
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if path.exists():
         existing = path.read_text(encoding="utf-8")
-        path.write_text(existing.rstrip("\n") + "\n\n" + content + "\n", encoding="utf-8")
+        path.write_text(existing.rstrip("\n") + "\n\n" + content, encoding="utf-8")
     else:
-        content = _inject_bugs_section(content)
-        path.write_text(content + "\n", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
     return path
