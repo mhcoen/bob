@@ -5312,6 +5312,134 @@ class TestSubsequentRunSpecVerificationIndependent:
         assert "Verify: type `1+1`, expect result `2`" in saved_content
 
 
+class TestVerificationTasksAppendToLastPhase:
+    """Verification tasks must be appended to the LAST phase, not the first.
+
+    Phase 0 is the scaffold and has no functionality, so behavior cases like
+    "type 1+1, expect 2" cannot pass there. They belong on the final phase
+    once all features exist.
+    """
+
+    _MULTI_PHASE_DATA = {
+        "source_url": "",
+        "app_name": "TestApp",
+        "current_phase": 0,
+        "roadmap": [
+            {"phase": 0, "title": "Scaffold", "goal": "Bootstrap project", "features": []},
+            {"phase": 1, "title": "Core", "goal": "Build core", "features": ["Search"]},
+            {"phase": 2, "title": "Polish", "goal": "Polish UI", "features": ["Theme"]},
+        ],
+        "features": [
+            {"name": "Search", "description": "Search stuff", "category": "core"},
+            {"name": "Theme", "description": "Light/dark theme", "category": "ui"},
+        ],
+        "preferences": {
+            "platform": "web",
+            "language": "Python",
+            "constraints": [],
+            "preferences": [],
+        },
+    }
+
+    _SPEC_VTASKS = (
+        "\n<!-- Functional verification from product spec -->\n\n"
+        "- [ ] Verify: type `1+1`, expect result `2`\n"
+    )
+    _FRAME_VTASKS = (
+        "\n<!-- Functional verification from demo video -->\n- [ ] Verify: click submit\n"
+    )
+
+    def _make_spec(self):
+        contract = type("C", (), {"input": "1+1", "expected": "2"})()
+        design = type("D", (), {"user_prose": "", "auto_generated": ""})()
+        return type(
+            "Spec",
+            (),
+            {
+                "raw": "x",
+                "behavior_contracts": [contract],
+                "scope_include": None,
+                "scope_exclude": None,
+                "purpose": "A" * 50,
+                "scope": "",
+                "behavior": "",
+                "architecture": "",
+                "design": design,
+                "sources": [],
+                "references": [],
+                "notes": "",
+                "fill_in_purpose": False,
+                "fill_in_architecture": False,
+                "fill_in_design": False,
+                "dropped_sources": [],
+                "dropped_references": [],
+            },
+        )()
+
+    def test_verification_appended_to_last_phase_only(self, tmp_path, monkeypatch):
+        """With a 3-phase roadmap, verification tasks land on phase 2 only."""
+        _write_duplo_json(tmp_path, self._MULTI_PHASE_DATA)
+        from duplo.hasher import compute_hashes, save_hashes
+
+        save_hashes(compute_hashes(tmp_path), directory=tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.extractor import Feature as F
+        from duplo.verification_extractor import VerificationCase
+
+        feats = [
+            F(name="Search", description="Search stuff", category="core"),
+            F(name="Theme", description="Light/dark theme", category="ui"),
+        ]
+        spec = self._make_spec()
+        vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
+
+        # Distinct per-phase plan body so we can attribute verification
+        # text to a specific phase via substring match in the saved blob.
+        def _gen_plan(*_args, phase=None, **_kw):
+            num = phase.get("phase") if phase else "?"
+            return f"# Phase {num}\n- [ ] task for phase {num}\n"
+
+        with (
+            patch("duplo.pipeline.read_spec", return_value=spec),
+            patch(
+                "duplo.pipeline.load_frame_descriptions",
+                return_value=[{"state": "home"}],
+            ),
+            patch(
+                "duplo.pipeline.extract_verification_cases",
+                return_value=vcases,
+            ),
+            patch(
+                "duplo.pipeline.format_verification_tasks",
+                return_value=self._FRAME_VTASKS,
+            ),
+            patch(
+                "duplo.pipeline.format_contracts_as_verification",
+                return_value=self._SPEC_VTASKS,
+            ),
+            patch("duplo.main.select_features", return_value=feats),
+            patch("duplo.pipeline.generate_phase_plan", side_effect=_gen_plan),
+            patch("duplo.pipeline.save_plan", return_value="PLAN.md") as mock_save,
+        ):
+            main()
+
+        saved_blobs = [call.args[0] for call in mock_save.call_args_list]
+        # Three phases generated in order: 0 (scaffold), 1 (core), 2 (polish).
+        # Find each phase's saved content by its unique body marker.
+        phase0 = next(b for b in saved_blobs if "task for phase 0" in b)
+        phase1 = next(b for b in saved_blobs if "task for phase 1" in b)
+        phase2 = next(b for b in saved_blobs if "task for phase 2" in b)
+
+        # Verification belongs only on the LAST phase.
+        assert "Verify: click submit" not in phase0
+        assert "Verify: type `1+1`, expect result `2`" not in phase0
+        assert "Verify: click submit" not in phase1
+        assert "Verify: type `1+1`, expect result `2`" not in phase1
+        assert "Verify: click submit" in phase2
+        assert "Verify: type `1+1`, expect result `2`" in phase2
+
+
 class TestValidateForRunWiring:
     """validate_for_run is called after read_spec in _subsequent_run."""
 

@@ -1621,9 +1621,12 @@ def _subsequent_run() -> None:
                 spec_text=spec_prompt,
                 platform_addendum=platform_addendum,
             )
-            # Verification tasks are authored once against the first phase;
-            # they describe product-level behavior, not per-phase scope.
-            if idx == 0:
+            # Verification tasks describe product-level behavior, so they
+            # are appended to the LAST phase: that is the only point at
+            # which all features are implemented and the cases (e.g.
+            # "type 1+1, expect 2") could plausibly pass. Appending them
+            # to Phase 0 (the scaffold) guarantees failure.
+            if idx == total_phases - 1:
                 frame_descs = load_frame_descriptions()
                 if frame_descs:
                     print("Extracting verification cases from demo video \u2026")
