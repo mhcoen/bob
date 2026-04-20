@@ -5439,6 +5439,87 @@ class TestVerificationTasksAppendToLastPhase:
         assert "Verify: click submit" in phase2
         assert "Verify: type `1+1`, expect result `2`" in phase2
 
+    def test_verify_lines_only_after_last_phase_heading_in_plan_md(self, tmp_path, monkeypatch):
+        """Read PLAN.md after a 3-phase run; every ``- [ ] Verify:`` line
+        must fall after the Phase 2 heading, never after Phase 0 or Phase 1.
+
+        This pins the ``if idx == total_phases - 1:`` guard: flipping it to
+        ``if idx == 0:`` would place Verify lines after Phase 0 and fail
+        this test.
+        """
+        _write_duplo_json(tmp_path, self._MULTI_PHASE_DATA)
+        from duplo.hasher import compute_hashes, save_hashes
+
+        save_hashes(compute_hashes(tmp_path), directory=tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.extractor import Feature as F
+        from duplo.verification_extractor import VerificationCase
+
+        feats = [
+            F(name="Search", description="Search stuff", category="core"),
+            F(name="Theme", description="Light/dark theme", category="ui"),
+        ]
+        spec = self._make_spec()
+        vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
+
+        def _gen_plan(*_args, phase=None, phase_number=None, **_kw):
+            num = (
+                phase_number
+                if phase_number is not None
+                else (phase.get("phase") if phase else "?")
+            )
+            return f"## Phase {num}: Dummy\n\n- [ ] dummy task for phase {num}\n"
+
+        with (
+            patch("duplo.pipeline.read_spec", return_value=spec),
+            patch(
+                "duplo.pipeline.load_frame_descriptions",
+                return_value=[{"state": "home"}],
+            ),
+            patch(
+                "duplo.pipeline.extract_verification_cases",
+                return_value=vcases,
+            ),
+            patch(
+                "duplo.pipeline.format_verification_tasks",
+                return_value=self._FRAME_VTASKS,
+            ),
+            patch(
+                "duplo.pipeline.format_contracts_as_verification",
+                return_value=self._SPEC_VTASKS,
+            ),
+            patch("duplo.main.select_features", return_value=feats),
+            patch("duplo.pipeline.generate_phase_plan", side_effect=_gen_plan),
+        ):
+            main()
+
+        plan_text = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
+        lines = plan_text.splitlines()
+
+        def _heading_index(n: int) -> int:
+            for i, ln in enumerate(lines):
+                if ln.startswith(f"## Phase {n}"):
+                    return i
+            raise AssertionError(f"Phase {n} heading not found in PLAN.md:\n{plan_text}")
+
+        h0 = _heading_index(0)
+        h1 = _heading_index(1)
+        h2 = _heading_index(2)
+        assert h0 < h1 < h2, "Phase headings out of order in PLAN.md"
+
+        verify_indices = [i for i, ln in enumerate(lines) if ln.startswith("- [ ] Verify:")]
+        assert verify_indices, (
+            "No '- [ ] Verify:' lines found in PLAN.md; "
+            "expected verification tasks on the last phase"
+        )
+        for i in verify_indices:
+            assert i > h2, (
+                f"Verify line at index {i} ({lines[i]!r}) appears before the "
+                f"Phase 2 heading at index {h2}. Verify lines must only follow "
+                f"the last phase heading.\nFull PLAN.md:\n{plan_text}"
+            )
+
 
 class TestValidateForRunWiring:
     """validate_for_run is called after read_spec in _subsequent_run."""
