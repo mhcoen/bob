@@ -140,6 +140,30 @@ def _strip_fences(text: str) -> str:
     return m.group(1) if m else text
 
 
+def _strip_trailing_commentary(content: str) -> str:
+    """Truncate *content* after the last ``- [ ]`` task or subtask line.
+
+    Finds the last line whose leading-whitespace-stripped prefix is ``- [ ]``
+    (a task or subtask checkbox) and discards everything after it, leaving
+    exactly one trailing newline. This handles the case where the LLM wraps
+    the plan in code fences AND adds meta-commentary after the closing fence:
+    ``_strip_fences`` cannot remove such commentary because ``_FENCE_RE``
+    requires the closing fence at end-of-string. The correct invariant is
+    that nothing should appear in phase content after the last task.
+
+    If no task line is found, returns *content* unchanged.
+    """
+    lines = content.splitlines()
+    last_task_idx: int | None = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("- [ ]"):
+            last_task_idx = i
+    if last_task_idx is None or last_task_idx == len(lines) - 1:
+        return content
+    kept = lines[: last_task_idx + 1]
+    return "\n".join(kept) + "\n"
+
+
 def _ensure_h1_heading(
     content: str,
     project_name: str,
@@ -376,7 +400,8 @@ Generate the PLAN.md now.
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
     raw = _strip_fences(query(prompt, system=system))
-    return _ensure_h1_heading(raw, project_name, phase_num, phase_title)
+    with_heading = _ensure_h1_heading(raw, project_name, phase_num, phase_title)
+    return _strip_trailing_commentary(with_heading)
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:

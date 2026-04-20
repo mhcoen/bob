@@ -19,6 +19,7 @@ from duplo.planner import (
     _ensure_h1_heading,
     _strip_bugs_section,
     _strip_fences,
+    _strip_trailing_commentary,
     append_test_tasks,
     generate_next_phase_plan,
     generate_phase_plan,
@@ -1117,6 +1118,68 @@ class TestPlanStructureForMcloop:
             save_plan(content, target_dir=subdir)
             text = (subdir / _PLAN_FILENAME).read_text(encoding="utf-8")
             assert "## Bugs" not in text, f"case {i} leaked ## Bugs"
+
+
+class TestStripTrailingCommentary:
+    """Tests for _strip_trailing_commentary() and its integration with
+    generate_phase_plan() when the LLM wraps the plan in code fences AND
+    adds meta-commentary after the closing fence.
+    """
+
+    def test_truncates_after_last_task_with_fence_and_commentary(self):
+        # _strip_fences() cannot remove the fence because _FENCE_RE requires
+        # the closing fence at end-of-string, and trailing commentary breaks
+        # that. _ensure_h1_heading() strips the opening fence. The fix
+        # function must then drop the closing fence and everything after it.
+        llm_output = (
+            "```markdown\n"
+            "# MyApp — Phase 1: Core\n"
+            "\n"
+            "- [ ] First task\n"
+            "- [ ] Second task\n"
+            "- [ ] Third task\n"
+            "```\n"
+            "\n"
+            "---\n"
+            "\n"
+            "**Structure:** The plan has three tasks.\n"
+            "\n"
+            "Want me to write it?\n"
+        )
+        with patch("duplo.planner.query", return_value=llm_output):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="MyApp",
+                phase_number=1,
+            )
+        assert result.endswith("- [ ] Third task\n")
+        assert "```" not in result
+        assert "---" not in result
+        assert "**Structure:**" not in result
+        assert "Want me to write it?" not in result
+
+    def test_keeps_content_unchanged_when_no_trailing_garbage(self):
+        content = "# Phase 1: Core\n\n- [ ] Task one\n- [ ] Task two\n"
+        assert _strip_trailing_commentary(content).endswith("- [ ] Task two\n")
+
+    def test_truncates_after_indented_subtask(self):
+        content = (
+            "# Phase 1\n"
+            "\n"
+            "- [ ] Parent\n"
+            "  - [ ] Nested subtask\n"
+            "\n"
+            "Trailing prose that should be dropped.\n"
+        )
+        result = _strip_trailing_commentary(content)
+        assert result.endswith("  - [ ] Nested subtask\n")
+        assert "Trailing prose" not in result
+
+    def test_no_task_lines_returns_content_unchanged(self):
+        content = "# Phase 1\n\nNo tasks here.\n"
+        assert _strip_trailing_commentary(content) == content
 
 
 class TestStripFences:
