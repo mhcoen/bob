@@ -1180,16 +1180,16 @@ def _detect_and_append_gaps(
     )
 
 
-_PHASE_CREATED_FILE_RE = re.compile(r"Create .(Sources/[^`]+|Package[^`]+).")
+_PHASE_CREATED_FILE_RE = re.compile(r"Create `([^`]+)`")
 
 
 def _extract_created_files(content: str) -> list[str]:
     """Return filenames the LLM told mcloop to create in *content*.
 
-    Scans *content* for task lines matching ``Create `Sources/<path>``` or
-    ``Create `Package<suffix>``` and returns the captured filenames in the
-    order they appear. Used to tell later phases what earlier phases have
-    already produced so they do not recreate the same files.
+    Scans *content* for task lines matching ``Create `<path>``` and returns
+    the captured filenames in the order they appear. Used to tell later
+    phases what earlier phases have already produced so they do not
+    recreate the same files.
     """
     return _PHASE_CREATED_FILE_RE.findall(content)
 

@@ -661,6 +661,7 @@ class TestSubsequentRunPhaseLoopPriorFiles:
             "# App -- Phase 0: Scaffold\n"
             "- [ ] Create `Package.swift` with SPM manifest\n"
             "- [ ] Create `Sources/App/App.swift` with @main entry point\n"
+            "- [ ] Create `Tests/AppTests/AppTests.swift` with a smoke test\n"
         )
         phase1_content = "# App -- Phase 1: Core\n- [ ] Wire the main view.\n"
 
@@ -677,11 +678,13 @@ class TestSubsequentRunPhaseLoopPriorFiles:
             main()
 
         # First phase receives no prior files; second phase must receive
-        # the filenames extracted from phase 0's content.
+        # the filenames extracted from phase 0's content -- including paths
+        # that do not start with the scaffold-only prefixes.
         assert calls[0].get("prior_phases_files") == []
         phase1_prior = calls[1]["prior_phases_files"]
         assert "Package.swift" in phase1_prior
         assert "Sources/App/App.swift" in phase1_prior
+        assert "Tests/AppTests/AppTests.swift" in phase1_prior
 
 
 class TestSubsequentRunFileChanges:

@@ -1323,3 +1323,5 @@ ad4498b: Changed verification section headers from Markdown H2 to HTML comments 
 4e616f4: Added a new helper to strip trailing commentary after the last task in generated plans, fixing cases where LLMs append extra text after code fences. Updated the plan generation pipeline to apply this cleanup after stripping fences and adding headings. Added comprehensive tests for the new behavior.
 
 73dd3e1: Fixed a bug where a function intended to strip trailing commentary after tasks was incorrectly normalizing formatting, breaking existing tests. The fix ensures the function only strips actual trailing content and preserves exact input formatting when no commentary exists. Added tests to lock in this behavior and prevent regression.
+
+de2b816: Added guidance for marking tasks requiring visual confirmation or manual interaction with [USER] tags. Updated test to verify this rule is included in system prompts.
