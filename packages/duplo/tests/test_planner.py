@@ -489,6 +489,11 @@ class TestPhaseSystemPromptAnnotations:
             "  task checkboxes."
         ) in _PHASE_SYSTEM
 
+    def test_system_prompt_marks_visual_confirmation_tasks_with_user_tag(self):
+        assert "USER" in _PHASE_SYSTEM
+        assert "visual confirmation" in _PHASE_SYSTEM
+        assert "McLoop will pause" in _PHASE_SYSTEM
+
 
 class TestNextPhaseSystemPromptAnnotations:
     def test_system_prompt_requires_feat_annotation(self):

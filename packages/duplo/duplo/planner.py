@@ -37,6 +37,11 @@ Rules for the plan:
   Do NOT use [BATCH] if any subtask is marked [USER] or [AUTO];
   McLoop handles this automatically by stopping the batch at
   those boundaries, but the intent should be clear in the plan.
+- Any task that requires visual confirmation, manual interaction,
+  or human judgment (e.g. running the app and visually confirming
+  behavior, Cmd-Q to quit) must be prefixed with the USER tag in
+  square brackets. McLoop will pause on these tasks and wait for
+  the human to perform and confirm them.
 - Do NOT include a platform, language, prerequisites, or
   build-system description paragraph at the top of the phase.
   That information is written once in the PLAN.md project
