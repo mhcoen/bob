@@ -3795,7 +3795,7 @@ def test_run_loop_user_task_skips_claude(tmp_path):
     )
     (tmp_path / ".git").mkdir()
 
-    inputs = iter(["Window is visible", ""])
+    inputs = iter(["Window is visible", "", "y"])
 
     with (
         patch("builtins.input", side_effect=inputs),
