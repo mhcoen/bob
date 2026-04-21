@@ -51,6 +51,7 @@ from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.conftest_guard import ensure_conftest_guard
 from mcloop.errors import (
     _check_errors_json,
+    _insert_bugs_section,
 )
 from mcloop.formatting import format_elapsed as _format_elapsed
 from mcloop.git_ops import (
@@ -968,10 +969,39 @@ def run_loop(
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
             response = _handle_user_task(label, instructions)
-            check_off(active_file, task)
-            completed.append(f"{label}) {task.text}")
-            ctx.add(label, task.text, "0s", response)
-            notify(f"[USER] {instructions[:80]}")
+            # Ask user whether the task passed
+            if response:
+                try:
+                    verdict = input("Did this task pass? [y/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    verdict = ""
+                passed = verdict in ("y", "yes")
+            else:
+                passed = True  # No observation = user skipped
+            if passed:
+                check_off(active_file, task)
+                completed.append(f"{label}) {task.text}")
+                ctx.add(label, task.text, "0s", response)
+                notify(f"[USER] {instructions[:80]}")
+            else:
+                # User reported failure: file a bug from the observation
+                # and leave the USER task unchecked for re-verification
+                # after the bug is fixed.
+                flat_obs = response.replace("\n", " | ")
+                short_obs = flat_obs[:200]
+                if len(flat_obs) > 200:
+                    short_obs += "..."
+                bug_desc = f"Fix issue reported during task {label}: {short_obs}"
+                _insert_bugs_section(bugs_path, [f"- [ ] {bug_desc}"])
+                print(
+                    formatting.system_msg("Bug filed from user observation -> BUGS.md"),
+                    flush=True,
+                )
+                failed_task = f"{label}) {task.text}"
+                failed_reason = response
+                terminal_failure = f"User verification failed: {task.text}"
+                notify(f"[USER] FAILED: {task.text[:60]}", level="error")
+                break
             continue
 
         # Check for [BATCH] on the parent task.
