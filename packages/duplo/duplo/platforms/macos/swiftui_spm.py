@@ -143,6 +143,15 @@ _PROFILE = PlatformProfile(
             "For macOS 14+, prefer the Observation framework (@Observable) "
             "over Combine/ObservableObject. Do not mix the two patterns."
         ),
+        (
+            "When the spec describes a text editor, text area, notepad-like "
+            "interface, or multi-line text input -- or when the reference "
+            "product is a text editor -- the plan MUST use a single "
+            "TextEditor or NSTextView-backed view. NEVER use a LazyVStack "
+            "of per-line TextFields with a button to add rows. Per-line "
+            "TextFields are form controls that commit on Return instead of "
+            "inserting a newline, producing the wrong UX."
+        ),
     ],
     claude_md_rules=[
         (
@@ -173,6 +182,13 @@ _PROFILE = PlatformProfile(
             "and that is fine for development. run.sh handles launching "
             "unsigned bundles."
         ),
+        (
+            "When building a text editor or multi-line input area, use "
+            "a single TextEditor or NSTextView-backed view. Do NOT use "
+            "a LazyVStack of per-line TextFields with a + button to add "
+            "rows -- that is a form pattern, not an editor pattern. "
+            "Return must insert a newline, not commit a field."
+        ),
     ],
     scaffold_files=[
         ScaffoldFile(
@@ -202,6 +218,12 @@ _PROFILE = PlatformProfile(
         (
             "Mixing @Observable and ObservableObject in the same "
             "view hierarchy: unpredictable update behavior."
+        ),
+        (
+            "Using per-line TextFields with a + button for multi-line "
+            "text input: produces form UX instead of editor UX. Return "
+            "commits the field instead of adding a line. Users must "
+            "click a button to add rows. Use TextEditor or NSTextView."
         ),
     ],
     bootstrap_steps=[
