@@ -1,12 +1,12 @@
 ## Stage 10: Multi-model executor support
 
-- [ ] [BATCH] Per-role model configuration
-   - [ ] Define a new config schema in ~/.mcloop/config.json that separates model config by role: executor (coding tasks), sync (NOTES.md summarization), reviewer (background code review), with independent model, provider, and fallback settings per role. The old flat "model" and "reviewer" keys must continue to work as before when the new schema is absent
-   - [ ] Add shell function templates (deepseek, kimi) to README documenting the ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL, ANTHROPIC_DEFAULT_*_MODEL, CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, and ENABLE_TOOL_SEARCH environment variables needed to route Claude Code through third-party Anthropic-compatible endpoints
-   - [ ] Update _build_command in runner.py to read the executor role config and set the appropriate environment variables on the subprocess when the model string indicates a non-Anthropic provider (deepseek/*, moonshotai/*, openai/*)
-   - [ ] Decouple sync and reviewer model config: claude_md_check.py currently reads from the shared reviewer.* stanza. Give sync its own config key (sync.model, sync.provider, sync.fallback) so users can run cheap models for sync and better models for review independently
-   - [ ] Make the Sonnet fallback in claude_md_check.py configurable via sync.fallback.model instead of hardcoding "sonnet". Preserve the claude -p subprocess fallback path as default when no fallback is explicitly configured
-   - [ ] Add the model strings "deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6" to _KNOWN_MODELS in runner.py with appropriate provider mappings
+- [x] [BATCH] Per-role model configuration
+   - [x] Define a new config schema in ~/.mcloop/config.json that separates model config by role: executor (coding tasks), sync (NOTES.md summarization), reviewer (background code review), with independent model, provider, and fallback settings per role. The old flat "model" and "reviewer" keys must continue to work as before when the new schema is absent
+   - [x] Add shell function templates (deepseek, kimi) to README documenting the ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL, ANTHROPIC_DEFAULT_*_MODEL, CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, and ENABLE_TOOL_SEARCH environment variables needed to route Claude Code through third-party Anthropic-compatible endpoints
+   - [x] Update _build_command in runner.py to read the executor role config and set the appropriate environment variables on the subprocess when the model string indicates a non-Anthropic provider (deepseek/*, moonshotai/*, openai/*)
+   - [x] Decouple sync and reviewer model config: claude_md_check.py currently reads from the shared reviewer.* stanza. Give sync its own config key (sync.model, sync.provider, sync.fallback) so users can run cheap models for sync and better models for review independently
+   - [x] Make the Sonnet fallback in claude_md_check.py configurable via sync.fallback.model instead of hardcoding "sonnet". Preserve the claude -p subprocess fallback path as default when no fallback is explicitly configured
+   - [x] Add the model strings "deepseek-v4-pro", "deepseek-v4-flash", "kimi-k2.6" to _KNOWN_MODELS in runner.py with appropriate provider mappings
 
 - [ ] [BATCH] Bug fixes discovered by multi-model audit (Kimi K2.6, DeepSeek V4 Pro, Claude Opus, GPT-5.5)
    - [ ] main.py:1511 -- bug-only verification failure silently returns success. When _launch_app_verification() returns a failure string after all BUGS.md tasks are checked off, set terminal_failure so the run exits with failure status instead of reporting success. Include a test that verifies a failed app launch produces RunStatus("failure"). Discovered independently by Kimi (Critical), Claude (High), and Codex (High)
