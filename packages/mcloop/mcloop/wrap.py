@@ -517,24 +517,32 @@ def _match_language(text: str) -> str | None:
 
 
 def _detect_from_extensions(project_dir: Path) -> str | None:
-    """Detect language from file extensions in the project."""
+    """Detect language from file extensions in the project.
+
+    Uses ``os.walk`` with ``followlinks=False`` so circular directory
+    symlinks (e.g. ``current -> .``) cannot trigger infinite recursion.
+    """
+    import os
+
     swift_count = 0
     python_count = 0
-    for p in project_dir.rglob("*"):
-        if p.is_dir():
-            continue
-        # Skip hidden dirs and common non-source dirs
-        parts = p.relative_to(project_dir).parts
-        if any(
-            part.startswith(".")
-            or part in ("node_modules", "__pycache__", ".build", "venv", ".venv")
-            for part in parts
-        ):
-            continue
-        if p.suffix == ".swift":
-            swift_count += 1
-        elif p.suffix == ".py":
-            python_count += 1
+    for dirpath, dirnames, filenames in os.walk(project_dir, followlinks=False):
+        # Filter directories in place to skip hidden and common non-source dirs.
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not d.startswith(".")
+            and d not in ("node_modules", "__pycache__", ".build", "venv", ".venv")
+        ]
+        for name in filenames:
+            full = Path(dirpath) / name
+            # Skip individual symlinked files too.
+            if full.is_symlink():
+                continue
+            if name.endswith(".swift"):
+                swift_count += 1
+            elif name.endswith(".py"):
+                python_count += 1
     if swift_count > python_count and swift_count > 0:
         return "swift"
     if python_count > swift_count and python_count > 0:
@@ -620,7 +628,14 @@ def has_markers(content: str, language: str) -> bool:
 
 
 def strip_markers(content: str, language: str) -> str:
-    """Remove existing mcloop wrap block from file content."""
+    """Remove existing mcloop wrap block from file content.
+
+    A marker is recognised only when the line, after stripping leading
+    whitespace, *starts* with the literal marker string. This prevents
+    incidental matches inside string literals or comments (e.g. a
+    docstring that mentions ``// mcloop:wrap:begin``) from being silently
+    deleted.
+    """
     if language == "swift":
         begin, end = SWIFT_BEGIN, SWIFT_END
     elif language == "python":
@@ -632,10 +647,11 @@ def strip_markers(content: str, language: str) -> str:
     result = []
     inside = False
     for line in lines:
-        if begin in line:
+        stripped = line.lstrip()
+        if stripped.startswith(begin):
             inside = True
             continue
-        if end in line:
+        if stripped.startswith(end):
             inside = False
             continue
         if not inside:
@@ -701,42 +717,90 @@ def _inject_swift(content: str, project_dir: str | None = None) -> str:
 
 
 def _add_swift_init_call(content: str) -> str:
-    """Add _mcloopSetupCrashHandlers() call to the app's init()."""
-    call = "_mcloopSetupCrashHandlers()"
-    if call in content:
-        return content
+    """Add _mcloopSetupCrashHandlers() call to the app's init().
 
-    # Look for init() inside a struct/class after @main
+    Inserts the call into an existing init() inside the @main struct.
+    If the @main struct has no init(), a minimal init() is synthesized
+    right after the struct's opening brace so the crash handler is
+    actually installed at app launch.
+
+    Lines inside the mcloop wrapper block are skipped when looking for
+    the @main struct or for an existing call site, since the wrapper
+    itself contains the function definition.
+    """
+    call = "_mcloopSetupCrashHandlers()"
+
     lines = content.splitlines(keepends=True)
-    result = []
+    in_wrapper = False
+    user_lines: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        if SWIFT_BEGIN in line:
+            in_wrapper = True
+            continue
+        if SWIFT_END in line:
+            in_wrapper = False
+            continue
+        if in_wrapper:
+            continue
+        user_lines.append((idx, line))
+
+    # If the user code already invokes the call, leave it alone.
+    for _, line in user_lines:
+        stripped = line.strip()
+        if call in stripped and not stripped.startswith("func "):
+            return content
+
+    result = list(lines)
     in_main_struct = False
     found_init = False
-    pending_init: bool = False
+    pending_init = False
+    struct_open_idx = -1
+    struct_indent = 0
+    seen_main = False
+    awaiting_struct_brace = False
+    insertions: list[tuple[int, str]] = []
 
-    for i, line in enumerate(lines):
-        result.append(line)
+    for idx, line in user_lines:
         stripped = line.strip()
 
         if "@main" in stripped:
             in_main_struct = True
+            seen_main = True
+            awaiting_struct_brace = True
+            continue
+
+        if awaiting_struct_brace and struct_open_idx == -1:
+            if struct_indent == 0 and stripped:
+                struct_indent = len(line) - len(line.lstrip())
+            if "{" in line:
+                struct_open_idx = idx
+                awaiting_struct_brace = False
             continue
 
         if in_main_struct and not found_init:
             if pending_init and stripped.startswith("{"):
                 found_init = True
                 indent = len(line) - len(line.lstrip()) + 4
-                result.append(" " * indent + call + "\n")
+                insertions.append((idx + 1, " " * indent + call + "\n"))
                 continue
             pending_init = False
             if re.match(r"^\s*init\s*\(", stripped):
                 if "{" in stripped:
                     found_init = True
                     indent = len(line) - len(line.lstrip()) + 8
-                    result.append(" " * indent + call + "\n")
+                    insertions.append((idx + 1, " " * indent + call + "\n"))
                     continue
-                # Brace may be on the next line; mark for insertion
                 pending_init = True
                 continue
+
+    if seen_main and not found_init and struct_open_idx != -1:
+        body_indent = " " * (struct_indent + 4)
+        call_indent = " " * (struct_indent + 8)
+        synthesized = f"{body_indent}init() {{\n{call_indent}{call}\n{body_indent}}}\n"
+        insertions.append((struct_open_idx + 1, synthesized))
+
+    for ins_idx, ins_text in sorted(insertions, key=lambda p: -p[0]):
+        result.insert(ins_idx, ins_text)
 
     return "".join(result)
 

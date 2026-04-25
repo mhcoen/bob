@@ -2189,6 +2189,57 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
     assert result is True
 
 
+def test_single_audit_round_keeps_bugs_with_prefix_line_numbers(tmp_path):
+    """REMOVED verdict for a header that is a prefix of another bug's title
+    must not drop the longer bug. Filter must use exact match, not substring.
+    """
+    bugs_path = tmp_path / ".mcloop" / "audit-report.md"
+
+    def fake_audit(project_dir, log_dir, model=None, existing_bugs=""):
+        bugs_path.parent.mkdir(parents=True, exist_ok=True)
+        bugs_path.write_text(
+            "# Bugs\n\n"
+            "## foo.py:4 — null deref\n"
+            "Body for line 4.\n\n"
+            "## foo.py:42 — null deref\n"
+            "Body for line 42.\n"
+        )
+        return _make_result()
+
+    verify_result = MagicMock()
+    verify_result.success = True
+    verify_result.exit_code = 0
+    verify_result.output = (
+        "--- VERIFY RESULT ---\n"
+        "REMOVED: foo.py:4 — null deref (already handled)\n"
+        "CONFIRMED: foo.py:42 — null deref\n"
+        "--- END VERIFY ---\n"
+    )
+
+    captured: dict[str, str] = {}
+
+    def capture_post_verify(*args, **kwargs):
+        captured["bugs_md"] = bugs_path.read_text()
+        return _make_result(success=False, exit_code=1)
+
+    with (
+        patch("mcloop.audit.run_audit", side_effect=fake_audit),
+        patch(
+            "mcloop.audit.run_bug_verify",
+            return_value=verify_result,
+        ),
+        patch("mcloop.audit.run_bug_fix", side_effect=capture_post_verify),
+    ):
+        _run_single_audit_round(tmp_path, tmp_path / "logs")
+
+    rewritten = captured.get("bugs_md", "")
+    assert "foo.py:42" in rewritten
+    assert "Body for line 42." in rewritten
+    # The line-4 bug was REMOVED, so its title must NOT appear in the
+    # rewritten BUGS.md. (Substring match would have wrongly dropped line 42.)
+    assert "## foo.py:4 —" not in rewritten
+
+
 def test_single_audit_round_returns_false_on_no_bugs(tmp_path):
     """_run_single_audit_round returns False when no bugs found."""
     bugs_path = tmp_path / ".mcloop" / "audit-report.md"
@@ -5985,6 +6036,48 @@ def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
 
     # errors.json should still exist when verification failed
     assert errors_path.exists()
+
+
+def test_run_loop_bug_only_failed_verification_returns_failure(tmp_path):
+    """Bug-only mode: failed app verification produces RunStatus("failure")."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] placeholder\n")
+    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
+    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch("mcloop.main._print_summary"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._launch_app_verification", return_value="App crashed on launch"),
+    ):
+        status = run_loop(plan)
+
+    assert status.status == "failure"
+    assert "Bug verification failed" in (status.detail or "")
+    assert "App crashed on launch" in (status.detail or "")
 
 
 def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):

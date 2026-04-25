@@ -216,13 +216,10 @@ def _run_single_audit_round(
 
             if verdicts:
                 removed_headers = {h for s, h, _ in verdicts if s == "REMOVED"}
-                # A bug is removed if any REMOVED verdict
-                # matches its title (substring match).
-                confirmed_bugs = [
-                    b
-                    for b in parsed_bugs
-                    if not any(rh in b["title"] or b["title"] in rh for rh in removed_headers)
-                ]
+                # A bug is removed only when its title matches a REMOVED
+                # verdict header exactly. Substring matches drop unrelated
+                # bugs whose titles share a prefix (e.g. line 4 vs line 42).
+                confirmed_bugs = [b for b in parsed_bugs if b["title"] not in removed_headers]
                 if not confirmed_bugs:
                     print(
                         formatting.system_msg(

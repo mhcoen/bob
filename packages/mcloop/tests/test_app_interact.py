@@ -148,3 +148,17 @@ class TestScreenshotWindow:
     def test_raises_on_timeout(self, mock_osa, mock_run):
         with pytest.raises(RuntimeError, match="timed out"):
             app_interact.screenshot_window("MyApp", "/tmp/shot.png")
+
+    @patch("subprocess.run")
+    @patch("mcloop.app_interact._run_osascript", return_value="12345")
+    def test_raises_on_nonzero_exit(self, mock_osa, mock_run):
+        """Permission denial / invalid window id sets returncode != 0; the
+        function must propagate the failure instead of silently succeeding.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="screencapture: cannot capture window\n",
+        )
+        with pytest.raises(RuntimeError, match="screencapture failed"):
+            app_interact.screenshot_window("MyApp", "/tmp/shot.png")

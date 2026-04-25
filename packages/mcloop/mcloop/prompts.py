@@ -495,5 +495,17 @@ def parse_bugs_md(content: str) -> list[dict[str, str]]:
 
 
 def bugs_md_has_bugs(content: str) -> bool:
-    """Return True if BUGS.md content contains actual bug reports."""
-    return "No bugs found." not in content
+    """Return True if BUGS.md content contains actual bug reports.
+
+    The audit signals a clean run by writing the literal line
+    ``No bugs found.``. Substring matching produced false negatives when
+    a real bug description quoted that phrase, so we (a) honour an actual
+    ``## `` bug section header as definitive evidence of a bug regardless
+    of the marker, and (b) only treat the marker as authoritative when it
+    appears as a full line.
+    """
+    lines = content.splitlines()
+    if any(line.startswith("## ") for line in lines):
+        return True
+    has_no_bugs_marker = any(line.strip() == "No bugs found." for line in lines)
+    return not has_no_bugs_marker

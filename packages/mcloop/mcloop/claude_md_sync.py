@@ -72,14 +72,17 @@ def handle_sync(
     *,
     task_label: str = "",
 ) -> threading.Thread | None:
-    """Kick off CLAUDE.md sync after a code commit.
+    """Run CLAUDE.md sync after a code commit, fenced before returning.
 
-    The freshness check runs synchronously; the LLM call (which can take
-    5-15 seconds) runs in a daemon thread so the main loop is not blocked.
+    The LLM call (which can take 5-15 seconds) runs inside a worker thread
+    for clean error isolation, but ``handle_sync`` joins the thread before
+    returning. This guarantees no working-tree mutation occurs after
+    ``handle_sync`` returns, so the next task starts against a stable tree
+    and per-task change detection is not contaminated by a still-running
+    NOTES.md write.
 
-    Returns the spawned thread, or None if there was no work to do.  The
-    thread reference is provided mainly so tests can ``.join()`` on it;
-    production callers do not need to wait for completion.
+    Returns the worker thread (already joined) for legacy callers, or None
+    if there was no sync work to do.
     """
     sha = commit_sha if isinstance(commit_sha, str) else ""
     changed = _committed_files(project_dir, sha) if sha else []
@@ -93,6 +96,7 @@ def handle_sync(
         name="mcloop-claude-md-sync",
     )
     thread.start()
+    thread.join()
     return thread
 
 

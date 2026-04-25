@@ -1514,6 +1514,7 @@ def run_loop(
                         formatting.error_msg(f"Bug verification failed: {failure}"),
                         flush=True,
                     )
+                    terminal_failure = f"Bug verification failed: {failure}"
                 else:
                     print(
                         formatting.system_msg("Bug verification passed"),

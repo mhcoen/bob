@@ -151,6 +151,20 @@ class TestExists:
     def test_empty_slug(self):
         assert worktree.exists("!!!") is False
 
+    def test_substring_branch_does_not_false_match(self):
+        """A worktree whose branch name merely *contains* the slug must
+        not be reported as an existing investigation. Compare branch
+        names exactly, like ``create()`` does.
+        """
+        wts = [
+            {
+                "path": "/repo-investigate-fix-crash-after-update",
+                "branch": "investigate-fix-crash-after-update",
+            }
+        ]
+        with patch.object(worktree, "list_worktrees", return_value=wts):
+            assert worktree.exists("Fix crash") is False
+
 
 class TestListWorktrees:
     def test_parses_porcelain(self):

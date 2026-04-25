@@ -247,6 +247,18 @@ def test_bugs_md_has_bugs_partial_match():
     assert bugs_md_has_bugs("# Bugs\n\nNo bugs.\n") is True
 
 
+def test_bugs_md_has_bugs_phrase_inside_bug_description():
+    """A bug description that quotes 'No bugs found.' must not be treated as
+    'no bugs'. The presence of an actual ## bug header is authoritative.
+    """
+    content = (
+        "# Bugs\n\n"
+        "## foo.py:42 — wrong status message\n"
+        'The audit tool prints "No bugs found." even when bugs exist.\n'
+    )
+    assert bugs_md_has_bugs(content) is True
+
+
 # --- build_bug_fix_prompt ---
 
 

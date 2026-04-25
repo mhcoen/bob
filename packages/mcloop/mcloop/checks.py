@@ -100,7 +100,7 @@ def run_autofix(project_dir: str | Path) -> None:
                 capture_output=True,
                 timeout=120,
             )
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
 
@@ -184,8 +184,11 @@ def try_salvage_style_failures(
                 body, eol = original[:-1], "\n"
             else:
                 body, eol = original, ""
-            # Skip if this exact noqa already present.
-            noqa_re = re.compile(r"#\s*noqa(?::\s*([A-Z0-9, ]+))?\b")
+            # Skip if this exact noqa already present. Require the pragma
+            # to be followed by whitespace, end-of-line, or another `#` so
+            # comments mentioning "noqa-like" or "noqa_workaround" don't
+            # get misclassified as a real pragma and corrupted.
+            noqa_re = re.compile(r"#\s*noqa(?::\s*([A-Z0-9, ]+))?(?=\s|#|$)")
             m = noqa_re.search(body)
             if m:
                 existing_codes = m.group(1) or ""
@@ -285,7 +288,10 @@ def run_checks(
         )
 
     config = _load_config(project_dir)
-    check_timeout = int(config.get("check_timeout", 300))
+    try:
+        check_timeout = int(config.get("check_timeout", 300))
+    except (TypeError, ValueError):
+        check_timeout = 300
 
     def _run_one(cmd: str) -> tuple[bool, str]:
         try:

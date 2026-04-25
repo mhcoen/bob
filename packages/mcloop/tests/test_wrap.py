@@ -192,6 +192,40 @@ def test_inject_swift():
     assert '"app_state"' in result
 
 
+def test_inject_swift_main_without_init_synthesizes_one():
+    """A SwiftUI @main struct without init() must get a synthesized init()
+    that calls _mcloopSetupCrashHandlers(). Otherwise the wrapper is dead
+    code: handlers are never installed.
+    """
+    content = (
+        "import SwiftUI\n"
+        "\n"
+        "@main\n"
+        "struct MyApp: App {\n"
+        "    var body: some Scene {\n"
+        "        WindowGroup {\n"
+        "            ContentView()\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    result = inject(content, "swift")
+    assert SWIFT_BEGIN in result
+    assert SWIFT_END in result
+    # Setup call must appear inside an init() body, not just as a function
+    # definition. We expect the synthesized init() to live in MyApp.
+    assert "init()" in result
+    # Find the synthesized init() and confirm the call sits in its body.
+    lines = result.splitlines()
+    init_idx = next(i for i, line in enumerate(lines) if line.strip() == "init() {")
+    body_idx = next(
+        j for j in range(init_idx + 1, len(lines)) if "_mcloopSetupCrashHandlers()" in lines[j]
+    )
+    # The body line is between the init { and its closing brace.
+    closing = next(k for k in range(init_idx + 1, len(lines)) if lines[k].strip() == "}")
+    assert init_idx < body_idx < closing
+
+
 def test_inject_swift_no_main():
     content = "import Foundation\n\nfunc doStuff() {}\n"
     result = inject(content, "swift")

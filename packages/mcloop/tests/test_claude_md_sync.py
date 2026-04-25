@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -110,29 +111,67 @@ class TestHandleSync:
         assert "1.7" in call_args[0][0]
         assert call_args[1]["level"] == "error"
 
-    def test_returns_quickly_when_llm_is_slow(self, tmp_path):
-        """handle_sync must not block on the LLM call.
+    def test_fences_before_returning(self, tmp_path):
+        """handle_sync must wait for the LLM call to finish before returning.
 
-        Mocks auto_update_claude_md with a 2-second sleep and asserts
-        handle_sync returns in well under that time.
+        Otherwise the background thread can mutate NOTES.md after the next
+        task has started, contaminating change detection and commits.
         """
         project = _setup_project(tmp_path)
+        notes_md = project / "NOTES.md"
+        sync_started = threading.Event()
 
-        def slow_llm(*args, **kwargs):
-            time.sleep(2.0)
+        def fenced_writer(p, sha=""):
+            sync_started.set()
+            time.sleep(0.05)
+            notes_md.write_text("written by sync\n")
             return SyncResult.OK
 
         with (
             patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
-            patch("mcloop.claude_md_sync.auto_update_claude_md", side_effect=slow_llm),
+            patch("mcloop.claude_md_sync.auto_update_claude_md", side_effect=fenced_writer),
         ):
-            start = time.monotonic()
             thread = handle_sync(project, "abc1234")
-            elapsed = time.monotonic() - start
 
-        assert elapsed < 0.5, f"handle_sync blocked for {elapsed:.3f}s"
         assert thread is not None
-        thread.join(timeout=5)
+        # After handle_sync returns, the worker thread must already be done
+        # and NOTES.md must have been written. Nothing further may mutate.
+        assert sync_started.is_set()
+        assert not thread.is_alive()
+        snapshot = notes_md.read_text()
+        assert snapshot == "written by sync\n"
+        # Wait briefly to confirm no further mutation arrives.
+        time.sleep(0.1)
+        assert notes_md.read_text() == snapshot
+
+    def test_no_working_tree_mutation_after_handle_sync_returns(self, tmp_path):
+        """Regression for the daemon-thread-after-task-start bug.
+
+        Spawn an LLM mock that, if not fenced, would mutate NOTES.md on a
+        delay simulating the 5-15s real call. After handle_sync returns,
+        no further writes may land.
+        """
+        project = _setup_project(tmp_path)
+        notes_md = project / "NOTES.md"
+
+        def lazy_writer(p, sha=""):
+            time.sleep(0.2)
+            notes_md.write_text("mutated\n")
+            return SyncResult.OK
+
+        with (
+            patch("mcloop.claude_md_sync.check_claude_md_freshness", return_value=False),
+            patch("mcloop.claude_md_sync.auto_update_claude_md", side_effect=lazy_writer),
+        ):
+            handle_sync(project, "abc1234")
+
+        # handle_sync returned, so the write must already have landed.
+        assert notes_md.exists()
+        snapshot = notes_md.read_text()
+        # Sleep longer than the simulated LLM duration and confirm the file
+        # is not mutated by any straggler thread.
+        time.sleep(0.4)
+        assert notes_md.read_text() == snapshot
 
     def test_background_thread_exception_does_not_propagate(self, tmp_path):
         """If the LLM call raises, the background thread logs and exits cleanly."""

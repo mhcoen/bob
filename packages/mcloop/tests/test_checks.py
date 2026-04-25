@@ -193,6 +193,22 @@ def test_get_check_commands_normalizes_python_m_pytest(tmp_path):
 
 
 @patch("mcloop.checks.subprocess.run")
+def test_run_checks_falls_back_when_check_timeout_is_non_integer(mock_run, tmp_path):
+    """A non-integer check_timeout in mcloop.json must not crash run_checks.
+    The default timeout (300s) is used instead.
+    """
+    data = {"checks": ["echo ok"], "check_timeout": "not a number"}
+    (tmp_path / "mcloop.json").write_text(json.dumps(data))
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="", returncode=0, stdout="ok\n", stderr=""
+    )
+    result = run_checks(tmp_path)
+    assert result.passed is True
+    # Confirm the default timeout reached subprocess.run.
+    assert mock_run.call_args.kwargs["timeout"] == 300
+
+
+@patch("mcloop.checks.subprocess.run")
 def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     # No mcloop.json present; pyproject.toml should trigger auto-detection
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
@@ -335,6 +351,42 @@ def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
     cmds = [call[0][0] for call in mock_run.call_args_list]
     assert cmds[0] == ["ruff", "check", "--fix", "."]
     assert cmds[1] == ["ruff", "format", "."]
+
+
+def test_try_salvage_does_not_extend_noqa_like_comment(tmp_path):
+    """A comment that contains "noqa" as a substring (e.g. "noqa-like
+    workaround") must not be misclassified as an existing # noqa pragma
+    and corrupted. The fresh pragma must be appended, not spliced into
+    the existing comment.
+    """
+    from mcloop.checks import try_salvage_style_failures
+
+    src = tmp_path / "mod.py"
+    long_value = "a" * 70
+    comment = "# This is a noqa-like workaround"
+    line = f"x = '{long_value}'  {comment}\n"
+    src.write_text(line)
+    failure_output = "mod.py:1:100: E501 Line too long (130 > 100)\n"
+
+    salvaged, patched = try_salvage_style_failures(tmp_path, failure_output)
+
+    assert salvaged is True
+    assert patched == ["mod.py"]
+    new_line = src.read_text()
+    # Original "noqa-like" must remain intact in the comment.
+    assert "noqa-like workaround" in new_line
+    # A fresh `# noqa: E501` pragma must have been appended.
+    assert "noqa: E501" in new_line
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_autofix_handles_missing_ruff(mock_run, tmp_path):
+    """run_autofix must not crash if ruff is not installed (FileNotFoundError)."""
+    mock_run.side_effect = FileNotFoundError(2, "No such file or directory: 'ruff'")
+    # Should not raise.
+    run_autofix(tmp_path)
+    # Both autofix commands attempted.
+    assert mock_run.call_count == 2
 
 
 @patch("mcloop.checks.subprocess.run")

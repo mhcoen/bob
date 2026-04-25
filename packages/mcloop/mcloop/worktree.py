@@ -92,13 +92,20 @@ def create(
 
 
 def exists(description: str, cwd: str | Path | None = None) -> bool:
-    """Check if a worktree already exists for this investigation."""
+    """Check if a worktree already exists for this investigation.
+
+    Compares branch names exactly so an investigation slug that is a
+    substring of an unrelated branch (e.g. "fix-bug" vs "fix-bug-2")
+    does not produce a false positive. This matches ``create()``'s
+    branch-name lookup.
+    """
     slug = _slugify(description)
     if not slug:
         return False
 
+    branch_name = f"investigate-{slug}"
     for wt in list_worktrees(cwd=cwd):
-        if slug in wt["path"]:
+        if wt.get("branch") == branch_name:
             return True
     return False
 

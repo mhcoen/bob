@@ -143,7 +143,7 @@ def screenshot_window(app_name: str, output_path: str) -> None:
     )
     window_id = _run_osascript(wid_script)
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["screencapture", "-l", window_id, output_path],
             capture_output=True,
             text=True,
@@ -153,3 +153,8 @@ def screenshot_window(app_name: str, output_path: str) -> None:
         raise RuntimeError("screencapture not found (not macOS?)")
     except subprocess.TimeoutExpired:
         raise RuntimeError("screencapture timed out")
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip() or (result.stdout or "").strip()
+        raise RuntimeError(
+            f"screencapture failed (exit {result.returncode}): {stderr or 'no error output'}"
+        )

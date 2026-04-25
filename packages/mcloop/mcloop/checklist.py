@@ -604,8 +604,12 @@ def clear_failed_markers(path: str | Path) -> int:
         return 0
     lines = p.read_text().splitlines()
     changed = 0
+    # Anchor to checkbox syntax: optional indent, the dash, a space, the
+    # `[!]` marker, then a space. Matching anywhere in the line corrupted
+    # prose that happened to contain the literal "- [!]" sequence.
+    failed_marker_re = re.compile(r"^(\s*)- \[!\] ")
     for i, line in enumerate(lines):
-        new_line = re.sub(r"- \[!\]", "- [ ]", line, count=1)
+        new_line = failed_marker_re.sub(r"\1- [ ] ", line, count=1)
         if new_line != line:
             lines[i] = new_line
             changed += 1

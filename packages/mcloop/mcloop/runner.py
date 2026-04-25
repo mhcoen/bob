@@ -709,10 +709,30 @@ def _run_session(
     session_start = time.monotonic()
 
     # Cap output buffer to prevent unbounded memory growth.
-    # A stuck claude session running checks in a loop can
-    # produce millions of lines. Keep only the tail.
-    _MAX_OUTPUT_LINES = 50_000
-    output_lines: list[str] = []
+    # A stuck claude session running checks in a loop can produce
+    # millions of lines. Keep both the *head* (so the session prologue
+    # — task prompt, early errors — survives) and the *tail* (so the
+    # most recent output that usually reveals failure cause survives).
+    # A marker line is inserted between them when truncation actually
+    # happened.
+    _MAX_HEAD_LINES = 5_000
+    _MAX_TAIL_LINES = 45_000
+    head_lines: list[str] = []
+    tail_lines: collections.deque[str] = collections.deque(maxlen=_MAX_TAIL_LINES)
+    dropped_count = 0
+
+    def _assemble_output() -> str:
+        if not tail_lines:
+            return "".join(head_lines)
+        if dropped_count == 0:
+            return "".join(head_lines) + "".join(tail_lines)
+        marker = (
+            f"\n... [truncated {dropped_count} line(s) "
+            f"between head ({_MAX_HEAD_LINES}) and tail "
+            f"({_MAX_TAIL_LINES})] ...\n"
+        )
+        return "".join(head_lines) + marker + "".join(tail_lines)
+
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
@@ -742,7 +762,7 @@ def _run_session(
                 (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
             except OSError:
                 pass
-            return "".join(output_lines), -2
+            return _assemble_output(), -2
         try:
             line = line_q.get(
                 timeout=PROGRESS_DOT_INTERVAL,
@@ -764,7 +784,10 @@ def _run_session(
                         f"\n!!! Permission denied, killing session: {reason}",
                         flush=True,
                     )
-                    process.kill()
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
                     process.wait()
                     _active_process = None
                     try:
@@ -778,7 +801,7 @@ def _run_session(
                         )
                     except OSError:
                         pass
-                    return "".join(output_lines), 1
+                    return _assemble_output(), 1
                 if not shown_waiting:
                     try:
                         pending = list(pending_dir.iterdir())
@@ -805,10 +828,13 @@ def _run_session(
             continue
         if line is _SENTINEL:
             break
-        output_lines.append(line)
+        if len(head_lines) < _MAX_HEAD_LINES:
+            head_lines.append(line)
+        else:
+            if len(tail_lines) == _MAX_TAIL_LINES:
+                dropped_count += 1
+            tail_lines.append(line)
         _last_output_lines.append(line.rstrip("\n"))
-        if len(output_lines) > _MAX_OUTPUT_LINES * 2:
-            output_lines = output_lines[-_MAX_OUTPUT_LINES:]
         printed_visible = _print_stream_event(line)
         shown_waiting = False
         now = time.monotonic()
@@ -831,7 +857,7 @@ def _run_session(
         (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
     except OSError:
         pass
-    return "".join(output_lines), process.returncode
+    return _assemble_output(), process.returncode
 
 
 # Suppress ALL tool names from stream output. Only the task

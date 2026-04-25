@@ -10,6 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Eager submodule imports register `mcloop.app_interact` and
+# `mcloop.process_monitor` as attributes on the mcloop package so tests
+# that use patch("mcloop.process_monitor") / patch("mcloop.app_interact.X")
+# resolve the attribute regardless of which test ran first under xdist.
+import mcloop.app_interact  # noqa: F401
+import mcloop.process_monitor  # noqa: F401
 from mcloop import formatting, worktree
 from mcloop.checklist import Task, parse
 from mcloop.checks import detect_app_type, detect_run

@@ -1826,6 +1826,27 @@ def test_clear_failed_markers_returns_zero_on_missing_file(tmp_path):
     assert clear_failed_markers(missing) == 0
 
 
+def test_clear_failed_markers_does_not_corrupt_non_checkbox_lines(tmp_path):
+    """A non-checkbox line that happens to contain the literal "- [!]"
+    sequence (e.g. inside prose or a code block) must not be rewritten.
+    """
+    f = tmp_path / "plan.md"
+    original = (
+        "- [!] real failed task\n"
+        "Sample diff line: `- [!]` should stay verbatim.\n"
+        "Note: avoid `- [!]` in templates.\n"
+        "  - [!] indented real failed task\n"
+    )
+    f.write_text(original)
+    n = clear_failed_markers(f)
+    assert n == 2  # only the two real checkbox lines flipped
+    result = f.read_text()
+    assert result.splitlines()[0] == "- [ ] real failed task"
+    assert result.splitlines()[1] == "Sample diff line: `- [!]` should stay verbatim."
+    assert result.splitlines()[2] == "Note: avoid `- [!]` in templates."
+    assert result.splitlines()[3] == "  - [ ] indented real failed task"
+
+
 def test_clear_failed_markers_no_op_preserves_mtime(tmp_path):
     f = tmp_path / "plan.md"
     f.write_text("- [ ] A\n- [x] B\n")
