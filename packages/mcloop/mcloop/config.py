@@ -7,6 +7,43 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Roles supported by the role-based ~/.mcloop/config.json schema.
+# The old flat "model" and project-level "reviewer" keys remain
+# valid when the new role section is absent.
+_ROLES = frozenset({"executor", "sync", "reviewer"})
+
+_USER_CONFIG_PATH = Path.home() / ".mcloop" / "config.json"
+
+
+def _read_user_config() -> dict:
+    """Return the parsed contents of ~/.mcloop/config.json or {}."""
+    if not _USER_CONFIG_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_USER_CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def load_role_config(role: str, source: dict | None = None) -> dict | None:
+    """Return the per-role config block from ~/.mcloop/config.json.
+
+    *role* must be one of "executor", "sync", or "reviewer".  When the
+    new role-based schema is absent, this returns None so callers can
+    fall back to the legacy flat "model" / project-level "reviewer"
+    keys.  Pass *source* to override the parsed config (test hook).
+    """
+    if role not in _ROLES:
+        raise ValueError(f"unknown role: {role}")
+    data = source if source is not None else _read_user_config()
+    block = data.get(role)
+    if not isinstance(block, dict):
+        return None
+    return dict(block)
+
 
 def load_reviewer_config(
     project_dir: str,

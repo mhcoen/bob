@@ -1246,6 +1246,18 @@ All keys in `~/.mcloop/config.json`:
   "billing": "subscription",
   "batch": true,
   "env_passthrough": [],
+  "executor": {
+    "model": "deepseek/deepseek-v4-pro",
+    "provider": "deepseek",
+    "base_url": "https://openrouter.ai/api",
+    "fallback": {"model": "sonnet"}
+  },
+  "sync": {
+    "model": "deepseek/deepseek-v4-flash",
+    "provider": "deepseek",
+    "base_url": "https://openrouter.ai/api/v1",
+    "fallback": {"model": "haiku"}
+  },
   "reviewer": {
     "enabled": true,
     "model": "deepseek/deepseek-v3.2",
@@ -1254,6 +1266,13 @@ All keys in `~/.mcloop/config.json`:
 }
 ```
 
+The legacy flat `model` key and the project-level `reviewer` section
+continue to work when the role-based blocks are absent. When the new
+schema is present, each role (executor, sync, reviewer) has independent
+`model`, `provider`, `base_url`, and `fallback` settings, so you can run
+a cheap model for sync, a stronger model for the executor, and a third
+for review.
+
 | Key | Values | Default | Description |
 |-----|--------|---------|-------------|
 | `cli` | `"claude"`, `"codex"` | `"claude"` | CLI backend. Override with `--cli`. |
@@ -1261,9 +1280,72 @@ All keys in `~/.mcloop/config.json`:
 | `billing` | `"subscription"`, `"api"`, `"openrouter"` | `"subscription"` | Billing mode. `"openrouter"` routes through OpenRouter. |
 | `batch` | `true`, `false` | `true` | Whether `[BATCH]` tags are honored. Set `false` to run all subtasks individually. |
 | `env_passthrough` | Array of strings | `[]` | Extra environment variable names to pass through to CLI sessions. |
+| `executor.model` | Model string | Falls back to flat `model` | Model used for coding tasks. |
+| `executor.provider` | `"deepseek"`, `"moonshotai"`, `"openai"`, ... | None (Anthropic) | Third-party provider for the executor. Set when the model string indicates a non-Anthropic provider. |
+| `executor.base_url` | URL | `https://openrouter.ai/api` | Anthropic-compatible endpoint for the executor. |
+| `executor.fallback.model` | Model string | None | Fallback model for the executor when the primary fails. |
+| `sync.model` | Model string | Falls back to `reviewer.model` | Model used for NOTES.md diff summaries. |
+| `sync.provider` | Provider name | None | Provider for the sync endpoint. |
+| `sync.base_url` | URL | Falls back to `reviewer.base_url` | OpenAI-compatible endpoint for sync. |
+| `sync.fallback.model` | Model string | `"sonnet"` | Model passed to the `claude -p` fallback when the primary sync provider fails. |
 | `reviewer.enabled` | `true`, `false` | `false` | Enable background code review. |
 | `reviewer.model` | Model string | Required if reviewer enabled | Model for the reviewer endpoint. |
 | `reviewer.base_url` | URL | Required if reviewer enabled | OpenAI-compatible API endpoint. |
+
+### Routing Claude Code through a third-party provider
+
+To run the executor against a third-party Anthropic-compatible
+endpoint (DeepSeek, Moonshot/Kimi, OpenAI, etc.), drop one of these
+shell functions into your `~/.zshrc` or `~/.bashrc`. They start a
+shell session with the right environment variables so any
+`claude` invocation in that subshell talks to the chosen provider:
+
+```bash
+deepseek() {
+  ANTHROPIC_BASE_URL="https://openrouter.ai/api" \
+  ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" \
+  ANTHROPIC_MODEL="deepseek/deepseek-v4-pro" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek/deepseek-v4-pro" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek/deepseek-v4-pro" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek/deepseek-v4-flash" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek/deepseek-v4-pro" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_TOOL_SEARCH="1" \
+  zsh
+}
+
+kimi() {
+  ANTHROPIC_BASE_URL="https://openrouter.ai/api" \
+  ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" \
+  ANTHROPIC_MODEL="moonshotai/kimi-k2.6" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="moonshotai/kimi-k2.6" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="moonshotai/kimi-k2.6" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="moonshotai/kimi-k2.6" \
+  CLAUDE_CODE_SUBAGENT_MODEL="moonshotai/kimi-k2.6" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_TOOL_SEARCH="1" \
+  zsh
+}
+```
+
+What each variable does:
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint that receives requests instead of api.anthropic.com. |
+| `ANTHROPIC_AUTH_TOKEN` | Bearer token sent to the endpoint. Set this when using OpenRouter or another provider that gives you a non-Anthropic key. |
+| `ANTHROPIC_MODEL` | Default model id Claude Code asks for. |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` / `_SONNET_MODEL` / `_HAIKU_MODEL` | Routes the `opus` / `sonnet` / `haiku` aliases to provider-specific model ids so existing prompts keep working. |
+| `CLAUDE_CODE_SUBAGENT_MODEL` | Model used when Claude Code spawns sub-agents. |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Suppresses telemetry calls back to Anthropic when you are not using their API. |
+| `ENABLE_TOOL_SEARCH` | Enables the deferred-tool-search feature so Claude Code can lazily load tool schemas, which most third-party endpoints support. |
+
+Inside that subshell, `mcloop` will pick up the variables. mcloop also
+applies these variables automatically when the executor model string
+matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
+`openai/`) or one of the short aliases (`deepseek-v4-pro`,
+`deepseek-v4-flash`, `kimi-k2.6`); the shell function is for invoking
+`claude` interactively outside of mcloop.
 
 ## Requirements
 

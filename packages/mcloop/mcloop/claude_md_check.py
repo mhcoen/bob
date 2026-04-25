@@ -126,8 +126,15 @@ def _get_diff_text(project_dir: Path, commit_sha: str = "") -> str:
 def _load_update_config() -> dict | None:
     """Load config for diff-summary auto-update from ~/.mcloop/config.json.
 
-    Uses the reviewer config (model, base_url, api_key) since the same
-    OpenRouter setup works for both. Returns None if not configured.
+    Prefers the dedicated ``sync`` block (``sync.model``,
+    ``sync.base_url``, ``sync.fallback``) so users can run a cheap
+    model for sync independently of the reviewer.  Falls back to the
+    legacy ``reviewer`` block when ``sync`` is absent.  Returns None
+    if neither block is present or if ``OPENROUTER_API_KEY`` is unset.
+
+    The returned dict additionally carries a ``fallback`` key
+    (possibly empty) that callers use to pick a non-default fallback
+    model name.
     """
     config_path = Path.home() / ".mcloop" / "config.json"
     if not config_path.exists():
@@ -138,16 +145,20 @@ def _load_update_config() -> dict | None:
         return None
     if not isinstance(data, dict):
         return None
-    reviewer = data.get("reviewer")
-    if not isinstance(reviewer, dict):
+    block = data.get("sync") if isinstance(data.get("sync"), dict) else None
+    if block is None:
+        block = data.get("reviewer") if isinstance(data.get("reviewer"), dict) else None
+    if block is None:
         return None
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         return None
+    fallback = block.get("fallback") if isinstance(block.get("fallback"), dict) else {}
     return {
-        "model": reviewer.get("model", ""),
-        "base_url": reviewer.get("base_url", "").rstrip("/"),
+        "model": block.get("model", ""),
+        "base_url": block.get("base_url", "").rstrip("/"),
         "api_key": api_key,
+        "fallback": fallback,
     }
 
 
@@ -215,17 +226,20 @@ def _call_deepseek(config: dict, diff_text: str) -> str | None:
     return content
 
 
-def _call_sonnet_fallback(diff_text: str) -> str | None:
-    """Call Claude Sonnet via ``claude -p`` subprocess as fallback.
+def _call_sonnet_fallback(diff_text: str, model: str = "sonnet") -> str | None:
+    """Call Claude via ``claude -p`` subprocess as fallback.
 
-    Strips ANTHROPIC_API_KEY from the environment so the subprocess
-    bills against the Max subscription, not API credits.
+    *model* is the value passed to ``--model``.  Defaults to
+    ``"sonnet"`` so callsites without a configured override behave
+    exactly as before.  Strips ANTHROPIC_API_KEY from the environment
+    so the subprocess bills against the Max subscription, not API
+    credits.
     """
     prompt = f"{_SUMMARY_SYSTEM_PROMPT}\n\n{diff_text}"
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
         result = subprocess.run(
-            ["claude", "-p", "--model", "sonnet", prompt],
+            ["claude", "-p", "--model", model, prompt],
             capture_output=True,
             text=True,
             timeout=60,
@@ -279,8 +293,13 @@ def auto_update_claude_md(project_dir: Path, commit_sha: str = "") -> SyncResult
         summary = _call_deepseek(config, diff_text)
 
     if summary is None:
-        print("  NOTES.md: DeepSeek failed twice, trying Sonnet fallback...", flush=True)
-        summary = _call_sonnet_fallback(diff_text)
+        fallback_cfg = config.get("fallback") or {}
+        fallback_model = fallback_cfg.get("model") or "sonnet"
+        print(
+            f"  NOTES.md: DeepSeek failed twice, trying {fallback_model} fallback...",
+            flush=True,
+        )
+        summary = _call_sonnet_fallback(diff_text, model=fallback_model)
 
     if summary is None:
         print("  NOTES.md auto-update: all providers failed", flush=True)

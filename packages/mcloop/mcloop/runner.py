@@ -82,6 +82,9 @@ _KNOWN_MODELS = {
             "claude-opus-4-5-20251101",
             "claude-sonnet-4-5-20250929",
             "claude-haiku-4-5-20251001",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "kimi-k2.6",
         }
     ),
     "codex": frozenset(
@@ -102,6 +105,18 @@ _KNOWN_MODELS = {
     ),
 }
 
+# Map short third-party model aliases to their OpenRouter provider
+# prefix.  Used by _build_command so a user can write
+# ``--model deepseek-v4-pro`` and still get the right provider env
+# vars without typing the full ``deepseek/deepseek-v4-pro`` slug.
+_MODEL_PROVIDERS = {
+    "deepseek-v4-pro": "deepseek",
+    "deepseek-v4-flash": "deepseek",
+    "kimi-k2.6": "moonshotai",
+}
+
+_THIRD_PARTY_PREFIXES = ("deepseek/", "moonshotai/", "openai/")
+
 
 def warn_unknown_model(cli: str, model: str) -> None:
     """Print a warning if model is not in the known-good list for cli."""
@@ -111,6 +126,70 @@ def warn_unknown_model(cli: str, model: str) -> None:
             f'Warning: model "{model}" not recognized for {cli} (may still work)',
             flush=True,
         )
+
+
+_DEFAULT_PROVIDER_BASE_URL = "https://openrouter.ai/api"
+
+
+def _provider_for_model(model: str) -> str | None:
+    """Return third-party provider name for *model*, or None.
+
+    Recognizes both fully-qualified slugs (``deepseek/deepseek-v4-pro``)
+    and the short aliases listed in :data:`_MODEL_PROVIDERS`.
+    """
+    if not model:
+        return None
+    if model in _MODEL_PROVIDERS:
+        return _MODEL_PROVIDERS[model]
+    for prefix in _THIRD_PARTY_PREFIXES:
+        if model.startswith(prefix):
+            return prefix.rstrip("/")
+    return None
+
+
+def _provider_model_slug(model: str) -> str:
+    """Expand a short alias (``kimi-k2.6``) to its provider slug."""
+    provider = _MODEL_PROVIDERS.get(model)
+    if provider and not model.startswith(provider + "/"):
+        return f"{provider}/{model}"
+    return model
+
+
+def _apply_provider_env(
+    env: dict[str, str],
+    model: str,
+    executor: dict | None,
+) -> None:
+    """Mutate *env* with third-party provider variables for *model*.
+
+    No-op when *model* is empty or refers to a native Anthropic/Codex
+    model.  When triggered, sets ``ANTHROPIC_BASE_URL``, the model
+    routing variables (``ANTHROPIC_MODEL``, the
+    ``ANTHROPIC_DEFAULT_*_MODEL`` family, and
+    ``CLAUDE_CODE_SUBAGENT_MODEL``), the no-noise traffic toggle, and
+    ``ENABLE_TOOL_SEARCH``.  Reads the auth token from the env var
+    named in ``executor.auth_token_env`` (default
+    ``OPENROUTER_API_KEY``) and sets ``ANTHROPIC_API_KEY`` to empty
+    so the underlying CLI does not bill against the wrong account.
+    """
+    if _provider_for_model(model) is None:
+        return
+    config = executor or {}
+    base_url = config.get("base_url") or _DEFAULT_PROVIDER_BASE_URL
+    auth_token_env = config.get("auth_token_env", "OPENROUTER_API_KEY")
+    auth_token = os.environ.get(auth_token_env, "")
+    slug = _provider_model_slug(model)
+    env["ANTHROPIC_BASE_URL"] = base_url
+    if auth_token:
+        env["ANTHROPIC_AUTH_TOKEN"] = auth_token
+    env["ANTHROPIC_API_KEY"] = ""
+    env["ANTHROPIC_MODEL"] = slug
+    env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = slug
+    env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = slug
+    env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = slug
+    env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
+    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    env["ENABLE_TOOL_SEARCH"] = "1"
 
 
 def _build_session_env(
@@ -465,11 +544,12 @@ def run_task(
     build_kwargs: dict = {"model": model}
     if allowed_tools:
         build_kwargs["allowed_tools"] = allowed_tools
-    cmd = _build_command(cli, prompt, **build_kwargs)
+    session_env = _build_session_env(task_label=task_label, cli=cli)
+    cmd = _build_command(cli, prompt, env=session_env, **build_kwargs)
     output, returncode = _run_session(
         cmd,
         project_dir,
-        env=_build_session_env(task_label=task_label, cli=cli),
+        env=session_env,
         timeout=timeout,
     )
     log_path = _write_log(
@@ -493,7 +573,13 @@ def _build_command(
     prompt: str | None = None,
     model: str | None = None,
     allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
+    env: dict[str, str] | None = None,
 ) -> list[str]:
+    if env is not None and cli == "claude" and model:
+        from mcloop.config import load_role_config
+
+        executor_cfg = load_role_config("executor")
+        _apply_provider_env(env, model, executor_cfg)
     if cli == "claude":
         cmd = ["claude", "-p"]
         if prompt:
