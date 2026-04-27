@@ -125,18 +125,18 @@ workflow design-loop
     reads topic, draft, critique
     writes reflection text
     writes draft text              # revised draft for the next iteration
-    on complete => continue?
+    on complete => continue-gate
     on error => stop
     on timeout => stop
 
   # Human choice gate. The user picks among continue / accept / stop.
   # See finding (F1) below for the introduced syntax.
-  state continue?
+  state continue-gate
     actor human
     prompt file prompts/continuation-question.md
     reads draft, critique, reflection
     options continue, accept, stop
-    on continue when attempts.continue? < 5 => critique
+    on continue when attempts.continue-gate < 6 => critique
     on continue => stop                # cycle exit guard, see (F4)
     on accept => done
     on stop => stop
@@ -213,23 +213,25 @@ content is not in scope.
   - `critique@v1, v2, v3`.
   - `reflection@v1, v2, v3`.
   Logs preserve the exact version IDs at every read and write.
-- **Human-backed actor as a choice gate**: the `continue?` state has
-  `actor human` and exits via the option labels `continue`,
+- **Human-backed actor as a choice gate**: the `continue-gate` state
+  has `actor human` and exits via the option labels `continue`,
   `accept`, `stop`, plus `timeout` and `cancelled`. See finding (F1).
-- **Cycle exit guard tied to attempts**: the `continue?` state's
-  transition list uses `on continue when attempts.continue? < 5 =>
-  critique` followed by an unguarded `on continue => stop`. This is
-  the explicit lint-recommended cycle guard from
-  `orchestra-design.md` validation rule 11. It is redundant with
-  `max_total_steps` but is the right shape for what the design doc
-  asks workflow authors to write.
+- **Cycle exit guard tied to attempts**: the `continue-gate` state's
+  transition list uses
+  `on continue when attempts.continue-gate < 6 => critique` followed
+  by an unguarded `on continue => stop`. This is the
+  lint-recommended cycle guard from `orchestra-design.md` validation
+  rule 11. It is redundant with `max_total_steps` but is the right
+  shape for what the design doc asks workflow authors to write. The
+  bound `< 6` matches the stated intent of "approximately 5 continue
+  iterations" under the increment semantics defined in finding (F7).
 
 ## What felt awkward
 
 (A1) **Where the cycle exit guard belongs.** The natural author
 intuition was to put the bound at the place control returns from
-(the `continue?` state's transition), but a "max iterations of the
-loop" feels conceptually attached to the loop body, not the gate.
+(the `continue-gate` state's transition), but a "max iterations of
+the loop" feels conceptually attached to the loop body, not the gate.
 The validator can detect either form, but a workflow author reading
 the source has to do work to figure out which iteration counter
 governs which loop. With one loop in this sketch the answer is
@@ -240,14 +242,15 @@ counter by name. Recorded as friction to revisit if Test 3 (which
 has at least one fix loop and possibly one check loop) makes it
 worse.
 
-(A2) **The `continue?` state name.** The indicative conventions don't
-specify whether punctuation is allowed in state names. Trailing `?`
-on a boolean-ish gate state is a common readability convention but
-might collide with a future use of `?` as syntax. Replaceable with
-`ask-continue` or `continuation-gate` without loss. Flagging because
-the grammar phase needs to rule on identifier syntax. Did not feel
-worth introducing a new finding number in syntax space; the issue is
-naming policy, not syntax.
+(A2) **State name punctuation.** The original sketch used `continue?`
+as the gate state name. The indicative conventions don't specify
+whether punctuation is allowed in state names, and `?` is likely to
+collide with whatever it ends up meaning in expression syntax. More
+concretely, referencing the state in a guard expression as
+`attempts.continue?` puts `?` inside an expression where the
+collision is harder to defer. Renamed to `continue-gate`. Identifier
+rule recommended for the grammar phase: letters, digits, underscore,
+hyphen; must start with a letter; no other punctuation.
 
 (A3) **Reusing the `reflector` role's default prompt as a template.**
 I wanted the reflector's default prompt (in role declaration) to be
@@ -263,7 +266,7 @@ intended to be used as a template. The validator can check this only
 at the state where the template is invoked. See clarification (F2)
 below.
 
-(A4) **`reads` on the `continue?` state.** The human is shown
+(A4) **`reads` on the `continue-gate` state.** The human is shown
 `prompts/continuation-question.md` (a static file). The human does
 not need `draft`, `critique`, `reflection` to make a decision in
 some abstract sense, but the human prompt presumably embeds or
@@ -274,7 +277,10 @@ reflection`. This raises the question of whether `reads` describes
 the runner to consider when constructing the invocation." For
 template states the relationship is direct (template variables map
 to reads). For file-prompt states the relationship is by convention.
-This is a real ambiguity in what `reads` means; recorded.
+The cleanest resolution is to define `reads` as visibility (artifacts
+made available to the actor invocation) and treat the
+template-variable-to-reads coverage as a derived check on top of
+that. Recorded.
 
 (A5) **Bare `actor model <id>` vs `actor agent <id>`.** Test 1 only
 uses agent-backed actors. The indicative conventions mention `actor
@@ -291,8 +297,8 @@ role groups, not agent-backed ones, for advisors).
 `external_input topic text` as a top-level declaration inside the
 workflow body. The design document says workflow-level declarations
 include external inputs, but doesn't pick a keyword. `input` would
-collide with state-level `reads` informally, and `external_input`
-is verbose. The grammar phase has to rule on this. Flagging.
+be cleaner; there is no real collision with state-level `reads`
+because they're at different scopes. Flagging for the grammar phase.
 
 (A7) **Loop progress requires a state to write an artifact a previous
 state already wrote.** The original sketch had `draft` written only
@@ -316,7 +322,7 @@ versioning. Recorded; no language change needed.
 as an actor backing whose outcomes include "the option labels
 chosen, plus `timeout` and `cancelled`," but does not show the
 syntax for declaring those option labels in a state. The sketch
-needs this for the `continue?` state. Under the unreadability
+needs this for the `continue-gate` state. Under the unreadability
 exception, I introduced:
 
 ```
@@ -376,7 +382,7 @@ on cycle exits using `attempts.<state>`. The sketch uses the
 shape:
 
 ```
-on continue when attempts.continue? < 5 => critique
+on continue when attempts.continue-gate < 6 => critique
 on continue => stop
 ```
 
@@ -386,7 +392,7 @@ order; the first match wins. Unguarded transitions for an outcome are
 fallthroughs." Confirmed in use. The friction is that the unguarded
 fallthrough has to be written out separately, even though the intent
 ("if the bound is exceeded, stop") is conceptually one rule. A
-single-line form like `on continue while attempts.continue? < 5
+single-line form like `on continue while attempts.continue-gate < 6
 => critique else stop` would read better but is not in the design.
 Not introducing it; recording the friction.
 
@@ -411,3 +417,27 @@ to omit `reads topic` on `draft` since `topic` is the only thing
 in scope, but the discipline rule covers this case too: if reads
 are explicit, every state's input set is auditable from the source
 without simulating the runner. Confirmed and applied.
+
+(F7) **`attempts.<state>` increment semantics.** The design document
+mentions `attempts.<state>` as a counter usable in transition guards
+(validation rule 11) and says the log records "Attempt number
+(matches `attempts.<state>`)". The crash-recovery section says
+re-entry after a crash increments the counter. The normal-execution
+case (when does the counter reach 1, 2, 3 across loop iterations)
+is not specified.
+
+The bound `attempts.continue-gate < 6` in this sketch assumes the
+following semantics: **`attempts.<state>` is incremented on state
+entry, so the counter equals 1 on the first visit, 2 on the second,
+and so on.** Under this reading the guard `< 6` permits transitions
+to `critique` on visits 1 through 5 and falls through to `stop` on
+visit 6. This matches the stated intent of "approximately 5 continue
+iterations."
+
+The alternative semantics ("incremented on state completion, so the
+counter equals 0 on first entry") would make `< 6` permit one extra
+iteration. Either reading is defensible; the design document needs
+to pick one and document it. Recommendation for the grammar/runner
+spec: increment on state entry, with the entry counted before any
+transition guard is evaluated. This makes guards read naturally
+("on the Nth visit, do X").

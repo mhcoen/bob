@@ -32,12 +32,13 @@ mcloop use case.
    a workflow with no shell, no workspace, no verdict schemas.
 
 2. **Test 2: Five-member council with chair**
-   (`orchestra-acid-test-2-council.md`). Probes generality. Role
-   groups, one model bound across multiple roles, parallel invocation
-   with `join all`, anonymized advisor outputs as a `messages`
-   artifact, a separate peer-review role group, chairman synthesis
-   with a verdict schema. Stays out of the workspace and shell
-   profiles entirely.
+   (`orchestra-acid-test-2-council.md`). Probes generality. Two
+   role groups (advisors and reviewers), one model bound across all
+   roles, parallel invocation with `join all`, anonymization done
+   workflow-structurally via a shell-actor state (visibility is v1,
+   not v0), chair synthesis with a verdict schema. Stays out of the
+   workspace and code profiles entirely; the only non-LLM actor is
+   one shell call for the mechanical anonymization transform.
 
 3. **Test 3: mcloop code implementation**
    (`orchestra-acid-test-3-mcloop.md`). Probes whether the general
@@ -61,7 +62,7 @@ that govern these sketches:
   every state.
 - New syntax is introduced only when the sketch becomes unreadable
   without it. When new syntax is introduced, it is flagged as a
-  finding in the sketch's "what the sketch forced you to clarify"
+  finding in the sketch's "what the sketch forced me to clarify"
   section.
 - Surface form is held constant across the three sketches so that
   awkwardness is attributable to the abstraction rather than to a
@@ -96,10 +97,6 @@ Every sketch sub-file has these sections, in this order:
 
 ## Status
 
-- Test 1: written.
-- Test 2: not yet written.
+- Test 1: written and revised once after review.
+- Test 2: written.
 - Test 3: not yet written.
-
-This document and Test 1 are the first deliverables. Tests 2 and 3
-follow after review of Test 1, on the principle that findings from
-Test 1 may change how Tests 2 and 3 are approached.
