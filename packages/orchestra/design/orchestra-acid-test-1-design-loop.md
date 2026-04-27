@@ -9,7 +9,7 @@ expresses the author's manual cross-LLM design loop:
 2. A Claude-backed designer agent drafts a response.
 3. A GPT-backed critic agent reviews the draft.
 4. The Claude-backed designer agent (same agent, different role)
-   reflects on the critique.
+   reflects on the critique and writes a revised draft.
 5. The user is asked, via a human choice gate, whether to continue
    iterating, accept the current state, or stop.
 6. On `continue`, the loop returns to the critique step. On `accept`,
@@ -28,6 +28,8 @@ in Tests 2 and 3. Test 1's job is to put pressure on:
   `prompt template ... with ...` in the same workflow.
 - Distinct named artifacts as the data substrate, with no fallback
   to `<state>.output` for durable content.
+- A named artifact getting written more than once across loop
+  iterations, exercising the design's versioning rule.
 - A human-backed actor used as a choice gate, including its outcome
   vocabulary.
 - Workflow-level safety nets: `max_total_steps`, an explicit cycle
@@ -80,6 +82,14 @@ workflow design-loop
   # Named artifacts. Every nontrivial state writes one of these
   # explicitly. There is no implicit "state output" used for
   # durable data anywhere in this workflow.
+  #
+  # `draft` is written by both `draft` (initial) and `reflect`
+  # (each subsequent iteration). The design's versioning rule
+  # means each write produces a new version; downstream `reads
+  # draft` resolves to the latest version. This is what lets the
+  # loop progress: the second pass of `critique` sees the
+  # reflector's revised draft, not the original. See finding (A7)
+  # below.
   artifact draft text
   artifact critique text
   artifact reflection text
@@ -114,6 +124,7 @@ workflow design-loop
     prompt template prompts/reflector.md with topic, draft, critique
     reads topic, draft, critique
     writes reflection text
+    writes draft text              # revised draft for the next iteration
     on complete => continue?
     on error => stop
     on timeout => stop
@@ -190,6 +201,18 @@ content is not in scope.
   explicitly by their producing states. Every downstream state
   declares its `reads` against these artifacts. There is no use of
   `<state>.output` for durable data in this sketch.
+- **Repeated writes to the same artifact across iterations.** `draft`
+  is written by the `draft` state on iteration 1 and by the `reflect`
+  state on every iteration. `critique` and `reflection` are written
+  by their respective states once per iteration. The design's
+  versioning rule means each write produces a new version, and
+  `reads draft` resolves to the latest. After three loop iterations
+  the version trail is approximately:
+  - `draft@v1` (initial), `draft@v2` (after first reflect),
+    `draft@v3` (after second reflect), `draft@v4` (after third).
+  - `critique@v1, v2, v3`.
+  - `reflection@v1, v2, v3`.
+  Logs preserve the exact version IDs at every read and write.
 - **Human-backed actor as a choice gate**: the `continue?` state has
   `actor human` and exits via the option labels `continue`,
   `accept`, `stop`, plus `timeout` and `cancelled`. See finding (F1).
@@ -237,7 +260,7 @@ relationship between "this role has a default file prompt" and "this
 state overrides with a template against the same file" is implicit:
 there is nothing in the workflow source that says the file is
 intended to be used as a template. The validator can check this only
-at the state where the template is invoked. See clarification (C2)
+at the state where the template is invoked. See clarification (F2)
 below.
 
 (A4) **`reads` on the `continue?` state.** The human is shown
@@ -270,6 +293,22 @@ workflow body. The design document says workflow-level declarations
 include external inputs, but doesn't pick a keyword. `input` would
 collide with state-level `reads` informally, and `external_input`
 is verbose. The grammar phase has to rule on this. Flagging.
+
+(A7) **Loop progress requires a state to write an artifact a previous
+state already wrote.** The original sketch had `draft` written only
+by the `draft` state, with the reflector writing `reflection`. On
+the second loop iteration this meant `critique` saw the same `draft`
+it saw on the first iteration; the reflector's contribution did not
+reach the next critique. Fix: the `reflect` state writes a new
+version of `draft` in addition to `reflection`. This is one extra
+`writes` line; no new mechanism is required. The design's versioning
+rule already specifies that repeated writes produce new versions and
+that name resolution returns the latest. The friction is that the
+discipline of "every state declares its writes" makes this kind of
+loop-progress dependency visible (good), but the design document
+does not flag "an artifact written by more than one state across
+iterations" as a pattern worth naming. The pattern is implicit in
+versioning. Recorded; no language change needed.
 
 ## What the sketch forced me to clarify
 
@@ -328,6 +367,8 @@ that the language probably wants both an inline policy and a named
 policy reference, with a global default available by name. Not
 introduced as new syntax beyond what the design document already
 implies; flagging as something the grammar phase has to confirm.
+The adapter name `api_runner_managed` is also a placeholder; the
+canonical name is the grammar phase's call.
 
 (F4) **Two transitions for the same outcome with a guard.** Validation
 rule 11 in the design document recommends adding a transition guard
@@ -349,12 +390,12 @@ single-line form like `on continue while attempts.continue? < 5
 => critique else stop` would read better but is not in the design.
 Not introducing it; recording the friction.
 
-(F5) **No agent message artifact named in the source.** Per your
-instruction, the runner's per-agent `messages` artifact is not
-declared in the workflow source. The design doc says these exist as
-a runner-internal mechanism. Test 1 did not encounter a case where
-a state needs to read another agent's history directly; the
-intermediate named artifacts (`draft`, `critique`, `reflection`)
+(F5) **No agent message artifact named in the source.** Per the
+project instruction, the runner's per-agent `messages` artifact is
+not declared in the workflow source. The design doc says these
+exist as a runner-internal mechanism. Test 1 did not encounter a
+case where a state needs to read another agent's history directly;
+the intermediate named artifacts (`draft`, `critique`, `reflection`)
 carried the data the downstream states needed. This was the
 expected outcome for the simplest case. If Test 2 or Test 3 forces
 a state to read another agent's full transcript, the question of
