@@ -142,6 +142,14 @@ the contract at invocation time.
 - **Blocking semantics**: whether the actor blocks indefinitely
   (humans, choice gates) or returns within bounded time (model calls,
   shell commands).
+- **Structured result**: every actor backing produces a structured
+  result with a canonical shape. The shape includes at minimum
+  status, outcome, duration, and any backing-specific fields (for
+  shell, this is per-command exit codes, stdout, and stderr; for
+  LLM, this is the response text and token/cost metrics; for human,
+  the chosen option). The result is the substrate from which a
+  profile's result parsers populate declared artifacts. See
+  "Profile-registered result parsers" under Profiles below.
 
 The actor abstraction unifies invocation syntax. The contracts ensure
 that the runner does not paper over real semantic differences between
@@ -363,6 +371,40 @@ Specifically:
 The lifetime of an artifact is the workflow run unless declared
 otherwise. Artifacts are not shared across runs in v0.
 
+#### Loop-progress pattern
+
+When a workflow contains a cycle, the state that issues the loop-back
+transition must write some artifact that the loop target reads. If it
+does not, the next iteration sees the same inputs as the previous one
+and is semantically identical to it. Versioning of artifacts (each
+write produces a new version, the name resolves to the latest) is the
+mechanism that carries information across the loop.
+
+Two cases follow from this:
+
+1. The loop target's `reads` must include the artifact the loop-issuing
+   state writes. This is enforced by the explicit-writes discipline
+   above plus the requirement that nontrivial states declare their
+   reads; the workflow author is expected to verify the dataflow at
+   the loop-back point.
+2. If the first iteration of the loop runs before any iteration of the
+   loop-issuing state has executed, the artifact will not yet exist.
+   In that case the artifact declaration must provide an initial
+   value so the first read is well-defined.
+
+Loop progress and loop termination are distinct. Progress (this
+section) makes a loop iteration meaningful by ensuring its inputs
+differ from the previous iteration's. Termination (validation rule
+11, "Cycle and step bounds") is what causes the loop to exit. A
+loop with progress but no termination mechanism runs until
+`max_total_steps` is exhausted; a loop with termination but no
+progress exits, but its iterations are wasted because each one sees
+the same inputs. Both are required for a useful cycle.
+
+The acid-test sketches surface this pattern in two of three workflows.
+It is not a new primitive: it is a consequence of versioned artifacts
+plus the discipline that durable data flows through named artifacts.
+
 ### Transition
 
 A **transition** routes control from one state to another based on the
@@ -542,23 +584,70 @@ concerns live in **profiles** layered on top of the core.
 
 ### What profiles can register
 
-Profiles do not extend the core syntax. They register additional
+Profiles do not extend the core grammar. They register additional
 capabilities through a fixed set of extension points:
 
-- **Artifact types**: e.g. `git-workspace` for the code profile.
+- **Artifact types**: e.g. `git-workspace` for the versioned-workspace
+  profile.
 - **Actor backings**: new adapter types backing the generic actor
   abstraction.
+- **Backing-scoped state-level keywords**: profiles may register
+  state-level keywords whose use is **scoped to a specific actor
+  backing** the profile registers (or co-registers). Example:
+  `runs` is a multi-line shell-command block legal only inside
+  `actor shell` states; `require_diff` is legal only inside states
+  that write a `git-workspace` artifact under `mode readwrite`. The
+  validator rejects use of a backing-scoped keyword outside its
+  legal context. This is not a macro system or arbitrary syntax
+  extension: each registered keyword has a fixed semantic
+  registered with the actor backing it applies to, and is
+  statically validated against the state's declared backing.
 - **Postconditions**: predicates that must hold after a state runs
-  (e.g. `require_diff` for the code profile).
+  (e.g. `require_diff` for the code profile, registered as the
+  postcondition associated with the keyword of the same name).
 - **Guard predicates**: new predicate forms usable in `when` clauses.
 - **Result parsers**: parsers for converting actor output into typed
-  result fields beyond the core's defaults.
+  result fields and into declared artifacts beyond the core's
+  defaults. See "Profile-registered result parsers" below.
 - **Validation rules**: load-time checks beyond the core rules.
 - **Default policies**: domain-appropriate defaults for timeouts,
   retries, modes.
 
 Profiles do **not** add new top-level keywords, new state types, or
-new transition syntax. The core grammar is closed.
+new transition syntax. They do not introduce new state-level keywords
+that are not scoped to a registered actor backing. The core grammar
+is closed at the workflow, transition, and unscoped-state levels;
+profile extension applies only inside the body of a state whose actor
+backing the profile registers or co-registers.
+
+### Profile-registered result parsers
+
+Every actor invocation produces a structured result (see "Actor
+invocation contracts" above). Profiles may register parsers that
+convert the actor's structured result into typed artifact values,
+populating artifacts the state declares as `writes`. Examples:
+
+- The code profile registers a result parser that converts a shell
+  actor's per-command stdout/stderr/exit-code result into a
+  structured `check-errors` json artifact when the state declares
+  it writes such an artifact.
+- A council profile (illustrative) might register a parser that
+  converts an LLM actor's structured response into entries in a
+  `messages` artifact under specific role-group invocations.
+
+This means a state's declared artifact writes are populated by the
+runner-and-profile machinery, not by ad-hoc inspection of state
+result fields by downstream states. The downstream state reads the
+declared artifact; the actor's raw result fields are runner-internal
+metadata.
+
+The exact contract between actor backings and result parsers is
+deferred to the runner spec. The conceptual requirement is that
+every actor backing produce a structured result rich enough that a
+profile parser can populate any declared artifact the state writes.
+For the shell actor specifically, the structured result must include
+at minimum per-command exit codes, stdout, stderr, aggregate
+pass/fail, and total duration; profile parsers build on top of this.
 
 ### Concrete profiles
 
@@ -579,8 +668,16 @@ from history, branching, and rollback over evolving textual or
 file-based state. Profiles below depend on it.
 
 **Code profile.** Depends on the versioned workspace profile. Adds:
-- The `require_diff` postcondition for mutating LLM states (errors
-  the state if a `readwrite` invocation produces no diff).
+- The `require_diff` postcondition (and its keyword) for mutating
+  LLM states (errors the state if a `readwrite` invocation produces
+  no diff). Scoped to states that write a `git-workspace` artifact
+  under `mode readwrite`.
+- The `runs` block keyword on `actor shell` states (a multi-line
+  list of shell command strings), together with `continue_on_fail`
+  for diagnostic vs sequenced semantics. Scoped to `actor shell`.
+- A shell-result parser that populates a declared `check-errors`
+  json artifact (or analogous artifact name) from per-command
+  stdout/stderr/exit-code data.
 - Shell-backed actor adapters via `claude -p` and `codex exec`
   invocation patterns oriented to code-specific subprocess output
   (transcripts, structured tool call traces).
@@ -614,11 +711,11 @@ postconditions, and no shell-backed code-aware actors.
 
 Profiles are additive when their registrations don't collide. If two
 profiles register the same artifact type name, actor backing name,
-postcondition name, guard predicate name, or validation rule name, the
-runner refuses to load the workflow with a load error identifying the
-conflicting profiles. The author is expected to use profiles that have
-been designed to coexist; v0 does not provide an override mechanism for
-resolving profile conflicts.
+state-level keyword name, postcondition name, guard predicate name,
+or validation rule name, the runner refuses to load the workflow with
+a load error identifying the conflicting profiles. The author is
+expected to use profiles that have been designed to coexist; v0 does
+not provide an override mechanism for resolving profile conflicts.
 
 A workflow can use multiple profiles simultaneously when they don't
 conflict (e.g. a workflow that has a code-implementation phase
@@ -764,8 +861,15 @@ rejects invalid files before any execution begins. Validation rules:
    for choices).
 10. Schema-backed LLM states have transitions for every verdict in
     the schema's verdict enum and no extras.
-11. **Cycle and step bounds.** Two complementary mechanisms ensure
-    workflows terminate:
+11. **Cycle and step bounds.** This rule covers loop *termination*
+    only. Loop *progress* (whether each iteration sees inputs that
+    differ from the previous iteration) is a separate concern, covered
+    in the "Loop-progress pattern" subsection of the Artifact section.
+    A loop can have progress without termination, termination without
+    progress, both, or neither; the validator and the runner address
+    them separately.
+
+    Two complementary mechanisms ensure workflows terminate:
     - **Workflow-level step budget**: every workflow must declare
       `max_total_steps` (or `max_state_visits`) at the workflow
       level (see "Workflow-level declarations"). The runner enforces
@@ -778,11 +882,25 @@ rejects invalid files before any execution begins. Validation rules:
       transition guarded by `attempts.<state>` or `retries.<state>`.
       This is reported as a warning, not a load error, because
       proving genuine boundedness statically is hard. Authors are
-      expected to add explicit guards on cycle exits, but the step
-      budget catches cases the linter misses.
+      expected to add a termination mechanism on at least one
+      transition in each cycle. Termination mechanisms include:
+      attempt or retry guards (`when attempts.<state> < N`, `when
+      retries.<state> < N`); guards on workflow state that the loop
+      itself can change (`when task.tests_written`, an explicit flag
+      written by a state in the loop); human choice gates that can
+      exit; verdict outcomes that route out of the loop. Artifact
+      progress is *not* a termination mechanism; an iteration that
+      sees fresh inputs but has no way to exit will still run until
+      `max_total_steps` is exhausted. The lint warning surfaces
+      cycles that have no termination mechanism on any transition.
 12. Profile-specific validation rules registered by any profile in
-    use also pass. Conflicting profile registrations (same type
-    name, conflicting validation rules) are themselves load errors.
+    use also pass. Conflicting profile registrations (same artifact
+    type name, actor backing name, state-level keyword name,
+    postcondition name, guard predicate name, or validation rule
+    name) are themselves load errors. Profile-registered
+    backing-scoped state-level keywords are legal only inside
+    states whose actor backing the profile registers or
+    co-registers; uses outside that scope are load errors.
 13. Every external input referenced in guards or templates is
     declared in the workflow's external input list.
 
@@ -951,7 +1069,11 @@ logging, downstream references) depends on result shape.
   needs a canonical result shape (status, outcome, output,
   artifacts_written, error, duration, metadata, plus backing-specific
   extensions). The acid test sketches will force this to be specified
-  before the runner can be built.
+  before the runner can be built. The shell actor's structured result
+  in particular must include per-command exit codes, stdout, stderr,
+  aggregate pass/fail, and total duration; the runner spec must define
+  how profile result parsers consume this to populate declared
+  artifacts.
 - Exact concrete syntax (the surface form, punctuation, indentation
   rules in detail, reserved word list, EBNF or equivalent).
 - The full set of guard predicates and their semantics.
