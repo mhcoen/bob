@@ -3,28 +3,27 @@
 Two tests prove the wrapper interface works on both backends:
 
 1. The direct path uses the legacy run_task body (now lifted into
-   invoke_code_edit's direct backend). Subprocess.Popen is mocked the
-   same way the rest of mcloop's tests mock it: _build_command,
-   _run_session, _write_log are patched on the mcloop.runner module
-   namespace so any caller (including invoke_code_edit) sees the
-   patches.
-2. The orchestra path uses orchestra.run_workflow under a temporary
-   .orchestra/config.json that maps code_edit to the single pattern.
-   Subprocess.Popen and subprocess.run are patched the same way
-   orchestra's parity test patches them, so the test runs offline and
-   returns a deterministic transcript and changed-files list.
+   invoke_code_edit's direct backend). The runner private helpers are
+   patched on the mcloop.runner module namespace so any caller
+   (including invoke_code_edit) sees the patches.
+2. The orchestra path mocks orchestra.run_workflow itself, the only
+   public boundary the wrapper crosses. The test asserts that the
+   model, timeout, log_dir, and project_dir the caller passed all
+   arrive in invocation_options, and that the WorkflowRunResult the
+   stub returns is converted into the expected CodeEditResult shape.
 
 Both backends produce a CodeEditResult; the assertions confirm the
 shape and the structural fields the plan calls out (success,
-exit_code, changed_files, log_path).
+exit_code, changed_files, log_path). The orchestra-backend test
+patches only the public ``orchestra.run_workflow`` symbol so internal
+orchestra refactors do not break this suite.
 """
 
 from __future__ import annotations
 
-import io
 import json
-import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -114,66 +113,31 @@ def test_direct_backend_returns_code_edit_result(tmp_path: Path) -> None:
 # --------------------------------------------------------------------
 
 
-_TRANSCRIPT_LINES = [
-    json.dumps({"type": "system", "subtype": "init"}) + "\n",
-    json.dumps(
-        {
-            "type": "assistant",
-            "message": {"content": [{"type": "text", "text": "ok"}]},
-        }
-    )
-    + "\n",
-    json.dumps({"type": "result", "subtype": "success"}) + "\n",
-]
+def _make_workflow_run_result(log_path: Path) -> Any:
+    """Return a duck-typed stand-in for ``WorkflowRunResult``.
 
-
-class _FakePopen:
-    """Subprocess.Popen replacement that yields a canned transcript.
-
-    Mirrors the FakePopen orchestra's parity test uses. Watchdog
-    spawns (sh -c) get a None stdout so they exit cleanly without
-    interfering with the captured transcript.
+    The wrapper only reads ``terminal``, ``log_path``, and
+    ``summary``. Patching at the ``run_workflow`` boundary means the
+    test does not need to construct the full real type, and a future
+    orchestra refactor that adds required fields to
+    ``WorkflowRunResult`` cannot break this test as long as the three
+    consumed fields keep their names.
     """
-
-    def __init__(
-        self,
-        cmd: list[str],
-        cwd: Any = None,
-        stdin: Any = None,
-        stdout: Any = None,
-        stderr: Any = None,
-        text: bool = True,
-        env: dict[str, str] | None = None,
-        start_new_session: bool = False,
-    ) -> None:
-        self.args = cmd
-        self.cwd = cwd
-        self.env = env
-        self.pid = 12345
-        self.returncode: int | None = None
-        is_watchdog = bool(cmd and cmd[0] == "sh" and "-c" in cmd)
-        if is_watchdog:
-            self.stdout = None
-        else:
-            self.stdout = io.StringIO("".join(_TRANSCRIPT_LINES))
-
-    def wait(self, timeout: float | None = None) -> int:
-        if self.returncode is None:
-            self.returncode = 0
-        return self.returncode
-
-    def kill(self) -> None:
-        if self.returncode is None:
-            self.returncode = -9
-
-
-def _fake_subprocess_run(*args: Any, **kwargs: Any) -> Any:
-    cmd = args[0] if args else kwargs.get("args")
-    return subprocess.CompletedProcess(
-        args=cmd,
-        returncode=0,
-        stdout=" M src/example.py\n",
-        stderr="",
+    summary = {
+        "terminal": "done",
+        "output": "ok\n",
+        "exit_code": 0,
+        "changed_files": ["src/example.py"],
+        "files_changed": True,
+        "adapter_log": str(log_path),
+    }
+    return SimpleNamespace(
+        run_id="run-test-1",
+        terminal="done",
+        envelope=None,
+        artifacts={},
+        log_path=log_path,
+        summary=summary,
     )
 
 
@@ -181,9 +145,11 @@ def test_orchestra_backend_returns_code_edit_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When .orchestra/config.json maps code_edit to single, the
-    orchestra backend fires and the result carries the orchestra
-    summary plus the same structural fields the direct backend
-    returns.
+    orchestra backend fires. The wrapper crosses one public boundary
+    (``orchestra.run_workflow``); patch only that symbol and assert
+    the wrapper threads ``model``, ``timeout``, ``log_dir``, and
+    ``project_dir`` through ``invocation_options``, and converts the
+    returned ``WorkflowRunResult`` into the expected ``CodeEditResult``.
     """
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -210,37 +176,61 @@ def test_orchestra_backend_returns_code_edit_result(
     )
 
     log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    adapter_log = log_dir / "session.log"
+    adapter_log.write_text("ok\n")
+
     inputs = _representative_inputs(project_dir)
     inputs["log_dir"] = log_dir
+    inputs["timeout"] = 1234
 
-    # Patch the orchestra subprocess layer the same way orchestra's
-    # parity test does. The orchestra adapter uses its own
-    # subprocess.Popen import inside orchestra.adapters._subprocess.
-    from orchestra.adapters import _subprocess as orch_sp
+    captured: dict[str, Any] = {}
 
-    # Isolate provider env from the developer's home directory.
-    monkeypatch.setattr(
-        orch_sp, "load_role_config", lambda role, source=None: None
-    )
-    monkeypatch.setattr(orch_sp.subprocess, "Popen", _FakePopen)
-    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
-    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+    def _stub_run_workflow(
+        workflow_name: str,
+        inputs_arg: dict[str, Any],
+        config: Any,
+        *,
+        invocation_options: dict[str, Any] | None = None,
+        project_dir: Any = None,
+        data_root: Any = None,
+        **extra: Any,
+    ) -> Any:
+        captured["workflow_name"] = workflow_name
+        captured["inputs"] = inputs_arg
+        captured["invocation_options"] = invocation_options
+        captured["project_dir"] = project_dir
+        captured["data_root"] = data_root
+        return _make_workflow_run_result(adapter_log)
+
+    import mcloop.code_edit as _ce
+
+    monkeypatch.setattr("orchestra.run_workflow", _stub_run_workflow)
+    monkeypatch.setattr(_ce, "run_workflow", _stub_run_workflow, raising=False)
 
     assert _select_backend(project_dir) == "orchestra"
     result = invoke_code_edit(**inputs)
 
+    assert captured["workflow_name"] == "code_edit"
+    assert captured["invocation_options"] is not None
+    invo = captured["invocation_options"]
+    assert invo["model"] == "opus"
+    assert invo["timeout"] == 1234
+    assert invo["log_dir"] == str(log_dir)
+    assert invo["project_dir"] == str(project_dir)
+    assert Path(captured["project_dir"]) == project_dir
+    assert Path(captured["data_root"]) == log_dir / "orchestra-runs"
+    assert captured["inputs"]["instruction"] == inputs["instruction"]
+
     assert isinstance(result, CodeEditResult)
     assert result.success is True
     assert result.exit_code == 0
-    # The transcript reaches the wrapper as the captured output.
-    for line in _TRANSCRIPT_LINES:
-        assert line.strip() in result.output
-    # The orchestra summary surfaces git-status changed files.
+    assert result.output == "ok\n"
     assert result.changed_files == ["src/example.py"]
     assert result.summary is not None
     assert result.summary.get("terminal") == "done"
     assert result.summary.get("exit_code") == 0
-    assert result.log_path.exists()
+    assert result.log_path == adapter_log
 
 
 def test_orchestra_backend_falls_back_when_pattern_is_direct(
