@@ -28,6 +28,7 @@ select = ["E", "F", "I", "W"]
 [project.optional-dependencies]
 dev = [
     "ruff",
+    "mypy>=1.10",
     "pytest>=8.0",
     "pytest-xdist>=3.5",
     "pytest-timeout>=2.3",
@@ -47,3 +48,9 @@ strict = false
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+# Editable installs of sibling packages (orchestra) use a PEP 660
+# import hook that mypy's analyzer does not follow. Pointing
+# mypy_path at the orchestra source directory lets mypy see the
+# package's py.typed marker and stubs without needing a non-editable
+# install.
+mypy_path = "/Users/mhcoen/proj/orchestra"
