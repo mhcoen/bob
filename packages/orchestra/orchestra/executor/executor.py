@@ -712,8 +712,15 @@ class Executor:
         the executor never wraps them in this thread-based timer.
         Wrapping would race the adapter's own loop and could discard
         its structured -2 payload before run_session returned.
+
+        For dispatcher adapters that fan out to a per-role adapter,
+        the actual adapter that will run is stashed on
+        ``prepared.inner["_role_adapter"]``. The flag is read from
+        there so a mixed dispatcher (some role-adapters manage their
+        own timeout, others do not) honors each adapter's preference
+        per dispatch instead of collapsing to a single aggregate.
         """
-        if timeout_ms is None or getattr(adapter, "manages_own_timeout", False):
+        if timeout_ms is None or _adapter_manages_own_timeout(adapter, prepared):
             return adapter.invoke(prepared)
 
         result_box: dict[str, Any] = {}
@@ -744,6 +751,27 @@ class Executor:
 
 class _TimeoutSignal(Exception):
     pass
+
+
+def _adapter_manages_own_timeout(
+    adapter: Adapter, prepared: PreparedInvocation
+) -> bool:
+    """Return whether the actually-selected adapter manages its own
+    timeout, accounting for dispatchers that fan out per role.
+
+    A dispatcher stashes the picked role-adapter on the prepared
+    invocation under ``_role_adapter``. The executor consults that
+    instance's flag instead of the dispatcher's so a mixed dispatcher
+    does not mask a True-flagged adapter behind a False aggregate.
+    Falls back to the adapter the executor already holds when the
+    prepared invocation does not carry a per-dispatch reference.
+    """
+    inner = prepared.inner
+    if isinstance(inner, dict):
+        selected = inner.get("_role_adapter")
+        if selected is not None:
+            return bool(getattr(selected, "manages_own_timeout", False))
+    return bool(getattr(adapter, "manages_own_timeout", False))
 
 
 # --------------------------------------------------------------------

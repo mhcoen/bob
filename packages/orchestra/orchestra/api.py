@@ -160,15 +160,13 @@ class _PerRoleDispatcher:
                 "_PerRoleDispatcher requires at least one role-adapter binding"
             )
         self._adapters: dict[str, Any] = dict(role_to_adapter)
-        # Aggregate the manages_own_timeout flag so the executor can
-        # skip its thread-based timer when every underlying adapter
-        # owns its timeout. Mixed adapter sets fall back to executor
-        # enforcement (False) because the safe answer is the more
-        # restrictive one.
-        self.manages_own_timeout = all(
-            getattr(a, "manages_own_timeout", False)
-            for a in self._adapters.values()
-        )
+        # Note: the dispatcher does not expose a static
+        # ``manages_own_timeout`` attribute. The executor consults the
+        # actually-selected role-adapter's flag via
+        # ``prepared.inner["_role_adapter"]`` after ``prepare`` has
+        # picked the adapter. A static aggregate (all-or-nothing) would
+        # mask True-flagged adapters in a future mixed dispatcher and
+        # reintroduce the timeout race the per-dispatch lookup avoids.
 
     def _pick(self, request: InvocationRequest) -> Any:
         binding = request.actor_binding or {}
