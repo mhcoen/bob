@@ -18,18 +18,44 @@ Adapter registration model
 
 The slice-1 executor dispatches adapters by ``state.actor.kind`` (one
 of ``model``, ``agent``, ``shell``, ``human``). The integration plan
-distinguishes text-role adapters from edit-agent adapters by
-backing name (``claude_code_text`` vs ``claude_code_agent``). The api
-bridges the two: it reads the role-binding's ``adapter`` key from
-config, instantiates the corresponding class with the role's model and
-parameters, and registers it under both its canonical backing name
-(for introspection and direct lookup) and the conventional kind name
-the workflow uses for that role (``model`` for text, ``agent`` for
-edit-agent).
+needs per-role binding so a workflow with two text-role states can use
+two different models, two different adapter parameter sets, or even
+two different adapter classes. The api solves this with a
+``_PerRoleDispatcher`` registered under each kind that the workflow
+uses. The dispatcher fans out to a per-role adapter instance based on
+``request.actor_binding["role"]`` (which the executor already
+populates from the state's ``role`` clause). State declarations that
+omit ``role`` fall back to the only adapter registered under that
+kind, or raise.
+
+Invocation options
+------------------
+
+Mcloop's wrapper interface takes ``model``, ``timeout``, and
+``log_dir`` at the call site. These are not workflow inputs; they are
+per-invocation knobs the consumer overrides without editing the
+workflow file or the project config. ``run_workflow`` accepts them as
+an ``invocation_options`` dict and threads them to the executor, which
+merges them into every state's ``backing_options`` and into the actor
+binding's ``model`` field.
+
+Instruction template override
+-----------------------------
+
+When a role binding in the project config sets
+``instruction_template``, the api rebuilds the workflow's role table
+so that role's ``default_prompt`` points at the configured template
+path. Path-shaped values resolve relative to the project directory or
+the workflow's source directory; inline strings are written to a
+side-car file in the run directory and referenced from there. The
+state's own ``prompt`` clause still wins over the role default per
+slice 1 grammar semantics; the override only takes effect for states
+that rely on the role's default prompt.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,19 +69,27 @@ from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.log import LogWriter
+from orchestra.prompts import build_code_edit_prompt
 from orchestra.registry.registry import (
     ProfileRegistry,
     ResultParser,
     with_core,
 )
-from orchestra.spine import NO_INITIAL, Envelope, Workflow
+from orchestra.spine import (
+    NO_INITIAL,
+    Envelope,
+    InvocationRequest,
+    PreparedInvocation,
+    PromptSource,
+    RoleDecl,
+    Workflow,
+)
 from orchestra.store import ArtifactStore
 
-# Maps a role's adapter name (from config) to the workflow actor kind
-# the api will register that adapter under. Slice-1 grammar limits the
-# kind vocabulary to {model, agent, shell, human}; the integration plan
-# pairs text adapters with the ``model`` kind and edit-agent adapters
-# with the ``agent`` kind.
+# Maps a configured adapter name to the workflow actor kind it serves.
+# Slice 1 grammar limits the kind vocabulary to {model, agent, shell,
+# human}; the integration plan pairs text adapters with the ``model``
+# kind and edit-agent adapters with the ``agent`` kind.
 _ADAPTER_TO_KIND: dict[str, str] = {
     "claude_code_text": "model",
     "claude_code_agent": "agent",
@@ -65,6 +99,18 @@ _ADAPTER_CLASSES: dict[str, type] = {
     "claude_code_text": ClaudeCodeTextAdapter,
     "claude_code_agent": ClaudeCodeAgentAdapter,
 }
+
+FINAL_PROMPT_INPUT: str = "final_prompt"
+"""Synthetic external input the api injects for code-edit workflows.
+
+The api computes the prompt up front via ``orchestra.prompts.build_code_edit_prompt``
+and supplies it under this name. The packaged templates substitute it
+directly so prompt construction stays faithful to mcloop's branching
+without needing format_map conditionals."""
+
+_CODE_EDIT_WORKFLOW_NAMES: frozenset[str] = frozenset(
+    {"single", "draft_then_adjudicate", "propose_critique_synthesize"}
+)
 
 
 class WorkflowApiError(OrchestraError):
@@ -83,13 +129,7 @@ class ArtifactView:
 
 @dataclass
 class WorkflowRunResult:
-    """Outcome of a ``run_workflow`` invocation.
-
-    Carries the fields the call site needs without forcing it to dig
-    through the artifact store. ``terminal`` is ``"done"`` or ``"stop"``
-    matching the executor's terminal target. ``envelope`` is the final
-    state's envelope.
-    """
+    """Outcome of a ``run_workflow`` invocation."""
 
     run_id: str
     terminal: str
@@ -100,18 +140,80 @@ class WorkflowRunResult:
 
 
 # --------------------------------------------------------------------
-# Registry construction
+# Per-role adapter dispatcher
 # --------------------------------------------------------------------
 
 
-def _adapter_factory(
-    binding: RoleBinding,
-) -> tuple[Any, str]:
-    """Return ``(factory, kind)`` for a configured role.
+class _PerRoleDispatcher:
+    """Adapter that fans out to a per-role adapter instance.
 
-    The factory closes over the role's model and parameters so that
-    ``adapter_for(kind)`` returns an instance with the right defaults
-    without needing per-call wiring.
+    Registered under a workflow actor kind ("model" or "agent"). On
+    ``prepare`` it reads ``request.actor_binding["role"]`` and forwards
+    the call to the matching role adapter. ``invoke`` and ``cancel``
+    consult a per-prepare back-reference so the same adapter handles
+    the same call across the prepare/invoke boundary.
+    """
+
+    def __init__(self, role_to_adapter: dict[str, Any]) -> None:
+        if not role_to_adapter:
+            raise WorkflowApiError(
+                "_PerRoleDispatcher requires at least one role-adapter binding"
+            )
+        self._adapters: dict[str, Any] = dict(role_to_adapter)
+
+    def _pick(self, request: InvocationRequest) -> Any:
+        binding = request.actor_binding or {}
+        role = binding.get("role")
+        if isinstance(role, str) and role in self._adapters:
+            return self._adapters[role]
+        if len(self._adapters) == 1:
+            return next(iter(self._adapters.values()))
+        raise WorkflowApiError(
+            f"no adapter configured for role {role!r}. "
+            f"Configured roles: {sorted(self._adapters)}"
+        )
+
+    def prepare(self, request: InvocationRequest) -> PreparedInvocation:
+        adapter = self._pick(request)
+        prepared = adapter.prepare(request)
+        return PreparedInvocation(
+            request=prepared.request,
+            summary=prepared.summary,
+            inner={
+                "_role_adapter": adapter,
+                "_role_prepared": prepared,
+            },
+        )
+
+    def invoke(self, prepared: PreparedInvocation) -> dict[str, Any]:
+        adapter = prepared.inner["_role_adapter"]
+        inner_prepared = prepared.inner["_role_prepared"]
+        result: dict[str, Any] = adapter.invoke(inner_prepared)
+        return result
+
+    def cancel(self, prepared: PreparedInvocation) -> None:
+        adapter = prepared.inner["_role_adapter"]
+        inner_prepared = prepared.inner["_role_prepared"]
+        adapter.cancel(inner_prepared)
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "kind": "per_role_dispatcher",
+            "roles": sorted(self._adapters.keys()),
+        }
+
+
+# --------------------------------------------------------------------
+# Adapter and registry construction
+# --------------------------------------------------------------------
+
+
+def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
+    """Instantiate the adapter for ``binding`` and return ``(adapter, kind)``.
+
+    The instance carries the role's configured model, tool override,
+    and adapter parameters as defaults so per-call requests can omit
+    them and still get the right behavior.
     """
     adapter_name = binding.adapter
     if adapter_name not in _ADAPTER_CLASSES:
@@ -121,7 +223,7 @@ def _adapter_factory(
         )
     cls = _ADAPTER_CLASSES[adapter_name]
     kind = _ADAPTER_TO_KIND[adapter_name]
-    params = dict(binding.parameters)
+    params: dict[str, Any] = dict(binding.parameters)
     if binding.model is not None:
         params.setdefault("default_model", binding.model)
     if binding.tools and binding.tools != "default":
@@ -129,50 +231,48 @@ def _adapter_factory(
             params.setdefault("default_allowed_tools", binding.tools)
         elif adapter_name == "claude_code_text":
             params.setdefault("allowed_tools", binding.tools)
-
-    def factory() -> Any:
-        return cls(**params)
-
-    return factory, kind
+    return cls(**params), kind
 
 
 def _build_registry(
     role_bindings: dict[str, RoleBinding],
 ) -> ProfileRegistry:
-    """Build a registry whose backings are wired to the configured
-    adapters.
+    """Build a registry whose actor backings dispatch per role.
 
-    Backings used by the configured roles ("model" and/or "agent") get
-    the configured adapter. Mocks are kept for the kinds the workflow
-    might still touch (``human``, ``shell``) so a multi-step workflow
-    that includes a human gate or a shell step does not crash on
-    lookup.
+    For each adapter kind referenced by the configured roles, the api
+    registers a single ``_PerRoleDispatcher`` instance whose role
+    table maps role names to per-role adapter instances. This lets a
+    multi-state workflow with two text-role states bind two different
+    models and adapter parameter sets without collapsing them.
     """
     reg = with_core()
 
-    needed_kinds: set[str] = set()
-    for binding in role_bindings.values():
-        factory, kind = _adapter_factory(binding)
-        # Replace the mock under this kind with the configured adapter.
-        # Direct dict assignment is intentional: ``register_actor_backing``
+    by_kind: dict[str, dict[str, Any]] = {}
+    for role_name, binding in role_bindings.items():
+        adapter, kind = _build_role_adapter(binding)
+        by_kind.setdefault(kind, {})[role_name] = adapter
+
+    for kind, role_to_adapter in by_kind.items():
+        dispatcher = _PerRoleDispatcher(role_to_adapter)
+
+        def make_factory(d: _PerRoleDispatcher) -> Any:
+            def factory() -> Any:
+                return d
+
+            return factory
+
+        # Replace the slice-1 mock under this kind with the dispatcher.
+        # Direct dict assignment is intentional: register_actor_backing
         # rejects duplicate names, but the api needs to override the
         # mock from with_core() for the kinds the configured roles use.
-        reg.actor_backings[kind] = factory
-        # Invalidate any cached instance so the new factory is honored
-        # on the next lookup.
+        reg.actor_backings[kind] = make_factory(dispatcher)
         reg._adapter_cache.pop(kind, None)
-        # Also register under the canonical adapter name when free, so
-        # callers can introspect or look up by adapter name directly.
-        canonical = binding.adapter
-        if canonical not in reg.actor_backings:
-            reg.actor_backings[canonical] = factory
-        needed_kinds.add(kind)
 
-    # The slice-1 identity_text parser is registered only for the
-    # ``model`` backing. Add an equivalent registration for ``agent`` so
-    # workflows whose final state is ``actor agent`` can write a text
-    # artifact without needing a profile registration.
-    if "agent" in needed_kinds:
+    if "agent" in by_kind:
+        # The slice-1 identity_text parser is registered for the
+        # ``model`` backing only. Mirror it for ``agent`` so a
+        # workflow whose final state is ``actor agent`` can write a
+        # text artifact without needing a profile.
         reg.register_result_parser(
             ResultParser(
                 name="identity_text_agent",
@@ -183,6 +283,91 @@ def _build_registry(
         )
 
     return reg
+
+
+# --------------------------------------------------------------------
+# Instruction template override
+# --------------------------------------------------------------------
+
+
+def _apply_instruction_templates(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+    *,
+    project_dir: Path | None,
+    run_dir: Path,
+) -> Workflow:
+    """Rebuild ``workflow.roles`` so each role's default prompt points
+    at the config-supplied template path or inline text.
+
+    Path-shaped values resolve in this order: absolute path as given,
+    relative to ``project_dir``, relative to the workflow's
+    ``source_dir``. Inline strings (anything that is not an existing
+    file) are written to a side-car file in ``run_dir`` and referenced
+    by absolute path.
+    """
+    if not workflow.roles:
+        return workflow
+    new_roles: list[RoleDecl] = []
+    changed = False
+    for role in workflow.roles:
+        binding = role_bindings.get(role.name)
+        override = binding.instruction_template if binding is not None else None
+        if not override:
+            new_roles.append(role)
+            continue
+        resolved = _resolve_template(
+            override,
+            project_dir=project_dir,
+            workflow_source_dir=Path(workflow.source_dir)
+            if workflow.source_dir
+            else None,
+            run_dir=run_dir,
+            role_name=role.name,
+        )
+        old = role.default_prompt
+        new_prompt = PromptSource(
+            kind="template" if old.kind == "template" else "file",
+            path=str(resolved),
+            template_vars=old.template_vars,
+            from_ref=old.from_ref,
+        )
+        new_roles.append(RoleDecl(name=role.name, default_prompt=new_prompt))
+        changed = True
+    if not changed:
+        return workflow
+    workflow.roles = tuple(new_roles)
+    return workflow
+
+
+def _resolve_template(
+    value: str,
+    *,
+    project_dir: Path | None,
+    workflow_source_dir: Path | None,
+    run_dir: Path,
+    role_name: str,
+) -> Path:
+    candidates: list[Path] = []
+    raw = Path(value)
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        if project_dir is not None:
+            candidates.append(project_dir / raw)
+        if workflow_source_dir is not None:
+            candidates.append(workflow_source_dir / raw)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    # Inline string fallback. Hash for stable filename across reruns.
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    side_dir = run_dir / "instruction_templates"
+    side_dir.mkdir(parents=True, exist_ok=True)
+    side_path = side_dir / f"{role_name}_{digest}.md"
+    if not side_path.exists():
+        side_path.write_text(value, encoding="utf-8")
+    return side_path
 
 
 # --------------------------------------------------------------------
@@ -243,12 +428,7 @@ def _build_summary(
     envelope: Envelope,
     artifacts: dict[str, ArtifactView],
 ) -> dict[str, Any]:
-    """Compose the adapter-facing summary dict.
-
-    Includes the terminal outcome, the final state's exit code if the
-    payload carries one, the final state's output text, and whether
-    any files changed (when the payload reports ``changed_files``).
-    """
+    """Compose the adapter-facing summary dict."""
     payload = envelope.payload or {}
     fields = payload.get("fields") or {}
     output = payload.get("output")
@@ -280,6 +460,26 @@ def _build_summary(
     return summary
 
 
+def _maybe_inject_final_prompt(
+    workflow: Workflow,
+    inputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Inject ``final_prompt`` for code-edit workflows.
+
+    The packaged code-edit workflows declare ``final_prompt`` as an
+    external input. The api computes its value by running the lifted
+    mcloop prompt builders on the other inputs, mirroring the
+    branching mcloop's run_task does at the call site.
+    """
+    declared = {ext.name for ext in workflow.external_inputs}
+    if FINAL_PROMPT_INPUT not in declared:
+        return inputs
+    if FINAL_PROMPT_INPUT in inputs:
+        return inputs
+    final_prompt = build_code_edit_prompt(inputs)
+    return {**inputs, FINAL_PROMPT_INPUT: final_prompt}
+
+
 # --------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------
@@ -290,24 +490,18 @@ def run_workflow(
     inputs: dict[str, Any],
     config: OrchestraConfig | dict[str, Any],
     *,
+    invocation_options: dict[str, Any] | None = None,
     project_dir: Path | str | None = None,
     data_root: Path | str | None = None,
 ) -> WorkflowRunResult:
     """Execute a configured workflow by name.
 
-    ``name`` is the config key under ``workflows`` (e.g. ``code_edit``).
-    The config picks the pattern (the ``.orc`` file in the package or
-    the project override), and the per-role adapter, model, template,
-    and tool overrides.
-
-    ``inputs`` are passed through to the workflow's ``external_input``
-    declarations. The api validates that every declared input is
-    supplied and no extra inputs are passed.
-
-    ``project_dir`` controls workflow override lookup and the default
-    working directory passed to subprocess adapters via
-    ``external_inputs``. ``data_root`` controls where run state is
-    persisted; defaults to ``~/.orchestra/runs``.
+    ``inputs`` must satisfy the workflow's declared ``external_input``s
+    exactly. ``invocation_options`` carries per-call overrides
+    (``model``, ``timeout`` in seconds, ``log_dir``, ``project_dir``,
+    plus any adapter-specific keys) that flow through to the adapter
+    via ``backing_options`` and override the role's configured model
+    on the actor binding.
     """
     if isinstance(config, dict):
         cfg = OrchestraConfig.from_dict(config)
@@ -321,7 +515,6 @@ def run_workflow(
 
     registry = _build_registry(workflow_cfg.roles)
     workflow = load_workflow(workflow_path, registry)
-    _validate_inputs(workflow, inputs)
 
     run_id = new_run_id()
     if data_root is None:
@@ -330,6 +523,20 @@ def run_workflow(
         run_root = Path(data_root)
     run_dir = run_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    workflow = _apply_instruction_templates(
+        workflow,
+        workflow_cfg.roles,
+        project_dir=Path(project_dir) if project_dir is not None else None,
+        run_dir=run_dir,
+    )
+
+    enriched = _maybe_inject_final_prompt(workflow, inputs)
+    _validate_inputs(workflow, enriched)
+
+    inv_opts: dict[str, Any] = dict(invocation_options or {})
+    if project_dir is not None and "project_dir" not in inv_opts:
+        inv_opts["project_dir"] = str(project_dir)
 
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log_path = run_dir / "log.jsonl"
@@ -342,8 +549,9 @@ def run_workflow(
             "config_name": name,
             "pattern": workflow_cfg.pattern,
             "spec_version": workflow.spec_version,
-            "external_inputs": inputs,
+            "external_inputs": enriched,
             "max_total_steps": workflow.max_total_steps,
+            "invocation_options": _safe_options(inv_opts),
         },
     )
 
@@ -354,7 +562,8 @@ def run_workflow(
         log=log,
         run_dir=run_dir,
         run_id=run_id,
-        external_inputs=dict(inputs),
+        external_inputs=dict(enriched),
+        invocation_options=inv_opts,
     )
 
     terminal: str = "stop"
@@ -367,21 +576,18 @@ def run_workflow(
         )
         log.close()
 
-    final_state_name = (
-        workflow.states[-1].name if workflow.states else workflow.start_state_name()
-    )
     envelopes = executor._envelopes
     last_state = (
         executor._last_state
         if executor._last_state is not None
-        else final_state_name
+        else (workflow.states[-1].name if workflow.states else workflow.start_state_name())
     )
     if last_state in envelopes:
         envelope = envelopes[last_state]
     elif envelopes:
-        # Fallback: the most recently executed state.
         envelope = next(iter(reversed(list(envelopes.values()))))
     else:
+        store.close()
         raise WorkflowApiError(
             f"workflow {name!r} produced no envelopes"
         )
@@ -400,3 +606,14 @@ def run_workflow(
         log_path=log_path,
         summary=summary,
     )
+
+
+def _safe_options(opts: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-friendly view of ``opts`` for the run_start log."""
+    out: dict[str, Any] = {}
+    for k, v in opts.items():
+        if isinstance(v, Path):
+            out[k] = str(v)
+        else:
+            out[k] = v
+    return out

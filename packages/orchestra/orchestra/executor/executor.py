@@ -98,6 +98,10 @@ class Executor:
         envelopes: dict[str, Envelope] | None = None,
         current_state: str | None = None,
         step_count: int = 0,
+        # Per-call invocation options. Merged into every state's
+        # backing_options at invoke time so adapters see the overrides
+        # without polluting the workflow's external_inputs surface.
+        invocation_options: dict[str, Any] | None = None,
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -115,6 +119,7 @@ class Executor:
         self._step_count = step_count
         self._payloads_dir = run_dir / "payloads"
         self._payloads_dir.mkdir(parents=True, exist_ok=True)
+        self._invocation_options: dict[str, Any] = dict(invocation_options or {})
 
     # ----- entry points ------------------------------------------
 
@@ -174,6 +179,18 @@ class Executor:
         backing_options = dict(state.backing_options)
         if state.options and state.actor.kind == "human":
             backing_options.setdefault("options", list(state.options))
+        # Merge per-call invocation options. These are call-site
+        # overrides (model, timeout, log_dir, project_dir) and win over
+        # the state's declared backing_options so a wrapper like
+        # mcloop's invoke_code_edit can pin values for this run
+        # without editing the workflow.
+        backing_options.update(self._invocation_options)
+        opt_timeout = self._invocation_options.get("timeout")
+        if isinstance(opt_timeout, int | float) and opt_timeout > 0:
+            timeout_ms = int(opt_timeout * 1000)
+        opt_model = self._invocation_options.get("model")
+        if isinstance(opt_model, str) and opt_model:
+            actor_binding = {**actor_binding, "model": opt_model}
 
         request = InvocationRequest(
             state_id=state.name,
