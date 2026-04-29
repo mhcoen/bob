@@ -491,6 +491,37 @@ def _build_bug_prompt(
     return "\n\n".join(parts)
 
 
+def _warn_if_orchestra_bypassed(
+    project_dir: Path, *, cli: str, allowed_tools: str | None
+) -> None:
+    """Warn when a custom tool list or non-claude cli routes around
+    orchestra even though the project configured a non-direct backend.
+
+    Slice 1 orchestra adapters use a fixed tool set, so the legacy path
+    is the right answer here. Surfacing the bypass tells the user that
+    their orchestra config did not apply to this call and prevents a
+    silent regression once orchestra adapters learn custom tool lists.
+    """
+    import sys as _sys
+
+    try:
+        from mcloop.code_edit import _select_backend
+    except Exception:
+        return
+    try:
+        backend = _select_backend(Path(project_dir))
+    except Exception:
+        return
+    if backend != "orchestra":
+        return
+    reason = "custom allowed_tools" if allowed_tools else f"cli={cli!r}"
+    print(
+        f"[orchestra] bypassed for this call ({reason}); "
+        "configured workflow did not run.",
+        file=_sys.stderr,
+    )
+
+
 def run_task(
     task_text: str,
     cli: str,
@@ -547,6 +578,12 @@ def run_task(
             exit_code=ce.exit_code,
             log_path=ce.log_path,
         )
+
+    # Legacy path. If the project has opted in to orchestra for
+    # code_edit but a custom allowed_tools list (or codex cli) routed
+    # us here, warn so the user does not silently lose orchestra
+    # routing on a single call.
+    _warn_if_orchestra_bypassed(project_dir, cli=cli, allowed_tools=allowed_tools)
 
     if prior_errors:
         prompt = _build_bug_prompt(
