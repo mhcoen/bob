@@ -157,16 +157,44 @@ class OrchestraConfig:
         return cls(workflows=workflows)
 
 
+def default_config() -> OrchestraConfig:
+    """Return the default OrchestraConfig.
+
+    The default maps ``code_edit`` to the ``single`` pattern with the
+    edit-agent adapter, no model override, default tools, and no
+    parameters. This preserves zero-regression fallback when a project
+    has not yet written a ``.orchestra/config.json``: the consumer
+    (mcloop) can call ``run_workflow("code_edit", ...)`` without first
+    creating a config file and still get the current behavior.
+    """
+    return OrchestraConfig(
+        workflows={
+            "code_edit": WorkflowConfig(
+                pattern="single",
+                roles={
+                    "editor": RoleBinding(
+                        adapter="claude_code_agent",
+                        model=None,
+                        instruction_template=None,
+                        tools=None,
+                        parameters={},
+                    )
+                },
+            )
+        }
+    )
+
+
 def load_config(project_dir: Path | str) -> OrchestraConfig:
     """Load ``.orchestra/config.json`` from ``project_dir``.
 
-    Returns an empty ``OrchestraConfig`` if the file does not exist.
-    Raises ``ConfigError`` if the file exists but cannot be parsed or
-    fails schema validation.
+    Returns the default config (see ``default_config``) if the file
+    does not exist. Raises ``ConfigError`` if the file exists but
+    cannot be parsed or fails schema validation.
     """
     path = Path(project_dir) / CONFIG_RELATIVE_PATH
     if not path.is_file():
-        return OrchestraConfig()
+        return default_config()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

@@ -22,6 +22,7 @@ from orchestra.config import (
     OrchestraConfig,
     RoleBinding,
     WorkflowConfig,
+    default_config,
     load_config,
 )
 
@@ -35,6 +36,7 @@ __all__ = [
     "WorkflowApiError",
     "WorkflowConfig",
     "WorkflowRunResult",
+    "default_config",
     "load_config",
     "run_workflow",
 ]

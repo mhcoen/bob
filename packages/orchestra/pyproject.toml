@@ -25,6 +25,12 @@ orchestra = "orchestra.cli:main"
 [tool.setuptools.packages.find]
 include = ["orchestra*"]
 
+[tool.setuptools.package-data]
+orchestra = [
+    "workflows/*.orc",
+    "workflows/templates/*.md",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
