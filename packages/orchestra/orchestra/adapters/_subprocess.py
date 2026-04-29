@@ -33,6 +33,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -369,9 +370,48 @@ def _slugify(text: str) -> str:
 # --------------------------------------------------------------------
 
 
-_active_process: subprocess.Popen[str] | None = None
 _last_output_lines: collections.deque[str] = collections.deque(maxlen=20)
-_interrupted: bool = False
+
+
+@dataclass
+class SessionState:
+    """Per-call state for one ``run_session`` invocation.
+
+    Each ``run_session`` call allocates one ``SessionState`` and
+    registers it as the thread-local current session for the duration
+    of the call. Mcloop signal handlers operate on the current session
+    or on an explicitly passed handle.
+
+    Carrying state per call avoids the module-global races where two
+    in-flight sessions would overwrite each other's active process or
+    where ``set_interrupted(False)`` at the top of one ``run_session``
+    would clear an interrupt aimed at a different session.
+    """
+
+    process: subprocess.Popen[str] | None = None
+    interrupted: bool = False
+    pid_file: Path | None = None
+    watchdog: subprocess.Popen[bytes] | None = None
+
+
+# Thread-local "current session" pointer. Mcloop's signal handler runs
+# on the same thread as run_session (signal delivery in CPython is
+# main-thread only), so a thread-local fits the slice 1 serial model
+# while still scoping state correctly when the same process happens to
+# run multiple threads.
+_current: threading.local = threading.local()
+
+
+def _current_session() -> SessionState | None:
+    return getattr(_current, "session", None)
+
+
+def _set_current_session(s: SessionState | None) -> None:
+    if s is None:
+        if hasattr(_current, "session"):
+            del _current.session
+    else:
+        _current.session = s
 
 
 # --------------------------------------------------------------------
@@ -382,48 +422,75 @@ _interrupted: bool = False
 # Mcloop's old runner kept ``_active_process`` and ``_interrupted`` as
 # module globals on ``mcloop.runner``. With the integration the
 # inner-process state lives on the orchestra side, so mcloop needs a
-# stable handle into it. The four functions below are that handle.
+# stable handle into it. The five functions below are that handle.
 # Orchestra is the single source of truth; mcloop's signal handlers
 # call these without importing private names.
+#
+# Each function accepts an optional ``session`` argument. When
+# omitted, it operates on the thread-local current session that
+# ``run_session`` registers for the duration of its call.
 # --------------------------------------------------------------------
 
 
-def register_active_process(proc: subprocess.Popen[str]) -> None:
-    """Record ``proc`` as the currently running inner CLI process.
+def register_active_process(
+    proc: subprocess.Popen[str], *, session: SessionState | None = None
+) -> None:
+    """Record ``proc`` as the running inner CLI process for ``session``.
 
-    ``run_session`` calls this when it spawns the subprocess. External
-    callers (typically mcloop signal handlers) read it via
-    ``get_active_process`` to send the process a signal.
+    ``run_session`` calls this on the per-call ``SessionState`` it
+    allocated. External callers may pass an explicit ``session`` to
+    address a specific run, or omit it to address the thread-local
+    current session.
     """
-    global _active_process
-    _active_process = proc
+    target = session if session is not None else _current_session()
+    if target is None:
+        target = SessionState()
+        _set_current_session(target)
+    target.process = proc
 
 
-def clear_active_process() -> None:
+def clear_active_process(
+    *, session: SessionState | None = None
+) -> None:
     """Drop the active-process reference. Called by ``run_session``
     when the subprocess exits, including on timeout and exception
     paths."""
-    global _active_process
-    _active_process = None
+    target = session if session is not None else _current_session()
+    if target is not None:
+        target.process = None
 
 
-def get_active_process() -> subprocess.Popen[str] | None:
-    """Return the currently running inner CLI process, or ``None``."""
-    return _active_process
+def get_active_process(
+    *, session: SessionState | None = None
+) -> subprocess.Popen[str] | None:
+    """Return the running inner CLI process for ``session``, or
+    ``None``."""
+    target = session if session is not None else _current_session()
+    return target.process if target is not None else None
 
 
-def is_interrupted() -> bool:
+def is_interrupted(*, session: SessionState | None = None) -> bool:
     """Return whether an external interrupt (typically a SIGINT
     handler) has asked the wait loop to bail out."""
-    return _interrupted
+    target = session if session is not None else _current_session()
+    return target.interrupted if target is not None else False
 
 
-def set_interrupted(value: bool = True) -> None:
-    """Flag the wait loop for early exit. Mcloop's signal handler
-    sets this to True; ``run_session`` clears it before returning so a
-    later run starts with a clean slate."""
-    global _interrupted
-    _interrupted = value
+def set_interrupted(
+    value: bool = True, *, session: SessionState | None = None
+) -> None:
+    """Flag the wait loop for early exit on ``session``.
+
+    Mcloop's signal handler sets this to ``True`` on whichever session
+    is currently running. ``run_session`` allocates a fresh
+    ``SessionState`` per call so a later run always starts with a
+    clean interrupted flag without needing an explicit reset.
+    """
+    target = session if session is not None else _current_session()
+    if target is None:
+        target = SessionState()
+        _set_current_session(target)
+    target.interrupted = bool(value)
 
 
 def run_session(
@@ -440,8 +507,16 @@ def run_session(
     Telegram approvals, returns exit 1 on a ``denied`` file, returns
     exit -2 and kills the process group on timeout, and bounds the
     captured output with a head-plus-tail buffer.
+
+    Allocates a per-call ``SessionState`` and registers it as the
+    thread-local current session for the duration of the run so the
+    public signal API (``set_interrupted``, ``get_active_process``)
+    operates on this session by default. The previously-current
+    session is restored on exit.
     """
-    set_interrupted(False)
+    session = SessionState()
+    previous = _current_session()
+    _set_current_session(session)
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -452,21 +527,24 @@ def run_session(
         env=env,
         start_new_session=True,
     )
-    register_active_process(process)
+    register_active_process(process, session=session)
     _last_output_lines.clear()
     try:
         pgid = os.getpgid(process.pid)
     except OSError:
         pgid = process.pid
     pid_file: Path = _publish_active_pid(cwd, process.pid, pgid, cmd)
+    session.pid_file = pid_file
     watchdog: subprocess.Popen[bytes] | None = _start_watchdog(
         os.getpid(), pgid, pid_file
     )
+    session.watchdog = watchdog
 
     if process.stdout is None:
         _kill_watchdog(watchdog)
         _remove_pid_file(pid_file)
-        clear_active_process()
+        clear_active_process(session=session)
+        _set_current_session(previous)
         raise RuntimeError("stdout is None despite stdout=PIPE")
 
     line_q: queue.Queue[Any] = queue.Queue()
@@ -491,7 +569,7 @@ def run_session(
 
     try:
         while True:
-            if is_interrupted():
+            if is_interrupted(session=session):
                 try:
                     os.killpg(os.getpgid(process.pid), 9)
                 except OSError:
@@ -574,4 +652,5 @@ def run_session(
     finally:
         _kill_watchdog(watchdog)
         _remove_pid_file(pid_file)
-        clear_active_process()
+        clear_active_process(session=session)
+        _set_current_session(previous)
