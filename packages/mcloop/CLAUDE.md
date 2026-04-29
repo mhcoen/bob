@@ -246,33 +246,52 @@ Setup. Reset the working tree to the pre-step-1 base again. Keep the
 `.orchestra/config.json` from step 2. Restore PLAN.md to the same
 single item.
 
-Run. Start mcloop. While the inner CLI is streaming (you will see
-streaming output in the terminal), send SIGINT (Ctrl-C) once. Wait
-for mcloop to print the interrupt summary and exit. Do not press
-Ctrl-C a second time.
+Important: after SIGINT, `latest.json` is NOT updated. Mcloop's
+signal handler in `mcloop/lifecycle.py` calls `os._exit(130)`, which
+skips the normal run-summary writer. `latest.json` after the
+interrupt still describes the previous completed run, not the
+interrupted one. Verify interruption state from the session log on
+disk and the process tree only. Do not read `latest.json` for any
+yes/no check in this step.
+
+Run. Start mcloop and watch the terminal for the line that prints
+the per-task log path (mcloop emits the path after creating the
+session log). Save that path as `STEP3_LOG_PATH`. While the inner
+CLI is streaming (you will see streaming output), send SIGINT
+(Ctrl-C) once. Wait for mcloop to exit. Do not press Ctrl-C a
+second time.
 
 Pass criteria, all required:
 
 - Mcloop exits within ten seconds of the SIGINT.
-- `.mcloop/active-pid` does not exist (`ls .mcloop/active-pid` returns
-  `No such file or directory`). The wrapper's signal path cleans up
-  on the way out.
-- `.mcloop/interrupted.json` exists and was written during this run
-  (`stat -f %m .mcloop/interrupted.json` is more recent than the
-  step 3 start time).
-- The most recent session log (the path captured from
-  `.mcloop/runs/latest.json`'s last task entry) exists and
-  has non-zero size.
-- The same task entry in `latest.json` reports a non-zero exit code
-  representing the interrupt: `exit_code: 130` (POSIX SIGINT) or
-  `exit_code: -2` (mcloop's timeout/abort sentinel). Any other code
-  is a failure.
-- The orchestra run directory under `RUN2_LOG_DIR/orchestra-runs/`
-  exists, the inner session log exists, and the run directory has no
-  files matching `pid` or `*.pid` and no files matching `watchdog*`.
-- `pgrep -f 'mcloop.*watchdog'` returns no results, and
-  `pgrep -f 'claude -p'` returns no results that started during the
-  step. Any leftover watchdog or inner CLI process is a failure.
+- `.mcloop/active-pid` does not exist
+  (`ls .mcloop/active-pid` returns `No such file or directory`).
+- `STEP3_LOG_PATH` exists and `wc -c "$STEP3_LOG_PATH"` reports
+  greater than zero bytes.
+- The session log records the interrupt:
+  - For an orchestra-backed run, the log under
+    `RUN2_LOG_DIR/orchestra-runs/<run-id>/` contains either an
+    `actor_invoke_end` record with `exit_code: 130` or a
+    `state_exit` record with `outcome: cancelled`. Use
+    `grep -E "actor_invoke_end|state_exit" "$ORCHESTRA_LOG"` to
+    verify.
+  - For a direct-backed run, the per-task log under `log_dir`
+    contains the interrupt indicator. Use
+    `grep -E "exit_code.*(130|-2)|interrupted" "$STEP3_LOG_PATH"`
+    to verify.
+- For orchestra-backed runs only: the orchestra run directory at
+  `RUN2_LOG_DIR/orchestra-runs/<run-id>/` exists, the inner session
+  log inside it exists, and the run directory has no files matching
+  `pid`, `*.pid`, or `watchdog*` (`ls "$ORCHESTRA_RUN_DIR" | grep -E
+  "^pid$|\\.pid$|^watchdog"` returns nothing).
+- `pgrep -f 'mcloop.*watchdog'` returns no results.
+- `pgrep -f 'claude -p'` returns no results from this run.
+  (Identify by start time relative to the step's start; a long-lived
+  unrelated `claude -p` from another shell is acceptable.)
+
+Any leftover watchdog or inner CLI process from this run is a
+failure. Any non-130 / non--2 exit indicator in the session log is
+a failure.
 
 This is a one-time gate per environment. Once all three steps pass
 with every criterion above marked yes, the offline tests are
