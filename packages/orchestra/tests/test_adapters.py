@@ -1,0 +1,214 @@
+"""Unit tests for the slice-1 mock adapters.
+
+The adapters are deterministic by design; these tests confirm the
+payload shapes match what the executor's parsers and outcome-derivation
+expect, and that the mock-specific configuration knobs work.
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from orchestra.adapters.mock_human import MockHumanAdapter
+from orchestra.adapters.mock_model import MockModelAdapter
+from orchestra.adapters.mock_shell import MockShellAdapter
+from orchestra.errors import AdapterError
+from orchestra.spine import InvocationRequest
+
+
+def _request(
+    *,
+    state_id: str = "s",
+    actor_binding: dict | None = None,
+    backing_options: dict | None = None,
+    prompt: str | None = None,
+) -> InvocationRequest:
+    return InvocationRequest(
+        state_id=state_id,
+        attempt=1,
+        actor_binding=actor_binding or {"kind": "model"},
+        reads={},
+        external_inputs={},
+        prompt_artifact=prompt,
+        schema=None,
+        backing_options=backing_options or {},
+        timeout_ms=None,
+    )
+
+
+# --------------------------------------------------------------------
+# Mock model adapter
+# --------------------------------------------------------------------
+
+
+def test_mock_model_default_response_echoes_prompt():
+    adapter = MockModelAdapter()
+    prepared = adapter.prepare(_request(prompt="hello"))
+    payload = adapter.invoke(prepared)
+    assert payload["output"].startswith("[mock-llm response to:")
+    assert "hello" in payload["output"]
+    assert payload["verdict"] is None
+    assert payload["fields"] == {}
+    assert payload["tokens_in"] == len("hello")
+    assert payload["cost_usd"] is None
+    assert payload["transcript_ref"] is None
+
+
+def test_mock_model_constructor_override():
+    adapter = MockModelAdapter(response="OVERRIDE")
+    prepared = adapter.prepare(_request(prompt="hi"))
+    assert adapter.invoke(prepared)["output"] == "OVERRIDE"
+
+
+def test_mock_model_env_override(monkeypatch):
+    monkeypatch.setenv("ORCHESTRA_MOCK_MODEL_RESPONSE", "ENV-RESPONSE")
+    adapter = MockModelAdapter()
+    prepared = adapter.prepare(_request(prompt="hi"))
+    assert adapter.invoke(prepared)["output"] == "ENV-RESPONSE"
+
+
+def test_mock_model_describe_metadata():
+    desc = MockModelAdapter().describe()
+    assert desc["backing"] == "model"
+    assert desc["kind"] == "mock"
+    assert desc["supports_cancel"] is False
+
+
+# --------------------------------------------------------------------
+# Mock human adapter
+# --------------------------------------------------------------------
+
+
+def test_mock_human_instance_script_consumed_in_order():
+    MockHumanAdapter.clear_shared_script()
+    adapter = MockHumanAdapter(script=["accept", "reject"])
+    req = _request(
+        actor_binding={"kind": "human"},
+        backing_options={"options": ["accept", "reject"]},
+    )
+    p = adapter.prepare(req)
+    assert adapter.invoke(p)["chosen"] == "accept"
+    p2 = adapter.prepare(req)
+    assert adapter.invoke(p2)["chosen"] == "reject"
+
+
+def test_mock_human_shared_script_used_when_instance_empty():
+    MockHumanAdapter.clear_shared_script()
+    MockHumanAdapter.set_shared_script(["accept"])
+    adapter = MockHumanAdapter()
+    req = _request(
+        actor_binding={"kind": "human"},
+        backing_options={"options": ["accept", "reject"]},
+    )
+    p = adapter.prepare(req)
+    assert adapter.invoke(p)["chosen"] == "accept"
+    MockHumanAdapter.clear_shared_script()
+
+
+def test_mock_human_raises_when_script_exhausted():
+    MockHumanAdapter.clear_shared_script()
+    if "ORCHESTRA_MOCK_HUMAN_SCRIPT" in os.environ:
+        del os.environ["ORCHESTRA_MOCK_HUMAN_SCRIPT"]
+    adapter = MockHumanAdapter()
+    req = _request(
+        actor_binding={"kind": "human"},
+        backing_options={"options": ["accept", "reject"]},
+    )
+    p = adapter.prepare(req)
+    with pytest.raises(AdapterError):
+        adapter.invoke(p)
+
+
+def test_mock_human_invalid_choice_raises():
+    MockHumanAdapter.clear_shared_script()
+    adapter = MockHumanAdapter(script=["definitely-not-an-option"])
+    req = _request(
+        actor_binding={"kind": "human"},
+        backing_options={"options": ["accept", "reject"]},
+    )
+    p = adapter.prepare(req)
+    with pytest.raises(AdapterError):
+        adapter.invoke(p)
+
+
+def test_mock_human_no_options_raises_at_prepare():
+    adapter = MockHumanAdapter()
+    req = _request(actor_binding={"kind": "human"}, backing_options={})
+    with pytest.raises(AdapterError):
+        adapter.prepare(req)
+
+
+# --------------------------------------------------------------------
+# Mock shell adapter
+# --------------------------------------------------------------------
+
+
+def test_mock_shell_runs_block_executes_each_command():
+    adapter = MockShellAdapter(
+        response_table={"echo a": (0, "a\n", ""), "echo b": (0, "b\n", "")}
+    )
+    req = _request(
+        actor_binding={"kind": "shell"},
+        backing_options={"runs": ["echo a", "echo b"]},
+    )
+    p = adapter.prepare(req)
+    payload = adapter.invoke(p)
+    assert payload["aggregate"]["pass_count"] == 2
+    assert payload["aggregate"]["fail_count"] == 0
+    assert payload["aggregate"]["skipped_count"] == 0
+    assert [c["command"] for c in payload["commands"]] == ["echo a", "echo b"]
+    assert all(c["exit_code"] == 0 for c in payload["commands"])
+
+
+def test_mock_shell_short_circuits_on_failure_by_default():
+    adapter = MockShellAdapter(
+        response_table={"first": (0, "", ""), "fail": (1, "", "boom"), "third": (0, "", "")}
+    )
+    req = _request(
+        actor_binding={"kind": "shell"},
+        backing_options={"runs": ["first", "fail", "third"]},
+    )
+    payload = adapter.invoke(adapter.prepare(req))
+    agg = payload["aggregate"]
+    assert agg["pass_count"] == 1
+    assert agg["fail_count"] == 1
+    assert agg["skipped_count"] == 1
+    assert payload["commands"][2]["skipped"] is True
+
+
+def test_mock_shell_continue_on_fail_does_not_short_circuit():
+    adapter = MockShellAdapter(
+        response_table={"first": (0, "", ""), "fail": (1, "", ""), "third": (0, "", "")}
+    )
+    req = _request(
+        actor_binding={"kind": "shell"},
+        backing_options={
+            "runs": ["first", "fail", "third"],
+            "continue_on_fail": True,
+        },
+    )
+    payload = adapter.invoke(adapter.prepare(req))
+    agg = payload["aggregate"]
+    assert agg["pass_count"] == 2
+    assert agg["fail_count"] == 1
+    assert agg["skipped_count"] == 0
+
+
+def test_mock_shell_no_command_or_runs_raises():
+    adapter = MockShellAdapter()
+    req = _request(actor_binding={"kind": "shell"}, backing_options={})
+    with pytest.raises(AdapterError):
+        adapter.prepare(req)
+
+
+def test_mock_shell_command_form():
+    adapter = MockShellAdapter(response_table={"echo hi": (0, "hi\n", "")})
+    req = _request(
+        actor_binding={"kind": "shell"},
+        backing_options={"command": "echo hi"},
+    )
+    payload = adapter.invoke(adapter.prepare(req))
+    assert payload["commands"][0]["command"] == "echo hi"
+    assert payload["aggregate"]["pass_count"] == 1

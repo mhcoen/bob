@@ -4,33 +4,102 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Orchestra is a **design-stage** project. There is no code, build system, or test suite yet. The repository currently contains only design documents under `design/`. Do not invent build/test/lint commands; there are none to run.
+Orchestra has moved past design. The design phase is complete; six design documents are on disk under `design/`. The runner spine for slice 1 is implemented under `orchestra/` (at the repo root) with unit tests and end-to-end tests under `tests/`. Slice 2 (versioned-workspace profile + real shell adapter) is the next planned increment but is not started.
 
-The work in progress is a meta-language and runtime spec for describing systems of interacting LLMs (councils, design loops, code workflows, research pipelines). It is informed by the author's prior work on `mcloop` and `Duplo` (Claude Code subprocess orchestrators), and by manual multi-LLM workflows the author runs by hand.
+The implementation is Python 3.12. The build is editable: `pip install -e '.[dev]'` from the repo root. Tests run with `pytest` from the repo root.
+
+## Repository layout
+
+```
+orchestra/                             # repo root (also the Python package name)
+  pyproject.toml                       # editable install, pytest/ruff/mypy config
+  README.md
+  CLAUDE.md
+  design/                              # design documents (frozen for slice 1)
+    orchestra-design.md                # conceptual model + factoring
+    orchestra-result-schemas.md        # result envelope, payload shapes, counters
+    orchestra-grammar.md               # EBNF + reserved words + reference resolution
+    orchestra-runner.md                # runner architecture
+    orchestra-implementation-plan.md   # slice 1 plan (the document this code implements)
+    orchestra-acid-tests.md            # cover for the three acid-test workflows
+    orchestra-acid-test-1-design-loop.md
+    orchestra-acid-test-2-council.md
+    orchestra-acid-test-3-mcloop.md
+  orchestra/                           # implementation (Python package)
+    spine.py                           # IR dataclasses + result envelope types
+    errors.py                          # exception hierarchy
+    adapters/                          # adapter contract + slice-1 mocks
+    executor/                          # state machine, parsers, guards
+    loader/                            # lexer, parser, validator
+    log/                               # JSONL writer + truncation-tolerant reader
+    registry/                          # profile registry + core registrations
+    resume/                            # log replay + resume hook dispatch
+    store/                             # SQLite-backed artifact store
+    cli.py                             # `orchestra run` and `orchestra resume`
+  tests/
+    fixtures/slice1/echo.orc           # the slice-1 workflow under test
+    test_store.py                      # unit tests
+    test_log.py
+    test_registry.py
+    test_loader.py
+    test_adapters.py
+    test_resume.py
+    test_e2e.py                        # tests A, B, C from the impl plan
+    test_e2e_determinism.py            # byte-identical-log check
+```
 
 ## Documents and reading order
 
-Read these in order when picking up the project:
+When picking up the project, read in this order:
 
-1. `design/orchestra-design.md` — the authoritative preliminary design. Conceptual model, the four-way factoring (model / role / prompt source / state), agents, artifacts, profiles, validation rules, deferrals. ~1000 lines; treat its commitments as load-bearing.
-2. `design/orchestra-acid-tests.md` — cover doc for the three sketch workflows that are the gate on further design work.
-3. `design/orchestra-acid-test-1-design-loop.md` — the only sketch written so far. Tests 2 (council) and 3 (mcloop code workflow) are not yet written and are the next deliverables.
+1. `design/orchestra-design.md` — conceptual model. The four-way factoring (model / role / prompt source / state), agents, artifacts, profiles, validation rules, deferrals. Treat its commitments as load-bearing.
+2. `design/orchestra-result-schemas.md` — result envelope shape, payload shapes per backing, counter semantics.
+3. `design/orchestra-grammar.md` — EBNF + reserved words.
+4. `design/orchestra-runner.md` — runner architecture (loader, validator, executor, adapters, parsers, store, log, resume).
+5. `design/orchestra-implementation-plan.md` — slice 1 plan. The implementation in `orchestra/` is built against this.
+6. The acid-test sketches if you need workflow-level grounding for slices 2-6.
 
-A historical `workflow-metalanguage.md` is referenced but not present in this directory; it is the code-specific predecessor that the general design supersedes.
+## Slice 1 status
 
-## Where the project is in its workflow
+Implemented. The slice exercises the spine end-to-end with mocks: loader -> validator -> executor -> adapter -> result parser -> artifact store -> log -> resume.
 
-The next concrete step (per `orchestra-design.md` "Status and next steps") is **writing acid-test workflows 2 and 3** in the proposed syntax. Findings from Test 1 may change how Tests 2 and 3 are approached. Grammar pinning, runner architecture, and implementation come *after* all three sketches exist. Do not skip ahead to grammar or implementation work unless the user asks.
+Known limitations and notes worth carrying forward:
 
-## Discipline that governs sketch writing
+- **Prompt paths are quoted strings in the parser, not bare paths.** The grammar doc's worked example uses bare paths (`prompt file prompts/designer.md`), but the slice-1 lexer treats `/` as an unknown character. The fixture `tests/fixtures/slice1/echo.orc` uses quoted paths to compensate. Slice 2+ should reconcile this — either by extending the lexer to recognize a path-shaped token after `prompt file` / `prompt template`, or by amending the grammar doc's worked example to use quoted strings.
+- **Step budget resets on resume.** The executor's `_step_count` is per-instance, not persisted. A resumed run starts fresh at zero. This is acceptable for slice 1 (no test exercises a long-running budget across resume) but should be fixed in slice 2 by replaying the count from the log.
+- **Crash between `state_exit` and `transition` is treated as case 2 by replay.** The state would be re-entered on resume, duplicating work. The window is small (single fsync cycle) but the case is wrong. A future slice should add a `state_committed` log record or detect this case explicitly.
+- **`_dispatch_parsers` doesn't return tentative handles to the caller if the parser raises after a partial write.** The slice's identity parser writes nothing before raising, so this is moot for slice 1; a future slice that adds parsers which write multiple artifacts before potentially raising must structure handle accumulation differently.
+- **Resume hooks dispatch is exercised with an empty hook set.** No `resume_hook` records are emitted in slice 1. The dispatch path is wired and tested.
 
-These rules come from `orchestra-acid-tests.md` and apply to any new sketch you produce:
+## Running the tests
 
-- Every nontrivial state declares its artifact `reads` and `writes` explicitly. `<state>.output` is reserved for trivial ephemeral control data (verdict enums, choice labels) — never for durable data.
-- Bindings (model, role, prompt source, artifact) are explicit at every state.
-- **Surface form is held constant across the three sketches.** Use the same indicative conventions as Test 1: `spec` / `workflow` headers, top-level `model` / `role` / `agent` / `group` / `artifact` / `state` / `prompt` declarations, indentation for grouping, `=>` for transitions, `#` comments, `state` keyword with `actor model <id>` / `actor agent <id>` / `actor shell` / `actor human` inside. Drift in surface form makes awkwardness uninterpretable.
-- Introduce new syntax only when the sketch becomes unreadable without it. When you do, flag it as a finding (numbered `(F<n>)`) in the sketch's "What the sketch forced me to clarify" section, with justification.
-- Each sketch sub-file follows the fixed structure: Goal → Workflow sketch → Primitives exercised → What felt awkward → What the sketch forced me to clarify.
+```
+pip install -e '.[dev]'
+pytest                       # all tests
+pytest tests/test_e2e.py     # end-to-end A/B/C only
+pytest tests/test_e2e_determinism.py  # determinism check
+```
+
+The CLI entry point:
+
+```
+orchestra run tests/fixtures/slice1/echo.orc --input topic="hello world"
+orchestra resume <run_id>
+```
+
+Run state lives in `~/.orchestra/runs/<run_id>/` by default; override with `--data-root <path>` on the top-level command.
+
+## Slice ordering
+
+Per the implementation plan's "Slice 2 preview" section:
+
+- **Slice 2:** versioned-workspace profile (git-workspace artifact, `mode` keyword, checkpoint mechanism, resume hook), real shell adapter, a trimmed Test 3 fixture exercising shell + workspace + interrupted-shell-state resume.
+- **Slice 3:** code profile (`require_diff`, `runs`, `continue_on_fail`, the check-errors parser).
+- **Slice 4:** real model adapters (Claude API first, then `claude -p` and `codex exec` subprocess adapters).
+- **Slice 5:** persistent agents and the agent-history parser.
+- **Slice 6:** multi-actor states and join semantics, exercised by Test 2 (council).
+
+Beyond slice 6: real human adapters (Telegram), verdict schemas, retry policy. Order is governed by the next acid-test workflow's needs, not by feature completeness.
 
 ## Design commitments that are easy to drift from
 
@@ -42,13 +111,21 @@ When discussing or writing about the design, these positions are deliberate — 
 - **The core grammar is closed.** Profiles register artifact types, actor backings, postconditions, guards, parsers, validation rules, defaults — but cannot add top-level keywords, state types, or transition syntax.
 - **`max_total_steps` is mandatory** at the workflow level; omitting it is a load error. Per-state cycle guards (`attempts.<state>`) are a separate, lint-recommended mechanism.
 - **Parallel writes to the same artifact are a v0 load error**, not a merge problem to define semantics for.
+- **Adapters never write to the artifact store directly.** Adapters return payloads. Profile parsers stage tentative writes. The executor commits them. This is the chokepoint through which postcondition checks, parser-failure rollback, log emission, and resume reconstruction all flow.
+- **The artifact store has no public unconditional `write` method.** Mutation is `tentative_write` followed by `commit_tentative` or `discard_tentative`.
 - The v0 non-goals list in `orchestra-design.md` (dynamic spawning, expression language, recursion, distributed execution, browser automation, grand unified ontology) is a real boundary, not a wishlist.
 
-## Acid tests as the unit of progress
+## Discipline that governs design changes
 
-The three acid tests are the *test cases* for the design itself, not for code. A sketch is "passing" when it expresses its workflow without special cases or extensions, with all bindings explicit and no `<state>.output` shortcuts for durable data. Frictions that emerge belong in "What felt awkward" (with `(A<n>)` numbering); decisions that close design ambiguities belong in "What the sketch forced me to clarify" (with `(F<n>)` numbering). Findings from earlier sketches feed forward into later ones.
+If a design change is needed during implementation:
+
+- The implementation plan is frozen for slice 1. If a slice-1 task surfaces a real design problem, surface it as a finding rather than silently amending the design doc.
+- Findings get a brief explanation in the relevant design doc's "open questions" section, not a wholesale revision of the doc.
+- The grammar doc, runner doc, and result-schemas doc are referenced by the code's comments and docstrings. If you change one, search for references and reconcile.
 
 ## Author conventions
 
 - Commit messages: never mention Claude, Claude Code, or Anthropic.
-- Prose style across the design docs is plain, declarative, no marketing voice. Match it. Avoid bulleted lists where running prose works; avoid emoji; avoid "we'll" / "let's" framing.
+- Prose style across the design docs is plain, declarative, no marketing voice. Match it.
+- No en-dashes, em-dashes, or semicolons in design docs or in code comments. (The author dislikes these. Code itself, including string literals and identifiers, is unaffected.)
+- Code style: ruff and mypy strict. The slice's pyproject.toml configures both.
