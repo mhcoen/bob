@@ -1,8 +1,8 @@
-# Acid Test 3: mcloop Code Implementation
+# Acid Test 3: McLoop Code Implementation
 
 ## Goal
 
-Re-express the original mcloop `implement` workflow (preserved at
+Re-express the original McLoop `implement` workflow (preserved at
 `/Users/mhcoen/proj/mcloop/local/workflow-metalanguage.md`) in the
 generalized Orchestra language. The discipline is that the general
 core established by Tests 1 and 2 should still support this workload
@@ -277,7 +277,7 @@ Files referenced by the workflow but not part of the sketch:
   `request_changes`; plus a `feedback` text field consumed by
   fix-review)
 
-External inputs supplied by the runner caller (mcloop):
+External inputs supplied by the runner caller (McLoop):
 
 - `task` (json): record with at least `name` (string, used in commit
   message) and `needs_tests` (boolean, used in guard).
@@ -296,7 +296,7 @@ External inputs supplied by the runner caller (mcloop):
 - **External input as a record**: `task` is declared as `json` and
   referenced as `task.name` in a template substitution and
   `task.needs_tests` in a guard. The design document shows this
-  pattern in the original mcloop examples but does not specify
+  pattern in the original McLoop examples but does not specify
   whether `external_input task json` is the right shape vs a typed
   record declaration. Going with `json` for the sketch; see (A15).
 - **Workspace artifact with a path source**: `artifact workspace
@@ -642,3 +642,4 @@ Adopt or replace. The cleanest fix is to allow either a json
 type with an associated schema (`external_input task json schema
 <path>`) or a typed record literal in the declaration. Not
 introducing either now; flagging.
+

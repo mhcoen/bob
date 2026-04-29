@@ -1,9 +1,9 @@
-# Orchestra integration into mcloop, minimal-path plan
+# Orchestra integration into McLoop, minimal-path plan
 
 ## Goal
 
-Get a working orchestra into mcloop at the highest-leverage decision
-point (code edits) so that mcloop's mistakes drop and the human stops
+Get a working orchestra into McLoop at the highest-leverage decision
+point (code edits) so that McLoop's mistakes drop and the human stops
 being the relay between models. Two integration sites, then stop.
 This adds adapters, packaged workflow lookup, and the Python library
 entry point. It introduces no new execution semantics beyond what
@@ -13,14 +13,14 @@ slice 1 already provides.
 
 In scope: two adapter kinds (text role, edit agent), a small Python
 library API, three workflow files implementing three named patterns,
-two integration points inside mcloop wrapped behind a config flag,
+two integration points inside McLoop wrapped behind a config flag,
 and a parity test proving the default path preserves current
 behavior.
 
 Out of scope until forced by a real need: profiles, schemas,
 councils-as-DSL, slice 2's versioned workspace, agent declarations,
 group declarations, retry sugar beyond what slice 1 has, and
-integrations at the other four mcloop decision sites (crash diagnosis,
+integrations at the other four McLoop decision sites (crash diagnosis,
 post-fix review, bug-fix model escalation, reviewer triage).
 
 ## Step 1: define the capability surface
@@ -68,14 +68,14 @@ step, distinguished by contract:
   implementation invokes Claude Code with the tool set restricted to
   `Read,Glob,Grep`. No `Edit`, `Write`, `Bash`, `WebFetch`, or
   `WebSearch`. The restriction is enforced via the `--allowedTools`
-  flag at the subprocess invocation site (the same mechanism mcloop
+  flag at the subprocess invocation site (the same mechanism McLoop
   already uses for `run_diagnostic`). This is provisional: any
   pure-text inference backend can replace it later without touching
   workflows.
 - **Edit-agent adapter.** Takes a task instruction and returns
   whatever the agent did (file changes, tool calls, output). Backed
   by Claude Code in normal mode (`--allowedTools
-  Edit,Write,Bash,Read,Glob,Grep`, matching mcloop's current default).
+  Edit,Write,Bash,Read,Glob,Grep`, matching McLoop's current default).
   Lift relevant subprocess invocation, output capture, and
   working-directory handling patterns from `mcloop/runner.py`.
 
@@ -90,7 +90,7 @@ Expose:
 orchestra.run_workflow(name, inputs, config) -> WorkflowRunResult
 ```
 
-Library, not CLI. Mcloop imports it. The workflow name resolves to a
+Library, not CLI. McLoop imports it. The workflow name resolves to a
 `.orc` file shipped in orchestra's package or a project-local
 override directory under `.orchestra/workflows/`.
 
@@ -108,8 +108,8 @@ forcing it to dig through the artifact store:
 
 ### Inputs dict for `code_edit`
 
-Mcloop calls `run_workflow("code_edit", inputs={...}, config=...)`
-with the following keys, mirroring the arguments mcloop's existing
+McLoop calls `run_workflow("code_edit", inputs={...}, config=...)`
+with the following keys, mirroring the arguments McLoop's existing
 `run_task` builds prompts from:
 
 - `instruction`: the task text (current `task_text`).
@@ -126,13 +126,13 @@ with the following keys, mirroring the arguments mcloop's existing
 - `is_bug_task`: whether this task came from BUGS.md (current
   `is_bug_task`).
 
-Note: the attempt counter is not passed in. Mcloop's current
+Note: the attempt counter is not passed in. McLoop's current
 prompt builders (`_build_normal_prompt`, `_build_bug_task_prompt`,
 `_build_bug_prompt` in `mcloop/runner.py`) do not inject attempt
 number into the prompt; only `prior_errors` (which is non-empty on
 retry) signals retry context to the model. Including `attempt` in the
 inputs dict would change what the model sees and break parity. The
-retry counter remains mcloop's private state.
+retry counter remains McLoop's private state.
 
 The workflow file declares these as `external_input`s. Each role's
 instruction template references them by name.
@@ -140,9 +140,9 @@ instruction template references them by name.
 ### Config schema
 
 Project-local Orchestra config lives at `.orchestra/config.json` in
-the consumer project (mcloop's repo). It is not embedded in
+the consumer project (McLoop's repo). It is not embedded in
 `mcloop.json`, because Orchestra is intended to be callable from
-mcloop, Duplo, or directly, and burying it in mcloop's config would
+McLoop, Duplo, or directly, and burying it in McLoop's config would
 couple them.
 
 Structure is nested:
@@ -188,13 +188,13 @@ bridge, or some other backend, and those have different invocation
 contracts. The distinction between text role and edit-agent role is
 captured by which adapter is named, plus the `tools` key (absent for
 text roles, restricted by adapter implementation; present for
-edit-agent roles, defaulting to mcloop's current tool set).
+edit-agent roles, defaulting to McLoop's current tool set).
 
 ## Step 4: first integration
 
 Wrap the code-agent invocation. Do not replace `run_task`.
 
-Mcloop owns the task loop, workspace setup, git policy, approval
+McLoop owns the task loop, workspace setup, git policy, approval
 hooks, verification, retry scheduling, Telegram state, and commit
 behavior. Orchestra owns only the advisory/edit pattern at the call
 site.
@@ -203,7 +203,7 @@ site.
 
 The wrapper sits at the code-edit invocation boundary, not at the
 whole-task level and not at the raw subprocess level. It corresponds
-to "one edit attempt" as mcloop currently understands it.
+to "one edit attempt" as McLoop currently understands it.
 
 Signature:
 
@@ -231,14 +231,14 @@ def invoke_code_edit(
 - `output` (str)
 - `exit_code` (int)
 - `log_path` (Path)
-- `changed_files` (list[str], if mcloop currently observes it or can
+- `changed_files` (list[str], if McLoop currently observes it or can
   cheaply compute it)
 - `summary` (dict, when produced by Orchestra; absent for the direct
   backend)
 
 Two backends implement `invoke_code_edit`:
 
-1. **`direct`**: the current behavior. Lifts the body of mcloop's
+1. **`direct`**: the current behavior. Lifts the body of McLoop's
    existing `run_task` (the prompt build, `_build_command`,
    `_run_session`, `_write_log` sequence) into a function that
    produces a `CodeEditResult`. No subprocess-level changes.
@@ -246,7 +246,7 @@ Two backends implement `invoke_code_edit`:
    inputs={...}, config=...)` and adapts the `WorkflowRunResult` into
    a `CodeEditResult`.
 
-Mcloop's `run_task` is modified minimally: it still owns timeouts,
+McLoop's `run_task` is modified minimally: it still owns timeouts,
 rate-limit detection, retry loop, success classification, session
 context updates, etc. The only change is that the inner edit
 invocation goes through `invoke_code_edit` (selected by config)
@@ -265,7 +265,7 @@ behavior, or output handling.
 
 Step 4 includes a parity test: the `direct` backend and the
 `orchestra` backend invoking `single` must receive the same
-instruction and context and produce an equivalent mcloop-visible
+instruction and context and produce an equivalent McLoop-visible
 result shape (same control-flow interface, not necessarily
 byte-identical agent behavior). The test compares `CodeEditResult`
 field-by-field on a representative task fixture, allowing
@@ -307,7 +307,7 @@ Concretely:
 
 ## Empirical loop
 
-After each integration, run mcloop on real tasks with config A vs
+After each integration, run McLoop on real tasks with config A vs
 config B. Diff the run summaries. Promote the winner. The library of
 patterns grows from this loop, not from speculation.
 
@@ -326,11 +326,11 @@ Code can implement these unsupervised:
    config schema loader.
 3. Step 1 workflow files: `single.orc`,
    `draft_then_adjudicate.orc`, `propose_critique_synthesize.orc`.
-4. Step 4 parity test (without wiring into mcloop yet). The test
+4. Step 4 parity test (without wiring into McLoop yet). The test
    should construct a `CodeEditResult` from both backends on a
    representative task and assert structural equivalence.
 
 Code stops and reports after item 4. The human reviews the parity
-test output. Wiring Step 4 into mcloop (the `invoke_code_edit`
+test output. Wiring Step 4 into McLoop (the `invoke_code_edit`
 wrapper and the `direct`/`orchestra` backend split) happens after
-that review, in mcloop's own repo.
+that review, in McLoop's own repo.

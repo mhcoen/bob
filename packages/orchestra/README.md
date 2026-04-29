@@ -15,12 +15,12 @@ code. Swapping a single-model edit for a draft-then-adjudicate
 council is a config change, not a rewrite.
 
 Orchestra is a library, not a runner. It is invoked at decision
-points by other tools (mcloop, Duplo) where a single-agent loop is
+points by other tools (McLoop, Duplo) where a single-agent loop is
 too brittle.
 
 ## Status
 
-Slice 1 plus the mcloop integration surface. The runner spine is in
+Slice 1 plus the McLoop integration surface. The runner spine is in
 place: loader, validator, profile registry, artifact store, executor,
 logger, resume. Real adapters for Claude Code (text-role and
 edit-agent variants) are wired and tested. The library API
@@ -105,7 +105,7 @@ orchestra/
   log/            # JSONL logger and reader
   resume/         # log replay + resume hook dispatch
   workflows/      # packaged .orc files and prompt templates
-  prompts.py      # prompt builders (verbatim lifts from mcloop)
+  prompts.py      # prompt builders (verbatim lifts from McLoop)
   api.py          # run_workflow entry point + WorkflowRunResult
   config.py       # .orchestra/config.json schema and loader
   cli.py          # command-line entry point
@@ -134,7 +134,7 @@ In `design/`:
 3. `orchestra-grammar.md`, surface syntax.
 4. `orchestra-runner.md`, runtime architecture.
 5. `orchestra-implementation-plan.md`, what slice 1 covers.
-6. `orchestra-mcloop-integration-plan.md`, the mcloop integration
+6. `orchestra-mcloop-integration-plan.md`, the McLoop integration
    contract this implementation follows.
 
 Where the code disagrees with a design document, the design document
