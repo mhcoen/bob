@@ -463,7 +463,7 @@ class Executor:
         if status == "error":
             return "error"
         kind = state.actor.kind
-        if kind == "model":
+        if kind in ("model", "agent"):
             verdict = payload.get("verdict")
             if verdict is not None:
                 return str(verdict)

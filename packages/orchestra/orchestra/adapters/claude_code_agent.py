@@ -28,7 +28,6 @@ from orchestra.adapters._subprocess import (
     run_session,
     write_log,
 )
-from orchestra.errors import AdapterError
 from orchestra.spine import InvocationRequest, PreparedInvocation
 
 DEFAULT_ALLOWED_TOOLS: str = "Edit,Write,Bash,Read,Glob,Grep"
@@ -91,7 +90,9 @@ class ClaudeCodeAgentAdapter:
         )
 
         cmd = self._build_command(prompt, model, allowed_tools)
-        env = build_session_env(task_label=task_label)
+        env = build_session_env(
+            task_label=task_label, cli=self._cli, model=model
+        )
 
         return PreparedInvocation(
             request=request,
@@ -135,14 +136,10 @@ class ClaudeCodeAgentAdapter:
             exit_code,
         )
         changed = _detect_changed_files(inner["project_dir"])
-        if exit_code != 0:
-            raise AdapterError(
-                f"{self.backing} returned exit code {exit_code} "
-                f"(log {log_path})",
-            )
+        verdict = _verdict_for_exit_code(exit_code)
         return {
             "output": output,
-            "verdict": None,
+            "verdict": verdict,
             "fields": {
                 "exit_code": exit_code,
                 "log_path": str(log_path),
@@ -191,6 +188,22 @@ class ClaudeCodeAgentAdapter:
         if model:
             cmd.extend(["--model", model])
         return cmd
+
+
+def _verdict_for_exit_code(exit_code: int) -> str:
+    """Map a subprocess exit code to a runner verdict.
+
+    Mirrors the convention the executor's ``_derive_outcome`` uses for
+    the ``model`` and ``agent`` backings: ``complete`` on zero,
+    ``timeout`` on the -2 timeout sentinel, ``error`` on any other
+    nonzero. The full exit code is preserved in ``payload.fields`` so
+    the adapter caller can read it back.
+    """
+    if exit_code == 0:
+        return "complete"
+    if exit_code == -2:
+        return "timeout"
+    return "error"
 
 
 def _detect_changed_files(project_dir: Path) -> list[str]:
