@@ -23,16 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mcloop.runner import (
-    DEFAULT_TASK_TIMEOUT,
-    _build_bug_prompt,
-    _build_bug_task_prompt,
-    _build_command,
-    _build_normal_prompt,
-    _build_session_env,
-    _run_session,
-    _write_log,
-)
+from mcloop import runner as _runner
+from mcloop.runner import DEFAULT_TASK_TIMEOUT
 
 
 @dataclass
@@ -208,7 +200,7 @@ def _invoke_direct(
     timeout: int,
 ) -> CodeEditResult:
     if prior_errors:
-        prompt = _build_bug_prompt(
+        prompt = _runner._build_bug_prompt(
             instruction,
             description,
             task_label,
@@ -218,7 +210,7 @@ def _invoke_direct(
             eliminated,
         )
     elif is_bug_task:
-        prompt = _build_bug_task_prompt(
+        prompt = _runner._build_bug_task_prompt(
             instruction,
             description,
             task_label,
@@ -227,7 +219,7 @@ def _invoke_direct(
             eliminated,
         )
     else:
-        prompt = _build_normal_prompt(
+        prompt = _runner._build_normal_prompt(
             instruction,
             description,
             task_label,
@@ -235,15 +227,15 @@ def _invoke_direct(
             check_commands,
             eliminated,
         )
-    session_env = _build_session_env(task_label=task_label, cli="claude")
-    cmd = _build_command("claude", prompt, env=session_env, model=model)
-    output, returncode = _run_session(
+    session_env = _runner._build_session_env(task_label=task_label, cli="claude")
+    cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
+    output, returncode = _runner._run_session(
         cmd,
         project_dir,
         env=session_env,
         timeout=timeout,
     )
-    log_path = _write_log(
+    log_path = _runner._write_log(
         log_dir,
         instruction,
         cmd,
@@ -271,15 +263,15 @@ def _invoke_bug_verify_direct(
     from mcloop.runner import build_bug_verify_prompt
 
     prompt = build_bug_verify_prompt(bugs_content)
-    session_env = _build_session_env(task_label="", cli="claude")
-    cmd = _build_command("claude", prompt, env=session_env, model=model)
-    output, returncode = _run_session(
+    session_env = _runner._build_session_env(task_label="", cli="claude")
+    cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
+    output, returncode = _runner._run_session(
         cmd,
         project_dir,
         env=session_env,
         timeout=timeout,
     )
-    log_path = _write_log(
+    log_path = _runner._write_log(
         log_dir,
         "bug-verify",
         cmd,

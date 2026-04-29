@@ -513,6 +513,42 @@ def run_task(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # The single inner edit attempt now flows through the code_edit
+    # wrapper, which dispatches to either the direct backend (the
+    # original prompt-build + run-session + write-log sequence below
+    # was lifted into mcloop.code_edit) or to orchestra when the
+    # project's .orchestra/config.json selects it. The outer loop in
+    # the caller (retry, rate-limit, success classification, Telegram
+    # approval, watchdog) is unchanged.
+    #
+    # The wrapper is the dispatch path only when ``cli == "claude"``
+    # and ``allowed_tools`` is left at the default. Codex sessions and
+    # custom tool overrides keep the legacy inline path so callers
+    # that pin those parameters get bit-for-bit prior behavior.
+    if cli == "claude" and not allowed_tools:
+        from mcloop.code_edit import invoke_code_edit
+
+        ce = invoke_code_edit(
+            instruction=task_text,
+            context=session_context,
+            prior_errors=prior_errors,
+            eliminated=list(eliminated or []),
+            project_dir=project_dir,
+            log_dir=log_dir,
+            description=description,
+            task_label=task_label,
+            check_commands=check_commands,
+            is_bug_task=is_bug_task,
+            model=model,
+            timeout=timeout,
+        )
+        return RunResult(
+            success=ce.success,
+            output=ce.output,
+            exit_code=ce.exit_code,
+            log_path=ce.log_path,
+        )
+
     if prior_errors:
         prompt = _build_bug_prompt(
             task_text,
