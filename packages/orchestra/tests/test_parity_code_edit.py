@@ -503,6 +503,87 @@ def test_parity_code_edit_failure_propagates(
     assert direct.exit_code == 1
 
 
+def test_parity_code_edit_provider_env(
+    tmp_path: Path,
+    patched_subprocess: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both backends must produce identical provider env when the
+    model is a third-party alias.
+
+    Routes the canonical kimi-k2.6 alias through the OpenRouter
+    provider config and asserts every env var apply_provider_env
+    sets matches between the two backends, including the emptied
+    ANTHROPIC_API_KEY. This catches regressions where the orchestra
+    path forgets to thread executor config through to
+    build_session_env.
+    """
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key-1234")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    inputs = _representative_inputs(project_dir)
+    model = "kimi-k2.6"
+
+    invoke_code_edit_direct(
+        inputs,
+        project_dir=project_dir,
+        log_dir=tmp_path / "direct_logs",
+        model=model,
+        timeout=600,
+    )
+    direct_call = _inner_cli_calls()[0]
+    assert direct_call.env is not None
+    direct_env = dict(direct_call.env)
+
+    _popen_calls.clear()
+    invoke_code_edit_orchestra(
+        inputs,
+        project_dir=project_dir,
+        log_dir=tmp_path / "orchestra_logs",
+        model=model,
+        timeout=600,
+        config=_orchestra_config(),
+        data_root=tmp_path / "orchestra_runs",
+    )
+    orch_call = _inner_cli_calls()[0]
+    assert orch_call.env is not None
+    orch_env = dict(orch_call.env)
+
+    keys_to_match = [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "ENABLE_TOOL_SEARCH",
+        "ANTHROPIC_API_KEY",
+    ]
+    for key in keys_to_match:
+        assert key in direct_env, (
+            f"direct env missing {key!r}: {sorted(direct_env)}"
+        )
+        assert key in orch_env, (
+            f"orchestra env missing {key!r}: {sorted(orch_env)}"
+        )
+        assert direct_env[key] == orch_env[key], (
+            f"{key} differs: direct={direct_env[key]!r} "
+            f"orchestra={orch_env[key]!r}"
+        )
+
+    # Provider routing must have actually fired: BASE_URL points at
+    # the OpenRouter endpoint, AUTH_TOKEN holds the faked key, the
+    # model slug is the resolved provider/model form, and the API
+    # key is emptied so the CLI does not bill against the wrong
+    # account.
+    assert direct_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert direct_env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key-1234"
+    assert direct_env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
+    assert direct_env["ANTHROPIC_API_KEY"] == ""
+
+
 def test_parity_code_edit_bug_task_branches_prompt(
     tmp_path: Path, patched_subprocess: None
 ) -> None:

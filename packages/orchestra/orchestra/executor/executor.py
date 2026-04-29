@@ -705,8 +705,15 @@ class Executor:
         finish on its own; its result is discarded. This is correct
         for slice 1's mocks; real adapters with non-cooperative work
         will need the slice-2 cancellation contract.
+
+        Adapters that manage their own timeout (the claude_code text
+        and agent adapters return exit_code -2 from a wall-clock
+        capped run_session) declare ``manages_own_timeout = True`` so
+        the executor never wraps them in this thread-based timer.
+        Wrapping would race the adapter's own loop and could discard
+        its structured -2 payload before run_session returned.
         """
-        if timeout_ms is None:
+        if timeout_ms is None or getattr(adapter, "manages_own_timeout", False):
             return adapter.invoke(prepared)
 
         result_box: dict[str, Any] = {}

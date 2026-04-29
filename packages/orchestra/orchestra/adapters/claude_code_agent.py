@@ -44,6 +44,11 @@ class ClaudeCodeAgentAdapter:
     """
 
     backing: str = "claude_code_agent"
+    manages_own_timeout: bool = True
+    """``run_session`` enforces a wall-clock timeout and returns
+    exit_code -2 on expiry. The executor honors this flag so it does
+    not impose a second timer on top, which would race the adapter
+    and discard the structured -2 payload."""
 
     def __init__(
         self,

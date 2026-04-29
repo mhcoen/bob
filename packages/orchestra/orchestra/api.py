@@ -62,7 +62,7 @@ from typing import Any
 
 from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
-from orchestra.config import OrchestraConfig, RoleBinding
+from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
 from orchestra.errors import OrchestraError
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.executor.parsers import _identity_text_parse_fn
@@ -160,13 +160,27 @@ class _PerRoleDispatcher:
                 "_PerRoleDispatcher requires at least one role-adapter binding"
             )
         self._adapters: dict[str, Any] = dict(role_to_adapter)
+        # Aggregate the manages_own_timeout flag so the executor can
+        # skip its thread-based timer when every underlying adapter
+        # owns its timeout. Mixed adapter sets fall back to executor
+        # enforcement (False) because the safe answer is the more
+        # restrictive one.
+        self.manages_own_timeout = all(
+            getattr(a, "manages_own_timeout", False)
+            for a in self._adapters.values()
+        )
 
     def _pick(self, request: InvocationRequest) -> Any:
         binding = request.actor_binding or {}
         role = binding.get("role")
         if isinstance(role, str) and role in self._adapters:
             return self._adapters[role]
-        if len(self._adapters) == 1:
+        if role is None and len(self._adapters) == 1:
+            # Roleless states are valid in the slice 1 grammar; fall
+            # back only when a single adapter is configured under this
+            # kind so there is no ambiguity. Roles that are present
+            # but unbound must raise rather than silently fall back to
+            # a different role's adapter.
             return next(iter(self._adapters.values()))
         raise WorkflowApiError(
             f"no adapter configured for role {role!r}. "
@@ -390,6 +404,35 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     return store
 
 
+def _validate_role_bindings(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+) -> None:
+    """Every actor role declared on a workflow state must be bound in
+    the project config.
+
+    Without this, a state whose role is missing from the config would
+    silently fall back to the slice-1 mock under the actor kind, or
+    (worse) reuse a different role's adapter via the dispatcher's
+    one-adapter shortcut. Both produce wrong behavior at runtime
+    (mock outputs or off-role models) without surfacing the gap. This
+    check fires early so the consumer sees a clear ConfigError.
+    """
+    needed: dict[str, str] = {}
+    for state in workflow.states:
+        if state.role is None:
+            continue
+        if state.actor.kind not in ("model", "agent"):
+            continue
+        needed.setdefault(state.role, state.actor.kind)
+    missing = sorted(name for name in needed if name not in role_bindings)
+    if missing:
+        raise ConfigError(
+            f"workflow {workflow.name!r}: role bindings missing in config: "
+            f"{missing}. Configured: {sorted(role_bindings)}"
+        )
+
+
 def _validate_inputs(workflow: Workflow, inputs: dict[str, Any]) -> None:
     declared = {ext.name for ext in workflow.external_inputs}
     extras = set(inputs) - declared
@@ -515,6 +558,7 @@ def run_workflow(
 
     registry = _build_registry(workflow_cfg.roles)
     workflow = load_workflow(workflow_path, registry)
+    _validate_role_bindings(workflow, workflow_cfg.roles)
 
     run_id = new_run_id()
     if data_root is None:

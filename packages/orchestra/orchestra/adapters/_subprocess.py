@@ -106,6 +106,9 @@ _MCLOOP_CONFIG_PATH: Path = Path.home() / ".mcloop" / "config.json"
 # --------------------------------------------------------------------
 
 
+_MCLOOP_ROLES: frozenset[str] = frozenset({"executor", "sync", "reviewer"})
+
+
 def _load_mcloop_config() -> dict[str, Any]:
     """Load ``~/.mcloop/config.json``. Returns empty dict on missing
     or malformed file. Mirrors mcloop's ``_load_mcloop_config``."""
@@ -118,6 +121,27 @@ def _load_mcloop_config() -> dict[str, Any]:
     if not isinstance(loaded, dict):
         return {}
     return loaded
+
+
+def load_role_config(
+    role: str, source: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Return the per-role config block from ``~/.mcloop/config.json``.
+
+    Lifted from mcloop ``load_role_config``. ``role`` must be one of
+    ``executor``, ``sync``, ``reviewer``. The block typically carries
+    ``base_url`` and ``auth_token_env`` overrides that
+    ``apply_provider_env`` honors when routing third-party model
+    aliases. Returns ``None`` when the role section is absent so
+    callers can fall back to defaults.
+    """
+    if role not in _MCLOOP_ROLES:
+        raise ValueError(f"unknown role: {role}")
+    data = source if source is not None else _load_mcloop_config()
+    block = data.get(role)
+    if not isinstance(block, dict):
+        return None
+    return dict(block)
 
 
 def provider_for_model(model: str) -> str | None:
@@ -209,7 +233,17 @@ def build_session_env(
             env["ANTHROPIC_AUTH_TOKEN"] = or_key
         env["ANTHROPIC_API_KEY"] = ""
     if model:
-        apply_provider_env(env, model, executor_config)
+        # Mirror mcloop's runner: when the caller has not supplied an
+        # explicit executor_config, fall back to the executor section
+        # of ~/.mcloop/config.json so DeepSeek, Kimi, OpenRouter, and
+        # any other provider routing the user has configured actually
+        # takes effect on the env passed to the subprocess.
+        provider_cfg = (
+            executor_config
+            if executor_config is not None
+            else load_role_config("executor")
+        )
+        apply_provider_env(env, model, provider_cfg)
     return env
 
 
@@ -337,6 +371,59 @@ def _slugify(text: str) -> str:
 
 _active_process: subprocess.Popen[str] | None = None
 _last_output_lines: collections.deque[str] = collections.deque(maxlen=20)
+_interrupted: bool = False
+
+
+# --------------------------------------------------------------------
+# Public lifecycle API
+#
+# Mcloop installs signal handlers (SIGINT and friends) that need to
+# kill the inner CLI process and break out of run_session's wait loop.
+# Mcloop's old runner kept ``_active_process`` and ``_interrupted`` as
+# module globals on ``mcloop.runner``. With the integration the
+# inner-process state lives on the orchestra side, so mcloop needs a
+# stable handle into it. The four functions below are that handle.
+# Orchestra is the single source of truth; mcloop's signal handlers
+# call these without importing private names.
+# --------------------------------------------------------------------
+
+
+def register_active_process(proc: subprocess.Popen[str]) -> None:
+    """Record ``proc`` as the currently running inner CLI process.
+
+    ``run_session`` calls this when it spawns the subprocess. External
+    callers (typically mcloop signal handlers) read it via
+    ``get_active_process`` to send the process a signal.
+    """
+    global _active_process
+    _active_process = proc
+
+
+def clear_active_process() -> None:
+    """Drop the active-process reference. Called by ``run_session``
+    when the subprocess exits, including on timeout and exception
+    paths."""
+    global _active_process
+    _active_process = None
+
+
+def get_active_process() -> subprocess.Popen[str] | None:
+    """Return the currently running inner CLI process, or ``None``."""
+    return _active_process
+
+
+def is_interrupted() -> bool:
+    """Return whether an external interrupt (typically a SIGINT
+    handler) has asked the wait loop to bail out."""
+    return _interrupted
+
+
+def set_interrupted(value: bool = True) -> None:
+    """Flag the wait loop for early exit. Mcloop's signal handler
+    sets this to True; ``run_session`` clears it before returning so a
+    later run starts with a clean slate."""
+    global _interrupted
+    _interrupted = value
 
 
 def run_session(
@@ -354,7 +441,7 @@ def run_session(
     exit -2 and kills the process group on timeout, and bounds the
     captured output with a head-plus-tail buffer.
     """
-    global _active_process
+    set_interrupted(False)
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -365,7 +452,7 @@ def run_session(
         env=env,
         start_new_session=True,
     )
-    _active_process = process
+    register_active_process(process)
     _last_output_lines.clear()
     try:
         pgid = os.getpgid(process.pid)
@@ -379,7 +466,7 @@ def run_session(
     if process.stdout is None:
         _kill_watchdog(watchdog)
         _remove_pid_file(pid_file)
-        _active_process = None
+        clear_active_process()
         raise RuntimeError("stdout is None despite stdout=PIPE")
 
     line_q: queue.Queue[Any] = queue.Queue()
@@ -404,6 +491,13 @@ def run_session(
 
     try:
         while True:
+            if is_interrupted():
+                try:
+                    os.killpg(os.getpgid(process.pid), 9)
+                except OSError:
+                    process.kill()
+                process.wait()
+                return _assemble(head_lines, tail_lines, dropped), 130
             if timeout and (time.monotonic() - started) > timeout:
                 try:
                     os.killpg(os.getpgid(process.pid), 9)
@@ -480,4 +574,4 @@ def run_session(
     finally:
         _kill_watchdog(watchdog)
         _remove_pid_file(pid_file)
-        _active_process = None
+        clear_active_process()
