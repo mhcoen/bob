@@ -157,4 +157,49 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **tests/test_worktree.py** - Tests for git worktree management.
 
+## Smoke testing the orchestra integration
+
+The wrapper tests (`tests/test_code_edit_wrapper.py`) cover prompt and
+result-shape parity offline. They cannot exercise the live CLI stream
+format, watchdog and PID timing, signal delivery, or Telegram approval
+flow. Run a one-time live gate before trusting the orchestra backend
+in production. Both runs use the same minimal one-line PLAN.md task on
+the same project, the same model, and the same outer flags. The git
+diff of the resulting commit must be equivalent.
+
+1. Direct path baseline. With no `.orchestra/config.json` in the project,
+   run mcloop on a one-line PLAN.md item ("Add a comment to README.md
+   saying hello world" is enough). Confirm mcloop produces a commit and
+   the working tree is clean afterward. This is the legacy path.
+
+2. Orchestra path. In the same project add `.orchestra/config.json`:
+
+       {
+         "workflows": {
+           "code_edit": {
+             "pattern": "single",
+             "roles": {
+               "editor": {
+                 "adapter": "claude_code_agent",
+                 "model": "<the same model name as run 1>",
+                 "tools": "default",
+                 "parameters": {}
+               }
+             }
+           }
+         }
+       }
+
+   Reset the project to the pre-run-1 state and rerun mcloop on the same
+   PLAN.md item. Confirm a commit lands and the diff matches run 1.
+
+3. Interrupt path. Start the orchestra-backed run as in step 2. While
+   the inner CLI is streaming, send SIGINT (Ctrl-C). Confirm the child
+   process group exits, `.mcloop/active-pid` is gone, and
+   `.mcloop/interrupted.json` was written. This exercises the
+   signal-handler path that reaches into the orchestra session.
+
+This is a one-time gate per environment. Once the three steps pass, the
+offline tests are sufficient regression coverage.
+
 **tests/test_wrap.py** - Tests for source file instrumentation.
