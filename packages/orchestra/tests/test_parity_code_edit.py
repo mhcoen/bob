@@ -517,8 +517,31 @@ def test_parity_code_edit_provider_env(
     ANTHROPIC_API_KEY. This catches regressions where the orchestra
     path forgets to thread executor config through to
     build_session_env.
+
+    The user's real ~/.mcloop/config.json is masked for the duration
+    of the test so a developer with executor overrides locally does
+    not fail the test for environmental reasons. ``load_role_config``
+    is replaced with a stub that returns an empty dict, and a sentinel
+    asserts the patch was actually applied by every call site.
     """
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key-1234")
+
+    stub_call_count = 0
+
+    def _stub_load_role_config(
+        role: str, source: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        nonlocal stub_call_count
+        stub_call_count += 1
+        assert role == "executor", (
+            f"only the executor role section should be read here, got {role!r}"
+        )
+        return None
+
+    monkeypatch.setattr(
+        orch_sp, "load_role_config", _stub_load_role_config
+    )
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     inputs = _representative_inputs(project_dir)
@@ -582,6 +605,16 @@ def test_parity_code_edit_provider_env(
     assert direct_env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key-1234"
     assert direct_env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
     assert direct_env["ANTHROPIC_API_KEY"] == ""
+
+    # Sanity check: the load_role_config patch must have fired at
+    # least once on each side (one direct call, one orchestra call).
+    # If a future refactor bypasses the patch, this assertion fires
+    # so the test does not silently start reading the developer's
+    # real ~/.mcloop/config.json again.
+    assert stub_call_count >= 2, (
+        f"load_role_config stub was hit only {stub_call_count} times. "
+        "Each backend should consult it once."
+    )
 
 
 def test_parity_code_edit_bug_task_branches_prompt(
