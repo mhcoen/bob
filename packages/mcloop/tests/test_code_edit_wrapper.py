@@ -280,12 +280,29 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     front and passes it through ``_build_command`` so
     ``_apply_provider_env`` fires.
 
+    The assertion is split into two capture points so the test cannot
+    be satisfied by a regression that replaces ``_build_session_env``
+    with a no-op:
+
+    - ``captured_pre`` is a snapshot of the env returned by
+      ``_build_session_env`` before ``_build_command`` runs. It must
+      contain at least one passthrough variable (PATH) and must NOT
+      contain the provider-routing keys yet. A regression where
+      ``session_env = {}`` fails the PATH assertion. A regression
+      where ``_build_session_env`` itself starts injecting provider
+      routing fails the absence assertion.
+    - ``captured_env`` is the env at ``_run_session``, after
+      ``_build_command`` has called ``_apply_provider_env``. It must
+      contain every provider-routing key. A regression that bypasses
+      ``_apply_provider_env`` fails this assertion.
+
     The user's real ``~/.mcloop/config.json`` is masked by stubbing
     ``mcloop.config.load_role_config`` so a developer with executor
     overrides locally does not fail this test for environmental
     reasons.
     """
     from mcloop.code_edit import invoke_bug_verify
+    from mcloop.runner import _build_session_env as _orig_build_session_env
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key-1234")
 
@@ -307,7 +324,21 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     project_dir.mkdir()
     log_dir = tmp_path / "logs"
 
+    captured_pre: dict[str, str] = {}
     captured_env: dict[str, str] = {}
+
+    def _capturing_build_session_env(
+        task_label: str = "", cli: str = "claude"
+    ) -> dict[str, str]:
+        # Call the real builder so the test sees what the wrapper
+        # actually constructs. Snapshot a copy before _build_command
+        # mutates it via _apply_provider_env. Return the original
+        # dict so the in-place mutation lands as it would in
+        # production.
+        env = _orig_build_session_env(task_label=task_label, cli=cli)
+        captured_pre.clear()
+        captured_pre.update(env)
+        return env
 
     def _capture_run_session(
         cmd: list[str],
@@ -320,6 +351,10 @@ def test_bug_verify_direct_routes_third_party_provider_env(
 
     log_path = tmp_path / "session.log"
     with (
+        patch(
+            "mcloop.runner._build_session_env",
+            side_effect=_capturing_build_session_env,
+        ),
         patch("mcloop.runner._run_session", side_effect=_capture_run_session),
         patch("mcloop.runner._write_log", return_value=log_path),
     ):
@@ -335,6 +370,28 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     assert result.success is True
     assert result.exit_code == 0
 
+    # (a) captured_pre is the env BEFORE _build_command's mutation.
+    # It must be a real session env, not an empty dict.
+    assert captured_pre, (
+        "_build_session_env returned an empty dict. A regression that "
+        "replaced session_env with {} would silently satisfy the "
+        "provider-routing assertions below because _build_command "
+        "injects them on whatever object it receives."
+    )
+    assert "PATH" in captured_pre, (
+        "PATH missing from session env; _build_session_env is not "
+        "copying passthrough variables. session_env = {} regression."
+    )
+    # Provider-routing keys must NOT be present yet at this point;
+    # _apply_provider_env runs inside _build_command. If they show up
+    # here, _build_session_env grew an out-of-band provider mutation.
+    assert "ANTHROPIC_BASE_URL" not in captured_pre
+    assert "ANTHROPIC_AUTH_TOKEN" not in captured_pre
+    assert "ANTHROPIC_MODEL" not in captured_pre
+
+    # (b) captured_env is the env AFTER _build_command. Provider
+    # routing keys must be present. A regression that skips
+    # _apply_provider_env fails here.
     keys_to_set = [
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_AUTH_TOKEN",
