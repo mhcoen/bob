@@ -9264,6 +9264,63 @@ def test_run_summary_all_fields_populated(tmp_path):
     assert data["stop_reason"] == ""
 
 
+def test_task_entry_carries_parity_fields(tmp_path):
+    """``TaskEntry`` carries the four parity fields the orchestra
+    integration smoke test needs and the writer round-trips them.
+
+    The fields mirror ``CodeEditResult`` so a reader can compare the
+    two backends directly off the JSON without scraping the per-task
+    log. Defaults match an empty result so older call sites that have
+    not been updated still serialize a valid entry.
+    """
+    from mcloop.run_summary import RunSummary, TaskEntry, write_run_summary
+
+    populated = TaskEntry(
+        label="1",
+        text="Add hello world comment",
+        outcome="success",
+        elapsed=12.5,
+        model="opus",
+        attempts=1,
+        commit_hash="deadbeef",
+        success=True,
+        exit_code=0,
+        log_path="/tmp/logs/session-1.log",
+        changed_files=["README.md", "PLAN.md"],
+    )
+    assert populated.success is True
+    assert populated.exit_code == 0
+    assert populated.log_path == "/tmp/logs/session-1.log"
+    assert populated.changed_files == ["README.md", "PLAN.md"]
+
+    default = TaskEntry(label="2", text="x", outcome="failed", elapsed=1.0)
+    assert default.success is False
+    assert default.exit_code == 0
+    assert default.log_path == ""
+    assert default.changed_files == []
+
+    s = RunSummary(
+        run_start="2026-04-29T12:00:00+00:00",
+        run_end="2026-04-29T12:00:13+00:00",
+        elapsed_seconds=13.0,
+        mode="plan",
+        tasks=[populated, default],
+    )
+    path = write_run_summary(tmp_path, s)
+    data = json.loads(path.read_text())
+    first = data["tasks"][0]
+    assert first["success"] is True
+    assert first["exit_code"] == 0
+    assert first["log_path"] == "/tmp/logs/session-1.log"
+    assert first["changed_files"] == ["README.md", "PLAN.md"]
+
+    second = data["tasks"][1]
+    assert second["success"] is False
+    assert second["exit_code"] == 0
+    assert second["log_path"] == ""
+    assert second["changed_files"] == []
+
+
 def test_run_summary_successful_run(tmp_path):
     """Successful run_loop produces a run summary with success status."""
     plan = tmp_path / "PLAN.md"

@@ -11,7 +11,13 @@ from pathlib import Path
 
 @dataclass
 class TaskEntry:
-    """Per-task entry in the run summary."""
+    """Per-task entry in the run summary.
+
+    The four parity fields (``success``, ``exit_code``, ``log_path``,
+    ``changed_files``) match the ``CodeEditResult`` shape produced by
+    ``invoke_code_edit`` so the orchestra integration smoke test can
+    compare backends by reading this entry directly.
+    """
 
     label: str
     text: str
@@ -20,6 +26,10 @@ class TaskEntry:
     model: str = ""
     attempts: int = 1
     commit_hash: str = ""
+    success: bool = False
+    exit_code: int = 0
+    log_path: str = ""
+    changed_files: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -170,7 +170,7 @@ The plan's parity contract requires both backends to produce the same
 `CodeEditResult` shape: `success` (bool), `exit_code` (int), `log_path`
 (an existing non-empty file), and `changed_files` (a list). Mcloop
 surfaces those fields through the run summary JSON at
-`.mcloop/run-summary/latest.json` and through the per-task log file
+`.mcloop/runs/latest.json` and through the per-task log file
 under the configured `log_dir` (default `logs/`). Use those two
 artifacts to evaluate the criteria below.
 
@@ -187,7 +187,7 @@ Pass criteria, all required:
 
 - `git log -1 --oneline` shows a new commit landed.
 - `git status` reports a clean working tree.
-- `cat .mcloop/run-summary/latest.json` shows the task entry's
+- `cat .mcloop/runs/latest.json` shows the task entry's
   `success: true` and `exit_code: 0`.
 - The task's `log_path` from the same JSON entry exists and
   `wc -c "$log_path"` is greater than zero.
@@ -226,7 +226,7 @@ Pass criteria, all required:
 - `git log -1 --oneline` shows a new commit landed on top of the
   pre-step-1 base.
 - `git status` reports a clean working tree.
-- `cat .mcloop/run-summary/latest.json` shows the task entry's
+- `cat .mcloop/runs/latest.json` shows the task entry's
   `success: true` and `exit_code: 0`, and these match the captured
   values from step 1 exactly.
 - The orchestra run wrote a session log under the directory
@@ -261,7 +261,7 @@ Pass criteria, all required:
   (`stat -f %m .mcloop/interrupted.json` is more recent than the
   step 3 start time).
 - The most recent session log (the path captured from
-  `.mcloop/run-summary/latest.json`'s last task entry) exists and
+  `.mcloop/runs/latest.json`'s last task entry) exists and
   has non-zero size.
 - The same task entry in `latest.json` reports a non-zero exit code
   representing the interrupt: `exit_code: 130` (POSIX SIGINT) or

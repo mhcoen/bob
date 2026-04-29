@@ -1371,6 +1371,10 @@ def run_loop(
                                 elapsed=round(time.monotonic() - task_start, 2),
                                 model=task_model or "",
                                 attempts=attempt,
+                                success=False,
+                                exit_code=result.exit_code,
+                                log_path=str(result.log_path) if result.log_path else "",
+                                changed_files=list(changed_files or []),
                             )
                         )
                         failed_task = f"{label}) {task.text}"
@@ -1397,6 +1401,10 @@ def run_loop(
                             model=task_model or "",
                             attempts=attempt,
                             commit_hash=task_hash,
+                            success=True,
+                            exit_code=result.exit_code,
+                            log_path=str(result.log_path) if result.log_path else "",
+                            changed_files=list(changed_files or []),
                         )
                     )
                     completed.append(f"{label}) {task.text}")
@@ -1437,6 +1445,7 @@ def run_loop(
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
+            last_result_changed = list(changed_files) if "changed_files" in dir() else []
             task_entries.append(
                 TaskEntry(
                     label=label,
@@ -1445,6 +1454,14 @@ def run_loop(
                     elapsed=round(time.monotonic() - task_start, 2),
                     model=current_model or "",
                     attempts=max_retries,
+                    success=False,
+                    exit_code=result.exit_code if "result" in dir() else 0,
+                    log_path=(
+                        str(result.log_path)
+                        if "result" in dir() and result.log_path
+                        else ""
+                    ),
+                    changed_files=last_result_changed,
                 )
             )
             mark_failed(active_file, task)
