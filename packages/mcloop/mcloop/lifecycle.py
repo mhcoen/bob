@@ -381,6 +381,7 @@ def register_signal_handlers(
 
     def _handle_signal(sig, frame):
         process_ref._interrupted = True  # type: ignore[attr-defined]
+        _signal_orchestra_interrupt()
         print("\nInterrupted. Saving state...", flush=True)
         _save_interrupt_state()
         if cleanup_callback is not None:
@@ -395,10 +396,86 @@ def register_signal_handlers(
     signal.signal(signal.SIGHUP, _handle_signal)
 
 
+def _signal_orchestra_interrupt() -> None:
+    """Flag any orchestra-launched session as interrupted.
+
+    When the orchestra backend is in flight, the active CLI child
+    lives in ``orchestra.adapters._subprocess.SessionState``, not in
+    ``mcloop.runner._active_process``. Mcloop's signal handler must
+    reach both paths so direct-followed-by-orchestra and
+    orchestra-followed-by-direct flows both terminate cleanly. Uses
+    orchestra's public signal API only (no private attribute access).
+    The call is a no-op when no orchestra session is registered, so
+    it is safe to invoke unconditionally on every signal.
+    """
+    try:
+        from orchestra.adapters._subprocess import set_interrupted
+    except ImportError:
+        return
+    try:
+        set_interrupted(True)
+    except Exception:
+        pass
+
+
+def _kill_orchestra_active_process() -> None:
+    """Send SIGTERM (then SIGKILL) to the orchestra session's child group.
+
+    Mirrors the runner-side ``_graceful_kill_active_process`` for the
+    orchestra-owned child. Looked up through the public signal API so
+    a future orchestra refactor that changes ``SessionState`` does not
+    break mcloop.
+    """
+    try:
+        from orchestra.adapters._subprocess import (
+            clear_active_process,
+            get_active_process,
+        )
+    except ImportError:
+        return
+    try:
+        proc = get_active_process()
+    except Exception:
+        return
+    if proc is None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (OSError, ProcessLookupError):
+        pgid = proc.pid
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        clear_active_process()
+    except Exception:
+        pass
+
+
 def _kill_active_process() -> None:
     """Kill any active claude subprocess and its process group with SIGKILL.
 
     Used by the atexit handler where graceful shutdown is not possible.
+    Reaches the orchestra session's child as well so the atexit path
+    cleans up after orchestra-backed runs too.
     """
     import mcloop.runner as _runner
 
@@ -413,6 +490,31 @@ def _kill_active_process() -> None:
             except OSError:
                 pass
         _runner._active_process = None
+    try:
+        from orchestra.adapters._subprocess import (
+            clear_active_process,
+            get_active_process,
+        )
+    except ImportError:
+        return
+    try:
+        oproc = get_active_process()
+    except Exception:
+        return
+    if oproc is None:
+        return
+    try:
+        pgid = os.getpgid(oproc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            oproc.kill()
+        except OSError:
+            pass
+    try:
+        clear_active_process()
+    except Exception:
+        pass
 
 
 def _graceful_kill_active_process() -> None:
@@ -420,10 +522,13 @@ def _graceful_kill_active_process() -> None:
 
     Called by the signal handler. Sends SIGTERM first to give the child
     process group a chance to clean up. If the group does not exit within
-    2 seconds, escalates to SIGKILL.
+    2 seconds, escalates to SIGKILL. Also kills the orchestra-side
+    session child if one is registered, so mixed direct/orchestra flows
+    do not leak processes when the user interrupts.
     """
     import mcloop.runner as _runner
 
+    _kill_orchestra_active_process()
     proc = _runner._active_process
     if proc is None:
         return
