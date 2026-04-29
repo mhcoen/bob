@@ -409,27 +409,61 @@ def _validate_role_bindings(
     role_bindings: dict[str, RoleBinding],
 ) -> None:
     """Every actor role declared on a workflow state must be bound in
-    the project config.
+    the project config, and the bound adapter must match the state's
+    actor kind.
 
-    Without this, a state whose role is missing from the config would
-    silently fall back to the slice-1 mock under the actor kind, or
-    (worse) reuse a different role's adapter via the dispatcher's
-    one-adapter shortcut. Both produce wrong behavior at runtime
-    (mock outputs or off-role models) without surfacing the gap. This
-    check fires early so the consumer sees a clear ConfigError.
+    Two failure modes are caught here:
+
+    1. A state whose role is missing from the config would silently
+       fall back to the slice-1 mock under the actor kind, or (worse)
+       reuse a different role's adapter via the dispatcher's
+       one-adapter shortcut.
+    2. A state whose role is bound to the wrong kind of adapter (a
+       text adapter on an ``actor agent`` state, or an edit-agent
+       adapter on an ``actor model`` state) would route wrong at
+       runtime. The mismatch only surfaces when the inner CLI sees
+       the wrong tool list, which is too late.
+
+    Both fail loudly with ``ConfigError`` naming the role, the state,
+    the configured adapter, and the kind it should serve.
     """
+    # Tracks the first state encountered for each role, so the error
+    # message can name a concrete state when the binding is wrong.
+    first_state_for_role: dict[str, str] = {}
     needed: dict[str, str] = {}
     for state in workflow.states:
         if state.role is None:
             continue
         if state.actor.kind not in ("model", "agent"):
             continue
+        first_state_for_role.setdefault(state.role, state.name)
         needed.setdefault(state.role, state.actor.kind)
     missing = sorted(name for name in needed if name not in role_bindings)
     if missing:
         raise ConfigError(
             f"workflow {workflow.name!r}: role bindings missing in config: "
             f"{missing}. Configured: {sorted(role_bindings)}"
+        )
+    mismatches: list[str] = []
+    for role_name, expected_kind in needed.items():
+        binding = role_bindings[role_name]
+        adapter_kind = _ADAPTER_TO_KIND.get(binding.adapter)
+        if adapter_kind is None:
+            mismatches.append(
+                f"role {role_name!r} (state {first_state_for_role[role_name]!r}): "
+                f"adapter {binding.adapter!r} is not a known orchestra adapter"
+            )
+            continue
+        if adapter_kind != expected_kind:
+            mismatches.append(
+                f"role {role_name!r} (state {first_state_for_role[role_name]!r}): "
+                f"adapter {binding.adapter!r} serves backing {adapter_kind!r} "
+                f"but the state's actor kind is {expected_kind!r}"
+            )
+    if mismatches:
+        raise ConfigError(
+            f"workflow {workflow.name!r}: role-adapter kind mismatch:\n  "
+            + "\n  ".join(mismatches)
         )
 
 
