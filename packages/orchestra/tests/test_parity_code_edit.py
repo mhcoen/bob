@@ -2,24 +2,34 @@
 
 The integration plan calls for a wrapper interface ``invoke_code_edit``
 with two backends, ``direct`` and ``orchestra``, that both produce a
-``CodeEditResult``. This test constructs both backends in-process,
-runs them on the same fixture task, and asserts structural equivalence
-(matching ``success``, ``exit_code``, and ``changed_files``). Output
-content is allowed to vary, since two real model invocations would
-produce different text.
+``CodeEditResult``. This test runs both backends in-process on the
+same fixture task and asserts:
 
-The test does not invoke real Claude Code. Both backends ultimately
-call ``subprocess.Popen`` through the same helper in
-``orchestra.adapters._subprocess`` (or a transcribed copy), which is
-patched to return a canned stream-json transcript with a deterministic
-exit code. ``git status --porcelain`` is also patched to return a
-deterministic changed-files list.
+1. Structural equivalence per the plan: ``success``, ``exit_code``,
+   and ``changed_files`` match. Output content is allowed to vary
+   since real model invocations would produce different text.
+2. The orchestra wrapper preserves what mcloop's direct path produces
+   at the subprocess boundary: same command shape including
+   ``--model``, same merged environment including the task label, and
+   the same captured stream-json transcript reaches the log file.
+3. The wrapper honors per-call ``model``, ``log_dir``, and ``timeout``
+   on both sides (the assertions verify this rather than ignoring the
+   args).
 
-The ``direct`` backend transcribes the body of mcloop's ``run_task``
-into a function that produces a ``CodeEditResult``. The transcription
-is structural: same command shape, same env passthrough, same log
-write. It deliberately avoids importing mcloop so the orchestra repo
-does not take a runtime dependency on a sibling project.
+The direct backend is a transcription of mcloop's ``run_task`` body.
+It uses ``orchestra.prompts.build_code_edit_prompt`` (which is itself
+a verbatim lift of mcloop's _build_normal_prompt /
+_build_bug_task_prompt / _build_bug_prompt / _build_shared_parts) and
+``orchestra.adapters._subprocess`` (which is itself a verbatim lift of
+mcloop's _build_session_env / _run_session / _write_log plus the
+watchdog and approval polling). It deliberately avoids importing
+mcloop so the orchestra repo does not take a runtime dependency on a
+sibling project.
+
+The test does not invoke real Claude Code. ``subprocess.Popen`` and
+``subprocess.run`` are patched to return a canned stream-json
+transcript and a canned ``git status`` output, so the test runs
+offline and never reaches a real CLI.
 """
 
 from __future__ import annotations
@@ -28,16 +38,21 @@ import io
 import json
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from orchestra.adapters import _subprocess as orch_sp
+from orchestra.adapters._subprocess import (
+    build_session_env,
+    run_session,
+    write_log,
+)
 from orchestra.adapters.claude_code_agent import DEFAULT_ALLOWED_TOOLS
 from orchestra.api import run_workflow
 from orchestra.config import OrchestraConfig
+from orchestra.prompts import build_code_edit_prompt
 
 # --------------------------------------------------------------------
 # CodeEditResult (the wrapper-interface return shape)
@@ -46,11 +61,7 @@ from orchestra.config import OrchestraConfig
 
 @dataclass
 class CodeEditResult:
-    """Mcloop-facing result shape produced by ``invoke_code_edit``.
-
-    Mirrors the plan's wrapper interface. ``summary`` is non-None for
-    the orchestra backend and absent (None) for the direct backend.
-    """
+    """Mcloop-facing result shape produced by ``invoke_code_edit``."""
 
     success: bool
     output: str
@@ -65,44 +76,12 @@ class CodeEditResult:
 # --------------------------------------------------------------------
 
 
-_DIRECT_PASSTHROUGH_VARS = frozenset(
-    {
-        "PATH",
-        "HOME",
-        "TERM",
-        "LANG",
-        "LC_ALL",
-        "TMPDIR",
-        "USER",
-        "LOGNAME",
-        "SHELL",
-        "XDG_CACHE_HOME",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "COLORTERM",
-        "FORCE_COLOR",
-        "NO_COLOR",
-        "RTK_DB_PATH",
-        "RTK_TEE",
-        "RTK_TEE_DIR",
-    }
-)
-
-
-def _direct_build_session_env(task_label: str) -> dict[str, str]:
-    import os
-
-    env = {k: v for k, v in os.environ.items() if k in _DIRECT_PASSTHROUGH_VARS}
-    if task_label:
-        env["MCLOOP_TASK_LABEL"] = task_label
-    return env
-
-
 def _direct_build_command(
     prompt: str,
     model: str | None,
     allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
 ) -> list[str]:
+    """Mirror of mcloop's _build_command for the claude CLI path."""
     cmd: list[str] = ["claude", "-p"]
     if prompt:
         cmd.append(prompt)
@@ -121,64 +100,6 @@ def _direct_build_command(
     if model:
         cmd.extend(["--model", model])
     return cmd
-
-
-def _direct_build_prompt(inputs: dict[str, Any]) -> str:
-    parts = [
-        inputs["instruction"],
-        f"Project description: {inputs['description']}",
-        f"Task label: {inputs['task_label']}",
-        f"Recent session context:\n{inputs['context']}",
-        f"Approaches already ruled out:\n{inputs['eliminated']}",
-        f"Prior errors from the previous attempt (empty if first try):\n{inputs['prior_errors']}",
-    ]
-    return "\n\n".join(parts) + "\n"
-
-
-def _direct_run_session(
-    cmd: list[str], cwd: Path, env: dict[str, str], timeout: int
-) -> tuple[str, int]:
-    """Mirror mcloop's _run_session at the structural level."""
-    process = subprocess.Popen(
-        cmd,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=env,
-        start_new_session=True,
-    )
-    if process.stdout is None:
-        raise RuntimeError("stdout is None despite stdout=PIPE")
-    lines: list[str] = []
-    for line in process.stdout:
-        lines.append(line)
-    process.wait()
-    return "".join(lines), process.returncode
-
-
-def _direct_write_log(
-    log_dir: Path,
-    task_text: str,
-    cmd: list[str],
-    output: str,
-    exit_code: int,
-) -> Path:
-    log_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    slug = "".join(
-        ch if ch.isalnum() else "-" for ch in task_text.lower()
-    ).strip("-")[:50]
-    log_path = log_dir / f"{timestamp}_{slug or 'task'}.log"
-    log_path.write_text(
-        f"Task: {task_text}\n"
-        f"Command: {' '.join(cmd)}\n"
-        f"Exit code: {exit_code}\n"
-        f"{'=' * 60}\n"
-        f"{output}\n"
-    )
-    return log_path
 
 
 def _direct_detect_changed_files(project_dir: Path) -> list[str]:
@@ -207,13 +128,28 @@ def invoke_code_edit_direct(
     model: str | None,
     timeout: int = 600,
 ) -> CodeEditResult:
-    """Direct backend: structural transcription of mcloop's run_task body."""
-    prompt = _direct_build_prompt(inputs)
+    """Direct backend: structural transcription of mcloop run_task body.
+
+    Builds the prompt with the same builders mcloop uses, builds the
+    command with the same flags, builds the env with the same
+    passthrough plus billing-mode plus provider routing, runs the
+    session through the same loop with watchdog and approval polling,
+    writes the same per-invocation log file, and detects changed files
+    via git status. All of this lives in orchestra modules that were
+    transcribed from mcloop runner.py for the integration; we use them
+    here so the test is faithful to mcloop without taking a runtime
+    dependency on the mcloop package.
+    """
+    prompt = build_code_edit_prompt(inputs)
     cmd = _direct_build_command(prompt, model)
-    env = _direct_build_session_env(inputs["task_label"])
-    output, exit_code = _direct_run_session(cmd, project_dir, env, timeout)
-    log_path = _direct_write_log(
-        log_dir, inputs["instruction"], cmd, output, exit_code
+    env = build_session_env(
+        task_label=str(inputs.get("task_label", "")),
+        cli="claude",
+        model=model,
+    )
+    output, exit_code = run_session(cmd, project_dir, env=env, timeout=timeout)
+    log_path = write_log(
+        log_dir, str(inputs.get("instruction", "task")), cmd, output, exit_code
     )
     changed = _direct_detect_changed_files(project_dir)
     return CodeEditResult(
@@ -241,18 +177,32 @@ def invoke_code_edit_orchestra(
     data_root: Path,
     timeout: int = 600,
 ) -> CodeEditResult:
-    enriched = dict(inputs)
-    enriched.setdefault("project_dir", str(project_dir))
+    """Orchestra backend: call run_workflow and adapt the result.
+
+    Threads ``log_dir``, ``model``, and ``timeout`` through
+    ``invocation_options`` so the underlying adapter receives them.
+    The adapter writes its session log under ``log_dir`` and uses the
+    overridden model.
+    """
+    invocation_options: dict[str, Any] = {
+        "log_dir": str(log_dir),
+        "timeout": timeout,
+    }
+    if model is not None:
+        invocation_options["model"] = model
     result = run_workflow(
         "code_edit",
-        enriched,
+        inputs,
         config,
+        invocation_options=invocation_options,
         project_dir=project_dir,
         data_root=data_root,
     )
     summary = result.summary
     output = summary.get("output", "")
-    exit_code = int(summary.get("exit_code", 1 if result.terminal != "done" else 0))
+    exit_code = int(
+        summary.get("exit_code", 1 if result.terminal != "done" else 0)
+    )
     changed_files = list(summary.get("changed_files") or [])
     adapter_log = summary.get("adapter_log")
     log_path = Path(adapter_log) if adapter_log else result.log_path
@@ -267,7 +217,8 @@ def invoke_code_edit_orchestra(
 
 
 # --------------------------------------------------------------------
-# Subprocess-layer mocks
+# Subprocess-layer mocks plus a spy that records the cmd/cwd/env of
+# every Popen call so the assertions can compare them.
 # --------------------------------------------------------------------
 
 
@@ -284,8 +235,25 @@ _TRANSCRIPT_LINES = [
 ]
 
 
+@dataclass
+class _PopenCall:
+    cmd: list[str]
+    cwd: Any
+    env: dict[str, str] | None
+    is_watchdog: bool
+
+
+_popen_calls: list[_PopenCall] = []
+
+
 class _FakePopen:
-    """A subprocess.Popen replacement that yields a canned transcript."""
+    """A subprocess.Popen replacement that yields a canned transcript.
+
+    Records each call into ``_popen_calls`` so the test can compare
+    the cmd, cwd, and env between the direct and orchestra paths.
+    """
+
+    return_code_default: int = 0
 
     def __init__(
         self,
@@ -301,13 +269,20 @@ class _FakePopen:
         self.args = cmd
         self.cwd = cwd
         self.env = env
-        self.pid = 12345
+        self.pid = 12345 + len(_popen_calls)
         self.returncode: int | None = None
-        self.stdout = io.StringIO("".join(_TRANSCRIPT_LINES))
+        is_watchdog = bool(cmd and cmd[0] == "sh" and "-c" in cmd)
+        if not is_watchdog:
+            self.stdout = io.StringIO("".join(_TRANSCRIPT_LINES))
+        else:
+            self.stdout = None
+        _popen_calls.append(
+            _PopenCall(cmd=list(cmd), cwd=cwd, env=env, is_watchdog=is_watchdog)
+        )
 
     def wait(self, timeout: float | None = None) -> int:
         if self.returncode is None:
-            self.returncode = 0
+            self.returncode = self.return_code_default
         return self.returncode
 
     def kill(self) -> None:
@@ -315,21 +290,22 @@ class _FakePopen:
             self.returncode = -9
 
 
+class _FailingFakePopen(_FakePopen):
+    return_code_default = 1
+
+
 _FAKE_GIT_STATUS_STDOUT = " M src/example.py\n"
+_EXPECTED_CHANGED_FILES = ["src/example.py"]
 
 
 def _fake_subprocess_run(*args: Any, **kwargs: Any) -> Any:
     cmd = args[0] if args else kwargs.get("args")
-    completed = subprocess.CompletedProcess(
+    return subprocess.CompletedProcess(
         args=cmd,
         returncode=0,
         stdout=_FAKE_GIT_STATUS_STDOUT,
         stderr="",
     )
-    return completed
-
-
-_EXPECTED_CHANGED_FILES = ["src/example.py"]
 
 
 # --------------------------------------------------------------------
@@ -371,9 +347,18 @@ def _orchestra_config() -> OrchestraConfig:
     )
 
 
+def _inner_cli_calls() -> list[_PopenCall]:
+    return [c for c in _popen_calls if not c.is_watchdog]
+
+
 # --------------------------------------------------------------------
-# The test
+# Test fixtures
 # --------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_popen_calls() -> None:
+    _popen_calls.clear()
 
 
 @pytest.fixture
@@ -381,6 +366,18 @@ def patched_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(orch_sp.subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+
+
+@pytest.fixture
+def patched_failing_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(orch_sp.subprocess, "Popen", _FailingFakePopen)
+    monkeypatch.setattr(subprocess, "Popen", _FailingFakePopen)
+    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+
+
+# --------------------------------------------------------------------
+# Tests
+# --------------------------------------------------------------------
 
 
 def test_parity_code_edit_single(
@@ -393,63 +390,91 @@ def test_parity_code_edit_single(
     data_root = tmp_path / "orchestra_runs"
 
     inputs = _representative_inputs(project_dir)
+    model = "opus"
+    timeout = 900
 
     direct = invoke_code_edit_direct(
         inputs,
         project_dir=project_dir,
         log_dir=direct_log_dir,
-        model="opus",
+        model=model,
+        timeout=timeout,
     )
+    direct_calls = list(_inner_cli_calls())
+
+    _popen_calls.clear()
     orchestra = invoke_code_edit_orchestra(
         inputs,
         project_dir=project_dir,
         log_dir=orchestra_log_dir,
-        model="opus",
+        model=model,
+        timeout=timeout,
         config=_orchestra_config(),
         data_root=data_root,
     )
+    orchestra_calls = list(_inner_cli_calls())
 
-    # Structural equivalence per the plan: matching success, exit_code,
-    # changed_files. Output content is allowed to vary.
+    # Plan-level structural equivalence.
     assert direct.success == orchestra.success
     assert direct.exit_code == orchestra.exit_code
     assert direct.changed_files == orchestra.changed_files
-
-    # Both should be successful with our happy-path mock.
     assert direct.success is True
     assert direct.exit_code == 0
     assert direct.changed_files == _EXPECTED_CHANGED_FILES
 
-    # Both should have written a log file containing the canned
-    # transcript.
-    for result in (direct, orchestra):
-        assert result.log_path.exists()
-        content = result.log_path.read_text()
+    # Both paths must hit the inner CLI exactly once.
+    assert len(direct_calls) == 1
+    assert len(orchestra_calls) == 1
+
+    direct_call = direct_calls[0]
+    orch_call = orchestra_calls[0]
+
+    # Same command shape on both sides. The prompt is positional and
+    # the same in both because both build it from the same inputs via
+    # the same prompt builder.
+    assert direct_call.cmd == orch_call.cmd
+    assert direct_call.cwd == orch_call.cwd
+
+    # The model override threaded through invocation_options must
+    # appear in the orchestra path's command exactly as in the direct
+    # path. The same flags must be present.
+    assert "--model" in direct_call.cmd
+    assert direct_call.cmd[direct_call.cmd.index("--model") + 1] == model
+    assert "--model" in orch_call.cmd
+    assert orch_call.cmd[orch_call.cmd.index("--model") + 1] == model
+    assert "--allowedTools" in direct_call.cmd
+    assert "--allowedTools" in orch_call.cmd
+
+    # The task label gets folded into the env of the inner CLI on both
+    # sides, proving log_dir / model / timeout are not the only knobs
+    # threaded through; the rest of build_session_env runs too.
+    assert direct_call.env is not None
+    assert orch_call.env is not None
+    assert direct_call.env.get("MCLOOP_TASK_LABEL") == inputs["task_label"]
+    assert orch_call.env.get("MCLOOP_TASK_LABEL") == inputs["task_label"]
+
+    # Each backend must have written a log file under its log_dir,
+    # proving the per-call log_dir argument was honored on both sides.
+    direct_logs = list(direct_log_dir.glob("*.log"))
+    orch_logs = list(orchestra_log_dir.glob("*.log"))
+    assert len(direct_logs) == 1
+    assert len(orch_logs) == 1
+    for log_file in direct_logs + orch_logs:
+        content = log_file.read_text()
         for line in _TRANSCRIPT_LINES:
             assert line.strip() in content
 
-    # The orchestra backend carries a summary dict; the direct backend
-    # does not.
+    # The orchestra path carries a summary; the direct path does not.
+    assert direct.summary is None
     assert orchestra.summary is not None
     assert orchestra.summary.get("terminal") == "done"
     assert orchestra.summary.get("exit_code") == 0
-    assert direct.summary is None
 
 
 def test_parity_code_edit_failure_propagates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, patched_failing_subprocess: None
 ) -> None:
     """Both backends must agree on a non-zero exit code as well."""
-
-    class _FailingPopen(_FakePopen):
-        def wait(self, timeout: float | None = None) -> int:
-            self.returncode = 1
-            return 1
-
-    monkeypatch.setattr(orch_sp.subprocess, "Popen", _FailingPopen)
-    monkeypatch.setattr(subprocess, "Popen", _FailingPopen)
-    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
-
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     inputs = _representative_inputs(project_dir)
@@ -459,12 +484,15 @@ def test_parity_code_edit_failure_propagates(
         project_dir=project_dir,
         log_dir=tmp_path / "direct_logs",
         model="opus",
+        timeout=600,
     )
+    _popen_calls.clear()
     orchestra = invoke_code_edit_orchestra(
         inputs,
         project_dir=project_dir,
         log_dir=tmp_path / "orchestra_logs",
         model="opus",
+        timeout=600,
         config=_orchestra_config(),
         data_root=tmp_path / "orchestra_runs",
     )
@@ -473,3 +501,40 @@ def test_parity_code_edit_failure_propagates(
     assert direct.exit_code == orchestra.exit_code
     assert direct.success is False
     assert direct.exit_code == 1
+
+
+def test_parity_code_edit_bug_task_branches_prompt(
+    tmp_path: Path, patched_subprocess: None
+) -> None:
+    """When is_bug_task is true, both backends must produce the
+    bug-task prompt, not the normal prompt."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    inputs = _representative_inputs(project_dir)
+    inputs["is_bug_task"] = True
+
+    invoke_code_edit_direct(
+        inputs,
+        project_dir=project_dir,
+        log_dir=tmp_path / "direct_logs",
+        model="opus",
+        timeout=600,
+    )
+    direct_call = _inner_cli_calls()[0]
+
+    _popen_calls.clear()
+    invoke_code_edit_orchestra(
+        inputs,
+        project_dir=project_dir,
+        log_dir=tmp_path / "orchestra_logs",
+        model="opus",
+        timeout=600,
+        config=_orchestra_config(),
+        data_root=tmp_path / "orchestra_runs",
+    )
+    orch_call = _inner_cli_calls()[0]
+
+    direct_prompt = direct_call.cmd[2]
+    orch_prompt = orch_call.cmd[2]
+    assert direct_prompt == orch_prompt
+    assert "BUG FIX (MANDATORY CODE CHANGE)" in direct_prompt
