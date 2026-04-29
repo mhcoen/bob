@@ -59,6 +59,10 @@ When picking up the project, read in this order:
 5. `design/orchestra-implementation-plan.md` — slice 1 plan. The implementation in `orchestra/` is built against this.
 6. The acid-test sketches if you need workflow-level grounding for slices 2-6.
 
+## Review discipline
+
+For code review, always inspect the current working-tree files from disk immediately before making claims. If the user says files were edited, discard prior analysis and re-open the files. Every finding about existing code must be backed by current file and line evidence from the working tree. Do not rely on fetched refs, prior commits, cached snapshots, summaries, or previous review text.
+
 ## Slice 1 status
 
 Implemented. The slice exercises the spine end-to-end with mocks: loader -> validator -> executor -> adapter -> result parser -> artifact store -> log -> resume.
