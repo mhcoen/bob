@@ -162,44 +162,121 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 The wrapper tests (`tests/test_code_edit_wrapper.py`) cover prompt and
 result-shape parity offline. They cannot exercise the live CLI stream
 format, watchdog and PID timing, signal delivery, or Telegram approval
-flow. Run a one-time live gate before trusting the orchestra backend
-in production. Both runs use the same minimal one-line PLAN.md task on
-the same project, the same model, and the same outer flags. The git
-diff of the resulting commit must be equivalent.
+flow. Run a one-time live gate per environment before trusting the
+orchestra backend in production. Each step below has explicit
+yes/no checks; the gate passes only when every check is yes.
 
-1. Direct path baseline. With no `.orchestra/config.json` in the project,
-   run mcloop on a one-line PLAN.md item ("Add a comment to README.md
-   saying hello world" is enough). Confirm mcloop produces a commit and
-   the working tree is clean afterward. This is the legacy path.
+The plan's parity contract requires both backends to produce the same
+`CodeEditResult` shape: `success` (bool), `exit_code` (int), `log_path`
+(an existing non-empty file), and `changed_files` (a list). Mcloop
+surfaces those fields through the run summary JSON at
+`.mcloop/run-summary/latest.json` and through the per-task log file
+under the configured `log_dir` (default `logs/`). Use those two
+artifacts to evaluate the criteria below.
 
-2. Orchestra path. In the same project add `.orchestra/config.json`:
+### Step 1: direct baseline
 
-       {
-         "workflows": {
-           "code_edit": {
-             "pattern": "single",
-             "roles": {
-               "editor": {
-                 "adapter": "claude_code_agent",
-                 "model": "<the same model name as run 1>",
-                 "tools": "default",
-                 "parameters": {}
-               }
-             }
-           }
-         }
-       }
+Setup. Pick a project with a clean working tree and no
+`.orchestra/config.json`. Set PLAN.md to one item:
+`- [ ] Add a hello-world comment to README.md`. Note `RUN1_LOG_DIR`,
+the `log_dir` mcloop will use (default `./logs/`).
 
-   Reset the project to the pre-run-1 state and rerun mcloop on the same
-   PLAN.md item. Confirm a commit lands and the diff matches run 1.
+Run. Invoke mcloop and let it process the single item.
 
-3. Interrupt path. Start the orchestra-backed run as in step 2. While
-   the inner CLI is streaming, send SIGINT (Ctrl-C). Confirm the child
-   process group exits, `.mcloop/active-pid` is gone, and
-   `.mcloop/interrupted.json` was written. This exercises the
-   signal-handler path that reaches into the orchestra session.
+Pass criteria, all required:
 
-This is a one-time gate per environment. Once the three steps pass, the
-offline tests are sufficient regression coverage.
+- `git log -1 --oneline` shows a new commit landed.
+- `git status` reports a clean working tree.
+- `cat .mcloop/run-summary/latest.json` shows the task entry's
+  `success: true` and `exit_code: 0`.
+- The task's `log_path` from the same JSON entry exists and
+  `wc -c "$log_path"` is greater than zero.
+- The task's `changed_files` list in the JSON contains `README.md`.
+
+Capture for step 2: copy the JSON entry's `success`, `exit_code`,
+`log_path`, and `changed_files` values for later comparison. Reset
+the working tree (`git reset --hard <pre-run-sha>`) so the orchestra
+run starts from the same base.
+
+### Step 2: orchestra path
+
+Setup. Add `.orchestra/config.json` to the same project:
+
+    {
+      "workflows": {
+        "code_edit": {
+          "pattern": "single",
+          "roles": {
+            "editor": {
+              "adapter": "claude_code_agent",
+              "model": "<the same model name used in step 1>",
+              "tools": "default",
+              "parameters": {}
+            }
+          }
+        }
+      }
+    }
+
+PLAN.md must contain the same single item from step 1. Note
+`RUN2_LOG_DIR`. Run mcloop again.
+
+Pass criteria, all required:
+
+- `git log -1 --oneline` shows a new commit landed on top of the
+  pre-step-1 base.
+- `git status` reports a clean working tree.
+- `cat .mcloop/run-summary/latest.json` shows the task entry's
+  `success: true` and `exit_code: 0`, and these match the captured
+  values from step 1 exactly.
+- The orchestra run wrote a session log under the directory
+  specified by the JSON entry's `log_path`, the file exists, and
+  `wc -c "$log_path"` is greater than zero.
+- The task entry's `changed_files` list matches the step 1 list
+  element by element in the same order. A different ordering or a
+  missing or extra file is a failure.
+- An orchestra run directory exists under `RUN2_LOG_DIR/orchestra-runs/`
+  and contains a non-empty session log inside the run directory.
+- No leftover PID file: `ls .mcloop/active-pid` returns
+  `No such file or directory`.
+
+### Step 3: interrupt path
+
+Setup. Reset the working tree to the pre-step-1 base again. Keep the
+`.orchestra/config.json` from step 2. Restore PLAN.md to the same
+single item.
+
+Run. Start mcloop. While the inner CLI is streaming (you will see
+streaming output in the terminal), send SIGINT (Ctrl-C) once. Wait
+for mcloop to print the interrupt summary and exit. Do not press
+Ctrl-C a second time.
+
+Pass criteria, all required:
+
+- Mcloop exits within ten seconds of the SIGINT.
+- `.mcloop/active-pid` does not exist (`ls .mcloop/active-pid` returns
+  `No such file or directory`). The wrapper's signal path cleans up
+  on the way out.
+- `.mcloop/interrupted.json` exists and was written during this run
+  (`stat -f %m .mcloop/interrupted.json` is more recent than the
+  step 3 start time).
+- The most recent session log (the path captured from
+  `.mcloop/run-summary/latest.json`'s last task entry) exists and
+  has non-zero size.
+- The same task entry in `latest.json` reports a non-zero exit code
+  representing the interrupt: `exit_code: 130` (POSIX SIGINT) or
+  `exit_code: -2` (mcloop's timeout/abort sentinel). Any other code
+  is a failure.
+- The orchestra run directory under `RUN2_LOG_DIR/orchestra-runs/`
+  exists, the inner session log exists, and the run directory has no
+  files matching `pid` or `*.pid` and no files matching `watchdog*`.
+- `pgrep -f 'mcloop.*watchdog'` returns no results, and
+  `pgrep -f 'claude -p'` returns no results that started during the
+  step. Any leftover watchdog or inner CLI process is a failure.
+
+This is a one-time gate per environment. Once all three steps pass
+with every criterion above marked yes, the offline tests are
+sufficient regression coverage until the wrapper or the signal path
+changes.
 
 **tests/test_wrap.py** - Tests for source file instrumentation.
