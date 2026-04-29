@@ -97,7 +97,7 @@ shape:
 ```
 {
   state_id:           string,    # the state's name
-  attempt:            integer,   # 1-indexed, matches attempts.<state>
+  attempt:            integer,   # 1-indexed; see "Counter semantics" below
   actor_binding:      object,    # what the state bound to (see below)
   status:             string,    # one of: ok, error, timeout, cancelled
   outcome:            string,    # the typed outcome (see below)
@@ -118,11 +118,13 @@ Field meanings:
   unambiguously when results from multiple states are in flight (for
   example in resume scenarios).
 
-- **`attempt`**: the value of `attempts.<state_id>` at the moment
-  this invocation entered the state. 1-indexed. Matches the design
-  document's increment-on-entry semantics. The runner increments the
-  counter before evaluating any guard or invoking the actor; the
-  envelope's `attempt` is the value used during this invocation.
+- **`attempt`**: the 1-indexed sequence number of this invocation
+  for this state. The first invocation of a state in a run has
+  `attempt = 1`, the second has `attempt = 2`, and so on. The
+  envelope's `attempt` is fixed at state entry and does not change
+  during the invocation. This field is not the same thing as the
+  `attempts.<state>` counter that transition guards reference; see
+  "Counter semantics" below for the disambiguation.
 
 - **`actor_binding`**: a record of what the state actually bound to
   at runtime. This is the runner's record of "which model and role,
@@ -555,6 +557,78 @@ artifact whose entries are the per-member outputs, in declaration
 order under `join all` or completion order under `join any` /
 `quorum`. The parser sees the aggregate envelope and constructs the
 artifact from the member envelopes' payloads.
+
+## Counter semantics
+
+Two distinct things share the word "attempt." Disambiguating them
+is the job of this section.
+
+**`envelope.attempt`** is a field of the result envelope. It records
+the 1-indexed sequence number of one specific invocation. The first
+invocation of a state has `envelope.attempt = 1`, the second has
+`envelope.attempt = 2`, and so on. Once an envelope is built, its
+`attempt` field is immutable. Downstream references to a past
+state's envelope (`<state>.attempt`) read this field.
+
+**`attempts.<state>`** is a runtime counter that transition guards
+reference. It is not a field of any envelope. It lives in the
+runner's run-level state and is updated as the run progresses.
+
+The two are related but not the same. The relationship and the
+update rule are:
+
+1. `attempts.<state>` starts at 0 at the beginning of a run.
+2. The runner increments `attempts.<state>` *on entry* to that
+   state, before invoking the actor. The just-incremented value is
+   the value that `envelope.attempt` will have for the invocation
+   that is about to start.
+3. Transition guards on outgoing edges from any state are evaluated
+   *before* the runner crosses the edge to the target. At
+   evaluation time, `attempts.<target>` has not yet been
+   incremented for the about-to-start invocation. The guard sees
+   the count of state entries to `<target>` that have already
+   completed (or are currently executing, in the unusual case of
+   a self-edge guard).
+
+The acid tests use guards of the shape:
+
+```
+on continue when attempts.continue-gate < 6 => critique
+```
+
+evaluated on the outgoing edge from `continue-gate`. Under the rule
+above, `attempts.continue-gate` at evaluation time equals the
+sequence number of the invocation that just completed (the one
+whose envelope.attempt is also that value). The guard succeeds
+while that count is below the bound, fails when the count reaches
+the bound. This is the natural "this is the Nth visit, do X"
+reading of the guard.
+
+Equivalently:
+
+```
+attempts.<state>  =  number of invocations of <state> that have
+                     entered (and either completed or are currently
+                     executing) so far in this run.
+                  =  envelope.attempt of the most recent invocation
+                     of <state>, when that invocation has finished
+                     entering.
+```
+
+For the `retries.<state>` counter (introduced in the design
+document for retry policy), the rule differs in one respect:
+`retries.<state>` counts only re-entries caused by `error` or
+`timeout` outcomes on the same state, and is reset to zero each
+time the state is entered for a non-retry reason (a transition
+from a different state, or the start of the run). It is updated on
+entry, like `attempts.<state>`, and is similarly visible to guards.
+
+Self-edges (a state transitioning to itself) and retries are the
+only cases where a guard on an outgoing edge of state X references
+`attempts.X` or `retries.X` for the about-to-start invocation. In
+those cases the guard reads the count of completed entries; the
+about-to-start entry is not yet counted. This is the same rule as
+the cross-state case, applied consistently.
 
 ## Verdict and outcome mapping
 
