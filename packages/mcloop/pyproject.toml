@@ -7,7 +7,7 @@ name = "mcloop"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "orchestra @ file:///Users/mhcoen/proj/orchestra",
+    "orchestra",
 ]
 
 [tool.setuptools]
@@ -50,7 +50,8 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 # Editable installs of sibling packages (orchestra) use a PEP 660
 # import hook that mypy's analyzer does not follow. Pointing
-# mypy_path at the orchestra source directory lets mypy see the
+# mypy_path at the orchestra source directory (relative to mcloop's
+# repo root, assuming the repos are siblings) lets mypy see the
 # package's py.typed marker and stubs without needing a non-editable
 # install.
-mypy_path = "/Users/mhcoen/proj/orchestra"
+mypy_path = "../orchestra"
