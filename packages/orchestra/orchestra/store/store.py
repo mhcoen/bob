@@ -18,6 +18,13 @@ rollback, log emission, and resume reconstruction all flow.
 Slice 1 stores only inline types (``text``, ``json``, ``messages``,
 ``prompt``, ``schema``, ``document``). File, directory, and
 git-workspace storage is slice 2 and beyond.
+
+Versioning model: each call to ``tentative_write`` produces a fresh
+row with a monotonically increasing ``seq``. ``read_latest`` orders
+by ``seq DESC`` so that rewriting an artifact to a previously-written
+content (A -> B -> A) correctly returns the most recent commit, not
+the older row with matching content hash. Version IDs remain
+content-addressed (SHA-256 of the canonicalized value).
 """
 
 from __future__ import annotations
@@ -85,23 +92,22 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 
 CREATE TABLE IF NOT EXISTS versions (
+    seq              INTEGER PRIMARY KEY AUTOINCREMENT,
     artifact         TEXT NOT NULL REFERENCES artifacts(name),
     version_id       TEXT NOT NULL,
     value            BLOB NOT NULL,
     written_at       TEXT NOT NULL,
     written_by       TEXT NOT NULL,
     is_tentative     INTEGER NOT NULL,
-    tentative_handle TEXT,
-    PRIMARY KEY (artifact, version_id)
+    tentative_handle TEXT
 );
 
-CREATE INDEX IF NOT EXISTS versions_by_artifact ON versions(artifact, written_at);
+CREATE INDEX IF NOT EXISTS versions_by_artifact ON versions(artifact, seq);
 CREATE INDEX IF NOT EXISTS versions_by_handle ON versions(tentative_handle);
 
 CREATE TABLE IF NOT EXISTS tentative_handles (
     handle      TEXT PRIMARY KEY,
-    artifact    TEXT NOT NULL,
-    version_id  TEXT NOT NULL
+    seq         INTEGER NOT NULL REFERENCES versions(seq)
 );
 """
 
@@ -141,6 +147,11 @@ class ArtifactStore:
 
         Re-declaration of the same artifact with the same type is a
         no-op. Re-declaration with a different type is a StoreError.
+
+        If ``qualifiers`` contains the ``initial`` key, an initial
+        committed version is written. The key being present is the
+        existence test, not the value being non-None: ``initial: null``
+        produces a row whose value is JSON null.
         """
         qualifiers = qualifiers or {}
         if type not in _INLINE_TYPES:
@@ -162,8 +173,6 @@ class ArtifactStore:
             (name, type, json.dumps(qualifiers, sort_keys=True)),
         )
         self._conn.commit()
-        # Apply ``initial`` if present. This produces a committed version
-        # with a synthetic written_by tag distinguishing it in listings.
         if "initial" in qualifiers:
             self._write_initial(name, qualifiers["initial"])
 
@@ -172,12 +181,6 @@ class ArtifactStore:
         # before any state has run; they are part of declaration, not
         # mutation by an invocation.
         version_id = _hash_value(value)
-        existing = self._conn.execute(
-            "SELECT 1 FROM versions WHERE artifact = ? AND version_id = ?",
-            (name, version_id),
-        ).fetchone()
-        if existing is not None:
-            return
         self._conn.execute(
             """
             INSERT INTO versions
@@ -210,7 +213,7 @@ class ArtifactStore:
             """
             SELECT version_id, value FROM versions
             WHERE artifact = ? AND is_tentative = 0
-            ORDER BY written_at DESC, rowid DESC
+            ORDER BY seq DESC
             LIMIT 1
             """,
             (name,),
@@ -231,6 +234,8 @@ class ArtifactStore:
             """
             SELECT value FROM versions
             WHERE artifact = ? AND version_id = ? AND is_tentative = 0
+            ORDER BY seq DESC
+            LIMIT 1
             """,
             (name, version_id),
         ).fetchone()
@@ -249,7 +254,7 @@ class ArtifactStore:
             """
             SELECT version_id, written_at, written_by FROM versions
             WHERE artifact = ? AND is_tentative = 0
-            ORDER BY written_at ASC, rowid ASC
+            ORDER BY seq ASC
             """,
             (name,),
         ).fetchall()
@@ -275,46 +280,36 @@ class ArtifactStore:
         """Stage a write. Returns a tentative handle that
         ``commit_tentative`` or ``discard_tentative`` can act on.
 
-        Versions are content-addressed. Two tentative writes of the
-        same value to the same artifact share a version_id but get
-        distinct handles; commit_tentative on either handle promotes
-        the row.
+        Each call produces a fresh row with a new ``seq``. Writing the
+        same content twice produces two rows that share a version_id
+        but order independently by ``seq``, so rewriting to a previous
+        value is correctly the latest version.
         """
         type = self._artifact_type(name)
         if type not in _INLINE_TYPES:
             raise StoreError(f"slice 1 does not handle artifact type {type!r}")
         handle = str(uuid.uuid4())
         version_id = _hash_value(value)
-        # If no row exists for this artifact+version_id yet, insert a
-        # tentative one. If one exists (committed or tentative), leave
-        # it; the handle just records the intent to materialize this
-        # content as part of an invocation's writes.
-        existing = self._conn.execute(
-            "SELECT is_tentative FROM versions WHERE artifact = ? AND version_id = ?",
-            (name, version_id),
-        ).fetchone()
-        if existing is None:
-            self._conn.execute(
-                """
-                INSERT INTO versions
-                    (artifact, version_id, value, written_at, written_by, is_tentative, tentative_handle)
-                VALUES (?, ?, ?, ?, ?, 1, ?)
-                """,
-                (
-                    name,
-                    version_id,
-                    _canonicalize(value),
-                    _now_iso(),
-                    written_by,
-                    handle,
-                ),
-            )
-        self._conn.execute(
+        cur = self._conn.cursor()
+        cur.execute(
             """
-            INSERT OR REPLACE INTO tentative_handles (handle, artifact, version_id)
-            VALUES (?, ?, ?)
+            INSERT INTO versions
+                (artifact, version_id, value, written_at, written_by, is_tentative, tentative_handle)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
             """,
-            (handle, name, version_id),
+            (
+                name,
+                version_id,
+                _canonicalize(value),
+                _now_iso(),
+                written_by,
+                handle,
+            ),
+        )
+        seq = cur.lastrowid
+        cur.execute(
+            "INSERT INTO tentative_handles (handle, seq) VALUES (?, ?)",
+            (handle, seq),
         )
         self._conn.commit()
         return handle
@@ -333,18 +328,24 @@ class ArtifactStore:
             committed_ids: list[str] = []
             for handle in handles:
                 row = cur.execute(
-                    "SELECT artifact, version_id FROM tentative_handles WHERE handle = ?",
+                    "SELECT seq FROM tentative_handles WHERE handle = ?",
                     (handle,),
                 ).fetchone()
                 if row is None:
                     raise StoreError(f"unknown tentative handle: {handle!r}")
-                artifact, version_id = row
+                (seq,) = row
+                vrow = cur.execute(
+                    "SELECT version_id FROM versions WHERE seq = ? AND is_tentative = 1",
+                    (seq,),
+                ).fetchone()
+                if vrow is None:
+                    raise StoreError(
+                        f"tentative handle {handle!r} points at no tentative row"
+                    )
+                (version_id,) = vrow
                 cur.execute(
-                    """
-                    UPDATE versions SET is_tentative = 0, tentative_handle = NULL
-                    WHERE artifact = ? AND version_id = ? AND is_tentative = 1
-                    """,
-                    (artifact, version_id),
+                    "UPDATE versions SET is_tentative = 0, tentative_handle = NULL WHERE seq = ?",
+                    (seq,),
                 )
                 cur.execute(
                     "DELETE FROM tentative_handles WHERE handle = ?",
@@ -365,25 +366,23 @@ class ArtifactStore:
             cur.execute("BEGIN")
             for handle in handles:
                 row = cur.execute(
-                    "SELECT artifact, version_id FROM tentative_handles WHERE handle = ?",
+                    "SELECT seq FROM tentative_handles WHERE handle = ?",
                     (handle,),
                 ).fetchone()
                 if row is None:
-                    # Idempotent: discarding an unknown handle is fine.
                     continue
-                artifact, version_id = row
-                # Only delete the row if it is still tentative; another
-                # handle may have already committed it.
-                cur.execute(
-                    """
-                    DELETE FROM versions
-                    WHERE artifact = ? AND version_id = ? AND is_tentative = 1
-                    """,
-                    (artifact, version_id),
-                )
+                (seq,) = row
+                # Delete the handle row first: tentative_handles.seq
+                # has a foreign key into versions(seq), so deleting
+                # the version row before the handle row violates the
+                # constraint.
                 cur.execute(
                     "DELETE FROM tentative_handles WHERE handle = ?",
                     (handle,),
+                )
+                cur.execute(
+                    "DELETE FROM versions WHERE seq = ? AND is_tentative = 1",
+                    (seq,),
                 )
             cur.execute("COMMIT")
         except Exception:
