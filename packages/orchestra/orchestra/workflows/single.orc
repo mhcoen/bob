@@ -11,22 +11,26 @@ workflow single
   external_input task_label text
   external_input check_commands json
   external_input is_bug_task boolean
+  external_input final_prompt text
 
   max_total_steps 10
 
-  model editor
+  model m_editor
 
   agent editor_agent
-    model editor
+    model m_editor
     adapter claude_code_agent
     context_policy fresh
 
   artifact editor_output text
 
+  role editor
+    prompt template "templates/single_editor.md" with final_prompt
+
   state edit
     actor agent editor_agent
-    prompt template "templates/single_editor.md" with instruction, context, prior_errors, eliminated, description, task_label
-    reads instruction, context, prior_errors, eliminated, project_dir, description, task_label, check_commands, is_bug_task
+    role editor
+    reads instruction, context, prior_errors, eliminated, project_dir, description, task_label, check_commands, is_bug_task, final_prompt
     writes editor_output text
     on complete => done
     on error => stop

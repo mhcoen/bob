@@ -1,24 +1,13 @@
-A proposer wrote an instruction. A critic evaluated it. Synthesize a
-final instruction that incorporates the critique, then perform the
-edit. If neither input is usable, rewrite from the original task.
+Apply this instruction now. It was produced by a proposer, a critic,
+and a synthesizer working off the original task. Treat it as the final
+instruction. Use the full project context below to interpret any
+references and to honor the project's safety rules and check
+commands.
 
-Proposer instruction:
-{proposer_output}
+Final instruction:
 
-Critic feedback:
-{critic_output}
+{synthesizer_output}
 
-Original task:
-{instruction}
+Full project context, safety rules, and check commands:
 
-Project description: {description}
-Task label: {task_label}
-
-Recent session context:
-{context}
-
-Approaches already ruled out:
-{eliminated}
-
-Prior errors from the previous attempt:
-{prior_errors}
+{final_prompt}

@@ -1,23 +1,14 @@
-A proposer agent has written the following instruction. Critique it.
-Identify gaps, mistakes, missed constraints, or risky steps. Do not
-edit any files yourself. Read the relevant code as needed.
+A proposer has written this instruction. Critique it. Identify gaps,
+mistakes, missed constraints, and risky steps. Do not edit any files
+yourself. The tools available to you are read-only. Read the relevant
+code as needed.
 
 Proposed instruction:
+
 {proposer_output}
 
-Original task:
-{instruction}
+Original task and full project context:
 
-Project description: {description}
-Task label: {task_label}
+{final_prompt}
 
-Recent session context:
-{context}
-
-Approaches already ruled out:
-{eliminated}
-
-Prior errors from the previous attempt:
-{prior_errors}
-
-Output the critique only. No revised instruction.
+Output the critique only. Do not write a revised instruction.

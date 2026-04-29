@@ -11,33 +11,54 @@ workflow draft_then_adjudicate
   external_input task_label text
   external_input check_commands json
   external_input is_bug_task boolean
+  external_input final_prompt text
 
-  max_total_steps 20
+  max_total_steps 30
 
-  model drafter
-  model editor
+  model m_drafter
+  model m_adjudicator
+  model m_editor
 
   agent editor_agent
-    model editor
+    model m_editor
     adapter claude_code_agent
     context_policy fresh
 
   artifact drafter_output text
+  artifact adjudicator_output text
   artifact editor_output text
 
+  role drafter
+    prompt template "templates/draft_then_adjudicate_drafter.md" with final_prompt
+
+  role adjudicator
+    prompt template "templates/draft_then_adjudicate_adjudicator.md" with drafter_output, final_prompt
+
+  role editor
+    prompt template "templates/draft_then_adjudicate_editor.md" with adjudicator_output, final_prompt
+
   state draft
-    actor model drafter
-    prompt template "templates/draft_then_adjudicate_drafter.md" with instruction, context, prior_errors, eliminated, description, task_label
-    reads instruction, context, prior_errors, eliminated, project_dir, description, task_label, check_commands, is_bug_task
+    actor model m_drafter
+    role drafter
+    reads final_prompt
     writes drafter_output text
+    on complete => adjudicate
+    on error => stop
+    on timeout => stop
+
+  state adjudicate
+    actor model m_adjudicator
+    role adjudicator
+    reads drafter_output, final_prompt
+    writes adjudicator_output text
     on complete => edit
     on error => stop
     on timeout => stop
 
   state edit
     actor agent editor_agent
-    prompt template "templates/draft_then_adjudicate_editor.md" with drafter_output, instruction, context, prior_errors, eliminated, description, task_label
-    reads drafter_output, instruction, context, prior_errors, eliminated, project_dir, description, task_label, check_commands, is_bug_task
+    role editor
+    reads adjudicator_output, project_dir, final_prompt
     writes editor_output text
     on complete => done
     on error => stop

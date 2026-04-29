@@ -66,7 +66,11 @@ class ClaudeCodeTextAdapter:
         ext = request.external_inputs or {}
         backing = request.backing_options or {}
 
-        model = binding.get("model") or self._default_model
+        model = (
+            backing.get("model_override")
+            or self._default_model
+            or binding.get("model")
+        )
         project_dir = Path(
             backing.get("project_dir")
             or ext.get("project_dir")

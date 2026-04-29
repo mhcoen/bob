@@ -190,7 +190,12 @@ class Executor:
             timeout_ms = int(opt_timeout * 1000)
         opt_model = self._invocation_options.get("model")
         if isinstance(opt_model, str) and opt_model:
-            actor_binding = {**actor_binding, "model": opt_model}
+            # Surface the override through backing_options so adapters
+            # can prefer it over both their default model and the
+            # workflow's actor.ref (which is just a workflow-local
+            # identifier referencing the model declaration, not the
+            # actual model id the CLI should receive).
+            backing_options["model_override"] = opt_model
 
         request = InvocationRequest(
             state_id=state.name,

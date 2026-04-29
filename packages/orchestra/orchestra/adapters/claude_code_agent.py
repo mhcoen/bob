@@ -66,7 +66,11 @@ class ClaudeCodeAgentAdapter:
         ext = request.external_inputs or {}
         backing = request.backing_options or {}
 
-        model = binding.get("model") or self._default_model
+        model = (
+            backing.get("model_override")
+            or self._default_model
+            or binding.get("model")
+        )
         allowed_tools = str(
             backing.get("allowed_tools") or self._default_allowed_tools
         )

@@ -1,22 +1,13 @@
-A drafter agent has produced the following instruction. Adjudicate it
-against the original task and any constraints below, then perform the
-edit. If the drafter's instruction is wrong or incomplete, rewrite it
-silently and proceed.
+Apply this instruction now. It was produced by a drafter and an
+adjudicator working off the original task. Treat it as the final
+instruction. Use the full project context below to interpret any
+references and to honor the project's safety rules and check
+commands.
 
-Drafter instruction:
-{drafter_output}
+Final instruction:
 
-Original task:
-{instruction}
+{adjudicator_output}
 
-Project description: {description}
-Task label: {task_label}
+Full project context, safety rules, and check commands:
 
-Recent session context:
-{context}
-
-Approaches already ruled out:
-{eliminated}
-
-Prior errors from the previous attempt:
-{prior_errors}
+{final_prompt}
