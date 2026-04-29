@@ -27,6 +27,7 @@ include = ["orchestra*"]
 
 [tool.setuptools.package-data]
 orchestra = [
+    "py.typed",
     "workflows/*.orc",
     "workflows/templates/*.md",
 ]
