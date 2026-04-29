@@ -265,3 +265,105 @@ def test_select_backend_handles_malformed_config(tmp_path: Path) -> None:
     config_dir.mkdir()
     (config_dir / "config.json").write_text("not json {{")
     assert _select_backend(project_dir) == "direct"
+
+
+def test_bug_verify_direct_routes_third_party_provider_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``invoke_bug_verify`` must thread provider env through to the
+    subprocess so third-party model aliases (kimi-k2.6, DeepSeek)
+    actually route through the correct endpoint.
+
+    The legacy ``run_bug_verify`` body skipped the provider env mutation
+    and consequently sent kimi-k2.6 / DeepSeek bug-verify sessions to
+    the default Anthropic endpoint. The fix builds a session env up
+    front and passes it through ``_build_command`` so
+    ``_apply_provider_env`` fires.
+
+    The user's real ``~/.mcloop/config.json`` is masked by stubbing
+    ``mcloop.config.load_role_config`` so a developer with executor
+    overrides locally does not fail this test for environmental
+    reasons.
+    """
+    from mcloop.code_edit import invoke_bug_verify
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key-1234")
+
+    stub_call_count = 0
+
+    def _stub_load_role_config(
+        role: str, source: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        nonlocal stub_call_count
+        stub_call_count += 1
+        assert role == "executor", (
+            f"only the executor role section should be read here, got {role!r}"
+        )
+        return None
+
+    monkeypatch.setattr("mcloop.config.load_role_config", _stub_load_role_config)
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    log_dir = tmp_path / "logs"
+
+    captured_env: dict[str, str] = {}
+
+    def _capture_run_session(
+        cmd: list[str],
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> tuple[str, int]:
+        captured_env.update(env or {})
+        return ("ok\n", 0)
+
+    log_path = tmp_path / "session.log"
+    with (
+        patch("mcloop.runner._run_session", side_effect=_capture_run_session),
+        patch("mcloop.runner._write_log", return_value=log_path),
+    ):
+        result = invoke_bug_verify(
+            bugs_content="- [ ] Some bug",
+            project_dir=project_dir,
+            log_dir=log_dir,
+            model="kimi-k2.6",
+            timeout=600,
+        )
+
+    assert isinstance(result, CodeEditResult)
+    assert result.success is True
+    assert result.exit_code == 0
+
+    keys_to_set = [
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "ENABLE_TOOL_SEARCH",
+        "ANTHROPIC_API_KEY",
+    ]
+    for key in keys_to_set:
+        assert key in captured_env, (
+            f"bug-verify env missing {key!r}: {sorted(captured_env)}"
+        )
+
+    assert captured_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert captured_env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key-1234"
+    assert captured_env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
+    assert captured_env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "moonshotai/kimi-k2.6"
+    assert captured_env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "moonshotai/kimi-k2.6"
+    assert captured_env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "moonshotai/kimi-k2.6"
+    assert captured_env["CLAUDE_CODE_SUBAGENT_MODEL"] == "moonshotai/kimi-k2.6"
+    assert captured_env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+    assert captured_env["ENABLE_TOOL_SEARCH"] == "1"
+    assert captured_env["ANTHROPIC_API_KEY"] == ""
+
+    assert stub_call_count >= 1, (
+        "load_role_config stub never fired; _apply_provider_env may "
+        "have been skipped or load_role_config was bypassed"
+    )

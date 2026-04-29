@@ -309,21 +309,25 @@ def _invoke_bug_verify_direct(
     model: str | None,
     timeout: int,
 ) -> CodeEditResult:
-    """Direct bug-verify path. Matches the legacy ``run_bug_verify`` body.
+    """Direct bug-verify path.
 
-    The original called ``_build_command`` without an env so the
-    third-party provider env mutation in ``_build_command`` did not
-    fire. Preserve that exactly: no env arg here. The session env still
-    applies inside ``_run_session``, which builds its own when none is
-    passed.
+    Builds a session env up front and threads it through
+    ``_build_command`` and ``_run_session`` so ``_apply_provider_env``
+    fires for third-party model aliases (kimi-k2.6, DeepSeek, any
+    fully qualified provider slug). The legacy ``run_bug_verify``
+    body skipped this and consequently routed third-party models to
+    the wrong endpoint. The code-edit direct backend already does the
+    right thing; this function now mirrors it.
     """
     from mcloop.prompts import build_bug_verify_prompt
 
     prompt = build_bug_verify_prompt(bugs_content)
-    cmd = _runner._build_command("claude", prompt=prompt, model=model)
+    session_env = _runner._build_session_env(task_label="bug-verify", cli="claude")
+    cmd = _runner._build_command("claude", prompt=prompt, env=session_env, model=model)
     output, returncode = _runner._run_session(
         cmd,
         project_dir,
+        env=session_env,
         timeout=timeout,
     )
     log_path = _runner._write_log(
