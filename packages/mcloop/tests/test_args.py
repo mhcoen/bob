@@ -9264,6 +9264,80 @@ def test_run_summary_all_fields_populated(tmp_path):
     assert data["stop_reason"] == ""
 
 
+def test_failed_task_summary_does_not_inherit_prior_changed_files(tmp_path):
+    """A failing second task must not inherit the first task's
+    ``changed_files`` list.
+
+    Scenario: task 1 succeeds with ``changed_files == ["foo.py"]``.
+    Task 2's ``run_task`` returns non-success on every attempt, so
+    the inner loop short-circuits at the failure branch (line ~1271)
+    and never reaches the autofix-then-changed-files block. Without
+    a per-task reset, ``changed_files`` from task 1 stays in scope
+    and shows up in task 2's no-success summary entry.
+
+    The fix resets ``changed_files = []`` and ``result = None`` at
+    the top of every task iteration, so the no-success path
+    serializes the empty default rather than the previous task's
+    list.
+    """
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("# Plan\n\n- [ ] First task\n- [ ] Second task\n")
+    (tmp_path / ".git").mkdir()
+
+    call_count = {"run_task": 0}
+
+    def fake_run_task(*args, **kwargs):
+        call_count["run_task"] += 1
+        r = MagicMock()
+        if call_count["run_task"] == 1:
+            r.success = True
+            r.output = "ok\n"
+            r.exit_code = 0
+            r.log_path = tmp_path / "logs" / "task-1.log"
+        else:
+            r.success = False
+            r.output = "boom\n"
+            r.exit_code = 1
+            r.log_path = tmp_path / "logs" / f"task-{call_count['run_task']}.log"
+        return r
+
+    captured: dict = {}
+
+    def capture_summary(*args, **kwargs):
+        captured.update(kwargs)
+
+    from mcloop.checks import CheckResult
+
+    status, _ = _run_loop_with_patches(
+        plan,
+        extra_patches={
+            "mcloop.main.run_task": fake_run_task,
+            "mcloop.main._changed_files": ["foo.py"],
+            "mcloop.main.run_checks": CheckResult(
+                passed=True, output="ok", command="true"
+            ),
+            "mcloop.main._build_and_write_summary": capture_summary,
+        },
+        max_retries=1,
+    )
+
+    tasks_summary = captured.get("task_entries", [])
+    assert len(tasks_summary) == 2, (
+        f"expected two task entries, got {len(tasks_summary)}: "
+        f"{tasks_summary}"
+    )
+    first, second = tasks_summary
+    assert first.outcome == "success"
+    assert first.changed_files == ["foo.py"]
+    assert second.outcome == "failed"
+    assert second.changed_files == [], (
+        "Second task summary entry inherited changed_files from "
+        f"the first task: {second.changed_files!r}"
+    )
+    assert second.exit_code == 1
+    assert status.status == "failure"
+
+
 def test_task_entry_carries_parity_fields(tmp_path):
     """``TaskEntry`` carries the four parity fields the orchestra
     integration smoke test needs and the writer round-trips them.

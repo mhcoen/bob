@@ -134,6 +134,7 @@ from mcloop.run_summary import (
 from mcloop.runner import (
     DEFAULT_TASK_TIMEOUT,
     INVESTIGATION_TOOLS,
+    RunResult,
     run_audit,
     run_task,
     warn_unknown_model,
@@ -1121,6 +1122,13 @@ def run_loop(
         eliminated = get_eliminated(tasks, task)
         task_start = time.monotonic()
         success = False
+        # Reset per-task parity-field locals so the no-success summary
+        # entry does not leak the previous task's result or
+        # changed_files. ``run_task`` reassigns ``result`` on every
+        # attempt; ``changed_files`` is set inside the success branch
+        # only, so it must default to an empty list here.
+        result: RunResult | None = None
+        changed_files = []
         models_to_try = [current_model]
         if fallback_model and fallback_model != current_model:
             models_to_try.append(fallback_model)
@@ -1445,7 +1453,10 @@ def run_loop(
 
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
-            last_result_changed = list(changed_files) if "changed_files" in dir() else []
+            # Use the per-iteration sentinels (result, changed_files)
+            # set at the top of this task. They are reset at every
+            # task boundary so the no-success entry never carries over
+            # values from a prior task's run.
             task_entries.append(
                 TaskEntry(
                     label=label,
@@ -1455,13 +1466,13 @@ def run_loop(
                     model=current_model or "",
                     attempts=max_retries,
                     success=False,
-                    exit_code=result.exit_code if "result" in dir() else 0,
+                    exit_code=result.exit_code if result is not None else 0,
                     log_path=(
                         str(result.log_path)
-                        if "result" in dir() and result.log_path
+                        if result is not None and result.log_path
                         else ""
                     ),
-                    changed_files=last_result_changed,
+                    changed_files=list(changed_files),
                 )
             )
             mark_failed(active_file, task)
