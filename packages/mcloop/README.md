@@ -1,4 +1,4 @@
-# McLoop
+# McLoop: https://github.com/mhcoen/mcloop
 
 McLoop lets you run AI coding agents for hours at a time without babysitting them. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone. McLoop supports Claude Code and OpenAI Codex as backends.
 
@@ -188,12 +188,15 @@ mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
 mcloop --retry                # Reset failed [!] markers and retry
 mcloop --stop-after-stage # Complete current stage then exit
 mcloop --stop-after-one   # Run exactly one task then exit
+mcloop --timeout 3600     # Per-task timeout in seconds (default: 1800)
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
 mcloop investigate "crash on wake from sleep"  # Debug a specific bug
 mcloop investigate --log crash.log             # Debug from a log file
 mcloop wrap                                    # Instrument an existing project for error capture
+mcloop maintain                                # Enforce invariants from MAINTAIN.md
+mcloop idea "some thought"                     # Append a timestamped idea to IDEAS.md
 mcloop install            # Guided setup: hooks, sandbox, Telegram, permissions
 mcloop install --dry-run  # Show what install would do without changing anything
 mcloop uninstall          # Remove hooks and credentials installed by mcloop
@@ -1120,8 +1123,9 @@ The summary schema:
 | `full_suite_passed` | bool/null | Full test suite result |
 | `build_passed` | bool/null | Build result |
 | `audit_result` | string/null | `"no_bugs"`, `"fixed"`, `"failed"`, `"skipped"` |
-| `terminal_status` | string | `"success"`, `"failure"`, `"interrupted"` |
+| `terminal_status` | string | `"success"`, `"failure"`, `"interrupted"`, or `"stopped"` |
 | `failure_detail` | string | Why the run failed (empty on success) |
+| `stop_reason` | string | `"stop_after_stage"` or `"stop_after_one"` when `terminal_status == "stopped"`; empty otherwise |
 | `stuck` | array | Task texts that could not be completed |
 | `commit_hashes` | array | Git hashes for all commits produced |
 
