@@ -367,3 +367,74 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         "load_role_config stub never fired; _apply_provider_env may "
         "have been skipped or load_role_config was bypassed"
     )
+
+
+def test_bug_verify_direct_native_env_matches_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native-Anthropic bug verification must produce a subprocess env
+    byte-identical to the legacy ``run_bug_verify`` body.
+
+    The legacy path called ``_run_session(cmd, project_dir)`` with no
+    env argument, which in turn called ``_build_session_env()`` with
+    the default empty ``task_label``. That left ``MCLOOP_TASK_LABEL``
+    unset. A regression where the wrapper calls
+    ``_build_session_env(task_label="bug-verify", cli="claude")``
+    would inject ``MCLOOP_TASK_LABEL=bug-verify`` into every
+    bug-verify subprocess, which is a behavior change visible to
+    inner CLI tooling.
+
+    The user's real ``~/.mcloop/config.json`` is masked the same way
+    as the third-party test so a developer with executor overrides
+    locally does not fail this test for environmental reasons.
+    """
+    from mcloop.code_edit import invoke_bug_verify
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    def _stub_load_role_config(
+        role: str, source: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        return None
+
+    monkeypatch.setattr("mcloop.config.load_role_config", _stub_load_role_config)
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    log_dir = tmp_path / "logs"
+
+    captured_env: dict[str, str] = {}
+
+    def _capture_run_session(
+        cmd: list[str],
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> tuple[str, int]:
+        captured_env.update(env or {})
+        return ("ok\n", 0)
+
+    log_path = tmp_path / "session.log"
+    with (
+        patch("mcloop.runner._run_session", side_effect=_capture_run_session),
+        patch("mcloop.runner._write_log", return_value=log_path),
+    ):
+        invoke_bug_verify(
+            bugs_content="- [ ] Some bug",
+            project_dir=project_dir,
+            log_dir=log_dir,
+            model="opus",
+            timeout=600,
+        )
+
+    assert "MCLOOP_TASK_LABEL" not in captured_env, (
+        "MCLOOP_TASK_LABEL leaked into the bug-verify subprocess env "
+        "for a native Anthropic model. The legacy run_bug_verify body "
+        "left this unset and the wrapper must match exactly."
+    )
+    # Provider-routing keys must NOT be present for a native model
+    # (kimi-k2.6 sets them, opus does not). Catches a future bug where
+    # apply_provider_env fires unconditionally.
+    assert "ANTHROPIC_BASE_URL" not in captured_env
+    assert "ANTHROPIC_AUTH_TOKEN" not in captured_env
+    assert "ANTHROPIC_MODEL" not in captured_env

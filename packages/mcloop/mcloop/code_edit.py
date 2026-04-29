@@ -322,7 +322,11 @@ def _invoke_bug_verify_direct(
     from mcloop.prompts import build_bug_verify_prompt
 
     prompt = build_bug_verify_prompt(bugs_content)
-    session_env = _runner._build_session_env(task_label="bug-verify", cli="claude")
+    # Match the legacy run_bug_verify env exactly: no task_label, so
+    # MCLOOP_TASK_LABEL stays unset for native Anthropic models. Only
+    # the third-party provider routing keys differ from the legacy
+    # path, and only when the model is a third-party alias.
+    session_env = _runner._build_session_env(task_label="", cli="claude")
     cmd = _runner._build_command("claude", prompt=prompt, env=session_env, model=model)
     output, returncode = _runner._run_session(
         cmd,
