@@ -20,7 +20,6 @@ from orchestra.spine import (
     Workflow,
 )
 
-
 # Backing-scoped keywords admitted by the parser. Each maps to the set
 # of actor backings on which the keyword is legal. v0 has no profile
 # loader, so this table is the source of truth; slice 2 will replace
@@ -217,6 +216,7 @@ def _phase5_state_validation(
         # only need 'on timeout'. The executor's error path is not
         # invoked for human gates in the same way it is for actor
         # invocations that can fail mid-run.
+        required_outcomes: tuple[str, ...]
         if state.actor.kind == "human":
             required_outcomes = ("timeout",)
         else:

@@ -603,7 +603,7 @@ class Executor:
         # API for this, so we reach into its connection here. A
         # cleaner factoring lives in slice 2 when the store grows
         # other multi-tentative-management features.
-        conn = self._store._conn  # type: ignore[attr-defined]
+        conn = self._store._conn
         prefix = f"{state_name}#"
         cur = conn.cursor()
         try:

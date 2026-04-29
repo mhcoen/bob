@@ -54,21 +54,21 @@ def _parse_external_input(decl: ExternalInputDecl, raw: str) -> Any:
         except json.JSONDecodeError as exc:
             raise SystemExit(
                 f"--input {decl.name}={raw!r}: invalid JSON ({exc})"
-            )
+            ) from exc
     if t == "integer":
         try:
             return int(raw)
         except ValueError as exc:
             raise SystemExit(
                 f"--input {decl.name}={raw!r}: not an integer ({exc})"
-            )
+            ) from exc
     if t == "decimal":
         try:
             return float(raw)
         except ValueError as exc:
             raise SystemExit(
                 f"--input {decl.name}={raw!r}: not a decimal ({exc})"
-            )
+            ) from exc
     if t == "boolean":
         if raw.lower() in ("true", "1", "yes"):
             return True
