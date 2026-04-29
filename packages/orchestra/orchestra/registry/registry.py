@@ -15,12 +15,12 @@ unit tests in slice 1, since the slice has no profiles.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from orchestra.errors import RegistryConflict
 from orchestra.spine import Envelope, StateDecl
-
 
 # --------------------------------------------------------------------
 # Protocols and small types

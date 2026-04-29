@@ -26,7 +26,6 @@ from orchestra.resume import replay_log, run_resume_hooks
 from orchestra.spine import Workflow
 from orchestra.store import ArtifactStore
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
 
 

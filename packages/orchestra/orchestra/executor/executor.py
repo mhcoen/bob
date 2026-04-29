@@ -46,7 +46,6 @@ from orchestra.spine import (
 )
 from orchestra.store import ArtifactStore
 
-
 _TERMINAL_TARGETS = {"done", "stop"}
 
 

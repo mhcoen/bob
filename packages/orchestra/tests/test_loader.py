@@ -10,7 +10,6 @@ from orchestra.errors import ParseError, ValidationError
 from orchestra.loader import load_workflow
 from orchestra.registry.registry import with_core
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
 
 

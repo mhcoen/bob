@@ -105,7 +105,7 @@ def _cmp(op: str, left: Any, right: Any) -> bool:
     if op == ">=":
         return bool(left >= right)
     if op == "==":
-        return left == right
+        return bool(left == right)
     if op == "!=":
-        return left != right
+        return bool(left != right)
     raise ValueError(f"unknown comparison operator: {op!r}")

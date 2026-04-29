@@ -26,11 +26,10 @@ from typing import Any
 from orchestra.adapters.mock_human import MockHumanAdapter
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
-from orchestra.log import LogReader, LogWriter
+from orchestra.log import LogWriter
 from orchestra.registry.registry import with_core
 from orchestra.spine import Workflow
 from orchestra.store import ArtifactStore
-
 
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
 
@@ -58,7 +57,7 @@ def _normalize(record_text: str) -> dict[str, Any]:
     # nondeterministic fields. The slice's records embed
     # ``payload_ref`` inside ``state_exit`` and ``actor_invoke_end``
     # records, and embed ``duration_ms`` similarly.
-    for k, v in obj.items():
+    for _k, v in obj.items():
         if isinstance(v, dict):
             for nk in list(v.keys()):
                 if nk in _NONDETERMINISTIC_NESTED_FIELDS:

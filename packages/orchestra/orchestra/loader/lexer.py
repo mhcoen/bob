@@ -18,11 +18,11 @@ lexer rewrite.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Literal
+from typing import Literal
 
 from orchestra.errors import ParseError
-
 
 TokenKind = Literal[
     "IDENT",
@@ -107,7 +107,6 @@ class Lexer:
                 yield Token("EOF", "", self._line, self._col)
                 return
             # We are at the start of a line. Read leading whitespace.
-            line_start = self._pos
             ws = self._read_leading_ws()
             # Blank or comment-only line: skip without changing indent.
             if self._pos >= len(self._src) or self._src[self._pos] == "\n":

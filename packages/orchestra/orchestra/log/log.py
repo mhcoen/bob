@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 def _now_iso() -> str:
@@ -140,5 +141,4 @@ class LogReader:
         return records
 
     def iter_records(self) -> Iterator[Record]:
-        for record in self.read_all():
-            yield record
+        yield from self.read_all()

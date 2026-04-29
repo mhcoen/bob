@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from orchestra.errors import ResumeError
-from orchestra.log import LogReader, Record
+from orchestra.log import LogReader
 from orchestra.registry import ProfileRegistry
 from orchestra.spine import Workflow
 

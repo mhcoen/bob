@@ -35,10 +35,9 @@ from orchestra.spine import (
     StateDecl,
     Transition,
     TruthyTest,
-    WriteDecl,
     Workflow,
+    WriteDecl,
 )
-
 
 # Reserved words that may not appear as user-defined identifiers.
 # Slice 1 enforces this on declaration sites only; uses of words that
