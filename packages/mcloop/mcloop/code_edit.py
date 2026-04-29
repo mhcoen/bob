@@ -336,6 +336,7 @@ def _invoke_orchestra(
         cfg,
         invocation_options=invocation_options,
         project_dir=project_dir,
+        data_root=log_dir / "orchestra-runs",
     )
     return _orchestra_to_code_edit_result(result, fallback_log=log_dir)
 
@@ -367,6 +368,7 @@ def _invoke_bug_verify_orchestra(
             cfg,
             invocation_options=invocation_options,
             project_dir=project_dir,
+            data_root=log_dir / "orchestra-runs",
         )
     except Exception as exc:
         raise RuntimeError(
