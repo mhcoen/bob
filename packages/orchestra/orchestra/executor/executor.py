@@ -18,11 +18,37 @@ Implements the eleven-step per-state sequence specified in
 The executor is the only component that calls the artifact store's
 ``commit_tentative`` path. Adapters return payloads; parsers stage
 tentative writes; the executor commits them.
+
+Crash atomicity:
+
+The store and the log are independent persistence systems. The
+executor orders work so that a crash at any point leaves a state
+that replay can correctly classify:
+
+- Before any tentative is staged: case 2, replay re-enters.
+- After tentatives staged but before commit: tentatives are
+  visible in the store but not yet committed; the next time the
+  store opens, those rows remain tentative. ``replay`` treats
+  this as case 2 and re-enters; the new attempt's
+  ``_discard_stale_tentatives`` cleans up the residue.
+- After commit but before ``state_exit``: committed rows are
+  durable. Replay sees ``state_enter`` without ``state_exit``;
+  ``_discard_stale_tentatives`` would find none. ``replay``
+  detects this case by looking for committed rows tagged
+  ``written_by = "<state>#<attempt>"``; if any exist, the state
+  is treated as completed (case 1.5) and the executor synthesizes
+  the missing ``state_exit`` and ``transition`` records.
+- After ``state_exit`` but before ``transition``: replay sees
+  state_exit without a following transition. The executor
+  re-selects and writes the transition. (Per the runner spec the
+  transition selection is deterministic given the envelope, so
+  this is safe.)
 """
 
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -71,6 +97,7 @@ class Executor:
         retries: dict[str, int] | None = None,
         envelopes: dict[str, Envelope] | None = None,
         current_state: str | None = None,
+        step_count: int = 0,
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -82,12 +109,10 @@ class Executor:
         self._attempts: dict[str, int] = dict(attempts or {})
         self._retries: dict[str, int] = dict(retries or {})
         self._envelopes: dict[str, Envelope] = dict(envelopes or {})
-        # Track whether the current entry into a state is a retry-from-self
-        # (which increments retries.<state>) versus a normal entry.
         self._last_outcome: str | None = None
         self._last_state: str | None = None
         self._current_state: str = current_state or workflow.start_state_name()
-        self._step_count = 0
+        self._step_count = step_count
         self._payloads_dir = run_dir / "payloads"
         self._payloads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,20 +123,18 @@ class Executor:
 
         Returns the terminal target string (``done`` or ``stop``).
         """
+        if self._current_state in _TERMINAL_TARGETS:
+            return self._current_state
         while True:
             outcome = self.step()
             if outcome in _TERMINAL_TARGETS:
                 return outcome
 
     def step(self) -> str:
-        """Run exactly one state.
-
-        Returns the transition target: a state name, ``done``, or
-        ``stop``. Tests that need to interleave executor activity with
-        manual log writes (such as Test C) call this directly rather
-        than ``run_to_completion``.
-        """
+        """Run exactly one state."""
         return self._run_one_state()
+
+    # ----- main loop ---------------------------------------------
 
     def _run_one_state(self) -> str:
         state = self._wf.state(self._current_state)
@@ -127,6 +150,12 @@ class Executor:
         else:
             self._retries[state.name] = 0
         attempt = self._attempts[state.name]
+
+        # Discard any tentatives left over from a previous interrupted
+        # attempt on this state. Slice 1 has no profile resume hooks
+        # for partial commits, so the discard is sufficient cleanup.
+        self._discard_stale_tentatives(state.name, attempt)
+
         self._log.write(
             "state_enter",
             state_id=state.name,
@@ -142,8 +171,6 @@ class Executor:
         prompt_artifact = self._resolve_prompt(state)
         reads = self._read_artifacts(state)
         timeout_ms = state.timeout_ms
-        # Carry options through backing_options too, so adapters that
-        # need them (the human adapter) read from one place.
         backing_options = dict(state.backing_options)
         if state.options and state.actor.kind == "human":
             backing_options.setdefault("options", list(state.options))
@@ -155,45 +182,73 @@ class Executor:
             reads=reads,
             external_inputs=dict(self._external),
             prompt_artifact=prompt_artifact,
-            schema=None,  # slice 1 has no schemas
+            schema=None,
             backing_options=backing_options,
             timeout_ms=timeout_ms,
         )
 
-        # Step 3: prepare invocation.
         adapter: Adapter = self._registry.adapter_for(state.actor.kind)
-        prepared = adapter.prepare(request)
-        self._log.write(
-            "actor_prepare",
-            state_id=state.name,
-            attempt=attempt,
-            fields={"summary": prepared.summary},
-        )
 
-        # Step 4: invoke.
+        # Step 3: prepare invocation. prepare() exceptions are caught
+        # and converted to envelopes so the state always emits
+        # state_exit and a transition.
+        prepared: PreparedInvocation | None = None
+        prepare_error: ErrorRecord | None = None
+        try:
+            prepared = adapter.prepare(request)
+        except Exception as exc:
+            prepare_error = ErrorRecord(
+                kind="actor_failure",
+                message=f"prepare() raised: {exc}",
+                detail={"exception": type(exc).__name__, "phase": "prepare"},
+            )
+
+        if prepared is not None:
+            self._log.write(
+                "actor_prepare",
+                state_id=state.name,
+                attempt=attempt,
+                fields={"summary": prepared.summary},
+            )
+
+        # Step 4: invoke (with timeout enforcement).
         started_at = _now_iso()
         started_perf = time.perf_counter()
-        self._log.write(
-            "actor_invoke_start",
-            state_id=state.name,
-            attempt=attempt,
-            fields={"actor_binding": actor_binding},
-        )
-        error_record: ErrorRecord | None = None
-        payload: dict[str, Any]
-        try:
-            payload = adapter.invoke(prepared)
-        except Exception as exc:
-            error_record = ErrorRecord(
-                kind="actor_failure",
-                message=str(exc),
-                detail={"exception": type(exc).__name__},
+        error_record: ErrorRecord | None = prepare_error
+        payload: dict[str, Any] = {}
+        if prepared is not None:
+            self._log.write(
+                "actor_invoke_start",
+                state_id=state.name,
+                attempt=attempt,
+                fields={"actor_binding": actor_binding},
             )
-            payload = {}
+            try:
+                payload = self._invoke_with_timeout(
+                    adapter, prepared, timeout_ms
+                )
+            except _TimeoutSignal:
+                error_record = ErrorRecord(
+                    kind="timeout",
+                    message=f"invocation exceeded timeout_ms={timeout_ms}",
+                    detail={"timeout_ms": timeout_ms},
+                )
+                payload = {}
+            except Exception as exc:
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=str(exc),
+                    detail={"exception": type(exc).__name__, "phase": "invoke"},
+                )
+                payload = {}
         ended_at = _now_iso()
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
 
-        # Persist the payload to disk and record payload_ref.
+        # Persist the payload BEFORE writing the log record that
+        # references it. The payload file is fsynced; the log record
+        # follows. A crash between the two leaves a payload without a
+        # log reference, which is acceptable. The reverse order would
+        # leave a log reference with no payload, which is not.
         payload_ref = self._write_payload(self._log.next_seq, payload)
         self._log.write(
             "actor_invoke_end",
@@ -206,7 +261,12 @@ class Executor:
             },
         )
 
-        status = "error" if error_record is not None else "ok"
+        if error_record is not None and error_record.kind == "timeout":
+            status: str = "timeout"
+        elif error_record is not None:
+            status = "error"
+        else:
+            status = "ok"
         outcome = self._derive_outcome(state, payload, status)
 
         # Step 5: postcondition checks. Slice 1 registers none.
@@ -214,13 +274,12 @@ class Executor:
         artifacts_written: list[dict[str, str]] = []
         # Step 6: result parser dispatch.
         tentative_handles: list[str] = []
-        if status == "ok" and state.writes:
+        if status == "ok" and state.writes and prepared is not None:
             try:
                 tentative_handles = self._dispatch_parsers(
                     state, prepared, payload, attempt
                 )
             except Exception as exc:
-                # Parser failure: discard tentatives, set error.
                 self._store.discard_tentative(tentative_handles)
                 tentative_handles = []
                 status = "error"
@@ -232,11 +291,9 @@ class Executor:
                 )
 
         # Step 7: commit writes.
+        committed_ids: list[str] = []
         if status == "ok" and tentative_handles:
             committed_ids = self._store.commit_tentative(tentative_handles)
-            # Re-walk parser outputs to pair committed version IDs
-            # with their artifact names. We re-run the parser fn purely
-            # for naming; this is cheap because parsers are pure.
             artifacts_written = self._artifact_writes_record(
                 state, prepared, payload, committed_ids
             )
@@ -304,13 +361,18 @@ class Executor:
             "transition",
             state_id=state.name,
             attempt=attempt,
-            fields={"outcome": envelope.outcome, "target": target},
+            fields={
+                "outcome": envelope.outcome,
+                "target": target,
+                "step_count": self._step_count,
+            },
         )
 
         # Step 11: route.
         self._last_state = state.name
         self._last_outcome = envelope.outcome
         if target in _TERMINAL_TARGETS:
+            self._current_state = target
             return target
         self._current_state = target
         return target
@@ -329,7 +391,6 @@ class Executor:
         return binding
 
     def _resolve_prompt(self, state: StateDecl) -> str | None:
-        # Prefer the state-level prompt; fall back to the role's default.
         prompt = state.prompt
         if prompt is None and state.role is not None:
             for r in self._wf.roles:
@@ -337,9 +398,6 @@ class Executor:
                     prompt = r.default_prompt
                     break
         if prompt is None:
-            # Non-LLM backings (shell, human) may have prompts (human
-            # gates display a prompt). For human, pick up from
-            # state-level prompt if set.
             return None
         return self._render_prompt(prompt)
 
@@ -363,9 +421,6 @@ class Executor:
                     substitutions[var] = art.value if art else None
             return _format(template, substitutions)
         if source.kind == "from":
-            # Slice 1 does not exercise this path. Resolution would
-            # walk envelopes for a 'prompt' artifact field. We surface
-            # the limitation rather than silently returning empty.
             raise ExecutorError("'prompt from' references are slice-2 territory")
         raise ExecutorError(f"unknown prompt source kind: {source.kind!r}")
 
@@ -373,9 +428,6 @@ class Executor:
         out: dict[str, Any] = {}
         for r in state.reads:
             if r in self._external:
-                # External inputs flow through reads-by-name too, which
-                # matches the design's "external inputs are referenced
-                # in templates by name" rule.
                 out[r] = {"value": self._external[r], "__version_id": ""}
                 continue
             art = self._store.read_latest(r)
@@ -386,15 +438,28 @@ class Executor:
         return out
 
     def _write_payload(self, seq: int, payload: dict[str, Any]) -> str:
+        """Persist a payload to disk with fsync.
+
+        Caller treats this as a durability boundary: the payload file
+        exists on disk by the time this returns. The log record that
+        references it is written after, ensuring no log record points
+        at a missing payload.
+        """
+        import os as _os
+
         payload_path = self._payloads_dir / f"{self._run_id}-{seq}.json"
         with open(payload_path, "w", encoding="utf-8") as fh:
             json.dump(_strip_internal(payload), fh, sort_keys=True, ensure_ascii=False)
             fh.write("\n")
+            fh.flush()
+            _os.fsync(fh.fileno())
         return f"payloads/{self._run_id}-{seq}.json"
 
     def _derive_outcome(
         self, state: StateDecl, payload: dict[str, Any], status: str
     ) -> str:
+        if status == "timeout":
+            return "timeout"
         if status == "error":
             return "error"
         kind = state.actor.kind
@@ -431,9 +496,6 @@ class Executor:
         )
         if not parsers:
             return []
-        # Side-channel: tell parsers what writes the state declared.
-        # The identity parser uses ``_declared_writes`` to know which
-        # artifact name(s) to emit values for.
         envelope_for_parser = Envelope(
             state_id=state.name,
             attempt=attempt,
@@ -461,29 +523,35 @@ class Executor:
                 attempt=attempt,
                 fields={"parser": parser.name},
             )
-            pairs = parser.fn(envelope_for_parser, self._store)
-            for name, value in pairs:
-                handle = self._store.tentative_write(
-                    name,
-                    value,
-                    written_by=f"{state.name}#{attempt}",
-                )
-                handles.append(handle)
+            try:
+                pairs = parser.fn(envelope_for_parser, self._store)
+                for name, value in pairs:
+                    handle = self._store.tentative_write(
+                        name,
+                        value,
+                        written_by=f"{state.name}#{attempt}",
+                    )
+                    handles.append(handle)
+            except Exception:
+                # Discard handles staged so far before re-raising. The
+                # caller will discard the empty list and set status to
+                # error.
+                if handles:
+                    self._store.discard_tentative(handles)
+                    handles.clear()
+                raise
         return handles
 
     def _artifact_writes_record(
         self,
         state: StateDecl,
-        prepared: PreparedInvocation,
+        prepared: PreparedInvocation | None,
         payload: dict[str, Any],
         committed_ids: list[str],
     ) -> list[dict[str, str]]:
         """Pair committed version IDs with their artifact names by
-        re-running the parsers in their declared order.
-
-        This duplicates a tiny bit of work but keeps the dispatch path
-        and the recording path out of each other's hair.
-        """
+        re-running the parsers in their declared order. Parsers are
+        pure, so re-running is safe and cheap."""
         write_types = tuple(w.type for w in state.writes)
         parsers = self._registry.parsers_for(
             backing=state.actor.kind, artifact_types=write_types
@@ -516,6 +584,49 @@ class Executor:
             out.append({"artifact": n, "version_id": vid})
         return out
 
+    def _discard_stale_tentatives(self, state_name: str, attempt: int) -> None:
+        """Discard tentatives left over from any earlier attempt on
+        this state.
+
+        On entry to attempt N, any tentatives written by attempts
+        1..N-1 are stale: either they were committed in a prior run
+        (in which case the rows are no longer tentative and are
+        unaffected) or they were left tentative by a crash (in which
+        case we discard them). The store's discard is by handle; we
+        do not have those handles in memory after a process restart,
+        so we discard by the underlying tentative rows tagged with
+        the relevant ``written_by``.
+        """
+        # Slice 1 implementation: query tentative rows whose
+        # written_by starts with f"{state_name}#" and discard them
+        # directly via SQL. The store does not yet expose a public
+        # API for this, so we reach into its connection here. A
+        # cleaner factoring lives in slice 2 when the store grows
+        # other multi-tentative-management features.
+        conn = self._store._conn  # type: ignore[attr-defined]
+        prefix = f"{state_name}#"
+        cur = conn.cursor()
+        try:
+            cur.execute("BEGIN")
+            cur.execute(
+                """
+                SELECT seq FROM versions
+                WHERE is_tentative = 1 AND written_by LIKE ?
+                """,
+                (prefix + "%",),
+            )
+            rows = cur.fetchall()
+            seqs = [r[0] for r in rows]
+            for seq in seqs:
+                cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
+                cur.execute(
+                    "DELETE FROM tentative_handles WHERE seq = ?", (seq,)
+                )
+            cur.execute("COMMIT")
+        except Exception:
+            cur.execute("ROLLBACK")
+            raise
+
     def _select_transition(self, state: StateDecl, envelope: Envelope) -> str:
         # Build artifact and envelope dicts for guard evaluation.
         artifact_values: dict[str, Any] = {}
@@ -539,15 +650,71 @@ class Executor:
             artifacts=artifact_values,
             envelopes=envelope_views,
         )
+        # First pass: pick a transition whose outcome matches.
+        # ``retry max N then T`` is sugar for: re-enter this state up
+        # to N times, then transition to T. We honor that here.
         for t in state.transitions:
             if t.outcome != envelope.outcome:
                 continue
-            if t.guard is None or guards.evaluate(t.guard, ctx):
+            if t.guard is not None and not guards.evaluate(t.guard, ctx):
+                continue
+            if t.retry_max is not None:
+                if self._retries.get(state.name, 0) < t.retry_max:
+                    return state.name
                 return t.target
-        # No transition matched. Fail closed.
+            return t.target
         raise ExecutorError(
             f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
         )
+
+    # ----- timeout enforcement -----------------------------------
+
+    def _invoke_with_timeout(
+        self,
+        adapter: Adapter,
+        prepared: PreparedInvocation,
+        timeout_ms: int | None,
+    ) -> dict[str, Any]:
+        """Invoke ``adapter.invoke(prepared)`` enforcing ``timeout_ms``.
+
+        Implementation: run invoke() on a daemon thread; the main
+        thread waits with a timer. On timeout, signal the adapter via
+        ``cancel`` and raise ``_TimeoutSignal``. The thread is left to
+        finish on its own; its result is discarded. This is correct
+        for slice 1's mocks; real adapters with non-cooperative work
+        will need the slice-2 cancellation contract.
+        """
+        if timeout_ms is None:
+            return adapter.invoke(prepared)
+
+        result_box: dict[str, Any] = {}
+        error_box: list[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result_box["payload"] = adapter.invoke(prepared)
+            except BaseException as exc:
+                error_box.append(exc)
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_ms / 1000.0)
+        if thread.is_alive():
+            try:
+                adapter.cancel(prepared)
+            except Exception:
+                pass
+            raise _TimeoutSignal()
+        if error_box:
+            exc = error_box[0]
+            if isinstance(exc, Exception):
+                raise exc
+            raise RuntimeError(f"adapter raised non-Exception: {exc!r}") from exc
+        return dict(result_box.get("payload", {}))
+
+
+class _TimeoutSignal(Exception):
+    pass
 
 
 # --------------------------------------------------------------------

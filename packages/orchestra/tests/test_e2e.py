@@ -23,7 +23,7 @@ from orchestra.loader import load_workflow
 from orchestra.log import LogReader, LogWriter
 from orchestra.registry.registry import ProfileRegistry, ResultParser, with_core
 from orchestra.resume import replay_log, run_resume_hooks
-from orchestra.spine import Workflow
+from orchestra.spine import NO_INITIAL, Workflow
 from orchestra.store import ArtifactStore
 
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
@@ -33,7 +33,7 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     store = ArtifactStore(db_path)
     for art in workflow.artifacts:
         qualifiers: dict[str, Any] = {}
-        if art.initial is not None:
+        if art.initial is not NO_INITIAL:
             qualifiers["initial"] = art.initial
         store.declare(art.name, art.type, qualifiers=qualifiers)
     return store
@@ -76,11 +76,6 @@ def test_a_happy_path(tmp_path: Path) -> None:
     records = LogReader(run_dir / "log.jsonl").read_all()
     events = [r.event for r in records]
 
-    # Expected event sequence in the slice's emit set:
-    # run_start, state_enter(respond), actor_prepare, actor_invoke_start,
-    # actor_invoke_end, parser_run, artifact_write, state_exit, transition,
-    # state_enter(confirm), actor_prepare, actor_invoke_start,
-    # actor_invoke_end, state_exit, transition, run_end.
     assert events[0] == "run_start"
     assert events[-1] == "run_end"
 
@@ -127,9 +122,6 @@ def test_b_parser_failure_rollback(tmp_path: Path) -> None:
     MockHumanAdapter.clear_shared_script()
     MockHumanAdapter.set_shared_script(["accept"])
 
-    # Build a registry where the identity_text parser is replaced by a
-    # faulty one. Construct from scratch so we can register everything
-    # except identity_text, then add the faulty parser in its place.
     registry = ProfileRegistry()
     for t in ("text", "json", "messages", "prompt", "schema", "document"):
         registry.register_artifact_type(t)
@@ -211,24 +203,9 @@ def test_b_parser_failure_rollback(tmp_path: Path) -> None:
 
 
 def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
-    """Simulate a crash on entry to ``confirm``, then resume.
-
-    The simulation runs one state of the executor (``respond``, which
-    completes normally and transitions to ``confirm``), then writes
-    the prefix records for ``confirm`` (state_enter + actor_prepare)
-    by hand, then closes the log to leave it in a state-2 truncation:
-    state_enter exists, state_exit does not.
-
-    Resume must:
-      1. Re-read the log and rebuild attempts/retries.
-      2. Identify ``confirm`` as the current state (case 2).
-      3. Run resume hooks (empty hook set in slice 1).
-      4. Re-enter ``confirm`` with attempt = 2.
-      5. Complete normally (with the human script set to ['accept']).
-    """
+    """Simulate a crash on entry to ``confirm``, then resume."""
     MockHumanAdapter.clear_shared_script()
 
-    # ----- phase 1: run respond, then write a confirm prefix --------
     registry = with_core()
     workflow = load_workflow(FIXTURE, registry)
 
@@ -251,11 +228,6 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     target = executor.step()
     assert target == "confirm", f"expected respond -> confirm, got {target!r}"
 
-    # Now write the prefix records for confirm by hand. These are the
-    # records the executor would have written before any visible side
-    # effect on the human adapter occurred. After this point the log
-    # has: state_enter(confirm, 1), actor_prepare(confirm, 1) -- no
-    # invoke_start, no invoke_end, no exit.
     log.write(
         "state_enter",
         state_id="confirm",
@@ -281,7 +253,6 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     log.close()
     store.close()
 
-    # ----- phase 2: resume ------------------------------------------
     MockHumanAdapter.set_shared_script(["accept"])
 
     replay = replay_log(str(run_dir / "log.jsonl"))
@@ -289,6 +260,9 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     assert replay.last_state_completed is False
     assert replay.attempts.get("confirm") == 1
     assert replay.attempts.get("respond") == 1
+    # The respond envelope is reconstructed from its state_exit.
+    assert "respond" in replay.envelopes
+    assert replay.envelopes["respond"].outcome == "complete"
 
     registry2 = with_core()
     workflow2 = load_workflow(FIXTURE, registry2)
@@ -310,7 +284,9 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
         external_inputs={"topic": "hi"},
         attempts=replay.attempts,
         retries=replay.retries,
+        envelopes=replay.envelopes,
         current_state=replay.current_state,
+        step_count=replay.step_count,
     )
     terminal = executor2.run_to_completion()
     log2.write("run_end", fields={"terminal": terminal})
@@ -321,12 +297,9 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
 
     records = LogReader(run_dir / "log.jsonl").read_all()
 
-    # No resume_hook records (no hooks registered in slice 1).
     rh = [r for r in records if r.event == "resume_hook"]
     assert rh == []
 
-    # confirm has two state_enter records: original (attempt=1) and
-    # resumed (attempt=2).
     confirm_enters = [
         r for r in records if r.event == "state_enter" and r.state_id == "confirm"
     ]
@@ -334,14 +307,12 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     assert confirm_enters[0].attempt == 1
     assert confirm_enters[1].attempt == 2
 
-    # Final state_exit for confirm has outcome=accept.
     confirm_exits = [
         r for r in records if r.event == "state_exit" and r.state_id == "confirm"
     ]
     assert len(confirm_exits) == 1
     assert confirm_exits[0].fields["outcome"] == "accept"
 
-    # respond has exactly one state_enter (attempt=1) and one state_exit.
     respond_enters = [
         r for r in records if r.event == "state_enter" and r.state_id == "respond"
     ]

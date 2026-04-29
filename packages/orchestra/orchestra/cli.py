@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,8 +13,10 @@ from orchestra.loader import load_workflow
 from orchestra.log import LogWriter
 from orchestra.registry.registry import with_core
 from orchestra.resume import replay_log, run_resume_hooks
-from orchestra.spine import Workflow
+from orchestra.spine import NO_INITIAL, ExternalInputDecl, Workflow
 from orchestra.store import ArtifactStore
+
+_TERMINAL_TARGETS = {"done", "stop"}
 
 
 def _data_root() -> Path:
@@ -24,7 +27,7 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     store = ArtifactStore(db_path)
     for art in workflow.artifacts:
         qualifiers: dict[str, Any] = {}
-        if art.initial is not None:
+        if art.initial is not NO_INITIAL:
             qualifiers["initial"] = art.initial
         if art.source_kind is not None:
             qualifiers["source"] = {
@@ -35,27 +38,82 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     return store
 
 
+def _parse_external_input(decl: ExternalInputDecl, raw: str) -> Any:
+    """Parse an external input string into the declared type.
+
+    Slice 1 supports the primitive types listed in the grammar
+    (text, json, integer, decimal, boolean) plus the inline artifact
+    types passed through as text.
+    """
+    t = decl.type
+    if t == "text" or t == "string":
+        return raw
+    if t == "json":
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(
+                f"--input {decl.name}={raw!r}: invalid JSON ({exc})"
+            )
+    if t == "integer":
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise SystemExit(
+                f"--input {decl.name}={raw!r}: not an integer ({exc})"
+            )
+    if t == "decimal":
+        try:
+            return float(raw)
+        except ValueError as exc:
+            raise SystemExit(
+                f"--input {decl.name}={raw!r}: not a decimal ({exc})"
+            )
+    if t == "boolean":
+        if raw.lower() in ("true", "1", "yes"):
+            return True
+        if raw.lower() in ("false", "0", "no"):
+            return False
+        raise SystemExit(
+            f"--input {decl.name}={raw!r}: not a boolean (expected true/false)"
+        )
+    # Pass-through for unknown types; slice 2+ may add structured
+    # artifact-type inputs.
+    return raw
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     registry = with_core()
     workflow = load_workflow(args.workflow, registry)
 
-    # Parse external inputs from --input k=v pairs.
-    external: dict[str, Any] = {}
+    raw_inputs: dict[str, str] = {}
     for entry in args.input or []:
         if "=" not in entry:
             print(f"--input expects key=value, got {entry!r}", file=sys.stderr)
             return 2
         k, v = entry.split("=", 1)
-        external[k] = v
+        raw_inputs[k] = v
 
-    # Confirm every declared external input is supplied.
+    declared = {ext.name: ext for ext in workflow.external_inputs}
+    for name in raw_inputs:
+        if name not in declared:
+            print(
+                f"--input {name}: not a declared external input",
+                file=sys.stderr,
+            )
+            return 2
     for ext in workflow.external_inputs:
-        if ext.name not in external:
+        if ext.name not in raw_inputs:
             print(
                 f"missing required external input: {ext.name}",
                 file=sys.stderr,
             )
             return 2
+
+    external: dict[str, Any] = {
+        name: _parse_external_input(declared[name], raw)
+        for name, raw in raw_inputs.items()
+    }
 
     run_id = new_run_id()
     run_dir = (Path(args.data_root) if args.data_root else _data_root()) / run_id
@@ -106,8 +164,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
     log_path = run_dir / "log.jsonl"
     replay = replay_log(str(log_path))
 
-    # We need the workflow source path to reload the spec. It is
-    # recorded in the run_start record.
     from orchestra.log import LogReader
 
     records = LogReader(log_path).read_all()
@@ -121,19 +177,24 @@ def cmd_resume(args: argparse.Namespace) -> int:
         return 2
     external_inputs = run_start.fields.get("external_inputs") or {}
 
+    if replay.is_terminal or replay.current_state in _TERMINAL_TARGETS:
+        print(
+            f"run {args.run_id} already ended in terminal state "
+            f"{replay.current_state!r}; nothing to resume",
+            file=sys.stderr,
+        )
+        return 0
+
+    if replay.current_state is None:
+        print("nothing to resume; the log named no state", file=sys.stderr)
+        return 2
+
     registry = with_core()
     workflow = load_workflow(workflow_path, registry)
     store = ArtifactStore(run_dir / "store.sqlite")
     log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
 
-    # Run resume hooks (slice 1: empty hook set).
     run_resume_hooks(workflow, registry, replay, log)
-
-    if replay.current_state is None:
-        print("nothing to resume; the log named no state", file=sys.stderr)
-        log.close()
-        store.close()
-        return 2
 
     executor = Executor(
         workflow=workflow,
@@ -145,7 +206,9 @@ def cmd_resume(args: argparse.Namespace) -> int:
         external_inputs=external_inputs,
         attempts=replay.attempts,
         retries=replay.retries,
+        envelopes=replay.envelopes,
         current_state=replay.current_state,
+        step_count=replay.step_count,
     )
     terminal: str | None = None
     try:

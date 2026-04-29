@@ -3,9 +3,9 @@
 Produces a ``Workflow`` (from ``orchestra.spine``) from a token stream.
 The parser handles the subset of ``orchestra-grammar.md`` that the
 ``echo.orc`` fixture uses, plus enough of the rest to parse the three
-acid-test sketches without further work in slice 2 (i.e. ``uses
-profile``, agent declarations, group declarations, schema clauses,
-backing-scoped clauses).
+acid-test sketches without further work in slice 2 (``uses profile``,
+agent declarations, group declarations, schema clauses, backing-scoped
+clauses).
 
 Anything the parser does not yet recognize raises ``ParseError`` with
 a clear message rather than silently dropping tokens.
@@ -19,11 +19,14 @@ from typing import Any
 from orchestra.errors import ParseError
 from orchestra.loader.lexer import Lexer, Token
 from orchestra.spine import (
+    NO_INITIAL,
     ActorBinding,
+    AgentDecl,
     AndExpr,
     ArtifactDecl,
     Comparison,
     ExternalInputDecl,
+    GroupDecl,
     GuardExpr,
     Literal_,
     ModelDecl,
@@ -38,30 +41,6 @@ from orchestra.spine import (
     Workflow,
     WriteDecl,
 )
-
-# Reserved words that may not appear as user-defined identifiers.
-# Slice 1 enforces this on declaration sites only; uses of words that
-# happen to match a reserved word in clearly non-declarative positions
-# (like values) are validated in context.
-_TOP_LEVEL_KEYWORDS = {
-    "spec",
-    "workflow",
-    "model",
-    "role",
-    "agent",
-    "group",
-    "artifact",
-    "state",
-    "prompt",
-    "profile",
-    "uses",
-    "max_total_steps",
-    "max_state_visits",
-    "external_input",
-    "compression_model",
-}
-
-_RESERVED_TARGETS = {"done", "stop"}
 
 
 class Parser:
@@ -81,7 +60,6 @@ class Parser:
 
     def _parse_spec_line(self) -> str:
         self._expect_keyword("spec")
-        # Version: integer optionally followed by '.' integer.
         major = self._expect("INT")
         version = major.value
         if self._peek().kind == "DOT":
@@ -103,6 +81,8 @@ class Parser:
         compression_model: str | None = None
         models: list[ModelDecl] = []
         roles: list[RoleDecl] = []
+        agents: list[AgentDecl] = []
+        groups: list[GroupDecl] = []
         artifacts: list[ArtifactDecl] = []
         states: list[StateDecl] = []
 
@@ -148,12 +128,9 @@ class Parser:
             elif kw == "role":
                 roles.append(self._parse_role())
             elif kw == "agent":
-                # Slice 1 does not exercise agents but we must consume
-                # the block so the parser does not crash if a future
-                # workflow is parsed by this code.
-                self._skip_block_starting("agent")
+                agents.append(self._parse_agent())
             elif kw == "group":
-                self._skip_block_starting("group")
+                groups.append(self._parse_group())
             elif kw == "artifact":
                 artifacts.append(self._parse_artifact())
             elif kw == "state":
@@ -174,6 +151,8 @@ class Parser:
             compression_model=compression_model,
             models=tuple(models),
             roles=tuple(roles),
+            agents=tuple(agents),
+            groups=tuple(groups),
             artifacts=tuple(artifacts),
             states=tuple(states),
             source_dir=self._source_dir,
@@ -190,12 +169,109 @@ class Parser:
         self._expect("DEDENT")
         return RoleDecl(name=name, default_prompt=prompt)
 
+    def _parse_agent(self) -> AgentDecl:
+        self._expect_keyword("agent")
+        name = self._expect("IDENT").value
+        self._expect("NEWLINE")
+        self._expect("INDENT")
+        model: str | None = None
+        adapter: str | None = None
+        context_policy: str | None = None
+        while self._peek().kind != "DEDENT":
+            tok = self._peek()
+            if tok.kind != "IDENT":
+                raise ParseError(
+                    f"unexpected token in agent body: {tok.kind} {tok.value!r}",
+                    line=tok.line,
+                )
+            kw = tok.value
+            self._advance()
+            if kw == "model":
+                model = self._expect("IDENT").value
+            elif kw == "adapter":
+                adapter = self._expect("IDENT").value
+            elif kw == "context_policy":
+                context_policy = self._expect("IDENT").value
+            else:
+                raise ParseError(
+                    f"unknown agent field: {kw!r}", line=tok.line
+                )
+            self._expect("NEWLINE")
+        self._expect("DEDENT")
+        if model is None:
+            raise ParseError(f"agent {name!r}: missing 'model'", line=0)
+        if adapter is None:
+            raise ParseError(f"agent {name!r}: missing 'adapter'", line=0)
+        if context_policy is None:
+            raise ParseError(
+                f"agent {name!r}: missing 'context_policy'", line=0
+            )
+        return AgentDecl(
+            name=name,
+            model=model,
+            adapter=adapter,
+            context_policy=context_policy,
+        )
+
+    def _parse_group(self) -> GroupDecl:
+        self._expect_keyword("group")
+        name = self._expect("IDENT").value
+        self._expect("NEWLINE")
+        self._expect("INDENT")
+        kind: str | None = None
+        members: list[str] = []
+        while self._peek().kind != "DEDENT":
+            tok = self._peek()
+            if tok.kind != "IDENT":
+                raise ParseError(
+                    f"unexpected token in group body: {tok.kind} {tok.value!r}",
+                    line=tok.line,
+                )
+            kw = tok.value
+            self._advance()
+            if kw == "kind":
+                kind = self._expect("IDENT").value
+                if kind not in ("roles", "agents"):
+                    raise ParseError(
+                        f"group kind must be 'roles' or 'agents', got {kind!r}",
+                        line=tok.line,
+                    )
+                self._expect("NEWLINE")
+            elif kw == "members":
+                # Either inline (members a, b, c) or block.
+                if self._peek().kind == "IDENT":
+                    members.append(self._expect("IDENT").value)
+                    while self._peek().kind == "COMMA":
+                        self._advance()
+                        members.append(self._expect("IDENT").value)
+                    self._expect("NEWLINE")
+                else:
+                    self._expect("NEWLINE")
+                    self._expect("INDENT")
+                    while self._peek().kind == "IDENT":
+                        members.append(self._expect("IDENT").value)
+                        while self._peek().kind == "COMMA":
+                            self._advance()
+                            members.append(self._expect("IDENT").value)
+                        self._expect("NEWLINE")
+                    self._expect("DEDENT")
+            else:
+                raise ParseError(
+                    f"unknown group field: {kw!r}", line=tok.line
+                )
+        self._expect("DEDENT")
+        if kind is None:
+            raise ParseError(f"group {name!r}: missing 'kind'", line=0)
+        if not members:
+            raise ParseError(f"group {name!r}: missing 'members'", line=0)
+        return GroupDecl(name=name, kind=kind, members=tuple(members))  # type: ignore[arg-type]
+
     def _parse_artifact(self) -> ArtifactDecl:
         self._expect_keyword("artifact")
         name = self._expect("IDENT").value
         type = self._expect("IDENT").value
         self._expect("NEWLINE")
-        initial: Any | None = None
+        initial: Any = NO_INITIAL
         source_kind: Any = None
         source_value: str | None = None
         if self._peek().kind == "INDENT":
@@ -238,6 +314,7 @@ class Parser:
         )
 
     def _parse_state(self) -> StateDecl:
+        start_tok = self._peek()
         self._expect_keyword("state")
         name = self._expect("IDENT").value
         self._expect("NEWLINE")
@@ -325,8 +402,6 @@ class Parser:
             elif kw == "on":
                 transitions.append(self._parse_transition())
             elif kw == "mode":
-                # Backing-scoped (versioned-workspace profile, slice 2).
-                # The parser admits it for forward compatibility.
                 self._advance()
                 backing_options["mode"] = self._expect("IDENT").value
                 self._expect("NEWLINE")
@@ -336,7 +411,6 @@ class Parser:
                 self._expect("NEWLINE")
             elif kw == "runs":
                 self._advance()
-                # Two forms: inline list of strings, or block of strings.
                 runs: list[str] = []
                 if self._peek().kind == "STRING":
                     runs.append(self._expect("STRING").value)
@@ -375,10 +449,8 @@ class Parser:
         self._expect("DEDENT")
         if actor is None:
             raise ParseError(
-                f"state {name!r} has no 'actor' clause", line=tok.line
+                f"state {name!r} has no 'actor' clause", line=start_tok.line
             )
-        # For human gates, the parser carries options into backing_options
-        # too, since the human adapter reads them from there.
         if actor.kind == "human" and options:
             backing_options["options"] = list(options)
         return StateDecl(
@@ -415,7 +487,6 @@ class Parser:
                 kind="template", path=path, template_vars=tuple(template_vars)
             )
         if kind == "from":
-            # 'prompt from <state>.<field>'. We capture the dotted ref.
             head = self._expect("IDENT").value
             parts = [head]
             while self._peek().kind == "DOT":
@@ -426,27 +497,39 @@ class Parser:
         raise ParseError(f"unknown prompt source: {kind!r}", line=self._peek().line)
 
     def _parse_transition(self) -> Transition:
+        on_tok = self._peek()
         self._expect_keyword("on")
         outcome = self._expect("IDENT").value
         guard: GuardExpr | None = None
         if self._peek().kind == "IDENT" and self._peek().value == "when":
             self._advance()
             guard = self._parse_guard_expr()
-        # Either an arrow + target, or a retry clause (slice 2+).
         if self._peek().kind == "ARROW":
             self._advance()
             target = self._expect("IDENT").value
             self._expect("NEWLINE")
             return Transition(outcome=outcome, target=target, guard=guard)
-        # Retry clause (admitted but not exercised in slice 1).
         if self._peek().kind == "IDENT" and self._peek().value == "retry":
+            if guard is not None:
+                raise ParseError(
+                    "v0 grammar does not admit 'when <guard>' before 'retry'",
+                    line=on_tok.line,
+                )
             self._advance()
             self._expect_keyword("max")
-            self._expect("INT")
+            n_tok = self._expect("INT")
+            n = int(n_tok.value)
             self._expect_keyword("then")
             target = self._expect("IDENT").value
             self._expect("NEWLINE")
-            return Transition(outcome=outcome, target=target, guard=guard)
+            if outcome not in ("error", "timeout"):
+                raise ParseError(
+                    f"retry clause is legal only on 'error' or 'timeout', got {outcome!r}",
+                    line=on_tok.line,
+                )
+            return Transition(
+                outcome=outcome, target=target, guard=None, retry_max=n
+            )
         raise ParseError(
             "expected '=> <target>' or 'retry max N then <target>'",
             line=self._peek().line,
@@ -581,24 +664,6 @@ class Parser:
                 line=tok.line,
             )
         return self._advance()
-
-    def _skip_block_starting(self, kw: str) -> None:
-        # Forward-compat helper: consume an entire indented block whose
-        # internals slice 1 does not need to interpret.
-        self._expect_keyword(kw)
-        while self._peek().kind not in ("NEWLINE", "EOF"):
-            self._advance()
-        if self._peek().kind == "NEWLINE":
-            self._advance()
-        if self._peek().kind == "INDENT":
-            depth = 1
-            self._advance()
-            while depth > 0 and self._peek().kind != "EOF":
-                tok = self._advance()
-                if tok.kind == "INDENT":
-                    depth += 1
-                elif tok.kind == "DEDENT":
-                    depth -= 1
 
 
 def _duration_to_ms(value: int, unit: str, line: int) -> int:

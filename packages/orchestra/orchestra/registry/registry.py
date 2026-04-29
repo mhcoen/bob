@@ -72,6 +72,12 @@ class ProfileRegistry:
 
     The registry is created with the core registrations baked in by
     ``with_core()``; profiles add to it via the ``register_*`` methods.
+
+    Adapter instances are constructed lazily on first ``adapter_for``
+    call and cached for the lifetime of the registry. The runner spec
+    requires one instance per backing per process so adapters with
+    process-local state (cached connections, scripted invocation
+    state, persistent sessions) work correctly.
     """
 
     artifact_types: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -85,6 +91,7 @@ class ProfileRegistry:
     validation_rules: dict[str, Callable[..., None]] = field(default_factory=dict)
     default_policies: dict[str, Any] = field(default_factory=dict)
     resume_hooks: dict[str, Any] = field(default_factory=dict)
+    _adapter_cache: dict[str, Any] = field(default_factory=dict, repr=False)
 
     # ----- registration -------------------------------------------
 
@@ -97,6 +104,8 @@ class ProfileRegistry:
         if name in self.actor_backings:
             raise RegistryConflict(f"actor backing already registered: {name!r}")
         self.actor_backings[name] = factory
+        # Invalidate any cached instance for this backing.
+        self._adapter_cache.pop(name, None)
 
     def register_result_parser(self, parser: ResultParser) -> None:
         if parser.name in self.result_parsers:
@@ -113,9 +122,17 @@ class ProfileRegistry:
     # ----- lookup -------------------------------------------------
 
     def adapter_for(self, backing: str) -> Any:
+        """Return the cached adapter instance for ``backing``,
+        constructing it on first call.
+        """
         if backing not in self.actor_backings:
             raise KeyError(f"no adapter registered for backing {backing!r}")
-        return self.actor_backings[backing]()
+        cached = self._adapter_cache.get(backing)
+        if cached is not None:
+            return cached
+        instance = self.actor_backings[backing]()
+        self._adapter_cache[backing] = instance
+        return instance
 
     def parsers_for(
         self, *, backing: str, artifact_types: tuple[str, ...]

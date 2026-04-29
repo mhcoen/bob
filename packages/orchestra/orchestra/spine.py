@@ -8,14 +8,14 @@ runner's value-shape contract.
 
 The shapes here are the slice-1 subset of what the design documents
 specify. They are forward-compatible with the full spec but do not
-implement features the slice does not exercise (groups, joins,
-schemas, agents, retry policy, cycle bounds beyond ``max_total_steps``).
+implement features the slice does not exercise (joins, schemas,
+persistent agents, cycle bounds beyond ``max_total_steps``).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 # --------------------------------------------------------------------
 # Workflow IR (produced by the loader, consumed by the executor)
@@ -34,6 +34,25 @@ ArtifactType = Literal[
 """Core artifact types. Profiles register additional types (e.g.
 ``git-workspace``) but slice 1 has no profiles and so the type vocabulary
 is closed."""
+
+
+# Sentinel used to distinguish "no initial qualifier" from
+# "initial: null". An ArtifactDecl whose ``initial`` is _NO_INITIAL has
+# no initial value; one whose ``initial`` is None had ``initial null``
+# in the source.
+class _NoInitial:
+    _singleton: _NoInitial | None = None
+
+    def __new__(cls) -> _NoInitial:
+        if cls._singleton is None:
+            cls._singleton = super().__new__(cls)
+        return cls._singleton
+
+    def __repr__(self) -> str:
+        return "<no-initial>"
+
+
+NO_INITIAL: Final[_NoInitial] = _NoInitial()
 
 
 @dataclass(frozen=True)
@@ -67,10 +86,28 @@ class RoleDecl:
 
 
 @dataclass(frozen=True)
+class AgentDecl:
+    name: str
+    model: str
+    adapter: str
+    context_policy: str
+
+
+@dataclass(frozen=True)
+class GroupDecl:
+    name: str
+    kind: Literal["roles", "agents"]
+    members: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ArtifactDecl:
     name: str
     type: str
-    initial: Any | None = None  # ``initial`` literal, or None
+    initial: Any = NO_INITIAL
+    """The literal value passed to ``initial``, or ``NO_INITIAL`` if
+    the qualifier was absent. ``None`` is a real initial value
+    (``initial null`` in the source)."""
     source_kind: Literal["file", "path", None] = None
     source_value: str | None = None  # path string or external_input ref
 
@@ -80,6 +117,11 @@ class Transition:
     outcome: str
     target: str  # state name, "done", or "stop"
     guard: GuardExpr | None = None
+    retry_max: int | None = None
+    """If set, this transition was declared as ``on <outcome> retry max
+    N then <target>``. The executor uses ``retry_max`` together with
+    ``retries.<state>`` to decide whether to re-enter the state or
+    fall through to ``target``."""
 
 
 @dataclass(frozen=True)
@@ -180,9 +222,8 @@ class Workflow:
     compression_model: str | None = None
     models: tuple[ModelDecl, ...] = ()
     roles: tuple[RoleDecl, ...] = ()
-    # agents and groups are forward-compat slots; slice 1 leaves them empty
-    agents: tuple[Any, ...] = ()
-    groups: tuple[Any, ...] = ()
+    agents: tuple[AgentDecl, ...] = ()
+    groups: tuple[GroupDecl, ...] = ()
     artifacts: tuple[ArtifactDecl, ...] = ()
     states: tuple[StateDecl, ...] = ()
     source_dir: str = ""

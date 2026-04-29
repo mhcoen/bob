@@ -28,14 +28,12 @@ from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
 from orchestra.log import LogWriter
 from orchestra.registry.registry import with_core
-from orchestra.spine import Workflow
+from orchestra.spine import NO_INITIAL, Workflow
 from orchestra.store import ArtifactStore
 
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
 
 
-# Field names whose values are nondeterministic by design (clock,
-# random, or run-id-derived) and must be zeroed before comparison.
 _NONDETERMINISTIC_RECORD_FIELDS = {"ts", "run_id"}
 _NONDETERMINISTIC_NESTED_FIELDS = {
     "duration_ms",
@@ -53,10 +51,6 @@ def _normalize(record_text: str) -> dict[str, Any]:
     for k in list(obj.keys()):
         if k in _NONDETERMINISTIC_NESTED_FIELDS:
             obj[k] = "<nondet>"
-    # Walk one level of nested structures looking for the nested
-    # nondeterministic fields. The slice's records embed
-    # ``payload_ref`` inside ``state_exit`` and ``actor_invoke_end``
-    # records, and embed ``duration_ms`` similarly.
     for _k, v in obj.items():
         if isinstance(v, dict):
             for nk in list(v.keys()):
@@ -69,7 +63,7 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     store = ArtifactStore(db_path)
     for art in workflow.artifacts:
         qualifiers: dict[str, Any] = {}
-        if art.initial is not None:
+        if art.initial is not NO_INITIAL:
             qualifiers["initial"] = art.initial
         store.declare(art.name, art.type, qualifiers=qualifiers)
     return store

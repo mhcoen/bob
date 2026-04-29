@@ -1,32 +1,37 @@
-# Orchestra Runner
+# Orchestra
 
-The Orchestra runner. v0, slice 1.
+A deterministic shell around stochastic actors.
+
+Orchestra coordinates multi-LLM workflows by wrapping nondeterministic
+model calls in a fully deterministic harness. The state machine,
+artifact store, log, and replay are deterministic and auditable. The
+nondeterminism lives at the adapter boundary, where it belongs.
 
 ## Status
 
-Slice 1 implementation. The runner spine (loader, validator, profile registry,
-artifact store, executor, adapters, logger, resume) is in place with mock
-adapters. No real LLM, shell, git, or notification integrations.
+Slice 1. The runner spine is in place with mock adapters: loader,
+validator, profile registry, artifact store, executor, logger, resume.
+No real LLM, shell, git, or notification integrations yet.
 
-See `../design/orchestra-implementation-plan.md` for what slice 1 covers and
-what it deliberately does not.
+See `design/orchestra-implementation-plan.md` for what slice 1 covers
+and what it deliberately does not.
 
 ## Layout
 
 ```
-runner/
-  orchestra/
-    loader/        # parser + validator
-    store/         # artifact store (SQLite-backed)
-    registry/      # profile registry
-    executor/      # state machine + parser dispatch
-    adapters/      # adapter interface + mock adapters
-    log/           # JSONL logger and reader
-    resume/        # log replay + resume hook dispatch
-    cli.py         # command-line entry point
-  tests/
-    fixtures/slice1/   # echo.orc and prompt files
-    test_*.py          # unit and end-to-end tests
+orchestra/
+  loader/        # parser + validator
+  store/         # artifact store (SQLite-backed)
+  registry/      # profile registry
+  executor/      # state machine + parser dispatch
+  adapters/      # adapter interface + mock adapters
+  log/           # JSONL logger and reader
+  resume/        # log replay + resume hook dispatch
+  cli.py         # command-line entry point
+tests/
+  fixtures/slice1/   # echo.orc and prompt files
+  test_*.py          # unit and end-to-end tests
+design/              # design documents
 ```
 
 ## Usage
@@ -57,14 +62,13 @@ pytest
 
 ## Reading order
 
-For implementers, the design documents to read first are in
-`../design/`:
+The design documents in `design/`:
 
-1. `orchestra-design.md` — conceptual model.
-2. `orchestra-result-schemas.md` — the result envelope.
-3. `orchestra-grammar.md` — surface syntax.
-4. `orchestra-runner.md` — runtime architecture.
-5. `orchestra-implementation-plan.md` — what slice 1 covers.
+1. `orchestra-design.md`, conceptual model.
+2. `orchestra-result-schemas.md`, the result envelope.
+3. `orchestra-grammar.md`, surface syntax.
+4. `orchestra-runner.md`, runtime architecture.
+5. `orchestra-implementation-plan.md`, what slice 1 covers.
 
 The runner code follows the architecture in document 4 and the slice-1
 scope in document 5. Where the code disagrees with a design document,
