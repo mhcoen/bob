@@ -317,9 +317,13 @@ to the events slice 1 actually emits:
 
 Other event types (`postcondition_check`, `compression_event`,
 `step_budget_exhausted`, `cancelled`, `notification_sent`,
-`choice_received`, `resume_hook`) are wired up but only
-`resume_hook` is exercised in slice 1's resume test. The others
-are exercised in later slices.
+`choice_received`, `resume_hook`) are wired up but not exercised
+in slice 1. The `resume_hook` event in particular is wired up
+but not emitted because no hooks are registered; the
+resume-hook dispatch path is exercised in test C with an empty
+hook set, so the dispatch logic is covered without any
+`resume_hook` records appearing in the log. The other listed
+events are exercised in later slices.
 
 The writer fsyncs after each record. The reader handles
 truncated last lines per the runner spec's open question 6.
@@ -339,10 +343,11 @@ or runs resume hooks and re-enters the last state (case 2).
 Slice 1 has no profile-registered resume hooks (the
 versioned-workspace hook is slice 2). The resume mechanism is
 exercised by a synthetic test that truncates the log mid-state
-and verifies the runner re-enters cleanly. Even with no hooks
-running, the `resume_hook` log-record machinery is invoked (with
-zero hook executions) and the ordering invariant ("hooks before
-state_enter on re-entry") is checked.
+and verifies the runner re-enters cleanly. The resume-hook
+dispatch is invoked with an empty hook set; no `resume_hook`
+records are emitted, but the dispatch path runs and the
+ordering invariant ("hooks before state_enter on re-entry") is
+satisfied vacuously.
 
 ## Tests
 
