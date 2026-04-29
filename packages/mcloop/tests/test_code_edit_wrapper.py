@@ -296,6 +296,19 @@ def test_bug_verify_direct_routes_third_party_provider_env(
       contain every provider-routing key. A regression that bypasses
       ``_apply_provider_env`` fails this assertion.
 
+    A discard-and-replace regression (call ``_build_session_env``,
+    drop the result, hand a fresh dict to ``_build_command``) is
+    caught by the per-key survival loop at the end: every key from
+    the pre snapshot must be present in the env at ``_run_session``
+    with the same value. We deliberately do NOT assert object
+    identity (``pre_obj is post_obj``). Identity would fail
+    spuriously if a future legitimate refactor introduces a shallow
+    copy of the env (``env=dict(session_env)``) somewhere along the
+    path, even though subprocess behavior would be unchanged. The
+    survival loop is the right level: it tracks the contract
+    (every key from the pre env reaches the subprocess) without
+    pinning the implementation (the same dict object).
+
     The user's real ``~/.mcloop/config.json`` is masked by stubbing
     ``mcloop.config.load_role_config`` so a developer with executor
     overrides locally does not fail this test for environmental
@@ -326,16 +339,6 @@ def test_bug_verify_direct_routes_third_party_provider_env(
 
     captured_pre: dict[str, str] = {}
     captured_env: dict[str, str] = {}
-    # Hold the actual dict references so the test can verify object
-    # identity across the path. A regression that calls
-    # _build_session_env, discards the result, and passes a fresh {}
-    # to _build_command would produce the same string keys at
-    # _run_session (because _build_command mutates whatever dict it
-    # receives) but would fail the identity check.
-    holder: dict[str, dict[str, str] | None] = {
-        "build_session_env_obj": None,
-        "run_session_obj": None,
-    }
 
     def _capturing_build_session_env(
         task_label: str = "", cli: str = "claude"
@@ -348,7 +351,6 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         env = _orig_build_session_env(task_label=task_label, cli=cli)
         captured_pre.clear()
         captured_pre.update(env)
-        holder["build_session_env_obj"] = env
         return env
 
     def _capture_run_session(
@@ -358,7 +360,6 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         timeout: int | None = None,
     ) -> tuple[str, int]:
         captured_env.update(env or {})
-        holder["run_session_obj"] = env
         return ("ok\n", 0)
 
     log_path = tmp_path / "session.log"
@@ -437,29 +438,22 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         "have been skipped or load_role_config was bypassed"
     )
 
-    # (c) Identity check. The dict the wrapper passed to _run_session
-    # MUST be the same Python object _build_session_env returned. A
-    # regression where the wrapper calls _build_session_env, discards
-    # its result, and passes a fresh {} to _build_command would still
-    # appear to satisfy the (b) post-capture assertions because
-    # _build_command's _apply_provider_env mutates whatever object it
-    # receives. The identity check fails that scenario directly.
-    pre_obj = holder["build_session_env_obj"]
-    post_obj = holder["run_session_obj"]
-    assert pre_obj is not None, "_build_session_env was never called"
-    assert post_obj is not None, "_run_session was never called"
-    assert post_obj is pre_obj, (
-        "_run_session received a different object than "
-        "_build_session_env returned. The wrapper discarded the "
-        "session env and passed a substitute to the inner call."
-    )
-
-    # Belt-and-suspenders: every key from the pre-snapshot must
-    # survive into the env at _run_session with the same value. A
-    # regression that copies the env partway down the path would
-    # fail the identity check above; this also catches a regression
-    # that copies the env AND drops some keys before passing the
-    # copy on.
+    # (c) Per-key survival loop. Every key from the pre snapshot
+    # MUST be present in the env at _run_session with the same
+    # value. A regression that calls _build_session_env, discards
+    # the result, and passes a fresh {} to _build_command would
+    # appear to satisfy the (b) provider-routing assertions because
+    # _build_command's _apply_provider_env mutates whatever object
+    # it receives, but would fail this loop because the passthrough
+    # keys (PATH, etc.) from the pre snapshot would not be in the
+    # substitute dict.
+    #
+    # Object identity (``pre_obj is post_obj``) is intentionally NOT
+    # asserted. A future legitimate refactor that adds a shallow
+    # copy of the env somewhere along the path would not change
+    # subprocess behavior but would break an identity check. The
+    # survival loop captures the actual contract (every pre-mutation
+    # key reaches the subprocess) without pinning the implementation.
     for key, value in captured_pre.items():
         assert key in captured_env, (
             f"key {key!r} present at _build_session_env but missing "
