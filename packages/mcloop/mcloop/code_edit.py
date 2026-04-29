@@ -19,12 +19,25 @@ working default.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from mcloop import runner as _runner
 from mcloop.runner import DEFAULT_TASK_TIMEOUT
+
+
+def _orchestra_warn(msg: str) -> None:
+    """Emit a single-line warning about an orchestra fallback to direct.
+
+    Goes to stderr so it surfaces in mcloop's run output without
+    blocking. The same prefix is used by the runner's allowed-tools
+    bypass warning so a user grepping logs sees both in one place.
+    """
+    print(f"[orchestra] falling back to direct backend due to error: {msg}", file=sys.stderr)
 
 
 @dataclass
@@ -48,27 +61,47 @@ class CodeEditResult:
 def _select_backend(project_dir: Path) -> str:
     """Return ``"direct"`` or ``"orchestra"`` per the project config.
 
-    Falls back to ``"direct"`` when:
+    Silent fallbacks (legitimate opt-outs):
     - ``.orchestra/config.json`` is missing
-    - the file fails to parse or load
-    - ``workflows.code_edit`` is not configured
-    - ``workflows.code_edit.pattern == "direct"`` (sentinel for opting
-      out of orchestra without removing the file)
-    - any import or attribute error along the orchestra path
+    - the JSON does not parse (the user may be mid-edit, or have a stub)
+    - the ``code_edit`` workflow entry is absent
+    - ``workflows.code_edit.pattern == "direct"`` (sentinel)
+
+    Loud fallbacks (warn to stderr, then still fall back so production
+    keeps working): orchestra import error after the user opted in,
+    role binding errors, and any other exception loading the config.
     """
+    return _select_backend_for(project_dir, "code_edit")
+
+
+def _select_backend_for(project_dir: Path, workflow_name: str) -> str:
     config_path = project_dir / ".orchestra" / "config.json"
     if not config_path.exists():
         return "direct"
     try:
-        from orchestra.config import load_config
-
-        cfg = load_config(project_dir)
-        wf = cfg.workflow("code_edit")
-        if wf.pattern == "direct":
-            return "direct"
-        return "orchestra"
-    except Exception:
+        json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return "direct"
+    try:
+        from orchestra.config import load_config
+    except ImportError as exc:
+        _orchestra_warn(f"orchestra not importable: {exc}")
+        return "direct"
+    try:
+        cfg = load_config(project_dir)
+    except Exception as exc:
+        _orchestra_warn(f"failed to load .orchestra/config.json: {exc}")
+        return "direct"
+    if workflow_name not in cfg.workflows:
+        return "direct"
+    try:
+        wf = cfg.workflow(workflow_name)
+    except Exception as exc:
+        _orchestra_warn(f"failed to read workflow {workflow_name!r}: {exc}")
+        return "direct"
+    if wf.pattern == "direct":
+        return "direct"
+    return "orchestra"
 
 
 def invoke_code_edit(
@@ -164,19 +197,7 @@ def invoke_bug_verify(
 
 
 def _select_bug_verify_backend(project_dir: Path) -> str:
-    config_path = project_dir / ".orchestra" / "config.json"
-    if not config_path.exists():
-        return "direct"
-    try:
-        from orchestra.config import load_config
-
-        cfg = load_config(project_dir)
-        wf = cfg.workflow("bug_verify")
-        if wf.pattern == "direct":
-            return "direct"
-        return "orchestra"
-    except Exception:
-        return "direct"
+    return _select_backend_for(project_dir, "bug_verify")
 
 
 # --------------------------------------------------------------------
@@ -247,9 +268,37 @@ def _invoke_direct(
         output=output,
         exit_code=returncode,
         log_path=log_path,
-        changed_files=[],
+        changed_files=_detect_changed_files(project_dir),
         summary=None,
     )
+
+
+def _detect_changed_files(project_dir: Path) -> list[str]:
+    """Return the files git reports as modified or new in ``project_dir``.
+
+    Mirrors orchestra's ``_detect_changed_files`` so both backends
+    populate the same shape. Best-effort: if the project is not a git
+    repo or git is missing, returns an empty list. Does not raise.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    files: list[str] = []
+    for line in out.stdout.splitlines():
+        path = line[3:].strip()
+        if path:
+            files.append(path)
+    return files
 
 
 def _invoke_bug_verify_direct(
@@ -260,15 +309,21 @@ def _invoke_bug_verify_direct(
     model: str | None,
     timeout: int,
 ) -> CodeEditResult:
+    """Direct bug-verify path. Matches the legacy ``run_bug_verify`` body.
+
+    The original called ``_build_command`` without an env so the
+    third-party provider env mutation in ``_build_command`` did not
+    fire. Preserve that exactly: no env arg here. The session env still
+    applies inside ``_run_session``, which builds its own when none is
+    passed.
+    """
     from mcloop.prompts import build_bug_verify_prompt
 
     prompt = build_bug_verify_prompt(bugs_content)
-    session_env = _runner._build_session_env(task_label="", cli="claude")
-    cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
+    cmd = _runner._build_command("claude", prompt=prompt, model=model)
     output, returncode = _runner._run_session(
         cmd,
         project_dir,
-        env=session_env,
         timeout=timeout,
     )
     log_path = _runner._write_log(
@@ -283,7 +338,7 @@ def _invoke_bug_verify_direct(
         output=output,
         exit_code=returncode,
         log_path=log_path,
-        changed_files=[],
+        changed_files=_detect_changed_files(project_dir),
         summary=None,
     )
 
