@@ -17,7 +17,6 @@ from pathlib import Path
 from mcloop.prompts import (
     build_audit_prompt,
     build_bug_fix_prompt,
-    build_bug_verify_prompt,
     build_diagnostic_prompt,
     build_post_fix_review_prompt,
     build_sync_prompt,
@@ -1011,29 +1010,23 @@ def run_bug_verify(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_bug_verify_prompt(bugs_content)
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
+    # Same wrapper shape as run_task: dispatch to invoke_bug_verify
+    # which returns a CodeEditResult, then narrow to RunResult.
+    # Direct backend mirrors the legacy invocation; orchestra backend
+    # is wired but raises until orchestra ships a bug_verify workflow.
+    from mcloop.code_edit import invoke_bug_verify
+
+    bv = invoke_bug_verify(
+        bugs_content=bugs_content,
+        project_dir=project_dir,
+        log_dir=log_dir,
         model=model,
     )
-    output, returncode = _run_session(
-        cmd,
-        project_dir,
-    )
-    log_path = _write_log(
-        log_dir,
-        "bug-verify",
-        cmd,
-        output,
-        returncode,
-    )
-
     return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        success=bv.success,
+        output=bv.output,
+        exit_code=bv.exit_code,
+        log_path=bv.log_path,
     )
 
 

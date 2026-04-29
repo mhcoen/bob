@@ -260,7 +260,7 @@ def _invoke_bug_verify_direct(
     model: str | None,
     timeout: int,
 ) -> CodeEditResult:
-    from mcloop.runner import build_bug_verify_prompt
+    from mcloop.prompts import build_bug_verify_prompt
 
     prompt = build_bug_verify_prompt(bugs_content)
     session_env = _runner._build_session_env(task_label="", cli="claude")
