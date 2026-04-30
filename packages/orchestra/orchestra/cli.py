@@ -255,10 +255,22 @@ def cmd_resume(args: argparse.Namespace) -> int:
             if not isinstance(children_field, list):
                 children_field = []
             children_list = [str(c) for c in children_field]
+            # A child is "completed" only when its last state_enter
+            # has a matching state_exit -- i.e. the envelope's
+            # attempt equals the latest state_enter's attempt
+            # (replay's reconstructed ``attempts`` counter). If a
+            # later state_enter exists without a matching exit
+            # (the retry-mid-flight crash case), the older
+            # envelope is stale; the child is still pending and
+            # must be re-launched on resume per the fresh-budget
+            # rule.
             completed = {
                 name: env
                 for name, env in replay.envelopes.items()
-                if name in children_list
+                if (
+                    name in children_list
+                    and env.attempt == replay.attempts.get(name)
+                )
             }
             executor.resume_fan_out(
                 parent_state_name=str(of.get("parent_state", "")),

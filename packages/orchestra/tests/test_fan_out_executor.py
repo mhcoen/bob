@@ -879,6 +879,282 @@ workflow retry
     assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
 
 
+def test_crash_mid_retry_then_replay_with_fresh_budget(
+    tmp_path: Path,
+) -> None:
+    """A child with ``on error retry max 2 then stop`` errors,
+    retries, and the run crashes mid-retry. On resume the child's
+    retry budget is fresh (per the re-entry retry budget rule):
+    retries[child] resets to 0 so the re-entered invocation can
+    fail up to two more times before the budget is exhausted.
+
+    Concretely the test runs a flaky adapter that errors twice
+    then succeeds. We truncate the log AFTER attempt 1's durable
+    error ``state_exit`` and attempt 2's ``state_enter`` (no exit).
+    On resume, the new adapter (a fresh-process instance) runs
+    once for the resumed entry and succeeds. The resumed
+    ``state_enter`` must show ``retries[child] == 0`` (fresh
+    budget); ``fan_out_end`` records the success with the
+    resumed attempt's invocation_id.
+
+    Tests Cleanup TEST 2.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow crash_retry
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_flaky
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact flaky_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role fr
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [flaky] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state flaky
+    actor model m_flaky
+    role fr
+    reads topic
+    writes flaky_out text
+    on complete => done
+    on error retry max 2 then stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads flaky_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role ar
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    # First run: flaky adapter errors twice, succeeds on third
+    # invocation. Run normally, then truncate the log to simulate
+    # a crash mid-retry.
+    flaky_calls = {"n": 0}
+    inv_lock = threading.Lock()
+
+    class _Flaky(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_flaky":
+                with inv_lock:
+                    flaky_calls["n"] += 1
+                    n = flaky_calls["n"]
+                if n <= 2:
+                    raise RuntimeError(f"synthetic flaky failure #{n}")
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Flaky()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    executor.run_to_completion()
+    log.close()
+    store.close()
+    assert flaky_calls["n"] == 3
+
+    log_path = run_dir / "log.jsonl"
+    records = LogReader(log_path).read_all()
+    # Drop run_end so replay does not short-circuit. Then truncate
+    # to simulate "crash while attempt 2 is in flight": keep
+    # records up to and including flaky's attempt-2 state_enter,
+    # and drop attempt-2's actor_*, attempt-3's full trace, the
+    # fan_out_end, and any post-fan-out state. The resume path
+    # should see attempt 1 with durable error state_exit, attempt
+    # 2 with state_enter only.
+    truncated: list[Any] = []
+    seen_attempt2_enter = False
+    for r in records:
+        if r.event == "run_end":
+            continue
+        truncated.append(r)
+        if (
+            r.event == "state_enter"
+            and r.state_id == "flaky"
+            and r.attempt == 2
+        ):
+            seen_attempt2_enter = True
+            break
+    assert seen_attempt2_enter
+    log_path.write_text(
+        "\n".join(r.to_json() for r in truncated) + "\n",
+        encoding="utf-8",
+    )
+
+    # Sanity-check the truncated log:
+    pre_records = LogReader(log_path).read_all()
+    flaky_enters = [
+        r for r in pre_records
+        if r.event == "state_enter" and r.state_id == "flaky"
+    ]
+    flaky_exits = [
+        r for r in pre_records
+        if r.event == "state_exit" and r.state_id == "flaky"
+    ]
+    assert [r.attempt for r in flaky_enters] == [1, 2]
+    assert [r.attempt for r in flaky_exits] == [1]
+    assert flaky_exits[0].fields["status"] == "error"
+    assert not any(r.event == "fan_out_end" for r in pre_records)
+
+    # Second run: a SUCCEEDING adapter for the resumed entry. If
+    # the fresh-budget rule is honored the resumed attempt has
+    # retries=0 and the call succeeds.
+    class _Succeed(MockModelAdapter):
+        pass
+
+    # Patch the registry used by ``_resume_open_fan_out`` to use
+    # the succeeding adapter. The helper builds its own registry
+    # via ``with_core()``, so monkey-patch the registry factory.
+    def _resume_with_succeeding_adapter() -> tuple[str, dict[str, Any]]:
+        from orchestra.resume import replay_log
+        from orchestra.visibility import VisibilityIndex
+
+        replay = replay_log(str(log_path))
+        registry = with_core()
+        registry.actor_backings["model"] = lambda: _Succeed()
+        registry._adapter_cache.pop("model", None)
+        workflow_resume = load_workflow(src, registry)
+        store_resume = ArtifactStore(run_dir / "store.sqlite")
+        log_resume = LogWriter(
+            log_path, replay.last_run_id, start_seq=replay.next_seq
+        )
+        visibility_index = VisibilityIndex(
+            persist_path=run_dir / "visibility.json"
+        )
+        visibility_index.replace_from(replay.visibility_statuses)
+
+        executor_resume = Executor(
+            workflow=workflow_resume,
+            registry=registry,
+            store=store_resume,
+            log=log_resume,
+            run_dir=run_dir,
+            run_id=replay.last_run_id,
+            external_inputs={"topic": "hello"},
+            attempts=replay.attempts,
+            retries=replay.retries,
+            envelopes=replay.envelopes,
+            current_state=replay.current_state,
+            step_count=replay.step_count,
+            visibility_index=visibility_index,
+        )
+        assert replay.open_fan_out is not None
+        of = replay.open_fan_out
+        children_list = [str(c) for c in of["children"]]
+        # A child mid-retry (older state_exit envelope plus a newer
+        # state_enter without a matching exit) is still pending
+        # and must be re-launched. Match cli.cmd_resume's
+        # envelope-attempt-matches-latest-state-enter check.
+        completed = {
+            n: env
+            for n, env in replay.envelopes.items()
+            if n in children_list
+            and env.attempt == replay.attempts.get(n)
+        }
+        executor_resume.resume_fan_out(
+            parent_state_name=str(of["parent_state"]),
+            children=children_list,
+            join_target=str(of["join_target"]),
+            error_target=str(of["error_target"]),
+            completed_children=completed,
+        )
+        terminal_resume = executor_resume.run_to_completion()
+        log_resume.close()
+        store_resume.close()
+        return terminal_resume, {}
+
+    terminal2, _ = _resume_with_succeeding_adapter()
+    assert terminal2 == "done"
+
+    resumed_records = LogReader(log_path).read_all()
+
+    # The resumed entry has retries[flaky] = 0 in its state_enter
+    # snapshot (fresh budget rule).
+    flaky_enters_after = [
+        r for r in resumed_records
+        if r.event == "state_enter" and r.state_id == "flaky"
+    ]
+    # Attempts 1 and 2 from pre-crash + 1 fresh resumed attempt.
+    assert len(flaky_enters_after) == 3
+    resumed_enter = flaky_enters_after[-1]
+    retries_snapshot = resumed_enter.fields.get("retries", {})
+    assert retries_snapshot.get("flaky") == 0, (
+        f"resumed entry's retries snapshot should show fresh "
+        f"budget (0); got {retries_snapshot}"
+    )
+
+    # The resumed attempt's adapter call succeeded; flaky has a
+    # durable success state_exit. fan_out_end records success.
+    resumed_exits = [
+        r for r in resumed_records
+        if r.event == "state_exit" and r.state_id == "flaky"
+    ]
+    # Pre-crash exit (attempt 1, error) + new exit (resumed
+    # attempt, success).
+    assert len(resumed_exits) == 2
+    final_exit = resumed_exits[-1]
+    assert final_exit.fields["status"] == "ok"
+    final_inv = str(final_exit.fields["invocation_id"])
+    assert "::flaky::" in final_inv
+
+    fan_end = next(r for r in resumed_records if r.event == "fan_out_end")
+    assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
+    assert fan_end.fields["aggregate"] == "success"
+    # The aggregate's invocation_id matches the final state_exit's.
+    assert fan_end.fields["child_invocation_ids"]["flaky"] == final_inv
+
+
 def test_cancellation_race_preserves_concurrent_success(
     tmp_path: Path,
 ) -> None:
@@ -1970,10 +2246,15 @@ def _resume_open_fan_out(
     assert replay.open_fan_out is not None
     of = replay.open_fan_out
     children_list = [str(c) for c in of["children"]]
+    # Mirror cli.cmd_resume's "envelope.attempt matches latest
+    # state_enter" check so a child mid-retry (older state_exit
+    # envelope but a newer state_enter without a matching exit) is
+    # treated as pending, not completed.
     completed = {
         n: env
         for n, env in replay.envelopes.items()
         if n in children_list
+        and env.attempt == replay.attempts.get(n)
     }
     executor.resume_fan_out(
         parent_state_name=str(of["parent_state"]),
