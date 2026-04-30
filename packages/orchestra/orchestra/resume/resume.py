@@ -61,6 +61,15 @@ class ReplayState:
     # state_enter and state_exit records; the resume helper feeds
     # this to ``VisibilityIndex.replace_from``.
     visibility_statuses: dict[str, VisibilityStatus] = field(default_factory=dict)
+    # True when the latest record sequence is ``state_exit`` followed
+    # by no ``transition`` (or any other terminator). The state's body
+    # is fully complete but the routing decision was not durably
+    # written before the crash. Resume must select and write the
+    # transition from the reconstructed envelope WITHOUT re-running
+    # the actor body. ``current_state`` remains the just-exited state
+    # so the caller can locate the envelope; the caller is expected
+    # to advance ``current_state`` after writing the transition.
+    state_exit_without_transition: bool = False
 
 
 def replay_log(log_path: str) -> ReplayState:
@@ -159,18 +168,17 @@ def replay_log(log_path: str) -> ReplayState:
         if state.current_state in _TERMINAL_TARGETS:
             state.is_terminal = True
     elif state.last_state_completed and state.last_target is None:
-        # A state_exit was logged but no transition followed (crash in
-        # the small window between the two). The current state is the
-        # state that exited; the executor will re-select its
-        # transition on resume by re-entering ... wait, that's wrong:
-        # re-entering would re-run the state. The right resume action
-        # is to re-select the transition without re-running. We
-        # signal this by leaving last_state_completed=True so that
-        # cmd_resume can detect and handle this case.
-        # For slice 1 we treat it conservatively as case 2: re-run
-        # the state. The executor's stale-tentative discard ensures
-        # the rerun produces a fresh attempt.
-        state.last_state_completed = False
+        # A ``state_exit`` was logged but no ``transition`` followed
+        # (crash in the small window between the two). The state is
+        # complete: its actor body must NOT run again. Resume's job is
+        # to re-select the transition from the reconstructed envelope
+        # and write the missing record, then continue from the chosen
+        # target. ``last_state_completed`` stays True (the state IS
+        # done), and the special-case flag tells the caller this is
+        # the no-transition-yet recovery path. ``current_state``
+        # stays at the just-exited state so the caller can locate the
+        # envelope to feed the transition selector.
+        state.state_exit_without_transition = True
     else:
         # case 2: state_enter without state_exit. current_state stays
         # at the entered state.

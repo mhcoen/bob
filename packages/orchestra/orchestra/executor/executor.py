@@ -982,6 +982,77 @@ class Executor:
         )
         return str(target)
 
+    def resume_pending_transition(self, state_name: str) -> str:
+        """Replay rule for a crash between ``state_exit`` and
+        ``transition``: the state's actor body has already run to a
+        durable ``state_exit``, so re-entering would violate replay
+        semantics. Instead, re-select the transition from the
+        reconstructed envelope, write the ``transition`` log record,
+        advance ``_current_state`` to the chosen target, and return
+        the target string so the caller can continue
+        ``run_to_completion`` from there.
+
+        Step-budget accounting matches the linear path: this is the
+        same step the original execution would have closed with the
+        ``transition`` write, so ``_step_count`` is incremented once
+        and the budget guard runs before the transition is written.
+        """
+        state = self._wf.state(state_name)
+        with self._envelope_lock:
+            envelope = self._envelopes.get(state_name)
+        if envelope is None:
+            raise ExecutorError(
+                f"resume_pending_transition: no envelope reconstructed "
+                f"for state {state_name!r}; cannot select transition"
+            )
+        decl = self._select_transition_decl(state, envelope)
+        if decl is None:
+            raise ExecutorError(
+                f"resume_pending_transition: state {state_name!r}: no "
+                f"transition matched outcome {envelope.outcome!r}"
+            )
+        if decl.is_fan_out():
+            target = self._run_fan_out_group(state, envelope, decl)
+        elif (
+            decl.retry_max is not None
+            and self._retries.get(state_name, 0) < decl.retry_max
+        ):
+            # The original execution would have re-entered the state
+            # under the retry budget. Re-entering is the only correct
+            # behavior here too: the state_exit was an error and the
+            # workflow author asked for a retry. The actor body runs
+            # again under a new attempt_seq.
+            target = state_name
+        else:
+            target = decl.target
+
+        self._step_count += 1
+        if self._step_count >= self._wf.max_total_steps:
+            if target not in _TERMINAL_TARGETS:
+                self._log.write(
+                    "step_budget_exhausted",
+                    state_id=state_name,
+                    attempt=envelope.attempt,
+                    fields={"max_total_steps": self._wf.max_total_steps},
+                )
+                target = "stop"
+
+        self._log.write(
+            "transition",
+            state_id=state_name,
+            attempt=envelope.attempt,
+            fields={
+                "outcome": envelope.outcome,
+                "target": target,
+                "step_count": self._step_count,
+            },
+        )
+
+        self._last_state = state_name
+        self._last_outcome = envelope.outcome
+        self._current_state = target
+        return target
+
     def resume_fan_out(
         self,
         parent_state_name: str,

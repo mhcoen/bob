@@ -244,6 +244,18 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
     terminal: str | None = None
     try:
+        # Slice A fix: a crash between ``state_exit`` and
+        # ``transition`` leaves the state's body durably complete but
+        # the routing decision unwritten. Re-select the transition
+        # from the reconstructed envelope WITHOUT re-running the
+        # actor; advance _current_state to the chosen target and
+        # let ``run_to_completion`` continue from there.
+        if (
+            replay.state_exit_without_transition
+            and replay.current_state is not None
+            and replay.current_state not in _TERMINAL_TARGETS
+        ):
+            executor.resume_pending_transition(replay.current_state)
         # Slice A: if a fan_out group is open (fan_out_start without
         # a matching fan_out_end), dispatch to resume_fan_out before
         # the linear loop takes over. The method advances

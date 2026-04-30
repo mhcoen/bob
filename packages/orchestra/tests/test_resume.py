@@ -85,6 +85,53 @@ def test_replay_case_1_after_transition(tmp_path: Path) -> None:
     assert state.last_run_id == "test-run"
 
 
+def test_replay_state_exit_without_transition_preserves_completion(
+    tmp_path: Path,
+) -> None:
+    """A state_exit landed but no transition followed (crash between
+    the two log writes). Replay must report the state as completed
+    (its actor body finished durably) AND set
+    ``state_exit_without_transition`` so the resume caller knows to
+    re-select and write the transition WITHOUT re-entering the state.
+
+    Regression test for the Slice A bug where this case was treated
+    as case 2 and the state's actor body would be re-executed.
+    """
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(
+                1,
+                "state_enter",
+                state_id="A",
+                attempt=1,
+                attempts={"A": 1},
+                retries={"A": 0},
+            ),
+            _common(2, "actor_prepare", state_id="A", attempt=1),
+            _common(3, "actor_invoke_start", state_id="A", attempt=1),
+            _common(4, "actor_invoke_end", state_id="A", attempt=1),
+            _common(
+                5,
+                "state_exit",
+                state_id="A",
+                attempt=1,
+                status="ok",
+                outcome="complete",
+            ),
+            # Crash here: no transition record was written.
+        ],
+    )
+    state = replay_log(str(log))
+    assert state.current_state == "A"
+    assert state.last_state_completed is True
+    assert state.state_exit_without_transition is True
+    assert "A" in state.envelopes
+    assert state.envelopes["A"].outcome == "complete"
+
+
 def test_replay_case_2_state_enter_only(tmp_path: Path) -> None:
     """A state_enter with no following state_exit => the state was
     interrupted; current_state is the entered state."""

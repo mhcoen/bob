@@ -325,3 +325,193 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     assert respond_exits[0].attempt == 1
 
     MockHumanAdapter.clear_shared_script()
+
+
+def test_resume_after_state_exit_without_transition_does_not_reexecute(
+    tmp_path: Path,
+) -> None:
+    """Slice A regression: a crash between ``state_exit`` and
+    ``transition`` must NOT cause the just-completed state's actor
+    body to run again on resume. The resume path re-selects the
+    transition from the reconstructed envelope and writes the missing
+    record; the state has exactly one ``state_enter`` and one
+    ``state_exit`` after resume, the artifact written by that single
+    invocation remains visible, and the workflow proceeds normally.
+    """
+    MockHumanAdapter.clear_shared_script()
+
+    registry = with_core()
+    workflow = load_workflow(FIXTURE, registry)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(FIXTURE)})
+
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hi"},
+    )
+    target = executor.step()
+    assert target == "confirm", f"expected respond -> confirm, got {target!r}"
+    log.close()
+    store.close()
+
+    # Truncate the log so the durable ``state_exit`` for ``respond``
+    # is preserved but the trailing ``transition`` record is dropped.
+    # Anything after the ``transition`` (including the new state's
+    # ``state_enter``) is also dropped, simulating a crash in the
+    # window between ``state_exit`` and the routing-decision write.
+    log_path = run_dir / "log.jsonl"
+    records_before_truncate = LogReader(log_path).read_all()
+    truncate_at: int | None = None
+    seen_state_exit = False
+    for r in records_before_truncate:
+        if (
+            r.event == "state_exit"
+            and r.state_id == "respond"
+        ):
+            seen_state_exit = True
+            continue
+        if seen_state_exit and r.event == "transition":
+            truncate_at = r.seq
+            break
+    assert truncate_at is not None, (
+        "fixture must produce a transition record after respond's "
+        "state_exit for this test to simulate the crash window"
+    )
+    keep_records = [
+        r for r in records_before_truncate if r.seq < truncate_at
+    ]
+    with open(log_path, "w", encoding="utf-8") as fh:
+        for r in keep_records:
+            fh.write(r.to_json() + "\n")
+
+    # Replay should report the state as completed AND flag the
+    # state_exit_without_transition recovery path. The respond
+    # envelope must be available so the resume helper can pick the
+    # transition from it.
+    replay = replay_log(str(log_path))
+    assert replay.current_state == "respond"
+    assert replay.last_state_completed is True
+    assert replay.state_exit_without_transition is True
+    assert "respond" in replay.envelopes
+
+    # An adapter that raises if it is ever asked to prepare or
+    # invoke during resume. The Slice A fix means resume must NOT
+    # call the actor again for ``respond``.
+    class _ExplodeIfReinvoked:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def prepare(self, request: Any) -> Any:
+            self.calls += 1
+            raise AssertionError(
+                "respond's actor must not be re-invoked during resume; "
+                "the state_exit was already durable before the crash"
+            )
+
+        def invoke(self, prepared: Any) -> Any:
+            self.calls += 1
+            raise AssertionError(
+                "respond's actor must not be re-invoked during resume"
+            )
+
+        def cancel(self, prepared: Any) -> None:
+            pass
+
+    explode_adapter = _ExplodeIfReinvoked()
+
+    MockHumanAdapter.set_shared_script(["accept"])
+
+    registry2 = ProfileRegistry()
+    # Inline artifact types that the workflow uses.
+    for type_name in ("text", "json", "messages", "prompt", "schema", "document"):
+        registry2.register_artifact_type(type_name)
+    registry2.register_actor_backing("model", lambda: explode_adapter)
+    from orchestra.adapters.mock_human import MockHumanAdapter as _Human
+    from orchestra.adapters.mock_shell import MockShellAdapter as _Shell
+
+    registry2.register_actor_backing("human", _Human)
+    registry2.register_actor_backing("shell", _Shell)
+    from orchestra.executor.parsers import identity_text_parser
+
+    registry2.register_result_parser(identity_text_parser)
+
+    workflow2 = load_workflow(FIXTURE, registry2)
+    store2 = ArtifactStore(run_dir / "store.sqlite")
+    log2 = LogWriter(
+        log_path,
+        replay.last_run_id,
+        start_seq=replay.next_seq,
+    )
+    run_resume_hooks(workflow2, registry2, replay, log2)
+
+    from orchestra.visibility import VisibilityIndex
+
+    visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
+    visibility_index.replace_from(replay.visibility_statuses)
+
+    executor2 = Executor(
+        workflow=workflow2,
+        registry=registry2,
+        store=store2,
+        log=log2,
+        run_dir=run_dir,
+        run_id=replay.last_run_id,
+        external_inputs={"topic": "hi"},
+        attempts=replay.attempts,
+        retries=replay.retries,
+        envelopes=replay.envelopes,
+        current_state=replay.current_state,
+        step_count=replay.step_count,
+        visibility_index=visibility_index,
+    )
+    if replay.state_exit_without_transition:
+        executor2.resume_pending_transition(replay.current_state)
+
+    terminal = executor2.run_to_completion()
+    log2.write("run_end", fields={"terminal": terminal})
+    log2.close()
+    store2.close()
+
+    assert terminal == "done"
+    assert explode_adapter.calls == 0, (
+        "the model adapter was invoked during resume; the Slice A "
+        "fix must keep a completed state from re-running"
+    )
+
+    records = LogReader(log_path).read_all()
+    respond_enters = [
+        r
+        for r in records
+        if r.event == "state_enter" and r.state_id == "respond"
+    ]
+    respond_exits = [
+        r
+        for r in records
+        if r.event == "state_exit" and r.state_id == "respond"
+    ]
+    respond_transitions = [
+        r
+        for r in records
+        if r.event == "transition" and r.state_id == "respond"
+    ]
+    # The actor body ran exactly once (one state_enter and one
+    # state_exit, both attempt 1). The missing transition was filled
+    # in by resume_pending_transition.
+    assert len(respond_enters) == 1
+    assert len(respond_exits) == 1
+    assert respond_enters[0].attempt == 1
+    assert respond_exits[0].attempt == 1
+    assert len(respond_transitions) == 1
+    assert respond_transitions[0].fields["target"] == "confirm"
+
+    MockHumanAdapter.clear_shared_script()
