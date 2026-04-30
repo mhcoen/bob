@@ -27,7 +27,7 @@ from orchestra.config import (
     ConfigError,
     OrchestraConfig,
     global_config_path,
-    load_global_config,
+    load_config,
 )
 from orchestra.errors import OrchestraError
 from orchestra.executor.executor import Executor, new_run_id
@@ -318,24 +318,47 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
     return 0
 
 
-def _try_load_global_config() -> tuple[OrchestraConfig | None, str | None]:
+def _try_load_merged_config(
+    project_dir: Path | None = None,
+) -> tuple[OrchestraConfig | None, str | None]:
     """Return ``(config, error_message)``.
 
-    Returns ``(config, None)`` when the file loaded successfully, or
-    ``(None, message)`` when it is missing or malformed. The CLI
-    branches on the return so it can show the right friendly error
-    for each case without leaking exception text into help output.
+    Returns ``(config, None)`` when the merged config loaded
+    successfully, or ``(None, message)`` when a parse or schema error
+    fires on either layer. The CLI branches on the return so it can
+    show the right friendly error for each case without leaking
+    exception text into help output.
+
+    Note that ``load_config`` returns ``default_config()`` when both
+    files are absent, so a successful return does not guarantee the
+    user has set up any verbs. Callers that need missing-config
+    detection check ``global_config_path().is_file()`` separately
+    before dispatching a verb.
     """
     try:
-        return load_global_config(), None
+        return load_config(project_dir=project_dir), None
     except ConfigError as exc:
         return None, str(exc)
 
 
+def _no_global_config_hint() -> str:
+    return (
+        f"no config at {global_config_path()}; create one with verb "
+        "mappings to use this command. See `orchestra help` for the format."
+    )
+
+
 def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
-    config, err = _try_load_global_config()
+    project_dir = Path.cwd()
+    config, err = _try_load_merged_config(project_dir=project_dir)
     if config is None:
-        print(err or "global config unavailable", file=sys.stderr)
+        print(err or "config unavailable", file=sys.stderr)
+        return 1
+    # If the merged config has no verbs and no global config exists on
+    # disk, the user is unconfigured: emit the setup hint instead of
+    # an unhelpful "unknown command".
+    if not config.verbs and not global_config_path().is_file():
+        print(_no_global_config_hint(), file=sys.stderr)
         return 1
     if verb_name not in config.verbs:
         print(
@@ -369,12 +392,12 @@ def main(argv: list[str] | None = None) -> int:
         return _dispatch_verb(raw_args[0], raw_args[1:])
 
     if raw_args and raw_args[0] == "help":
-        config, _err = _try_load_global_config()
+        config, _err = _try_load_merged_config(project_dir=Path.cwd())
         if len(raw_args) == 1:
             return _print_help_overview(config)
         if config is None:
             print(
-                "no global config; cannot describe verb. Create "
+                "no config; cannot describe verb. Create "
                 f"{global_config_path()} first.",
                 file=sys.stderr,
             )

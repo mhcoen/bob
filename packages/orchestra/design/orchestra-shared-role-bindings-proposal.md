@@ -317,8 +317,36 @@ adapter+model. Out of scope for this proposal.
   patterns).
 - Per-project agent declarations (orchestra grammar feature, not
   config schema).
-- Cross-project shared bindings (e.g., `~/.orchestra/config.json`).
-  Useful eventually, not in this round.
+
+## Addendum: global plus project config merge
+
+The original proposal listed cross-project shared bindings (a
+`~/.orchestra/config.json`) as out of scope. That has since landed
+because the verb-style CLI needs a global config and McLoop's
+project-local configs would otherwise drift out of sync.
+
+The on-disk schema does not change. The loader assembles a merged
+config from up to two files:
+
+- `~/.orchestra/config.json` (global).
+- `<project>/.orchestra/config.json` (project, optional).
+
+The merge rule is the same replace-not-nest rule the workflow-level
+`role_overrides` already uses, applied one level up:
+
+- Section absent in project config: use global as-is.
+- Section present in project config: per-key override. A role or
+  verb or workflow defined in project config replaces the global
+  entry of the same name in full. Entries in the global section
+  the project does not redefine are inherited.
+- Section present in project config but not global: just use
+  project's.
+
+Two layers, same rule. A workflow's `role_overrides` can still
+narrow a single role binding for a single workflow, on top of
+whatever the merged config produced for that role at the top level.
+Validation runs against the merged config. The default-config
+fallback applies only when neither file exists.
 
 ## Acceptance criteria
 

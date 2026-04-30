@@ -145,6 +145,41 @@ the proposal-spec config schema already documents:
 Verb names are user-defined; rename, add, or remove freely. Each
 verb just names which workflow runs.
 
+### Global plus project configs
+
+Orchestra reads up to two config files and merges them into a single
+view:
+
+1. `~/.orchestra/config.json` (global). Defines roles, verbs, and
+   workflows shared across projects.
+2. `<project>/.orchestra/config.json` (project, optional). Replaces
+   specific entries from the global on a per-key basis.
+
+The merge rule is replace, not nest: a role or verb or workflow
+defined in the project config replaces the global entry of the same
+name in full. Entries the project does not redefine are inherited.
+The same replace semantics as `role_overrides` at the workflow level,
+applied one level up.
+
+A project that wants to override only the editor model:
+
+```json
+{
+  "roles": {
+    "editor": {
+      "adapter": "claude_code_text",
+      "model": "deepseek-v4-pro",
+      "parameters": {}
+    }
+  }
+}
+```
+
+That project keeps every other role from the global config and just
+swaps the editor's binding for itself. McLoop's
+`invoke_code_edit(project_dir=...)` and the verb CLI both pick up
+the merged view.
+
 ### Help
 
 ```

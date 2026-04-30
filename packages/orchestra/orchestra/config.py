@@ -1,45 +1,30 @@
-"""Project-local Orchestra configuration loader.
+"""Orchestra configuration loader.
 
-Reads ``.orchestra/config.json`` from a consumer project (mcloop,
-Duplo, or anything else that imports orchestra). The schema is the
-two-tier form documented in
-``design/orchestra-shared-role-bindings-proposal.md``:
+Reads two-tier configs documented in
+``design/orchestra-shared-role-bindings-proposal.md``. A config has
+top-level ``roles`` (canonical role-to-binding identities), top-level
+``workflows`` (patterns plus optional ``role_overrides``), and
+optional top-level ``verbs`` (verb-name to workflow-name mappings for
+the CLI).
 
-    {
-      "roles": {
-        "<role_name>": {
-          "adapter": "<registered_backing_name>",
-          "model": "<model_id>",
-          "instruction_template": "<path_or_inline_string>",
-          "tools": "default" | "<comma_separated_override>",
-          "parameters": { ... }
-        }
-      },
-      "workflows": {
-        "<workflow_name>": {
-          "pattern": "<workflow_file_name>",
-          "role_overrides": {
-            "<role_name>": {
-              "<key>": "<value>",
-              ...
-            }
-          }
-        }
-      }
-    }
+The loader assembles a single merged ``OrchestraConfig`` from up to
+two on-disk files:
 
-Top-level ``roles`` defines the actor identities once. Each workflow
-references them by name through its ``pattern``. A workflow may
-specify ``role_overrides.<role>`` to replace individual binding keys
-for that workflow only. Override values replace the top-level value
-entirely. There is no nested merging.
+1. ``~/.orchestra/config.json`` (global). Defines roles, verbs, and
+   workflows shared across projects. Always loaded first.
+2. ``<project>/.orchestra/config.json`` (project-local, optional).
+   Overrides specific entries on a per-key basis.
 
-The loader is permissive at the top level and strict per role: missing
-required keys (``adapter``) raise ``ConfigError`` so the integration
-fails loudly rather than running with the wrong adapter. Other fields
-have sensible defaults so a minimal config still loads. The loader
-rejects the legacy per-workflow ``roles`` shape with a clear migration
-hint pointing at the proposal doc.
+Merge rule (replace, not nest): for each top-level section, entries
+in the project config replace entries of the same key in the global
+config in full. Entries the project does not redefine are inherited.
+The replace semantics match the workflow-level ``role_overrides``
+behavior, applied one level up.
+
+When neither file exists, ``load_config`` returns
+``default_config()`` so consumers (mcloop) keep zero-regression
+behavior. The loader rejects the legacy per-workflow ``roles`` shape
+with a clear migration hint pointing at the proposal doc.
 """
 
 from __future__ import annotations
@@ -292,11 +277,12 @@ class OrchestraConfig:
             raise ConfigError(
                 f"config root must be an object, got {type(raw).__name__}"
             )
-        if "roles" not in raw:
-            raise ConfigError(
-                "config is missing the top-level 'roles' table. "
-                f"{_PROPOSAL_HINT}"
-            )
+        # Each top-level section is optional in a single config file.
+        # The merge step combines a global file plus an optional
+        # project-local file, and either may carry only a subset of
+        # the sections. Validation that a workflow's required roles
+        # have bindings runs against the merged config in the api,
+        # not here, so a partial file does not fail to load.
         roles_raw = raw.get("roles") or {}
         if not isinstance(roles_raw, dict):
             raise ConfigError("'roles' must be an object")
@@ -348,46 +334,26 @@ def default_config() -> OrchestraConfig:
     )
 
 
-def load_config(project_dir: Path | str) -> OrchestraConfig:
-    """Load ``.orchestra/config.json`` from ``project_dir``.
-
-    Returns the default config (see ``default_config``) if the file
-    does not exist. Raises ``ConfigError`` if the file exists but
-    cannot be parsed or fails schema validation.
-    """
-    path = Path(project_dir) / CONFIG_RELATIVE_PATH
-    if not path.is_file():
-        return default_config()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ConfigError(
-            f"{path}: invalid JSON ({exc})"
-        ) from exc
-    return OrchestraConfig.from_dict(raw)
-
-
 def global_config_path() -> Path:
     """Return the path the global verb-config lives at."""
     return Path.home() / ".orchestra" / "config.json"
 
 
-def load_global_config() -> OrchestraConfig:
-    """Load the user-level config from ``~/.orchestra/config.json``.
+def project_config_path(project_dir: Path | str) -> Path:
+    """Return the path the project-local config lives at."""
+    return Path(project_dir) / CONFIG_RELATIVE_PATH
 
-    Distinct from ``load_config`` (which reads project-local config):
-    this is the source of truth for verb-style CLI invocations. The
-    global config typically populates ``verbs``; project-local configs
-    typically do not. Raises ``ConfigError`` if the file is missing or
-    malformed; the CLI catches the missing-file case to emit a
-    friendlier setup hint.
+
+def _read_config_file(path: Path) -> OrchestraConfig | None:
+    """Parse one config file. Returns ``None`` if the file is absent.
+
+    Raises ``ConfigError`` when the file exists but cannot be parsed
+    or fails schema validation. Each top-level section is optional in
+    isolation; merge-time logic upstream combines partial files into a
+    complete config.
     """
-    path = global_config_path()
     if not path.is_file():
-        raise ConfigError(
-            f"no config at {path}; create one with verb mappings to "
-            "use this command. See `orchestra help` for the format."
-        )
+        return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -395,3 +361,69 @@ def load_global_config() -> OrchestraConfig:
             f"{path}: invalid JSON ({exc})"
         ) from exc
     return OrchestraConfig.from_dict(raw)
+
+
+def _merge_configs(
+    base: OrchestraConfig,
+    overlay: OrchestraConfig,
+) -> OrchestraConfig:
+    """Return a merged config with ``overlay`` applied on top of ``base``.
+
+    Per the proposal: for each top-level section (roles, workflows,
+    verbs), entries in ``overlay`` replace entries of the same key in
+    ``base`` in full. ``base`` entries that ``overlay`` does not
+    redefine are inherited unchanged. There is no nested merging:
+    overriding a single role replaces the entire RoleBinding for that
+    role, including its parameters and tools.
+    """
+    return OrchestraConfig(
+        roles={**base.roles, **overlay.roles},
+        workflows={**base.workflows, **overlay.workflows},
+        verbs={**base.verbs, **overlay.verbs},
+    )
+
+
+def load_config(
+    project_dir: Path | str | None = None,
+) -> OrchestraConfig:
+    """Load and merge the global and (optional) project-local configs.
+
+    Loads ``~/.orchestra/config.json`` first when present. If
+    ``project_dir`` is given and contains ``.orchestra/config.json``,
+    that file is merged on top via ``_merge_configs``. Returns
+    ``default_config()`` when neither file exists. Either file may
+    omit any top-level section; the merge fills gaps from the other
+    side.
+    """
+    global_cfg = _read_config_file(global_config_path())
+    project_cfg: OrchestraConfig | None = None
+    if project_dir is not None:
+        project_cfg = _read_config_file(project_config_path(project_dir))
+
+    if global_cfg is None and project_cfg is None:
+        return default_config()
+    if project_cfg is None:
+        assert global_cfg is not None
+        return global_cfg
+    if global_cfg is None:
+        return project_cfg
+    return _merge_configs(global_cfg, project_cfg)
+
+
+def load_global_config() -> OrchestraConfig:
+    """Load only the global config, raising if it is missing.
+
+    Verb-style CLI uses this to detect the no-config case and emit a
+    setup hint rather than silently falling back to ``default_config``.
+    A loaded global config still supports being merged with a project
+    config via ``load_config(project_dir=...)`` for callers that want
+    both layers.
+    """
+    path = global_config_path()
+    cfg = _read_config_file(path)
+    if cfg is None:
+        raise ConfigError(
+            f"no config at {path}; create one with verb mappings to "
+            "use this command. See `orchestra help` for the format."
+        )
+    return cfg
