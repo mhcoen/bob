@@ -220,6 +220,32 @@ class _PerRoleDispatcher:
 # --------------------------------------------------------------------
 
 
+def _pre_load_registry() -> ProfileRegistry:
+    """Return a registry the loader can validate any workflow against.
+
+    ``with_core()`` registers ``model``, ``human``, and ``shell``
+    backings; the ``agent`` backing is added by the runtime registry
+    builder once role bindings are known. We need to load the
+    workflow first to know which roles it requires, so this helper
+    pre-registers a placeholder ``agent`` factory plus the
+    identity-text result parser bound to ``agent``. The placeholder
+    factory is replaced by the real per-role dispatcher in
+    ``_build_registry`` before the executor runs.
+    """
+    reg = with_core()
+    if "agent" not in reg.actor_backings:
+        reg.actor_backings["agent"] = lambda: None
+        reg.register_result_parser(
+            ResultParser(
+                name="identity_text_agent",
+                backing_filter=("agent",),
+                artifact_type_filter=("text",),
+                fn=_identity_text_parse_fn,
+            )
+        )
+    return reg
+
+
 def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
     """Instantiate the adapter for ``binding`` and return ``(adapter, kind)``.
 
@@ -402,31 +428,110 @@ def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
     return store
 
 
+def _resolve_role_binding(
+    workflow_name: str,
+    role_name: str,
+    config: OrchestraConfig,
+) -> RoleBinding:
+    """Resolve a role binding for a workflow per the two-tier rules.
+
+    Resolution order:
+
+    1. If the workflow has ``role_overrides.<role>``, the top-level
+       binding for ``<role>`` must exist; the override keys replace
+       (do not merge with) the corresponding top-level keys.
+    2. Else if the top-level ``roles.<role>`` exists, return it as-is.
+    3. Else raise ``ConfigError`` naming the workflow, the role, and
+       what was searched.
+
+    Override values replace top-level values entirely. ``parameters``
+    overrides replace the entire dict, not individual keys.
+    """
+    workflow_cfg = config.workflow(workflow_name)
+    override = workflow_cfg.role_overrides.get(role_name)
+    if override is not None:
+        if role_name not in config.roles:
+            raise ConfigError(
+                f"workflow {workflow_name!r}: role_overrides entry "
+                f"{role_name!r} has no corresponding top-level binding "
+                "in 'roles'. Overrides replace keys on top of an existing "
+                "top-level binding."
+            )
+        return config.roles[role_name].with_overrides(role_name, override)
+    if role_name in config.roles:
+        return config.roles[role_name]
+    raise ConfigError(
+        f"workflow {workflow_name!r}: role {role_name!r} has no binding. "
+        f"Configured top-level roles: {sorted(config.roles)}"
+    )
+
+
+def _resolve_workflow_role_bindings(
+    workflow: Workflow,
+    workflow_name: str,
+    config: OrchestraConfig,
+) -> dict[str, RoleBinding]:
+    """Resolve every role the workflow's states reference.
+
+    Walks the workflow states, collects each unique role name, and
+    resolves it via ``_resolve_role_binding``. Missing top-level
+    bindings, dangling overrides, and adapter-kind mismatches all
+    accumulate into a single ``ConfigError``.
+    """
+    needed: dict[str, str] = {}
+    first_state_for_role: dict[str, str] = {}
+    for state in workflow.states:
+        if state.role is None:
+            continue
+        if state.actor.kind not in ("model", "agent"):
+            continue
+        needed.setdefault(state.role, state.actor.kind)
+        first_state_for_role.setdefault(state.role, state.name)
+
+    resolution_errors: list[str] = []
+    resolved: dict[str, RoleBinding] = {}
+    for role_name in needed:
+        try:
+            resolved[role_name] = _resolve_role_binding(
+                workflow_name, role_name, config
+            )
+        except ConfigError as exc:
+            resolution_errors.append(str(exc))
+    if resolution_errors:
+        raise ConfigError(
+            f"workflow {workflow_name!r}: role-binding resolution failed:\n  "
+            + "\n  ".join(resolution_errors)
+        )
+    return resolved
+
+
 def _validate_role_bindings(
     workflow: Workflow,
-    role_bindings: dict[str, RoleBinding],
-) -> None:
-    """Every actor role declared on a workflow state must be bound in
-    the project config, and the bound adapter must match the state's
-    actor kind.
+    workflow_name: str,
+    config: OrchestraConfig,
+) -> dict[str, RoleBinding]:
+    """Resolve every workflow role and check adapter kinds match.
 
     Two failure modes are caught here:
 
-    1. A state whose role is missing from the config would silently
-       fall back to the slice-1 mock under the actor kind, or (worse)
-       reuse a different role's adapter via the dispatcher's
-       one-adapter shortcut.
-    2. A state whose role is bound to the wrong kind of adapter (a
-       text adapter on an ``actor agent`` state, or an edit-agent
-       adapter on an ``actor model`` state) would route wrong at
-       runtime. The mismatch only surfaces when the inner CLI sees
-       the wrong tool list, which is too late.
+    1. A state whose role has no top-level binding (and no override
+       references one) would silently fall back to the slice-1 mock
+       under the actor kind, or reuse a different role's adapter via
+       the dispatcher's one-adapter shortcut.
+    2. A state whose resolved adapter has the wrong kind (a text
+       adapter on an ``actor agent`` state, or an edit-agent adapter
+       on an ``actor model`` state) would route wrong at runtime. The
+       mismatch only surfaces when the inner CLI sees the wrong tool
+       list, which is too late.
 
-    Both fail loudly with ``ConfigError`` naming the role, the state,
-    the configured adapter, and the kind it should serve.
+    Both fail loudly with ``ConfigError`` naming the workflow, the
+    role, the first state that needs it, the configured adapter, and
+    the expected kind. Returns the resolved bindings keyed by role
+    name so callers can pass them to the dispatcher without resolving
+    a second time.
     """
-    # Tracks the first state encountered for each role, so the error
-    # message can name a concrete state when the binding is wrong.
+    resolved = _resolve_workflow_role_bindings(workflow, workflow_name, config)
+
     first_state_for_role: dict[str, str] = {}
     needed: dict[str, str] = {}
     for state in workflow.states:
@@ -436,15 +541,10 @@ def _validate_role_bindings(
             continue
         first_state_for_role.setdefault(state.role, state.name)
         needed.setdefault(state.role, state.actor.kind)
-    missing = sorted(name for name in needed if name not in role_bindings)
-    if missing:
-        raise ConfigError(
-            f"workflow {workflow.name!r}: role bindings missing in config: "
-            f"{missing}. Configured: {sorted(role_bindings)}"
-        )
+
     mismatches: list[str] = []
     for role_name, expected_kind in needed.items():
-        binding = role_bindings[role_name]
+        binding = resolved[role_name]
         adapter_kind = _ADAPTER_TO_KIND.get(binding.adapter)
         if adapter_kind is None:
             mismatches.append(
@@ -460,9 +560,10 @@ def _validate_role_bindings(
             )
     if mismatches:
         raise ConfigError(
-            f"workflow {workflow.name!r}: role-adapter kind mismatch:\n  "
+            f"workflow {workflow_name!r}: role-adapter kind mismatch:\n  "
             + "\n  ".join(mismatches)
         )
+    return resolved
 
 
 def _validate_inputs(workflow: Workflow, inputs: dict[str, Any]) -> None:
@@ -588,9 +689,15 @@ def run_workflow(
         workflow_cfg.pattern, project_dir=project_dir
     )
 
-    registry = _build_registry(workflow_cfg.roles)
-    workflow = load_workflow(workflow_path, registry)
-    _validate_role_bindings(workflow, workflow_cfg.roles)
+    # Two-pass load: a pre-registry with placeholder backings for any
+    # kind the workflow might reference (the loader validates that
+    # every ``actor`` clause names a registered backing), then resolve
+    # the per-workflow role bindings against the project config and
+    # build the runtime registry whose dispatchers fan out per role.
+    pre_registry = _pre_load_registry()
+    workflow = load_workflow(workflow_path, pre_registry)
+    role_bindings = _validate_role_bindings(workflow, name, cfg)
+    registry = _build_registry(role_bindings)
 
     run_id = new_run_id()
     if data_root is None:
@@ -602,7 +709,7 @@ def run_workflow(
 
     workflow = _apply_instruction_templates(
         workflow,
-        workflow_cfg.roles,
+        role_bindings,
         project_dir=Path(project_dir) if project_dir is not None else None,
         run_dir=run_dir,
     )

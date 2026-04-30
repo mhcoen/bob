@@ -330,19 +330,17 @@ def _representative_inputs(project_dir: Path) -> dict[str, Any]:
 def _orchestra_config() -> OrchestraConfig:
     return OrchestraConfig.from_dict(
         {
+            "roles": {
+                "editor": {
+                    "adapter": "claude_code_agent",
+                    "model": "opus",
+                    "tools": "default",
+                    "parameters": {},
+                },
+            },
             "workflows": {
-                "code_edit": {
-                    "pattern": "single",
-                    "roles": {
-                        "editor": {
-                            "adapter": "claude_code_agent",
-                            "model": "opus",
-                            "tools": "default",
-                            "parameters": {},
-                        }
-                    },
-                }
-            }
+                "code_edit": {"pattern": "single"},
+            },
         }
     )
 
