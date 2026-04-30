@@ -54,11 +54,18 @@ def test_ask_workflow_loads(
         "ask_propose_critique_synthesize",
     ],
 )
-def test_ask_workflow_takes_only_query_input(name: str) -> None:
+def test_ask_workflow_takes_query_and_history_inputs(name: str) -> None:
+    """Each ask workflow declares two text inputs: ``query`` for the
+    user's question, and ``history`` for the prior conversation
+    transcript the REPL passes through. ``history`` is the empty
+    string when the verb is invoked outside the REPL."""
     path = resolve_workflow_path(name, project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
-    assert [e.name for e in workflow.external_inputs] == ["query"]
-    assert workflow.external_inputs[0].type == "text"
+    names = [e.name for e in workflow.external_inputs]
+    assert sorted(names) == ["history", "query"]
+    by_name = {e.name: e for e in workflow.external_inputs}
+    assert by_name["query"].type == "text"
+    assert by_name["history"].type == "text"
 
 
 @pytest.mark.parametrize(

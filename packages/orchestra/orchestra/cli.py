@@ -386,14 +386,19 @@ def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
-    # No arguments at all: show the help overview and exit 0. The user
-    # is asking what this tool does; argparse's "required: cmd" error
-    # is the wrong answer. `orchestra <unknown>` still hits the verb
-    # dispatcher and exits 2 with a friendly hint, so this fall-through
-    # only fires when there is literally nothing to dispatch on.
+    # No arguments at all: drop into the interactive REPL. The user
+    # is asking to use the tool, not asking what argparse complains
+    # about. `orchestra help` still emits the static overview, and
+    # `orchestra <unknown>` still hits the verb dispatcher and exits
+    # 2 with a friendly hint, so this fall-through only fires when
+    # there is literally nothing to dispatch on.
     if not raw_args:
-        config, _err = _try_load_merged_config(project_dir=Path.cwd())
-        return _print_help_overview(config)
+        config, err = _try_load_merged_config(project_dir=Path.cwd())
+        if config is None:
+            print(err or "config unavailable", file=sys.stderr)
+            return 1
+        from orchestra.repl import run_repl
+        return run_repl(config)
 
     # Handle the verb-style surface before argparse so positional
     # words can flow through unmangled.

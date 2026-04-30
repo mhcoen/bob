@@ -806,15 +806,22 @@ def run_verb(
     verb_name: str,
     query: str,
     config: OrchestraConfig,
+    *,
+    history: str = "",
 ) -> str:
     """Run the workflow named by ``verb_name`` and return the answer text.
 
     The verb resolves to a workflow name through ``config.verbs``. The
-    workflow runs with ``inputs={"query": query}``. The return value
-    is the final state's text payload, which the CLI prints to stdout.
-    Raises ``WorkflowApiError`` if the verb is unknown, the workflow
-    does not terminate in ``done``, or the final envelope carries no
-    text response.
+    workflow runs with ``inputs={"query": query}`` and, when
+    ``history`` is non-empty AND the workflow declares a ``history``
+    external_input, ``inputs["history"] = history`` too. Workflows
+    that do not declare ``history`` ignore it silently so a custom
+    verb pointing at a non-ask workflow keeps working.
+
+    Returns the final state's text payload, which the CLI prints to
+    stdout. Raises ``WorkflowApiError`` if the verb is unknown, the
+    workflow does not terminate in ``done``, or the final envelope
+    carries no text response.
     """
     if verb_name not in config.verbs:
         raise WorkflowApiError(
@@ -822,7 +829,16 @@ def run_verb(
             f"{sorted(config.verbs)}"
         )
     workflow_name = config.verbs[verb_name].workflow
-    result = run_workflow(workflow_name, {"query": query}, config)
+    inputs: dict[str, Any] = {"query": query}
+    # history threads through only when the workflow asks for it.
+    # The pre-load registry is enough to introspect declared inputs;
+    # run_workflow does the real load again with the runtime registry.
+    workflow_path = resolve_workflow_path(workflow_name, project_dir=None)
+    workflow = load_workflow(workflow_path, _pre_load_registry())
+    declared = {ext.name for ext in workflow.external_inputs}
+    if "history" in declared:
+        inputs["history"] = history
+    result = run_workflow(workflow_name, inputs, config)
     if result.terminal != "done":
         raise WorkflowApiError(
             f"verb {verb_name!r} (workflow {workflow_name!r}) did not "

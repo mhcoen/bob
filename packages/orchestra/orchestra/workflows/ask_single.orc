@@ -3,6 +3,7 @@ spec 0.1
 workflow ask_single
 
   external_input query text
+  external_input history text
 
   max_total_steps 5
 
@@ -11,12 +12,12 @@ workflow ask_single
   artifact editor_output text
 
   role editor
-    prompt template "templates/ask_single_editor.md" with query
+    prompt template "templates/ask_single_editor.md" with history, query
 
   state answer
     actor model m_editor
     role editor
-    reads query
+    reads query, history
     writes editor_output text
     on complete => done
     on error => stop

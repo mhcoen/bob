@@ -3,6 +3,7 @@ spec 0.1
 workflow ask_propose_critique_synthesize
 
   external_input query text
+  external_input history text
 
   max_total_steps 20
 
@@ -17,21 +18,21 @@ workflow ask_propose_critique_synthesize
   artifact editor_output text
 
   role proposer
-    prompt template "templates/ask_propose_critique_synthesize_proposer.md" with query
+    prompt template "templates/ask_propose_critique_synthesize_proposer.md" with history, query
 
   role critic
-    prompt template "templates/ask_propose_critique_synthesize_critic.md" with proposer_output, query
+    prompt template "templates/ask_propose_critique_synthesize_critic.md" with history, proposer_output, query
 
   role synthesizer
-    prompt template "templates/ask_propose_critique_synthesize_synthesizer.md" with proposer_output, critic_output, query
+    prompt template "templates/ask_propose_critique_synthesize_synthesizer.md" with history, proposer_output, critic_output, query
 
   role editor
-    prompt template "templates/ask_propose_critique_synthesize_editor.md" with synthesizer_output, query
+    prompt template "templates/ask_propose_critique_synthesize_editor.md" with history, synthesizer_output, query
 
   state propose
     actor model m_proposer
     role proposer
-    reads query
+    reads query, history
     writes proposer_output text
     on complete => critique
     on error => stop
@@ -40,7 +41,7 @@ workflow ask_propose_critique_synthesize
   state critique
     actor model m_critic
     role critic
-    reads proposer_output, query
+    reads proposer_output, query, history
     writes critic_output text
     on complete => synthesize
     on error => stop
@@ -49,7 +50,7 @@ workflow ask_propose_critique_synthesize
   state synthesize
     actor model m_synthesizer
     role synthesizer
-    reads proposer_output, critic_output, query
+    reads proposer_output, critic_output, query, history
     writes synthesizer_output text
     on complete => answer
     on error => stop
@@ -58,7 +59,7 @@ workflow ask_propose_critique_synthesize
   state answer
     actor model m_editor
     role editor
-    reads synthesizer_output, query
+    reads synthesizer_output, query, history
     writes editor_output text
     on complete => done
     on error => stop

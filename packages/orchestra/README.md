@@ -40,6 +40,25 @@ $ orchestra pair explain liskov substitution to someone who knows oop basics
 [final answer, after a drafter and an adjudicator]
 ```
 
+For multi-turn back-and-forth, run bare `orchestra` with no arguments
+to drop into an interactive REPL:
+
+```
+$ orchestra
+orchestra REPL. /help for commands, /exit to quit.
+orchestra> what is the capital of france
+Paris.
+orchestra> what about its population
+About 2.1 million in the city proper.
+orchestra> /verb council
+verb -> council
+orchestra (council)> should I rewrite this service in rust or stay in go
+[council answer, with prior turns threaded into the prompt as context]
+orchestra (council)> /save session.md
+saved 3 turn(s) to session.md
+orchestra (council)> /exit
+```
+
 No quotes around the question. The CLI takes the verb plus the rest
 of the line. The model's text response is the only thing printed; the
 full multi-model log lands at `~/.orchestra/runs/<run_id>/log.jsonl`
@@ -200,7 +219,6 @@ A role binding has three required keys (plus an optional fourth):
 ### Help
 
 ```
-orchestra
 orchestra help
 ```
 
@@ -208,6 +226,50 @@ Lists every configured verb plus the workflow it runs.
 `orchestra help <verb>` shows the required roles and the binding
 configured for each, flagging any role with no binding as
 `NOT CONFIGURED`.
+
+## Interactive REPL
+
+Bare `orchestra` (no arguments) drops you into a prompt that solves
+shell quoting once and lets you ask follow-up questions that
+reference prior turns:
+
+```
+$ orchestra
+orchestra REPL. /help for commands, /exit to quit.
+orchestra> what is the capital of france
+Paris.
+orchestra> what's the population of that city
+About 2.1 million in the city proper.
+```
+
+The REPL threads the running transcript into each new prompt as a
+``Prior conversation:`` block, so models see what was just discussed.
+Switch verbs mid-session without losing context:
+
+```
+orchestra> /verb council
+verb -> council
+orchestra (council)> what would Brian Kernighan say about that
+[council answer, with the prior two turns still visible to the models]
+```
+
+Slash commands (in-process, do not call any model):
+
+- `/help` - list slash commands and configured verbs.
+- `/verb [name]` - show or switch the active verb.
+- `/clear` - drop the in-memory transcript.
+- `/history` - print the transcript so far.
+- `/save <path>` - write the transcript to disk. `.json` writes JSON;
+  anything else writes markdown.
+- `/exit`, `/quit` - leave the REPL. Ctrl-D also exits.
+
+A single Ctrl-C cancels the current input line. A second Ctrl-C
+within one second exits the REPL. The session transcript is in
+memory only; it is not persisted across sessions unless you
+`/save` it. The prompt_toolkit history file at
+`~/.orchestra/history` records past commands so up-arrow recall
+works across sessions, but it is not the conversational
+transcript.
 
 ## Library use
 

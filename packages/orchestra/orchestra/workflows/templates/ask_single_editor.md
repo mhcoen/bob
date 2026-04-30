@@ -1,1 +1,1 @@
-{query}
+{history}{query}

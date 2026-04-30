@@ -1,0 +1,347 @@
+"""Interactive REPL for the verb-style CLI.
+
+Bare ``orchestra`` (no arguments) drops into this loop. The user
+types a verb-and-question line, sees the model's answer, and can
+follow up with another line that references prior turns. The REPL
+also handles slash commands for switching verbs, viewing the
+transcript, and saving it.
+
+Design choices:
+
+- ``prompt_toolkit.PromptSession`` for the input primitive. Gives
+  history file, auto-suggest from history, and clean Ctrl-D handling
+  for free.
+- Slash commands (lines starting with ``/``) dispatch through a
+  small in-process table. Anything else is treated as a query and
+  routed to ``run_verb`` with the active verb plus the in-memory
+  transcript as ``history``.
+- Session context is in-memory only. The user opts in to disk via
+  ``/save``. The history file at ``~/.orchestra/history`` is
+  prompt_toolkit's recall mechanism for past commands; it is not the
+  conversational transcript.
+- Ctrl-D exits cleanly. A first Ctrl-C cancels the current input
+  line; a second within ``_DOUBLE_CTRL_C_WINDOW`` exits the loop.
+- Verb invocation errors print to stderr but the REPL stays alive
+  so a stray failure does not eject the user.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import FileHistory
+
+from orchestra.api import run_verb
+from orchestra.config import OrchestraConfig
+from orchestra.errors import OrchestraError
+
+_HISTORY_PATH: Path = Path.home() / ".orchestra" / "history"
+_DOUBLE_CTRL_C_WINDOW: float = 1.0
+
+
+@dataclass
+class Turn:
+    """One question/answer pair plus the verb that produced it."""
+
+    verb: str
+    query: str
+    answer: str
+
+
+@dataclass
+class ReplState:
+    """In-memory session state. Reset on /clear, lost on exit."""
+
+    config: OrchestraConfig
+    current_verb: str
+    turns: list[Turn] = field(default_factory=list)
+
+
+def _default_verb(config: OrchestraConfig) -> str | None:
+    """Return the default verb for a session.
+
+    Honors a top-level ``default_verb`` key in the config when
+    present and configured. Otherwise picks the first verb in the
+    table (sorted alphabetically for stability across reloads).
+    Returns ``None`` only when no verbs are configured.
+    """
+    explicit = getattr(config, "default_verb", None)
+    if isinstance(explicit, str) and explicit in config.verbs:
+        return explicit
+    if not config.verbs:
+        return None
+    return sorted(config.verbs)[0]
+
+
+def format_history(turns: list[Turn]) -> str:
+    """Format prior turns as a transcript prefix for the next prompt.
+
+    Returns the empty string when ``turns`` is empty so a template
+    that inlines ``{history}{query}`` produces no orphaned header on
+    the first turn. Otherwise returns
+    ``"Prior conversation:\\n<lines>\\n\\n"`` where each line is one
+    user/assistant pair.
+    """
+    if not turns:
+        return ""
+    lines: list[str] = []
+    for turn in turns:
+        lines.append(f"user: {turn.query}")
+        lines.append(f"assistant: {turn.answer}")
+    return "Prior conversation:\n" + "\n".join(lines) + "\n\n"
+
+
+def _format_markdown_transcript(turns: list[Turn]) -> str:
+    """Render the transcript as a human-friendly markdown document."""
+    if not turns:
+        return "# Orchestra session\n\n_(no turns)_\n"
+    parts: list[str] = ["# Orchestra session", ""]
+    for i, turn in enumerate(turns, 1):
+        parts.append(f"## Turn {i} ({turn.verb})")
+        parts.append("")
+        parts.append("**You:**")
+        parts.append("")
+        parts.append(turn.query)
+        parts.append("")
+        parts.append("**Assistant:**")
+        parts.append("")
+        parts.append(turn.answer)
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def _format_json_transcript(turns: list[Turn]) -> str:
+    return json.dumps(
+        [
+            {"verb": t.verb, "query": t.query, "answer": t.answer}
+            for t in turns
+        ],
+        indent=2,
+    ) + "\n"
+
+
+# --------------------------------------------------------------------
+# Slash-command dispatcher
+# --------------------------------------------------------------------
+
+
+@dataclass
+class SlashOutcome:
+    """Return shape from a slash command. ``exit`` ends the REPL."""
+
+    exit: bool = False
+
+
+SlashCommand = Callable[[ReplState, list[str]], SlashOutcome]
+
+
+def _cmd_help(state: ReplState, _args: list[str]) -> SlashOutcome:
+    print("Slash commands:")
+    print("  /help          show this list")
+    print("  /verb [name]   show or switch the active verb")
+    print("  /clear         clear the in-memory transcript")
+    print("  /history       print the transcript")
+    print("  /save <path>   write the transcript to a file")
+    print("  /exit, /quit   leave the REPL")
+    print("Configured verbs:")
+    if not state.config.verbs:
+        print("  (none)")
+    else:
+        for name in sorted(state.config.verbs):
+            print(f"  {name}  runs {state.config.verbs[name].workflow}")
+    return SlashOutcome()
+
+
+def _cmd_verb(state: ReplState, args: list[str]) -> SlashOutcome:
+    if not args:
+        print(f"current verb: {state.current_verb}")
+        return SlashOutcome()
+    target = args[0]
+    if target not in state.config.verbs:
+        print(
+            f"unknown verb {target!r}. Configured: "
+            f"{sorted(state.config.verbs)}",
+            file=sys.stderr,
+        )
+        return SlashOutcome()
+    state.current_verb = target
+    print(f"verb -> {target}")
+    return SlashOutcome()
+
+
+def _cmd_clear(state: ReplState, _args: list[str]) -> SlashOutcome:
+    n = len(state.turns)
+    state.turns.clear()
+    print(f"cleared {n} turn(s).")
+    return SlashOutcome()
+
+
+def _cmd_history(state: ReplState, _args: list[str]) -> SlashOutcome:
+    if not state.turns:
+        print("(no turns yet)")
+        return SlashOutcome()
+    for i, turn in enumerate(state.turns, 1):
+        print(f"--- Turn {i} ({turn.verb}) ---")
+        print(f"you: {turn.query}")
+        print(f"assistant: {turn.answer}")
+    return SlashOutcome()
+
+
+def _cmd_save(state: ReplState, args: list[str]) -> SlashOutcome:
+    if not args:
+        print("usage: /save <path>", file=sys.stderr)
+        return SlashOutcome()
+    path = Path(args[0]).expanduser()
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        body = _format_json_transcript(state.turns)
+    else:
+        body = _format_markdown_transcript(state.turns)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        print(f"could not write {path}: {exc}", file=sys.stderr)
+        return SlashOutcome()
+    print(f"saved {len(state.turns)} turn(s) to {path}")
+    return SlashOutcome()
+
+
+def _cmd_exit(_state: ReplState, _args: list[str]) -> SlashOutcome:
+    return SlashOutcome(exit=True)
+
+
+_SLASH_COMMANDS: dict[str, SlashCommand] = {
+    "/help": _cmd_help,
+    "/verb": _cmd_verb,
+    "/clear": _cmd_clear,
+    "/history": _cmd_history,
+    "/save": _cmd_save,
+    "/exit": _cmd_exit,
+    "/quit": _cmd_exit,
+}
+
+
+def dispatch_slash(state: ReplState, line: str) -> SlashOutcome:
+    """Run a slash-command line. Unknown commands print a hint."""
+    parts = line.strip().split()
+    if not parts:
+        return SlashOutcome()
+    name = parts[0]
+    args = parts[1:]
+    handler = _SLASH_COMMANDS.get(name)
+    if handler is None:
+        print(
+            f"unknown slash command {name!r}. Try /help.",
+            file=sys.stderr,
+        )
+        return SlashOutcome()
+    return handler(state, args)
+
+
+# --------------------------------------------------------------------
+# Verb invocation from the REPL
+# --------------------------------------------------------------------
+
+
+def handle_query(state: ReplState, line: str) -> None:
+    """Run ``state.current_verb`` against ``line`` plus the running
+    history. Append the resulting turn on success; print the error
+    and stay in the REPL on failure."""
+    history = format_history(state.turns)
+    try:
+        answer = run_verb(
+            state.current_verb,
+            line,
+            state.config,
+            history=history,
+        )
+    except OrchestraError as exc:
+        print(str(exc), file=sys.stderr)
+        return
+    print(answer)
+    state.turns.append(
+        Turn(verb=state.current_verb, query=line, answer=answer)
+    )
+
+
+# --------------------------------------------------------------------
+# Top-level loop
+# --------------------------------------------------------------------
+
+
+def _build_session() -> PromptSession[str]:
+    _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return PromptSession(
+        history=FileHistory(str(_HISTORY_PATH)),
+        auto_suggest=AutoSuggestFromHistory(),
+    )
+
+
+def _prompt_string(state: ReplState, default_verb: str | None) -> str:
+    if default_verb is not None and state.current_verb == default_verb:
+        return "orchestra> "
+    return f"orchestra ({state.current_verb})> "
+
+
+def run_repl(
+    config: OrchestraConfig,
+    *,
+    session: Any | None = None,
+) -> int:
+    """Run the interactive REPL. Returns the process exit code."""
+    default = _default_verb(config)
+    if default is None:
+        print(
+            "no verbs configured; cannot start REPL. "
+            "Add a verb mapping to ~/.orchestra/config.json. "
+            "See `orchestra help` for the format.",
+            file=sys.stderr,
+        )
+        return 1
+    state = ReplState(config=config, current_verb=default)
+    if session is None:
+        session = _build_session()
+
+    completer = WordCompleter(
+        sorted(config.verbs) + sorted(_SLASH_COMMANDS),
+        ignore_case=True,
+    )
+
+    print("orchestra REPL. /help for commands, /exit to quit.")
+    last_ctrl_c = 0.0
+    while True:
+        try:
+            line = session.prompt(
+                _prompt_string(state, default),
+                completer=completer,
+            )
+        except KeyboardInterrupt:
+            now = time.monotonic()
+            if now - last_ctrl_c < _DOUBLE_CTRL_C_WINDOW:
+                print("(double Ctrl-C, exiting)")
+                return 0
+            last_ctrl_c = now
+            print("(press Ctrl-C again to exit, or Ctrl-D)")
+            continue
+        except EOFError:
+            print()
+            return 0
+        last_ctrl_c = 0.0
+        if not line.strip():
+            continue
+        if line.startswith("/"):
+            outcome = dispatch_slash(state, line)
+            if outcome.exit:
+                return 0
+            continue
+        handle_query(state, line)

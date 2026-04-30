@@ -10,7 +10,9 @@ requires-python = ">=3.12"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [{name = "Michael Coen"}]
-dependencies = []
+dependencies = [
+    "prompt_toolkit>=3.0",
+]
 
 [project.optional-dependencies]
 dev = [
