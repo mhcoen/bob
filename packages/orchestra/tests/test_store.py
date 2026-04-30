@@ -386,3 +386,117 @@ def test_cleanup_mid_purge_preserves_hidden_invariant(tmp_path):
     assert store2.purge_invisible_state_invocation_versions() == 1
     assert store2.read_latest("b") is None
     store2.close()
+
+
+def test_tentative_write_atomic_under_concurrent_pressure(tmp_path):
+    """``tentative_write`` performs two inserts (one into ``versions``,
+    one into ``tentative_handles``). The store runs with
+    ``isolation_level=None``, so without an explicit
+    ``BEGIN IMMEDIATE`` / commit / rollback wrap, a failure between
+    the two inserts would leak a half-written row: a ``versions`` row
+    with ``is_tentative=1`` and no matching handle, with no way to
+    commit or discard it.
+
+    Tests Follow-up 2.
+    """
+    import threading
+    from typing import Any
+
+    # Sanity: under normal conditions, two threads each calling
+    # ``tentative_write`` on different artifacts both commit; the
+    # store-level RLock plus BEGIN IMMEDIATE serialise them cleanly.
+    store = ArtifactStore(tmp_path / "store.sqlite")
+    store.declare("a", "text")
+    store.declare("b", "text")
+
+    barrier = threading.Barrier(2)
+    handles: list[str] = []
+    handles_lock = threading.Lock()
+    errors: list[BaseException] = []
+
+    def worker(name: str, value: str) -> None:
+        try:
+            barrier.wait()
+            h = store.tentative_write(name, value, written_by=f"t-{name}")
+            with handles_lock:
+                handles.append(h)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker, args=("a", "v1"))
+    t2 = threading.Thread(target=worker, args=("b", "v2"))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    assert errors == []
+    assert len(handles) == 2
+
+    cur = store._conn.cursor()
+    versions = cur.execute(
+        "SELECT seq FROM versions WHERE is_tentative = 1"
+    ).fetchall()
+    assert len(versions) == 2
+    handle_rows = cur.execute("SELECT handle FROM tentative_handles").fetchall()
+    assert len(handle_rows) == 2
+    store.close()
+
+    # Now corrupt the second insert. A separate store instance gets
+    # a wrapped ``cursor()`` factory whose returned cursor raises on
+    # the second ``execute`` call (the INSERT INTO tentative_handles
+    # statement). Without the BEGIN IMMEDIATE wrap, the first insert
+    # would already be committed; with it, rollback undoes the
+    # versions insert too.
+    fresh = ArtifactStore(tmp_path / "store2.sqlite")
+    fresh.declare("c", "text")
+
+    class _FailingCursor:
+        def __init__(self, real: Any) -> None:
+            self._real = real
+            self._n = 0
+
+        def execute(self, *a: Any, **k: Any) -> Any:
+            self._n += 1
+            if self._n == 2:
+                raise RuntimeError("synthetic failure on second insert")
+            return self._real.execute(*a, **k)
+
+        def fetchone(self) -> Any:
+            return self._real.fetchone()
+
+        def fetchall(self) -> Any:
+            return self._real.fetchall()
+
+        @property
+        def lastrowid(self) -> int:
+            return int(self._real.lastrowid)
+
+    real_conn = fresh._conn
+
+    class _WrappedConn:
+        """Delegates everything except cursor() to the real
+        connection. ``cursor()`` returns a failing cursor."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_conn, name)
+
+        def cursor(self) -> Any:
+            return _FailingCursor(real_conn.cursor())
+
+    fresh._conn = _WrappedConn()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        fresh.tentative_write("c", "x", written_by="t")
+
+    # Restore the real connection for queries.
+    fresh._conn = real_conn
+
+    # The rollback undid the versions insert: no half-written row.
+    cur = fresh._conn.cursor()
+    versions = cur.execute(
+        "SELECT seq FROM versions WHERE is_tentative = 1"
+    ).fetchall()
+    assert versions == []
+    handle_rows = cur.execute("SELECT handle FROM tentative_handles").fetchall()
+    assert handle_rows == []
+    fresh.close()

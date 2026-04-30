@@ -499,31 +499,45 @@ class ArtifactStore:
             producer_kind: ProducerKind = (
                 "state_invocation" if invocation_id is not None else "legacy"
             )
-            cur = self._conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO versions
-                    (artifact, version_id, value, written_at, written_by,
-                     is_tentative, tentative_handle, producer_kind, invocation_id)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
-                """,
-                (
-                    name,
-                    version_id,
-                    _canonicalize(value),
-                    _now_iso(),
-                    written_by,
-                    handle,
-                    producer_kind,
-                    invocation_id,
-                ),
-            )
-            seq = cur.lastrowid
-            cur.execute(
-                "INSERT INTO tentative_handles (handle, seq) VALUES (?, ?)",
-                (handle, seq),
-            )
-            self._conn.commit()
+            # The two inserts must commit atomically: if the
+            # ``tentative_handles`` insert fails after the ``versions``
+            # insert succeeds, the version row is orphaned (no handle
+            # to commit or discard it). The store runs with
+            # ``isolation_level=None``, so wrap in explicit
+            # ``BEGIN IMMEDIATE`` / commit / rollback under the
+            # store-level RLock, mirroring the discipline already
+            # used by ``commit_tentative``, ``discard_tentative``,
+            # and ``purge``.
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self._conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO versions
+                        (artifact, version_id, value, written_at, written_by,
+                         is_tentative, tentative_handle, producer_kind, invocation_id)
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                    """,
+                    (
+                        name,
+                        version_id,
+                        _canonicalize(value),
+                        _now_iso(),
+                        written_by,
+                        handle,
+                        producer_kind,
+                        invocation_id,
+                    ),
+                )
+                seq = cur.lastrowid
+                cur.execute(
+                    "INSERT INTO tentative_handles (handle, seq) VALUES (?, ?)",
+                    (handle, seq),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
             return handle
 
     def commit_tentative(self, handles: list[str]) -> list[str]:
