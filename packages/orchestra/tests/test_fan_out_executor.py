@@ -1627,11 +1627,10 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     )
 
     # advise_c was run for the first time on resume: one state_enter
-    # and one state_exit. The attempt_seq is whatever increment the
-    # resume's attempt counter produced (it may not be 1 because the
-    # ``attempts`` snapshot field on advise_b's preserved state_enter
-    # carries the controller's per-state counters at fan_out_start
-    # time, so replay seeds advise_c's count from there).
+    # and one state_exit. After Cleanup 1, attempt_seq is minted at
+    # state_enter time (not pre-seeded by the controller), so a
+    # never-entered pending child gets attempt_seq=1 on its first
+    # entry rather than an inflated counter.
     c_enters = [
         r for r in records
         if r.event == "state_enter" and r.state_id == "advise_c"
@@ -1643,7 +1642,10 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     assert len(c_enters) == 1
     assert len(c_exits) == 1
     c_inv = str(c_enters[0].fields.get("invocation_id"))
-    assert "::advise_c::" in c_inv
+    assert c_inv.endswith("::advise_c::1"), (
+        f"after Cleanup 1 advise_c should mint attempt 1 on first "
+        f"entry; got {c_inv}"
+    )
     assert c_inv == str(c_exits[0].fields.get("invocation_id"))
 
     # fan_out_end is now durable; aggregate is success and the
@@ -1963,6 +1965,89 @@ workflow sib_resume
     )
 
 
+def test_attempt_seq_minted_at_state_enter(tmp_path: Path) -> None:
+    """Per the plan's "Invocation identity" subsection,
+    ``attempt_seq`` is a monotonic counter incremented on every
+    entry and re-entry of a state, minted at ``state_enter`` time.
+    Pre-Cleanup-1 the fan-out controller pre-seeded ``_attempts``
+    for every child at submission time. A pending child that
+    never entered (because of a crash before its turn) saw its
+    counter inflated even though no ``state_enter`` was logged for
+    it. On resume, the counter would be re-incremented from the
+    inflated value, so a never-entered child resumed at
+    ``attempt_seq=2`` -- a different number than the one true entry
+    it had seen.
+
+    After Cleanup 1, the increment moves into the reentrant
+    ``_execute_state_body`` immediately before the ``state_enter``
+    log write. A never-entered child has no counter bump in the
+    log, replay does not seed it, and resume's first entry mints
+    ``attempt_seq=1``.
+
+    Tests Cleanup 1.
+    """
+    # Setup: run the 3-child fan-out fixture normally, then truncate
+    # the log to keep only advise_a's full trace (success). advise_b
+    # and advise_c never entered in the truncated log; resume must
+    # mint their attempt_seq=1.
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+    records = LogReader(log_path).read_all()
+    records = [r for r in records if r.event != "run_end"]
+    log_path.write_text(
+        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
+    )
+    _filter_log_to_open_fan_out(
+        log_path,
+        keep_completed=["advise_a"],
+        keep_started_only=[],
+    )
+
+    terminal, _ = _resume_open_fan_out(
+        run_dir, workflow_path, {"topic": "hello world"}
+    )
+    assert terminal == "done"
+
+    records = LogReader(log_path).read_all()
+
+    # advise_a entered exactly once (first run); attempt_seq=1.
+    a_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_a"
+    ]
+    assert len(a_enters) == 1
+    a_inv = str(a_enters[0].fields["invocation_id"])
+    assert a_inv.endswith("::advise_a::1"), (
+        f"advise_a's only entry should be attempt 1; got {a_inv}"
+    )
+
+    # advise_b never entered in the truncated log. After resume, its
+    # first (and only) entry is attempt 1, NOT attempt 2 (which is
+    # what controller pre-seeding would have produced).
+    b_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_b"
+    ]
+    assert len(b_enters) == 1
+    b_inv = str(b_enters[0].fields["invocation_id"])
+    assert b_inv.endswith("::advise_b::1"), (
+        f"advise_b's resumed entry should mint attempt 1; got {b_inv}"
+    )
+
+    # advise_c same as advise_b: never entered before crash, attempt
+    # 1 on resume.
+    c_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_c"
+    ]
+    assert len(c_enters) == 1
+    c_inv = str(c_enters[0].fields["invocation_id"])
+    assert c_inv.endswith("::advise_c::1"), (
+        f"advise_c's resumed entry should mint attempt 1; got {c_inv}"
+    )
+
+
 def test_resume_open_fan_out_with_errored_completed_child_does_not_launch_pending(
     tmp_path: Path,
 ) -> None:
@@ -2147,7 +2232,7 @@ def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
     # The discard must not raise: under FK=ON, the wrong delete
     # order would trip ``IntegrityError``. The fix mirrors
     # store.discard_tentative's handle-first-then-version order.
-    executor._discard_stale_tentatives("advise_a", attempt=2)
+    executor._discard_stale_tentatives("advise_a")
 
     # Both rows are gone.
     post_versions = cur.execute(

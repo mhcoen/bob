@@ -187,7 +187,7 @@ class Executor:
         # Discard any tentatives left over from a previous interrupted
         # attempt on this state. Slice 1 has no profile resume hooks
         # for partial commits, so the discard is sufficient cleanup.
-        self._discard_stale_tentatives(state.name, attempt)
+        self._discard_stale_tentatives(state.name)
 
         # Slice A: mint the per-invocation key and pre-register it
         # as pending in the visibility index BEFORE writing
@@ -711,7 +711,7 @@ class Executor:
             out.append({"artifact": n, "version_id": vid})
         return out
 
-    def _discard_stale_tentatives(self, state_name: str, attempt: int) -> None:
+    def _discard_stale_tentatives(self, state_name: str) -> None:
         """Discard tentatives left over from any earlier attempt on
         this state.
 
@@ -879,15 +879,13 @@ class Executor:
         for child_name in transition.fan_out:
             registry.register_pending(child_name)
 
-        # Submit child futures.
-        per_child_attempt: dict[str, int] = {}
+        # Cleanup 1: do NOT pre-seed ``_attempts``. The reentrant
+        # ``_execute_state_body`` increments per-state at
+        # ``state_enter`` time. Reset ``_retries`` for first entry;
+        # the per-entry retry budget starts at 0 here.
         with self._attempt_lock:
             for child_name in transition.fan_out:
-                self._attempts[child_name] = (
-                    self._attempts.get(child_name, 0) + 1
-                )
                 self._retries[child_name] = 0
-                per_child_attempt[child_name] = self._attempts[child_name]
 
         futures: dict[str, Future[Envelope]] = {}
         executor = ThreadPoolExecutor(
@@ -896,11 +894,9 @@ class Executor:
         )
         try:
             for child_name in transition.fan_out:
-                attempt = per_child_attempt[child_name]
                 fut = executor.submit(
                     self._fan_out_child_worker,
                     child_name,
-                    attempt,
                     registry,
                     snapshot_envelopes,
                     snapshot_artifacts,
@@ -1119,17 +1115,16 @@ class Executor:
         for child_name in pending_children:
             registry.register_pending(child_name)
 
-        # Mint fresh attempt_seq for pending children. Per the plan's
-        # fresh-budget-on-replay rule, ``retries`` resets to 0 for
-        # each re-entered child.
-        per_child_attempt: dict[str, int] = {}
+        # Cleanup 1: do NOT pre-seed ``_attempts`` for pending
+        # children. The reentrant ``_execute_state_body`` increments
+        # per-state at ``state_enter`` time, so a never-entered
+        # pending child gets ``attempt_seq=1`` on its first entry
+        # rather than an inflated counter from controller pre-seed.
+        # Per the plan's fresh-budget-on-replay rule, ``retries``
+        # resets to 0 for each re-entered child.
         with self._attempt_lock:
             for child_name in pending_children:
-                self._attempts[child_name] = (
-                    self._attempts.get(child_name, 0) + 1
-                )
                 self._retries[child_name] = 0
-                per_child_attempt[child_name] = self._attempts[child_name]
 
         if pending_children:
             futures: dict[str, Future[Envelope]] = {}
@@ -1139,11 +1134,9 @@ class Executor:
             )
             try:
                 for child_name in pending_children:
-                    attempt = per_child_attempt[child_name]
                     fut = executor.submit(
                         self._fan_out_child_worker,
                         child_name,
-                        attempt,
                         registry,
                         snapshot_envelopes,
                         snapshot_artifacts,
@@ -1214,34 +1207,36 @@ class Executor:
     def _fan_out_child_worker(
         self,
         child_name: str,
-        attempt: int,
         registry: _CancellationRegistry,
         snapshot_envelopes: dict[str, dict[str, Any]],
         snapshot_artifacts: dict[str, Any],
     ) -> Envelope:
         """Run one fan-out child to a durable ``state_exit``.
 
-        Workers mint their own invocation_id. They share the
-        VisibilityIndex (which is its own thread-safe primitive) and
-        the LogWriter and ArtifactStore (each lock-guarded). Workers
-        do NOT mutate ``self._current_state``, ``self._step_count``,
-        or write outgoing transition records; the fan-out controller
-        owns those. Artifact reads and prompt template substitutions
-        consume the captured snapshot, never the live store, so a
-        sibling write that lands mid-fan-out is invisible.
+        Workers do NOT mutate ``self._current_state``,
+        ``self._step_count``, or write outgoing transition records;
+        the fan-out controller owns those. Artifact reads and prompt
+        template substitutions consume the captured snapshot, never
+        the live store, so a sibling write that lands mid-fan-out is
+        invisible.
+
+        Cleanup 1: workers no longer accept a pre-minted ``attempt``.
+        ``_execute_state_body`` increments ``_attempts[child_name]``
+        and mints the invocation_id at ``state_enter`` time. The
+        envelope's ``attempt`` field is the source of truth for the
+        retry loop and any downstream invocation_id reconstruction.
 
         Slice A child-local retry: when the per-state body returns
         an error or timeout envelope and the child's state declares
-        ``on error retry max N then T`` (or the timeout equivalent),
-        the worker increments ``retries[child_name]`` under
-        ``_attempt_lock``, mints a fresh invocation_id with a new
-        attempt_seq, and re-runs the body. Loops until success or
-        retry budget exhausted, then returns the final envelope.
-        The per-entry budget rule applies: ``retries[child_name]``
-        starts at 0 on first entry; the controller resets it to 0
-        before submitting (in ``_run_fan_out_group``). The
-        fresh-budget-on-replay rule (per the plan) is separate and
-        applies only after a CRASH and replay re-entry.
+        ``on error retry max N then T``, the worker increments
+        ``retries[child_name]`` under ``_attempt_lock`` and re-calls
+        the body. The body's next invocation increments
+        ``_attempts[child_name]`` again, producing a monotonic
+        per-state attempt counter. The per-entry budget rule applies:
+        ``retries[child_name]`` starts at 0 on first entry (controller
+        resets it in ``_run_fan_out_group``). The
+        fresh-budget-on-replay rule is separate and handled by the
+        resume path.
         """
         snapshot = FanOutSnapshot(
             envelopes=dict(snapshot_envelopes),
@@ -1249,23 +1244,19 @@ class Executor:
         )
         state = self._wf.state(child_name)
         adapter = self._registry.adapter_for(state.actor.kind)
-        current_attempt = attempt
         while True:
             if registry.is_cancelled(child_name):
-                return self._write_cancelled_state_exit(
-                    child_name, current_attempt
-                )
-            invocation_id = make_invocation_id(
-                self._run_id, child_name, current_attempt
-            )
+                return self._write_cancelled_state_exit(child_name)
 
             def _on_prepared(
                 prepared: PreparedInvocation,
+                invocation_id: str,
                 _name: str = child_name,
-                _id: str = invocation_id,
                 _adapter: Adapter = adapter,
             ) -> None:
-                registry.mark_started(_name, _id, prepared, _adapter)
+                registry.mark_started(
+                    _name, invocation_id, prepared, _adapter
+                )
 
             def _is_cancelled_after_register(
                 _name: str = child_name,
@@ -1274,8 +1265,6 @@ class Executor:
 
             envelope = self._execute_state_body(
                 child_name,
-                current_attempt,
-                invocation_id,
                 snapshot=snapshot,
                 on_prepared=_on_prepared,
                 is_cancelled_after_register=_is_cancelled_after_register,
@@ -1294,18 +1283,23 @@ class Executor:
             if not should_retry:
                 registry.mark_done(child_name)
                 return envelope
-            with self._attempt_lock:
-                self._attempts[child_name] = (
-                    self._attempts.get(child_name, 0) + 1
-                )
-                current_attempt = self._attempts[child_name]
+            # Loop: the next iteration's ``_execute_state_body``
+            # will increment ``_attempts[child_name]`` again.
 
-    def _write_cancelled_state_exit(
-        self, child_name: str, attempt: int
-    ) -> Envelope:
+    def _write_cancelled_state_exit(self, child_name: str) -> Envelope:
         """Emit a state_enter/state_exit pair for a cancelled child
         that never invoked its adapter, so replay sees a complete
-        durable record for the invocation."""
+        durable record for the invocation.
+
+        Cleanup 1: ``_attempts[child_name]`` is minted HERE so
+        cancellation that fires before the body runs still produces
+        a monotonic per-state attempt counter. Mirrors
+        ``_execute_state_body``'s minting discipline."""
+        with self._attempt_lock:
+            self._attempts[child_name] = (
+                self._attempts.get(child_name, 0) + 1
+            )
+            attempt = self._attempts[child_name]
         invocation_id = make_invocation_id(self._run_id, child_name, attempt)
         self._visibility_index.insert_pending(invocation_id)
         self._log.write(
@@ -1360,28 +1354,37 @@ class Executor:
     def _execute_state_body(
         self,
         state_name: str,
-        attempt: int,
-        invocation_id: str,
         snapshot: FanOutSnapshot | None = None,
-        on_prepared: Callable[[PreparedInvocation], None] | None = None,
+        on_prepared: (
+            Callable[[PreparedInvocation, str], None] | None
+        ) = None,
         is_cancelled_after_register: Callable[[], bool] | None = None,
     ) -> Envelope:
-        """Run steps 1-9 of the per-state sequence for ``state_name``
-        with the supplied attempt and invocation_id.
+        """Run steps 1-9 of the per-state sequence for ``state_name``.
 
-        Used by both the linear ``_run_one_state`` (which then does
-        transition selection) and the fan-out child worker (which
-        skips transition selection per the plan's "fan-out child"
-        mode). The body mints no counters of its own; callers
-        increment ``self._attempts`` / ``self._retries`` under
-        ``self._attempt_lock`` before calling.
+        Used by the fan-out child worker; the linear ``_run_one_state``
+        path inlines an equivalent sequence today.
+
+        Cleanup 1: ``_attempts[state_name]`` is incremented HERE, under
+        ``_attempt_lock``, immediately before the ``state_enter`` log
+        write. Callers no longer pre-seed the counter, so a child that
+        never enters never gets a counter bump. The minted attempt and
+        the invocation_id derived from it are returned via the
+        envelope; ``on_prepared`` (if provided) receives the
+        ``invocation_id`` alongside the prepared invocation so the
+        fan-out cancellation registry can record the handle.
         """
         state = self._wf.state(state_name)
-        self._discard_stale_tentatives(state.name, attempt)
-        self._visibility_index.insert_pending(invocation_id)
         with self._attempt_lock:
+            self._attempts[state_name] = (
+                self._attempts.get(state_name, 0) + 1
+            )
+            attempt = self._attempts[state_name]
             attempts_snapshot = dict(self._attempts)
             retries_snapshot = dict(self._retries)
+        invocation_id = make_invocation_id(self._run_id, state_name, attempt)
+        self._discard_stale_tentatives(state.name)
+        self._visibility_index.insert_pending(invocation_id)
         self._log.write(
             "state_enter",
             state_id=state.name,
@@ -1453,7 +1456,7 @@ class Executor:
                 fields={"summary": prepared.summary},
             )
             if on_prepared is not None:
-                on_prepared(prepared)
+                on_prepared(prepared, invocation_id)
             if (
                 is_cancelled_after_register is not None
                 and is_cancelled_after_register()
