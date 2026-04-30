@@ -50,8 +50,8 @@ orchestra> what is the capital of france
 Paris.
 orchestra> what about its population
 About 2.1 million in the city proper.
-orchestra> /verb council
-verb -> council
+orchestra> /use council
+workflow -> council
 orchestra (council)> should I rewrite this service in rust or stay in go
 [council answer, with prior turns threaded into the prompt as context]
 orchestra (council)> /save session.md
@@ -262,19 +262,31 @@ About 2.1 million in the city proper.
 
 The REPL threads the running transcript into each new prompt as a
 ``Prior conversation:`` block, so models see what was just discussed.
-Switch verbs mid-session without losing context:
+Switch workflows mid-session without losing context:
 
 ```
-orchestra> /verb council
-verb -> council
+orchestra> /use council
+workflow -> council
 orchestra (council)> what would Brian Kernighan say about that
 [council answer, with the prior two turns still visible to the models]
 ```
 
+You can also dispatch a single turn to a different workflow without
+switching the session by typing the workflow name as the first
+word of the line. The next bare line still uses the session's
+active workflow:
+
+```
+orchestra> council should I rewrite this service in rust
+[council answer]
+orchestra> what about latency
+[ask answer; the session workflow is still ask, council was per-turn]
+```
+
 Slash commands (in-process, do not call any model):
 
-- `/help` - list slash commands and configured verbs.
-- `/verb [name]` - show or switch the active verb.
+- `/help` - list slash commands and configured workflows.
+- `/use [name]` - show or switch the active workflow.
 - `/clear` - drop the in-memory transcript.
 - `/history` - print the transcript so far.
 - `/save <path>` - write the transcript to disk. `.json` writes JSON;

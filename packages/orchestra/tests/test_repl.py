@@ -118,36 +118,47 @@ def test_slash_help_lists_commands_and_verbs(
     assert out.exit is False
     text = capsys.readouterr().out
     assert "Slash commands:" in text
-    assert "/help" in text and "/exit" in text
-    assert "Configured verbs:" in text
+    assert "/help" in text and "/exit" in text and "/use" in text
+    assert "Configured workflows:" in text
     assert "ask" in text
 
 
-def test_slash_verb_with_no_arg_shows_current(
+def test_slash_use_with_no_arg_shows_current(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     state = _state_with_turns()
-    repl.dispatch_slash(state, "/verb")
+    repl.dispatch_slash(state, "/use")
     assert state.current_verb == "ask"
-    assert "current verb: ask" in capsys.readouterr().out
+    assert "current workflow: ask" in capsys.readouterr().out
 
 
-def test_slash_verb_switches(
+def test_slash_use_switches(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     state = _state_with_turns()
-    repl.dispatch_slash(state, "/verb council")
+    repl.dispatch_slash(state, "/use council")
     assert state.current_verb == "council"
-    assert "verb -> council" in capsys.readouterr().out
+    assert "workflow -> council" in capsys.readouterr().out
 
 
-def test_slash_verb_unknown_keeps_current(
+def test_slash_use_unknown_keeps_current(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     state = _state_with_turns()
-    repl.dispatch_slash(state, "/verb nope")
+    repl.dispatch_slash(state, "/use nope")
     assert state.current_verb == "ask"
-    assert "unknown verb 'nope'" in capsys.readouterr().err
+    assert "unknown workflow 'nope'" in capsys.readouterr().err
+
+
+def test_slash_verb_no_longer_recognized(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The legacy /verb command is no longer registered. Hitting it
+    falls through to the unknown-slash hint so users discover /use."""
+    state = _state_with_turns()
+    out = repl.dispatch_slash(state, "/verb")
+    assert out.exit is False
+    assert "unknown slash command" in capsys.readouterr().err
 
 
 def test_slash_clear_drops_turns(

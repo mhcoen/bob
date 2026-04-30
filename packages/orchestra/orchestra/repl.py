@@ -147,12 +147,12 @@ SlashCommand = Callable[[ReplState, list[str]], SlashOutcome]
 def _cmd_help(state: ReplState, _args: list[str]) -> SlashOutcome:
     print("Slash commands:")
     print("  /help          show this list")
-    print("  /verb [name]   show or switch the active verb")
+    print("  /use [name]    show or switch the active workflow")
     print("  /clear         clear the in-memory transcript")
     print("  /history       print the transcript")
     print("  /save <path>   write the transcript to a file")
     print("  /exit, /quit   leave the REPL")
-    print("Configured verbs:")
+    print("Configured workflows:")
     if not state.config.verbs:
         print("  (none)")
     else:
@@ -161,20 +161,20 @@ def _cmd_help(state: ReplState, _args: list[str]) -> SlashOutcome:
     return SlashOutcome()
 
 
-def _cmd_verb(state: ReplState, args: list[str]) -> SlashOutcome:
+def _cmd_use(state: ReplState, args: list[str]) -> SlashOutcome:
     if not args:
-        print(f"current verb: {state.current_verb}")
+        print(f"current workflow: {state.current_verb}")
         return SlashOutcome()
     target = args[0]
     if target not in state.config.verbs:
         print(
-            f"unknown verb {target!r}. Configured: "
+            f"unknown workflow {target!r}. Configured: "
             f"{sorted(state.config.verbs)}",
             file=sys.stderr,
         )
         return SlashOutcome()
     state.current_verb = target
-    print(f"verb -> {target}")
+    print(f"workflow -> {target}")
     return SlashOutcome()
 
 
@@ -222,7 +222,7 @@ def _cmd_exit(_state: ReplState, _args: list[str]) -> SlashOutcome:
 
 _SLASH_COMMANDS: dict[str, SlashCommand] = {
     "/help": _cmd_help,
-    "/verb": _cmd_verb,
+    "/use": _cmd_use,
     "/clear": _cmd_clear,
     "/history": _cmd_history,
     "/save": _cmd_save,
