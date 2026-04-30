@@ -810,3 +810,175 @@ workflow retry
     fan_end = next(r for r in records if r.event == "fan_out_end")
     assert fan_end.fields["aggregate"] == "success"
     assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
+
+
+def test_cancellation_registered_child_calls_adapter_cancel(
+    tmp_path: Path,
+) -> None:
+    """When one fan-out child errors, the controller calls
+    ``request_cancel_all``. For children that are already
+    ``registered`` (their ``adapter.prepare`` returned and the worker
+    is mid-invoke), the registry now calls
+    ``adapter.cancel(invocation_handle)`` on the appropriate adapter
+    so it has the chance to abort cooperatively. The worker still
+    drains to a durable ``state_exit``; the cancel call is best
+    effort.
+
+    Tests Blocker 6's invocation_handle threading.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+    from orchestra.spine import PreparedInvocation
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow cancel_test
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact a_out text
+  artifact b_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  role br
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role abr
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [a, b] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role ar
+    reads topic
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role br
+    reads topic
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads a_out, b_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role abr
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    b_in_invoke = threading.Event()
+    cancel_signal = threading.Event()
+    cancel_calls: list[tuple[str, PreparedInvocation]] = []
+    cancel_lock = threading.Lock()
+
+    class _Cancelable(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_a":
+                # Wait for b to enter invoke before erroring, so the
+                # controller's request_cancel_all observes b in the
+                # ``registered`` state with a stored handle.
+                b_in_invoke.wait(timeout=5)
+                raise RuntimeError("synthetic failure on a")
+            if model_id == "m_b":
+                b_in_invoke.set()
+                # Block until the controller calls adapter.cancel(),
+                # which sets cancel_signal. The worker then drains
+                # naturally to a durable state_exit.
+                cancel_signal.wait(timeout=5)
+                return super().invoke(prepared)
+            return super().invoke(prepared)
+
+        def cancel(self, prepared: Any) -> None:
+            model_id = prepared.summary.get("model")
+            with cancel_lock:
+                cancel_calls.append((str(model_id), prepared))
+            cancel_signal.set()
+
+    registry.actor_backings["model"] = lambda: _Cancelable()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+
+    # The registry called cancel on b's adapter exactly once, with
+    # b's prepared handle. (a's worker raised, so a was never in the
+    # ``registered`` state with a stored handle; only registered
+    # children receive cancel.)
+    b_cancels = [c for c in cancel_calls if c[0] == "m_b"]
+    assert len(b_cancels) == 1, (
+        f"expected exactly one cancel(prepared) call for b, got "
+        f"{cancel_calls}"
+    )
+    _, prepared = b_cancels[0]
+    assert prepared.summary.get("model") == "m_b"
+
+    # b's worker drained to a durable state_exit despite the cancel.
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    b_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "b"
+    ]
+    assert len(b_exits) == 1
+
+    # fan_out_end records the per-child outcome map and routes to
+    # the error_target (a errored).
+    fan_end = next(r for r in records if r.event == "fan_out_end")
+    assert "b" in fan_end.fields["per_child_outcome"]
+    assert fan_end.fields["aggregate"] == "error"
+    assert fan_end.fields["target"] == "abort_state"

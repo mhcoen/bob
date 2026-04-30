@@ -51,6 +51,7 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -925,7 +926,7 @@ class Executor:
                         },
                     )
                     group_errored = True
-                    registry.request_cancel_all_pending(futures)
+                    registry.request_cancel_all(futures)
                     continue
                 inv_id = make_invocation_id(
                     self._run_id, child_name, per_child_attempt[child_name]
@@ -935,7 +936,7 @@ class Executor:
                 child_outcomes[child_name] = outcome
                 if outcome == "error" and not group_errored:
                     group_errored = True
-                    registry.request_cancel_all_pending(futures)
+                    registry.request_cancel_all(futures)
         finally:
             executor.shutdown(wait=True)
 
@@ -1000,6 +1001,7 @@ class Executor:
             artifacts=dict(snapshot_artifacts),
         )
         state = self._wf.state(child_name)
+        adapter = self._registry.adapter_for(state.actor.kind)
         current_attempt = attempt
         while True:
             if registry.is_cancelled(child_name):
@@ -1009,13 +1011,21 @@ class Executor:
             invocation_id = make_invocation_id(
                 self._run_id, child_name, current_attempt
             )
-            registry.mark_started(child_name, invocation_id)
-            if registry.is_cancelled(child_name):
-                return self._write_cancelled_state_exit(
-                    child_name, current_attempt
-                )
+
+            def _on_prepared(
+                prepared: PreparedInvocation,
+                _name: str = child_name,
+                _id: str = invocation_id,
+                _adapter: Adapter = adapter,
+            ) -> None:
+                registry.mark_started(_name, _id, prepared, _adapter)
+
             envelope = self._execute_state_body(
-                child_name, current_attempt, invocation_id, snapshot=snapshot
+                child_name,
+                current_attempt,
+                invocation_id,
+                snapshot=snapshot,
+                on_prepared=_on_prepared,
             )
             should_retry = False
             outcome = envelope.outcome
@@ -1100,6 +1110,7 @@ class Executor:
         attempt: int,
         invocation_id: str,
         snapshot: FanOutSnapshot | None = None,
+        on_prepared: Callable[[PreparedInvocation], None] | None = None,
     ) -> Envelope:
         """Run steps 1-9 of the per-state sequence for ``state_name``
         with the supplied attempt and invocation_id.
@@ -1175,6 +1186,8 @@ class Executor:
                 attempt=attempt,
                 fields={"summary": prepared.summary},
             )
+            if on_prepared is not None:
+                on_prepared(prepared)
 
         started_at = _now_iso()
         started_perf = time.perf_counter()
@@ -1484,7 +1497,8 @@ class _ChildEntry:
     cancel_requested: bool = False
     state: Literal["pending", "registered", "done"] = "pending"
     invocation_id: str | None = None
-    invocation_handle: Any = None
+    invocation_handle: PreparedInvocation | None = None
+    adapter: Adapter | None = None
 
 
 class _CancellationRegistry:
@@ -1492,18 +1506,21 @@ class _CancellationRegistry:
     and worker threads.
 
     The registry tracks one entry per child state name. Workers move
-    the entry from ``pending`` to ``registered`` when they begin
-    invocation, and to ``done`` when they finish. The controller
-    requests cancellation by setting ``cancel_requested=True`` on
-    every still-pending entry; pending workers observe the flag and
-    write a cancelled state_exit without invoking the adapter.
+    the entry from ``pending`` to ``registered`` once
+    ``adapter.prepare`` returns and the prepared handle is stored,
+    and to ``done`` when the worker finishes. The controller requests
+    cancellation by calling ``request_cancel_all``: pending entries
+    are flagged (so workers that have not yet started can short
+    circuit before invoking the adapter); registered entries receive
+    ``adapter.cancel(invocation_handle)`` so the adapter can attempt
+    to abort an in-flight invocation cooperatively.
 
     Slice A's adapter implementations are non-cooperative for
-    in-flight cancellation; once the adapter is invoked, the worker
-    runs to completion regardless. This is acceptable for the
-    crash-atomicity tests because the controller still drains those
-    workers to durable ``state_exit`` and records their outcomes in
-    ``fan_out_end``.
+    in-flight cancellation, so the registered-cancel call is best
+    effort and the worker still drains the in-flight invocation to a
+    durable ``state_exit``. The fix here is that the registry now
+    CALLS ``adapter.cancel``; whether the adapter actually cooperates
+    is the adapter's contract.
     """
 
     def __init__(self) -> None:
@@ -1519,13 +1536,21 @@ class _CancellationRegistry:
             entry = self._entries.get(child_name)
             return entry is not None and entry.cancel_requested
 
-    def mark_started(self, child_name: str, invocation_id: str) -> None:
+    def mark_started(
+        self,
+        child_name: str,
+        invocation_id: str,
+        invocation_handle: PreparedInvocation,
+        adapter: Adapter,
+    ) -> None:
         with self._lock:
             entry = self._entries.get(child_name)
             if entry is None:
                 return
             entry.state = "registered"
             entry.invocation_id = invocation_id
+            entry.invocation_handle = invocation_handle
+            entry.adapter = adapter
 
     def mark_done(self, child_name: str) -> None:
         with self._lock:
@@ -1534,20 +1559,50 @@ class _CancellationRegistry:
                 return
             entry.state = "done"
 
-    def request_cancel_all_pending(
+    def request_cancel_all(
         self, futures: dict[str, Future[Envelope]]
     ) -> None:
-        """Mark every still-pending child for cancellation and try to
-        cancel its future. Running futures continue to drain to
-        durable ``state_exit``; the cancellation flag affects only
-        workers that have not yet reached the adapter call."""
+        """Cancel every still-running child.
+
+        - ``pending`` entries: set ``cancel_requested`` so the worker
+          short circuits before invoking the adapter; also call
+          ``future.cancel()`` for futures that have not yet started.
+        - ``registered`` entries: call
+          ``adapter.cancel(invocation_handle)`` so the adapter can
+          attempt to abort the in-flight invocation. Running futures
+          still drain to a durable ``state_exit``; the cancel call is
+          best effort.
+        - ``done`` entries: no-op.
+        """
+        # Snapshot the actions to take under the lock, then perform
+        # them outside the lock so adapter cancel and future cancel
+        # cannot deadlock against the registry lock.
+        pending_to_cancel: list[str] = []
+        registered_to_cancel: list[tuple[Adapter, PreparedInvocation]] = []
         with self._lock:
             for name, entry in self._entries.items():
                 if entry.state == "pending":
                     entry.cancel_requested = True
-                    fut = futures.get(name)
-                    if fut is not None:
-                        fut.cancel()
+                    pending_to_cancel.append(name)
+                elif entry.state == "registered":
+                    if (
+                        entry.adapter is not None
+                        and entry.invocation_handle is not None
+                    ):
+                        registered_to_cancel.append(
+                            (entry.adapter, entry.invocation_handle)
+                        )
+        for name in pending_to_cancel:
+            fut = futures.get(name)
+            if fut is not None:
+                fut.cancel()
+        for adapter, handle in registered_to_cancel:
+            try:
+                adapter.cancel(handle)
+            except Exception:
+                # An adapter raising from cancel must not stall the
+                # controller. The worker still drains to state_exit.
+                pass
 
 
 def _envelope_to_view(env: Envelope) -> dict[str, Any]:
