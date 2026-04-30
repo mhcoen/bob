@@ -133,6 +133,7 @@ class ClaudeCodeTextAdapter:
             inner["cwd"],
             env=inner["env"],
             timeout=int(inner["timeout_s"]),
+            silent=True,
         )
         log_path = write_log(
             inner["log_dir"],

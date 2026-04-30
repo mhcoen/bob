@@ -571,6 +571,8 @@ def run_session(
     cwd: Path,
     env: dict[str, str],
     timeout: int = DEFAULT_TIMEOUT_S,
+    *,
+    silent: bool = False,
 ) -> tuple[str, int]:
     """Run ``cmd`` in ``cwd``, stream output, return ``(output, exit_code)``.
 
@@ -586,6 +588,12 @@ def run_session(
     public signal API (``set_interrupted``, ``get_active_process``)
     operates on this session by default. The previously-current
     session is restored on exit.
+
+    ``silent`` suppresses the four user-facing prints (progress dots,
+    permission-denied banner, Telegram-waiting banner). Control flow
+    is unchanged. Adapters consumed by structured callers (the
+    orchestra REPL, McLoop's invoke_code_edit) pass ``silent=True``
+    so progress noise does not bleed into captured output.
     """
     session = SessionState()
     previous = _current_session()
@@ -671,10 +679,11 @@ def run_session(
                             denied_file.unlink(missing_ok=True)
                         except OSError:
                             pass
-                        print(
-                            f"\n!!! Permission denied, killing session: {reason}",
-                            flush=True,
-                        )
+                        if not silent:
+                            print(
+                                f"\n!!! Permission denied, killing session: {reason}",
+                                flush=True,
+                            )
                         try:
                             process.kill()
                         except ProcessLookupError:
@@ -693,15 +702,17 @@ def run_session(
                             except OSError:
                                 desc = "unknown"
                             extra = f" ({count} pending)" if count > 1 else ""
-                            print(
-                                f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
-                                flush=True,
-                            )
+                            if not silent:
+                                print(
+                                    f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
+                                    flush=True,
+                                )
                             shown_waiting = True
                             continue
                 now = time.monotonic()
                 if now - last_dot >= PROGRESS_DOT_INTERVAL:
-                    print(".", end="", flush=True)
+                    if not silent:
+                        print(".", end="", flush=True)
                     last_dot = now
                 continue
             if line is _SENTINEL:
@@ -716,7 +727,8 @@ def run_session(
             shown_waiting = False
             now = time.monotonic()
             if now - last_dot >= PROGRESS_DOT_INTERVAL:
-                print(".", end="", flush=True)
+                if not silent:
+                    print(".", end="", flush=True)
                 last_dot = now
 
         reader_thread.join(timeout=5)
