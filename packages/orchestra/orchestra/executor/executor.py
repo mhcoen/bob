@@ -51,9 +51,11 @@ import json
 import threading
 import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from orchestra.adapters.base import Adapter
 from orchestra.errors import ExecutorError
@@ -137,6 +139,14 @@ class Executor:
             else VisibilityIndex(persist_path=run_dir / "visibility.json")
         )
         self._store.set_visibility_index(self._visibility_index)
+        # Locks that worker threads spawned by the fan-out controller
+        # share with the controller thread. ``_attempt_lock`` guards
+        # ``self._attempts`` and ``self._retries`` (the per-state
+        # counters). ``_envelope_lock`` guards ``self._envelopes``.
+        # The store and log have their own locks; these two cover the
+        # remaining workflow-level mutable state.
+        self._attempt_lock: threading.Lock = threading.Lock()
+        self._envelope_lock: threading.Lock = threading.Lock()
 
     # ----- entry points ------------------------------------------
 
@@ -407,7 +417,17 @@ class Executor:
         )
 
         # Step 9: transition selection.
-        target = self._select_transition(state, envelope)
+        decl = self._select_transition_decl(state, envelope)
+        if decl is None:
+            raise ExecutorError(
+                f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
+            )
+        if decl.is_fan_out():
+            target = self._run_fan_out_group(state, envelope, decl)
+        elif decl.retry_max is not None and self._retries.get(state.name, 0) < decl.retry_max:
+            target = state.name
+        else:
+            target = decl.target
 
         # Step 10: check step budget.
         self._step_count += 1
@@ -666,35 +686,62 @@ class Executor:
         # Slice 1 implementation: query tentative rows whose
         # written_by starts with f"{state_name}#" and discard them
         # directly via SQL. The store does not yet expose a public
-        # API for this, so we reach into its connection here. A
-        # cleaner factoring lives in slice 2 when the store grows
-        # other multi-tentative-management features.
+        # API for this, so we reach into its connection here. The
+        # store-level RLock and isolation_level=None contract
+        # require explicit BEGIN IMMEDIATE / commit / rollback on
+        # the connection (not via a cursor).
         conn = self._store._conn
         prefix = f"{state_name}#"
-        cur = conn.cursor()
-        try:
-            cur.execute("BEGIN")
-            cur.execute(
-                """
-                SELECT seq FROM versions
-                WHERE is_tentative = 1 AND written_by LIKE ?
-                """,
-                (prefix + "%",),
-            )
-            rows = cur.fetchall()
-            seqs = [r[0] for r in rows]
-            for seq in seqs:
-                cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
+        with self._store.lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = conn.cursor()
                 cur.execute(
-                    "DELETE FROM tentative_handles WHERE seq = ?", (seq,)
+                    """
+                    SELECT seq FROM versions
+                    WHERE is_tentative = 1 AND written_by LIKE ?
+                    """,
+                    (prefix + "%",),
                 )
-            cur.execute("COMMIT")
-        except Exception:
-            cur.execute("ROLLBACK")
-            raise
+                rows = cur.fetchall()
+                seqs = [r[0] for r in rows]
+                for seq in seqs:
+                    cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
+                    cur.execute(
+                        "DELETE FROM tentative_handles WHERE seq = ?", (seq,)
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _select_transition(self, state: StateDecl, envelope: Envelope) -> str:
-        # Build artifact and envelope dicts for guard evaluation.
+        """Return the next state name. Linear shape only.
+
+        For fan_out transitions, callers should use
+        ``_select_transition_decl`` and dispatch through
+        ``_run_fan_out_group``.
+        """
+        decl = self._select_transition_decl(state, envelope)
+        if decl is None:
+            raise ExecutorError(
+                f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
+            )
+        if decl.retry_max is not None:
+            if self._retries.get(state.name, 0) < decl.retry_max:
+                return state.name
+            return str(decl.target)
+        return str(decl.target)
+
+    def _select_transition_decl(
+        self, state: StateDecl, envelope: Envelope
+    ) -> Any:
+        """Return the matched ``Transition`` declaration or None.
+
+        Used by the run loop to dispatch on fan_out vs linear. Linear
+        callers can use ``_select_transition`` for the resolved target
+        string.
+        """
         artifact_values: dict[str, Any] = {}
         for art in self._wf.artifacts:
             v = self._store.read_latest(art.name)
@@ -716,22 +763,463 @@ class Executor:
             artifacts=artifact_values,
             envelopes=envelope_views,
         )
-        # First pass: pick a transition whose outcome matches.
-        # ``retry max N then T`` is sugar for: re-enter this state up
-        # to N times, then transition to T. We honor that here.
         for t in state.transitions:
             if t.outcome != envelope.outcome:
                 continue
             if t.guard is not None and not guards.evaluate(t.guard, ctx):
                 continue
-            if t.retry_max is not None:
-                if self._retries.get(state.name, 0) < t.retry_max:
-                    return state.name
-                return t.target
-            return t.target
-        raise ExecutorError(
-            f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
+            return t
+        return None
+
+    # ----- fan-out execution -------------------------------------
+
+    def _run_fan_out_group(
+        self,
+        parent_state: StateDecl,
+        parent_envelope: Envelope,
+        transition: Any,
+    ) -> str:
+        """Run a fan_out group and return the next state target.
+
+        The parent state's ``state_exit`` is already durable. This
+        method walks the fan-out lifecycle:
+
+        1. Capture an immutable snapshot of pre-fan-out envelopes and
+           the visible artifact store (via ``read_latest``) under the
+           ``LogWriter -> ArtifactStore`` ordering rule.
+        2. Append ``fan_out_start`` inside the same critical section.
+        3. Submit one future per child state through a
+           ``ThreadPoolExecutor``. Each child's worker mints a new
+           invocation_id and runs the full per-state sequence ending
+           at a durable ``state_exit``.
+        4. Drain via ``as_completed``. On the first child error,
+           cancel pending futures and continue to drain the running
+           ones.
+        5. Determine the aggregate outcome (any error -> error_target).
+        6. Run the post-fan-out cleanup pass: purge committed
+           ``state_invocation`` rows whose producing invocation is
+           not ``success``.
+        7. Append ``fan_out_end`` carrying the routing decision.
+        8. Return the target state name.
+        """
+        # Step 1 + 2: snapshot capture and fan_out_start under the
+        # LogWriter-then-store lock-ordering rule.
+        with self._log.lock:
+            with self._store.lock:
+                snapshot_envelopes = {
+                    name: _envelope_to_view(env)
+                    for name, env in self._envelopes.items()
+                }
+                snapshot_artifacts: dict[str, Any] = {}
+                for art in self._wf.artifacts:
+                    v = self._store.read_latest(art.name)
+                    if v is not None:
+                        snapshot_artifacts[art.name] = v.value
+            self._log.write(
+                "fan_out_start",
+                state_id=parent_state.name,
+                attempt=parent_envelope.attempt,
+                fields={
+                    "parent_state": parent_state.name,
+                    "children": list(transition.fan_out),
+                    "join_target": transition.target,
+                    "error_target": transition.error_target,
+                },
+            )
+
+        registry = _CancellationRegistry()
+        for child_name in transition.fan_out:
+            registry.register_pending(child_name)
+
+        # Submit child futures.
+        per_child_attempt: dict[str, int] = {}
+        with self._attempt_lock:
+            for child_name in transition.fan_out:
+                self._attempts[child_name] = (
+                    self._attempts.get(child_name, 0) + 1
+                )
+                self._retries[child_name] = 0
+                per_child_attempt[child_name] = self._attempts[child_name]
+
+        futures: dict[str, Future[Envelope]] = {}
+        executor = ThreadPoolExecutor(
+            max_workers=max(1, len(transition.fan_out)),
+            thread_name_prefix="orchestra-fan-out",
         )
+        try:
+            for child_name in transition.fan_out:
+                attempt = per_child_attempt[child_name]
+                fut = executor.submit(
+                    self._fan_out_child_worker,
+                    child_name,
+                    attempt,
+                    registry,
+                    snapshot_envelopes,
+                    snapshot_artifacts,
+                )
+                futures[child_name] = fut
+
+            # Drain. On first error, cancel pending futures.
+            child_outcomes: dict[str, str] = {}
+            child_invocation_ids: dict[str, str] = {}
+            group_errored = False
+            from concurrent.futures import as_completed
+            for fut in as_completed(futures.values()):
+                # Map future back to child name.
+                child_name = next(
+                    name for name, f in futures.items() if f is fut
+                )
+                try:
+                    envelope = fut.result()
+                except Exception as exc:
+                    # The worker should have written its own
+                    # state_exit; defensive fallback for unexpected
+                    # crashes records the error here.
+                    child_outcomes[child_name] = "error"
+                    self._log.write(
+                        "fan_out_child_crash",
+                        state_id=parent_state.name,
+                        fields={
+                            "child": child_name,
+                            "error": str(exc),
+                        },
+                    )
+                    group_errored = True
+                    registry.request_cancel_all_pending(futures)
+                    continue
+                inv_id = make_invocation_id(
+                    self._run_id, child_name, per_child_attempt[child_name]
+                )
+                child_invocation_ids[child_name] = inv_id
+                outcome = "success" if envelope.status == "ok" else "error"
+                child_outcomes[child_name] = outcome
+                if outcome == "error" and not group_errored:
+                    group_errored = True
+                    registry.request_cancel_all_pending(futures)
+        finally:
+            executor.shutdown(wait=True)
+
+        # Aggregate outcome.
+        aggregate: Literal["success", "error"] = (
+            "error" if group_errored else "success"
+        )
+        target = transition.error_target if aggregate == "error" else transition.target
+        # Cleanup pass: purge state_invocation rows whose producing
+        # invocation is not success. Idempotent.
+        purged = self._store.purge_invisible_state_invocation_versions()
+        # fan_out_end log record.
+        self._log.write(
+            "fan_out_end",
+            state_id=parent_state.name,
+            attempt=parent_envelope.attempt,
+            fields={
+                "parent_state": parent_state.name,
+                "aggregate": aggregate,
+                "per_child_outcome": child_outcomes,
+                "child_invocation_ids": child_invocation_ids,
+                "target": target,
+                "purged_versions": purged,
+            },
+        )
+        return str(target)
+
+    def _fan_out_child_worker(
+        self,
+        child_name: str,
+        attempt: int,
+        registry: _CancellationRegistry,
+        snapshot_envelopes: dict[str, dict[str, Any]],
+        snapshot_artifacts: dict[str, Any],
+    ) -> Envelope:
+        """Run one fan-out child to a durable ``state_exit``.
+
+        Workers mint their own invocation_id. They share the
+        VisibilityIndex (which is its own thread-safe primitive) and
+        the LogWriter and ArtifactStore (each lock-guarded). Workers
+        do NOT mutate ``self._current_state``, ``self._step_count``,
+        or write outgoing transition records; the fan-out controller
+        owns those.
+        """
+        if registry.is_cancelled(child_name):
+            return self._write_cancelled_state_exit(child_name, attempt)
+        # Pre-mint the invocation_id so we can register the cancel
+        # handle before the adapter call.
+        invocation_id = make_invocation_id(self._run_id, child_name, attempt)
+        registry.mark_started(child_name, invocation_id)
+        if registry.is_cancelled(child_name):
+            return self._write_cancelled_state_exit(child_name, attempt)
+        # Run the same per-state body the linear path uses, but in
+        # fan-out child mode (no transition selection at the end).
+        envelope = self._execute_state_body(
+            child_name, attempt, invocation_id
+        )
+        registry.mark_done(child_name)
+        return envelope
+
+    def _write_cancelled_state_exit(
+        self, child_name: str, attempt: int
+    ) -> Envelope:
+        """Emit a state_enter/state_exit pair for a cancelled child
+        that never invoked its adapter, so replay sees a complete
+        durable record for the invocation."""
+        invocation_id = make_invocation_id(self._run_id, child_name, attempt)
+        self._visibility_index.insert_pending(invocation_id)
+        self._log.write(
+            "state_enter",
+            state_id=child_name,
+            attempt=attempt,
+            fields={
+                "attempts": {child_name: attempt},
+                "retries": {child_name: 0},
+                "invocation_id": invocation_id,
+                "cancelled": True,
+            },
+        )
+        envelope = Envelope(
+            state_id=child_name,
+            attempt=attempt,
+            actor_binding={},
+            status="error",
+            outcome="cancelled",
+            started_at=_now_iso(),
+            ended_at=_now_iso(),
+            duration_ms=0,
+            inputs_read=[],
+            artifacts_written=[],
+            payload={},
+            error=ErrorRecord(
+                kind="cancelled",
+                message="cancelled by fan-out controller before adapter invoke",
+            ),
+        )
+        with self._envelope_lock:
+            self._envelopes[child_name] = envelope
+        self._visibility_index.mark_error(invocation_id)
+        self._log.write(
+            "state_exit",
+            state_id=child_name,
+            attempt=attempt,
+            fields={
+                "status": "error",
+                "outcome": "cancelled",
+                "duration_ms": 0,
+                "inputs_read": [],
+                "artifacts_written": [],
+                "error": _error_to_dict(envelope.error),
+                "payload_ref": None,
+                "invocation_id": invocation_id,
+            },
+        )
+        return envelope
+
+    def _execute_state_body(
+        self,
+        state_name: str,
+        attempt: int,
+        invocation_id: str,
+    ) -> Envelope:
+        """Run steps 1-9 of the per-state sequence for ``state_name``
+        with the supplied attempt and invocation_id.
+
+        Used by both the linear ``_run_one_state`` (which then does
+        transition selection) and the fan-out child worker (which
+        skips transition selection per the plan's "fan-out child"
+        mode). The body mints no counters of its own; callers
+        increment ``self._attempts`` / ``self._retries`` under
+        ``self._attempt_lock`` before calling.
+        """
+        state = self._wf.state(state_name)
+        self._discard_stale_tentatives(state.name, attempt)
+        self._visibility_index.insert_pending(invocation_id)
+        with self._attempt_lock:
+            attempts_snapshot = dict(self._attempts)
+            retries_snapshot = dict(self._retries)
+        self._log.write(
+            "state_enter",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "attempts": attempts_snapshot,
+                "retries": retries_snapshot,
+                "invocation_id": invocation_id,
+            },
+        )
+
+        actor_binding = self._build_actor_binding(state)
+        prompt_artifact = self._resolve_prompt(state)
+        reads = self._read_artifacts(state)
+        timeout_ms = state.timeout_ms
+        backing_options = dict(state.backing_options)
+        if state.options and state.actor.kind == "human":
+            backing_options.setdefault("options", list(state.options))
+        backing_options.update(self._invocation_options)
+        opt_timeout = self._invocation_options.get("timeout")
+        if isinstance(opt_timeout, int | float) and opt_timeout > 0:
+            timeout_ms = int(opt_timeout * 1000)
+        opt_model = self._invocation_options.get("model")
+        if isinstance(opt_model, str) and opt_model:
+            backing_options["model_override"] = opt_model
+
+        request = InvocationRequest(
+            state_id=state.name,
+            attempt=attempt,
+            actor_binding=actor_binding,
+            reads=reads,
+            external_inputs=dict(self._external),
+            prompt_artifact=prompt_artifact,
+            schema=None,
+            backing_options=backing_options,
+            timeout_ms=timeout_ms,
+        )
+
+        adapter: Adapter = self._registry.adapter_for(state.actor.kind)
+
+        prepared: PreparedInvocation | None = None
+        prepare_error: ErrorRecord | None = None
+        try:
+            prepared = adapter.prepare(request)
+        except Exception as exc:
+            prepare_error = ErrorRecord(
+                kind="actor_failure",
+                message=f"prepare() raised: {exc}",
+                detail={"exception": type(exc).__name__, "phase": "prepare"},
+            )
+
+        if prepared is not None:
+            self._log.write(
+                "actor_prepare",
+                state_id=state.name,
+                attempt=attempt,
+                fields={"summary": prepared.summary},
+            )
+
+        started_at = _now_iso()
+        started_perf = time.perf_counter()
+        error_record: ErrorRecord | None = prepare_error
+        payload: dict[str, Any] = {}
+        if prepared is not None:
+            self._log.write(
+                "actor_invoke_start",
+                state_id=state.name,
+                attempt=attempt,
+                fields={"actor_binding": actor_binding},
+            )
+            try:
+                payload = self._invoke_with_timeout(
+                    adapter, prepared, timeout_ms
+                )
+            except _TimeoutSignal:
+                error_record = ErrorRecord(
+                    kind="timeout",
+                    message=f"invocation exceeded timeout_ms={timeout_ms}",
+                    detail={"timeout_ms": timeout_ms},
+                )
+                payload = {}
+            except Exception as exc:
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=str(exc),
+                    detail={"exception": type(exc).__name__, "phase": "invoke"},
+                )
+                payload = {}
+        ended_at = _now_iso()
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+
+        payload_ref = self._write_payload(self._log.next_seq, payload)
+        self._log.write(
+            "actor_invoke_end",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "summary": _payload_summary(state, payload),
+                "payload_ref": payload_ref,
+                "duration_ms": duration_ms,
+            },
+        )
+
+        if error_record is not None and error_record.kind == "timeout":
+            status: str = "timeout"
+        elif error_record is not None:
+            status = "error"
+        else:
+            status = "ok"
+        outcome = self._derive_outcome(state, payload, status)
+
+        artifacts_written: list[dict[str, str]] = []
+        tentative_handles: list[str] = []
+        if status == "ok" and state.writes and prepared is not None:
+            try:
+                tentative_handles = self._dispatch_parsers(
+                    state, prepared, payload, attempt, invocation_id
+                )
+            except Exception as exc:
+                self._store.discard_tentative(tentative_handles)
+                tentative_handles = []
+                status = "error"
+                outcome = "error"
+                error_record = ErrorRecord(
+                    kind="parser_failure",
+                    message=str(exc),
+                    detail={"exception": type(exc).__name__},
+                )
+
+        committed_ids: list[str] = []
+        if status == "ok" and tentative_handles:
+            committed_ids = self._store.commit_tentative(tentative_handles)
+            artifacts_written = self._artifact_writes_record(
+                state, prepared, payload, committed_ids
+            )
+            for entry in artifacts_written:
+                self._log.write(
+                    "artifact_write",
+                    state_id=state.name,
+                    attempt=attempt,
+                    fields={
+                        "artifact": entry["artifact"],
+                        "version_id": entry["version_id"],
+                        "invocation_id": invocation_id,
+                    },
+                )
+
+        envelope = Envelope(
+            state_id=state.name,
+            attempt=attempt,
+            actor_binding=actor_binding,
+            status=status,  # type: ignore[arg-type]
+            outcome=outcome,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            inputs_read=[
+                {"artifact": name, "version_id": v.get("__version_id", "")}
+                for name, v in (reads or {}).items()
+            ],
+            artifacts_written=artifacts_written,
+            payload=_strip_internal(payload),
+            error=error_record,
+        )
+        with self._envelope_lock:
+            self._envelopes[state.name] = envelope
+        if status == "ok":
+            self._visibility_index.mark_success(invocation_id)
+        else:
+            self._visibility_index.mark_error(invocation_id)
+        self._log.write(
+            "state_exit",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "status": envelope.status,
+                "outcome": envelope.outcome,
+                "duration_ms": envelope.duration_ms,
+                "inputs_read": envelope.inputs_read,
+                "artifacts_written": envelope.artifacts_written,
+                "error": _error_to_dict(envelope.error),
+                "payload_ref": payload_ref,
+                "invocation_id": invocation_id,
+            },
+        )
+        return envelope
 
     # ----- timeout enforcement -----------------------------------
 
@@ -883,3 +1371,95 @@ def _strip_internal(payload: dict[str, Any]) -> dict[str, Any]:
 
 def new_run_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+# --------------------------------------------------------------------
+# Slice A helpers: cancellation registry and snapshot view
+# --------------------------------------------------------------------
+
+
+@dataclass
+class _ChildEntry:
+    cancel_requested: bool = False
+    state: Literal["pending", "registered", "done"] = "pending"
+    invocation_id: str | None = None
+
+
+class _CancellationRegistry:
+    """Per-fan-out-group cancellation state, shared by the controller
+    and worker threads.
+
+    The registry tracks one entry per child state name. Workers move
+    the entry from ``pending`` to ``registered`` when they begin
+    invocation, and to ``done`` when they finish. The controller
+    requests cancellation by setting ``cancel_requested=True`` on
+    every still-pending entry; pending workers observe the flag and
+    write a cancelled state_exit without invoking the adapter.
+
+    Slice A's adapter implementations are non-cooperative for
+    in-flight cancellation; once the adapter is invoked, the worker
+    runs to completion regardless. This is acceptable for the
+    crash-atomicity tests because the controller still drains those
+    workers to durable ``state_exit`` and records their outcomes in
+    ``fan_out_end``.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[str, _ChildEntry] = {}
+
+    def register_pending(self, child_name: str) -> None:
+        with self._lock:
+            self._entries[child_name] = _ChildEntry()
+
+    def is_cancelled(self, child_name: str) -> bool:
+        with self._lock:
+            entry = self._entries.get(child_name)
+            return entry is not None and entry.cancel_requested
+
+    def mark_started(self, child_name: str, invocation_id: str) -> None:
+        with self._lock:
+            entry = self._entries.get(child_name)
+            if entry is None:
+                return
+            entry.state = "registered"
+            entry.invocation_id = invocation_id
+
+    def mark_done(self, child_name: str) -> None:
+        with self._lock:
+            entry = self._entries.get(child_name)
+            if entry is None:
+                return
+            entry.state = "done"
+
+    def request_cancel_all_pending(
+        self, futures: dict[str, Future[Envelope]]
+    ) -> None:
+        """Mark every still-pending child for cancellation and try to
+        cancel its future. Running futures continue to drain to
+        durable ``state_exit``; the cancellation flag affects only
+        workers that have not yet reached the adapter call."""
+        with self._lock:
+            for name, entry in self._entries.items():
+                if entry.state == "pending":
+                    entry.cancel_requested = True
+                    fut = futures.get(name)
+                    if fut is not None:
+                        fut.cancel()
+
+
+def _envelope_to_view(env: Envelope) -> dict[str, Any]:
+    """Render an Envelope as a snapshot dict for fan-out workers.
+
+    Workers receive an immutable, read-only snapshot of pre-fan-out
+    envelopes. The plan's "sibling visibility rule" forbids workers
+    from seeing each other's envelopes, so the snapshot is taken
+    once at fan-out entry and never mutated.
+    """
+    return {
+        "outcome": env.outcome,
+        "status": env.status,
+        "duration_ms": env.duration_ms,
+        "attempt": env.attempt,
+        "payload": env.payload,
+    }

@@ -193,8 +193,18 @@ class ArtifactStore:
     ) -> None:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        # RLock so the snapshot-capture critical section in
+        # Executor._run_fan_out_group can re-enter the store via
+        # read_latest while still holding the outer store lock.
+        self._lock: threading.RLock = threading.RLock()
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        # Disable Python's auto-wrapping of DML statements in implicit
+        # transactions. Explicit BEGIN IMMEDIATE / commit() / rollback()
+        # under the store-level RLock manages transaction lifecycle.
+        # Without this, mixing implicit transactions with explicit
+        # BEGINs across worker threads (fan-out path) produces
+        # "cannot start a transaction within a transaction" errors.
+        self._conn.isolation_level = None
         # Synchronous=FULL plus a single-connection model gives durability
         # at the cost of throughput. Slice 1 favors durability.
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -208,9 +218,14 @@ class ArtifactStore:
         )
 
     @property
-    def lock(self) -> threading.Lock:
+    def lock(self) -> threading.RLock:
         """Return the store-level lock for callers that need to pair
-        store ops with other state under a single critical section."""
+        store ops with other state under a single critical section.
+
+        The lock is an ``RLock`` so the snapshot-capture path can
+        re-enter the store via ``read_latest`` while still holding
+        the outer store lock acquired by the fan-out controller.
+        """
         return self._lock
 
     def set_visibility_index(self, index: VisibilityIndexProtocol) -> None:
@@ -516,14 +531,18 @@ class ArtifactStore:
 
         Either every handle becomes a committed version, or none does.
         Returns version IDs in the same order as ``handles``.
+
+        Uses explicit ``BEGIN IMMEDIATE`` / ``commit`` / ``rollback``
+        under the store RLock so concurrent workers (fan-out path)
+        serialize cleanly.
         """
         if not handles:
             return []
         with self._lock:
-            cur = self._conn.cursor()
+            committed_ids: list[str] = []
+            self._conn.execute("BEGIN IMMEDIATE")
             try:
-                cur.execute("BEGIN")
-                committed_ids: list[str] = []
+                cur = self._conn.cursor()
                 for handle in handles:
                     row = cur.execute(
                         "SELECT seq FROM tentative_handles WHERE handle = ?",
@@ -533,7 +552,8 @@ class ArtifactStore:
                         raise StoreError(f"unknown tentative handle: {handle!r}")
                     (seq,) = row
                     vrow = cur.execute(
-                        "SELECT version_id FROM versions WHERE seq = ? AND is_tentative = 1",
+                        "SELECT version_id FROM versions "
+                        "WHERE seq = ? AND is_tentative = 1",
                         (seq,),
                     ).fetchone()
                     if vrow is None:
@@ -542,7 +562,8 @@ class ArtifactStore:
                         )
                     (version_id,) = vrow
                     cur.execute(
-                        "UPDATE versions SET is_tentative = 0, tentative_handle = NULL WHERE seq = ?",
+                        "UPDATE versions SET is_tentative = 0, "
+                        "tentative_handle = NULL WHERE seq = ?",
                         (seq,),
                     )
                     cur.execute(
@@ -550,19 +571,19 @@ class ArtifactStore:
                         (handle,),
                     )
                     committed_ids.append(str(version_id))
-                cur.execute("COMMIT")
-                return committed_ids
+                self._conn.commit()
             except Exception:
-                cur.execute("ROLLBACK")
+                self._conn.rollback()
                 raise
+            return committed_ids
 
     def discard_tentative(self, handles: list[str]) -> None:
         if not handles:
             return
         with self._lock:
-            cur = self._conn.cursor()
+            self._conn.execute("BEGIN IMMEDIATE")
             try:
-                cur.execute("BEGIN")
+                cur = self._conn.cursor()
                 for handle in handles:
                     row = cur.execute(
                         "SELECT seq FROM tentative_handles WHERE handle = ?",
@@ -583,9 +604,9 @@ class ArtifactStore:
                         "DELETE FROM versions WHERE seq = ? AND is_tentative = 1",
                         (seq,),
                     )
-                cur.execute("COMMIT")
+                self._conn.commit()
             except Exception:
-                cur.execute("ROLLBACK")
+                self._conn.rollback()
                 raise
 
     # ----- post-fan-out cleanup -----------------------------------
@@ -615,13 +636,13 @@ class ArtifactStore:
                     continue
                 if self._visibility.status(inv_id) != "success":
                     to_delete.append(int(seq))
-            cur = self._conn.cursor()
+            self._conn.execute("BEGIN IMMEDIATE")
             try:
-                cur.execute("BEGIN")
+                cur = self._conn.cursor()
                 for seq in to_delete:
                     cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
-                cur.execute("COMMIT")
+                self._conn.commit()
             except Exception:
-                cur.execute("ROLLBACK")
+                self._conn.rollback()
                 raise
             return len(to_delete)
