@@ -49,6 +49,17 @@ class ReplayState:
     """True if current_state is ``done`` or ``stop``."""
     last_outcome: str | None = None
     last_target: str | None = None
+    # Slice A: fan-out group reconstruction. ``open_fan_out`` is the
+    # fan_out_start fields when a fan_out group has been opened but
+    # not yet closed by a matching fan_out_end. ``last_fan_out_target``
+    # is set when a durable fan_out_end was observed; the executor
+    # uses it to skip re-running the group.
+    open_fan_out: dict[str, Any] | None = None
+    last_fan_out_target: str | None = None
+    # invocation_id -> "pending" | "success" | "error" rebuilt from
+    # state_enter and state_exit records; the resume helper feeds
+    # this to ``VisibilityIndex.replace_from``.
+    visibility_statuses: dict[str, str] = field(default_factory=dict)
 
 
 def replay_log(log_path: str) -> ReplayState:
@@ -78,12 +89,37 @@ def replay_log(log_path: str) -> ReplayState:
                 )
             state.current_state = rec.state_id
             state.last_state_completed = False
+            # Slice A: track invocation status from the log so the
+            # resume path can rebuild VisibilityIndex.
+            inv_id = rec.fields.get("invocation_id")
+            if isinstance(inv_id, str):
+                state.visibility_statuses[inv_id] = "pending"
+        elif rec.event == "fan_out_start":
+            state.open_fan_out = dict(rec.fields)
+        elif rec.event == "fan_out_end":
+            state.open_fan_out = None
+            target = rec.fields.get("target")
+            if isinstance(target, str):
+                state.last_fan_out_target = target
+                state.last_target = target
+                state.last_state_completed = True
+                state.current_state = target
+                if target in _TERMINAL_TARGETS:
+                    state.is_terminal = True
         elif rec.event == "state_exit":
             assert rec.state_id is not None
             assert rec.attempt is not None
             state.last_state_completed = True
             outcome = rec.fields.get("outcome")
             state.last_outcome = str(outcome) if outcome is not None else None
+            # Slice A: invocation_id -> success/error in the
+            # rebuilt visibility map.
+            inv_id = rec.fields.get("invocation_id")
+            if isinstance(inv_id, str):
+                status_field = rec.fields.get("status")
+                state.visibility_statuses[inv_id] = (
+                    "success" if status_field == "ok" else "error"
+                )
             # Rebuild the envelope so guards on resumed transitions
             # can reference this state's results.
             err_field = rec.fields.get("error")
