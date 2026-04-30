@@ -359,7 +359,13 @@ def extract_final_text(stream_json_output: str) -> str:
         rtype = record.get("type")
         if rtype == "result":
             result = record.get("result")
-            if isinstance(result, str):
+            # Empty result.result is treated as "no result" and falls
+            # through to the text_delta fallback. Some Claude Code
+            # vendors (e.g. kimi via moonshot/Parasail) emit
+            # result.result == "" when the response includes thinking
+            # blocks; the actual answer text only reaches the consumer
+            # via content_block_delta events.
+            if isinstance(result, str) and result:
                 last_result_text = result
         elif rtype == "stream_event":
             event = record.get("event")

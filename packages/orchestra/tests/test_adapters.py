@@ -356,6 +356,48 @@ def test_extract_final_text_handles_empty_input() -> None:
     assert extract_final_text("") == ""
 
 
+def test_extract_final_text_falls_through_when_result_is_empty_string() -> None:
+    """Some vendor builds of the inner CLI (kimi via moonshot/Parasail
+    has been observed) emit a final ``result`` record where the
+    ``result`` field is the empty string while the actual assistant
+    text was emitted only through ``content_block_delta`` events.
+    Treat empty ``result.result`` as ``no result`` and fall through
+    to the delta fallback so the answer is recovered."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "Yes. "},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "Sleep is good."},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "",
+            }
+        ),
+    ]
+    assert extract_final_text("\n".join(lines)) == "Yes. Sleep is good."
+
+
 def test_extract_final_text_ignores_non_text_deltas() -> None:
     """Tool-use deltas should not pollute the final text."""
     import json
