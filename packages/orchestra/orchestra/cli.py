@@ -219,6 +219,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     run_resume_hooks(workflow, registry, replay, log)
 
+    # Slice A: the persisted ``visibility.json`` is a best-effort
+    # cache; the log is the source of truth. Apply the rebuilt
+    # statuses to the index BEFORE constructing the Executor so the
+    # store consults the log-derived view from the first read.
+    from orchestra.visibility import VisibilityIndex
+    visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
+    visibility_index.replace_from(replay.visibility_statuses)
+
     executor = Executor(
         workflow=workflow,
         registry=registry,
@@ -232,9 +240,33 @@ def cmd_resume(args: argparse.Namespace) -> int:
         envelopes=replay.envelopes,
         current_state=replay.current_state,
         step_count=replay.step_count,
+        visibility_index=visibility_index,
     )
     terminal: str | None = None
     try:
+        # Slice A: if a fan_out group is open (fan_out_start without
+        # a matching fan_out_end), dispatch to resume_fan_out before
+        # the linear loop takes over. The method advances
+        # _current_state to the join/error target so run_to_completion
+        # can continue from there.
+        if replay.open_fan_out is not None:
+            of = replay.open_fan_out
+            children_field = of.get("children") or []
+            if not isinstance(children_field, list):
+                children_field = []
+            children_list = [str(c) for c in children_field]
+            completed = {
+                name: env
+                for name, env in replay.envelopes.items()
+                if name in children_list
+            }
+            executor.resume_fan_out(
+                parent_state_name=str(of.get("parent_state", "")),
+                children=children_list,
+                join_target=str(of.get("join_target", "")),
+                error_target=str(of.get("error_target", "")),
+                completed_children=completed,
+            )
         terminal = executor.run_to_completion()
     finally:
         log.write(

@@ -964,6 +964,189 @@ class Executor:
         )
         return str(target)
 
+    def resume_fan_out(
+        self,
+        parent_state_name: str,
+        children: list[str],
+        join_target: str,
+        error_target: str,
+        completed_children: dict[str, Envelope],
+        parent_attempt: int | None = None,
+    ) -> str:
+        """Resume an open fan-out group after a crash.
+
+        The original ``fan_out_start`` is durable in the log but no
+        ``fan_out_end`` was written, so replay surfaces the group in
+        ``ReplayState.open_fan_out``. The resume entry point applies
+        the rebuilt VisibilityIndex (BEFORE constructing the
+        Executor, see ``cli.cmd_resume``), then dispatches here.
+
+        Children with a durable ``state_exit`` are passed in via
+        ``completed_children``. Their outcomes feed into the
+        aggregate; their committed artifacts remain visible (the
+        VisibilityIndex was rebuilt from the log to reflect this).
+        Children listed in ``children`` but not in
+        ``completed_children`` are pending: they get a fresh
+        ``invocation_id`` (a new ``attempt_seq`` minted under
+        ``_attempt_lock``) and re-run. Per the plan's
+        fresh-budget-on-replay rule, each re-entered child's
+        ``retries`` counter resets to 0.
+
+        After the group finishes, this method writes ``fan_out_end``
+        and advances ``_current_state`` to the chosen target so the
+        caller can continue with ``run_to_completion``.
+        """
+        parent_state = self._wf.state(parent_state_name)
+
+        # Reconstruct the snapshot from currently-visible artifacts
+        # and envelopes. The VisibilityIndex was rebuilt from the
+        # log before this method was called, so the snapshot
+        # reflects only producers whose state_exit was durable; this
+        # is equivalent to the snapshot the original fan_out_start
+        # would have captured.
+        with self._log.lock:
+            with self._store.lock:
+                snapshot_envelopes = {
+                    name: _envelope_to_view(env)
+                    for name, env in self._envelopes.items()
+                }
+                snapshot_artifacts: dict[str, Any] = {}
+                for art in self._wf.artifacts:
+                    v = self._store.read_latest(art.name)
+                    if v is not None:
+                        snapshot_artifacts[art.name] = v.value
+            self._log.write(
+                "fan_out_resume",
+                state_id=parent_state.name,
+                attempt=parent_attempt,
+                fields={
+                    "parent_state": parent_state.name,
+                    "children": list(children),
+                    "completed": list(completed_children.keys()),
+                    "pending": [
+                        c for c in children if c not in completed_children
+                    ],
+                    "join_target": join_target,
+                    "error_target": error_target,
+                },
+            )
+
+        pending_children = [
+            c for c in children if c not in completed_children
+        ]
+
+        # Seed outcomes from already-completed children; these were
+        # committed and durable before the crash.
+        child_outcomes: dict[str, str] = {}
+        child_invocation_ids: dict[str, str] = {}
+        group_errored = False
+        for name, env in completed_children.items():
+            outcome = "success" if env.status == "ok" else "error"
+            child_outcomes[name] = outcome
+            child_invocation_ids[name] = make_invocation_id(
+                self._run_id, name, env.attempt
+            )
+            if outcome == "error":
+                group_errored = True
+
+        registry = _CancellationRegistry()
+        for child_name in pending_children:
+            registry.register_pending(child_name)
+
+        # Mint fresh attempt_seq for pending children. Per the plan's
+        # fresh-budget-on-replay rule, ``retries`` resets to 0 for
+        # each re-entered child.
+        per_child_attempt: dict[str, int] = {}
+        with self._attempt_lock:
+            for child_name in pending_children:
+                self._attempts[child_name] = (
+                    self._attempts.get(child_name, 0) + 1
+                )
+                self._retries[child_name] = 0
+                per_child_attempt[child_name] = self._attempts[child_name]
+
+        if pending_children:
+            futures: dict[str, Future[Envelope]] = {}
+            executor = ThreadPoolExecutor(
+                max_workers=max(1, len(pending_children)),
+                thread_name_prefix="orchestra-fan-out-resume",
+            )
+            try:
+                for child_name in pending_children:
+                    attempt = per_child_attempt[child_name]
+                    fut = executor.submit(
+                        self._fan_out_child_worker,
+                        child_name,
+                        attempt,
+                        registry,
+                        snapshot_envelopes,
+                        snapshot_artifacts,
+                    )
+                    futures[child_name] = fut
+
+                # If a completed child had already errored, every
+                # pending child should be cancelled; drain anyway.
+                if group_errored:
+                    registry.request_cancel_all(futures)
+
+                from concurrent.futures import as_completed
+
+                for fut in as_completed(futures.values()):
+                    child_name = next(
+                        name for name, f in futures.items() if f is fut
+                    )
+                    try:
+                        envelope = fut.result()
+                    except Exception as exc:
+                        child_outcomes[child_name] = "error"
+                        self._log.write(
+                            "fan_out_child_crash",
+                            state_id=parent_state.name,
+                            fields={
+                                "child": child_name,
+                                "error": str(exc),
+                            },
+                        )
+                        group_errored = True
+                        registry.request_cancel_all(futures)
+                        continue
+                    inv_id = make_invocation_id(
+                        self._run_id,
+                        child_name,
+                        per_child_attempt[child_name],
+                    )
+                    child_invocation_ids[child_name] = inv_id
+                    outcome = (
+                        "success" if envelope.status == "ok" else "error"
+                    )
+                    child_outcomes[child_name] = outcome
+                    if outcome == "error" and not group_errored:
+                        group_errored = True
+                        registry.request_cancel_all(futures)
+            finally:
+                executor.shutdown(wait=True)
+
+        aggregate: Literal["success", "error"] = (
+            "error" if group_errored else "success"
+        )
+        target = error_target if aggregate == "error" else join_target
+        purged = self._store.purge_invisible_state_invocation_versions()
+        self._log.write(
+            "fan_out_end",
+            state_id=parent_state.name,
+            attempt=parent_attempt,
+            fields={
+                "parent_state": parent_state.name,
+                "aggregate": aggregate,
+                "per_child_outcome": child_outcomes,
+                "child_invocation_ids": child_invocation_ids,
+                "target": target,
+                "purged_versions": purged,
+            },
+        )
+        self._current_state = str(target)
+        return str(target)
+
     def _fan_out_child_worker(
         self,
         child_name: str,

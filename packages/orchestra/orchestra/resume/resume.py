@@ -27,6 +27,7 @@ from orchestra.errors import ResumeError
 from orchestra.log import LogReader
 from orchestra.registry import ProfileRegistry
 from orchestra.spine import Envelope, ErrorRecord, Workflow
+from orchestra.visibility import VisibilityStatus
 
 _TERMINAL_TARGETS = {"done", "stop"}
 
@@ -59,7 +60,7 @@ class ReplayState:
     # invocation_id -> "pending" | "success" | "error" rebuilt from
     # state_enter and state_exit records; the resume helper feeds
     # this to ``VisibilityIndex.replace_from``.
-    visibility_statuses: dict[str, str] = field(default_factory=dict)
+    visibility_statuses: dict[str, VisibilityStatus] = field(default_factory=dict)
 
 
 def replay_log(log_path: str) -> ReplayState:

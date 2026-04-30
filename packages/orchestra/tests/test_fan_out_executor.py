@@ -982,3 +982,303 @@ workflow cancel_test
     assert "b" in fan_end.fields["per_child_outcome"]
     assert fan_end.fields["aggregate"] == "error"
     assert fan_end.fields["target"] == "abort_state"
+
+
+# --------------------------------------------------------------------
+# Resume of an open fan-out group (Blockers 4 + 5)
+# --------------------------------------------------------------------
+
+
+def _filter_log_to_open_fan_out(
+    log_path: Path,
+    keep_completed: list[str],
+    keep_started_only: list[str],
+) -> None:
+    """Rewrite ``log_path`` to simulate a crash mid-fan-out.
+
+    Keeps:
+      - every record up to and including the parent's ``state_exit``
+      - the ``fan_out_start`` record
+      - all records whose ``state_id`` is in ``keep_completed`` (so
+        that child has a durable state_enter+state_exit and any
+        artifact_write records)
+      - only ``state_enter`` records whose ``state_id`` is in
+        ``keep_started_only`` (no exit, no artifact_write -- the
+        in-flight crash window)
+
+    Drops everything else after ``fan_out_start``: no
+    ``fan_out_end``, no records for children NOT in either list, and
+    no records past the cutoff.
+    """
+    records = LogReader(log_path).read_all()
+    out: list[Any] = []
+    seen_fan_start = False
+    for rec in records:
+        if rec.event == "fan_out_start":
+            out.append(rec)
+            seen_fan_start = True
+            continue
+        if not seen_fan_start:
+            out.append(rec)
+            continue
+        # After fan_out_start: filter by child state_id.
+        sid = rec.state_id
+        if sid in keep_completed:
+            out.append(rec)
+        elif sid in keep_started_only:
+            if rec.event == "state_enter":
+                out.append(rec)
+        # else: drop (other children, fan_out_end, post-fan-out states)
+    log_path.write_text(
+        "\n".join(r.to_json() for r in out) + "\n", encoding="utf-8"
+    )
+
+
+def _resume_open_fan_out(
+    run_dir: Path,
+    workflow_path: Path,
+    external_inputs: dict[str, Any],
+    *,
+    visibility_overrides: dict[str, str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Mirror cmd_resume's open-fan-out path. Returns
+    ``(terminal, visibility_snapshot_after_resume)``.
+
+    If ``visibility_overrides`` is provided, those entries are
+    written directly into the persisted ``visibility.json`` BEFORE
+    resume runs, simulating a stale on-disk cache that the
+    log-derived rebuild must overwrite.
+    """
+    from orchestra.resume import replay_log
+    from orchestra.visibility import VisibilityIndex
+
+    log_path = run_dir / "log.jsonl"
+    replay = replay_log(str(log_path))
+
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+    store = ArtifactStore(run_dir / "store.sqlite")
+    log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
+
+    if visibility_overrides is not None:
+        # Stale persisted cache (whatever it was previously) is
+        # overwritten so the test scenario starts from a known-stale
+        # state. The log is the source of truth; replace_from must
+        # win regardless of what was on disk.
+        import json as _json
+        (run_dir / "visibility.json").write_text(
+            _json.dumps(visibility_overrides), encoding="utf-8"
+        )
+
+    visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
+    visibility_index.replace_from(replay.visibility_statuses)
+
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=replay.last_run_id,
+        external_inputs=external_inputs,
+        attempts=replay.attempts,
+        retries=replay.retries,
+        envelopes=replay.envelopes,
+        current_state=replay.current_state,
+        step_count=replay.step_count,
+        visibility_index=visibility_index,
+    )
+
+    assert replay.open_fan_out is not None
+    of = replay.open_fan_out
+    children_list = [str(c) for c in of["children"]]
+    completed = {
+        n: env
+        for n, env in replay.envelopes.items()
+        if n in children_list
+    }
+    executor.resume_fan_out(
+        parent_state_name=str(of["parent_state"]),
+        children=children_list,
+        join_target=str(of["join_target"]),
+        error_target=str(of["error_target"]),
+        completed_children=completed,
+    )
+
+    terminal = executor.run_to_completion()
+    snapshot = visibility_index.snapshot()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+    return terminal, dict(snapshot)
+
+
+def test_resume_open_fan_out_relaunches_only_incomplete_children(
+    tmp_path: Path,
+) -> None:
+    """A log truncated mid-fan-out (advise_a complete, advise_b
+    in-flight, nothing for advise_c, no fan_out_end) is recoverable.
+
+    Resume:
+      - applies the rebuilt VisibilityIndex from the log,
+      - dispatches to ``Executor.resume_fan_out``,
+      - re-runs only advise_b and advise_c with fresh
+        invocation_ids (new attempt_seq),
+      - leaves advise_a's existing committed artifact in place
+        (its state_exit is durable, so its visibility stays
+        ``success`` and the per-child outcome carries over),
+      - writes ``fan_out_end`` with aggregate=success and
+        target=join_state,
+      - lets the linear loop continue from join_state to terminal.
+
+    Tests Blocker 4.
+    """
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+    # Strip the trailing run_end so replay's terminal-state shortcut
+    # does not bypass the resume path; then truncate to mid-fan-out.
+    records = LogReader(log_path).read_all()
+    records = [r for r in records if r.event != "run_end"]
+    log_path.write_text(
+        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
+    )
+    _filter_log_to_open_fan_out(
+        log_path,
+        keep_completed=["advise_a"],
+        keep_started_only=["advise_b"],
+    )
+
+    terminal, _ = _resume_open_fan_out(
+        run_dir, workflow_path, {"topic": "hello world"}
+    )
+    assert terminal == "done"
+
+    records = LogReader(log_path).read_all()
+
+    # advise_a was NOT re-run: it has exactly one state_enter (the
+    # original) and one state_exit (the original), both with
+    # attempt_seq 1.
+    a_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_a"
+    ]
+    a_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "advise_a"
+    ]
+    assert len(a_enters) == 1
+    assert len(a_exits) == 1
+    a_inv = a_enters[0].fields.get("invocation_id")
+    assert isinstance(a_inv, str)
+    assert a_inv.endswith("::advise_a::1")
+
+    # advise_b was re-run: the original state_enter (attempt 1) is
+    # still in the log, and a fresh state_enter+state_exit pair was
+    # appended with attempt 2 carrying a different invocation_id.
+    b_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_b"
+    ]
+    b_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "advise_b"
+    ]
+    assert len(b_enters) == 2
+    assert len(b_exits) == 1
+    b_inv_ids = {r.fields.get("invocation_id") for r in b_enters}
+    assert any(str(inv).endswith("::advise_b::1") for inv in b_inv_ids)
+    assert any(str(inv).endswith("::advise_b::2") for inv in b_inv_ids)
+    # The state_exit's invocation_id is the new one (attempt 2).
+    assert str(b_exits[0].fields.get("invocation_id")).endswith(
+        "::advise_b::2"
+    )
+
+    # advise_c was run for the first time on resume: one state_enter
+    # and one state_exit. The attempt_seq is whatever increment the
+    # resume's attempt counter produced (it may not be 1 because the
+    # ``attempts`` snapshot field on advise_b's preserved state_enter
+    # carries the controller's per-state counters at fan_out_start
+    # time, so replay seeds advise_c's count from there).
+    c_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_c"
+    ]
+    c_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "advise_c"
+    ]
+    assert len(c_enters) == 1
+    assert len(c_exits) == 1
+    c_inv = str(c_enters[0].fields.get("invocation_id"))
+    assert "::advise_c::" in c_inv
+    assert c_inv == str(c_exits[0].fields.get("invocation_id"))
+
+    # fan_out_end is now durable; aggregate is success and the
+    # group routes to join_state.
+    fan_ends = [r for r in records if r.event == "fan_out_end"]
+    assert len(fan_ends) == 1
+    assert fan_ends[0].fields["aggregate"] == "success"
+    assert fan_ends[0].fields["target"] == "join_state"
+
+    # The linear loop continued past the join target to terminal.
+    join_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "join_state"
+    ]
+    assert len(join_exits) == 1
+
+
+def test_resume_visibility_log_wins_over_persisted_json(
+    tmp_path: Path,
+) -> None:
+    """The persisted ``visibility.json`` is a best-effort cache; the
+    log is the source of truth. ``cmd_resume`` calls
+    ``VisibilityIndex.replace_from(replay.visibility_statuses)``
+    BEFORE constructing the Executor, so any stale entries in the
+    persisted file are overwritten by the log-derived rebuild.
+
+    Tests Blocker 5.
+    """
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+    records = LogReader(log_path).read_all()
+    records = [r for r in records if r.event != "run_end"]
+    log_path.write_text(
+        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
+    )
+    # Truncate to mid-fan-out so resume actually runs (terminal logs
+    # bypass the resume path entirely).
+    _filter_log_to_open_fan_out(
+        log_path,
+        keep_completed=["advise_a"],
+        keep_started_only=["advise_b"],
+    )
+
+    # advise_a's invocation_id is in the truncated log as success.
+    records = LogReader(log_path).read_all()
+    a_exit = next(
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "advise_a"
+    )
+    a_inv = str(a_exit.fields["invocation_id"])
+
+    # Stale cache: claim advise_a errored AND introduce a phantom
+    # invocation_id with success that is not in the log at all.
+    stale = {
+        a_inv: "error",  # log says success; stale says error
+        "phantom-run::ghost::1": "success",
+    }
+    terminal, snapshot = _resume_open_fan_out(
+        run_dir,
+        workflow_path,
+        {"topic": "hello world"},
+        visibility_overrides=stale,
+    )
+    assert terminal == "done"
+
+    # The log wins: advise_a is success in the in-memory snapshot
+    # (taken AFTER resume) and the phantom entry is gone.
+    assert snapshot.get(a_inv) == "success"
+    assert "phantom-run::ghost::1" not in snapshot
