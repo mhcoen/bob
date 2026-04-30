@@ -40,6 +40,7 @@ _NONDETERMINISTIC_NESTED_FIELDS = {
     "started_at",
     "ended_at",
     "payload_ref",
+    "invocation_id",  # embeds run_id, so it varies between runs.
 }
 
 

@@ -194,8 +194,13 @@ def rebuild_from_records(
     The pass walks the records in order and updates the inferred
     status for each invocation_id. ``state_enter`` inserts ``pending``;
     ``state_exit`` updates to ``success`` or ``error`` based on the
-    record's ``outcome`` field. Records without an invocation_id
-    field are ignored (legacy or non-state events).
+    record's ``status`` field (``"ok"`` is success, anything else is
+    error). The executor writes both ``status`` and ``outcome`` into
+    every ``state_exit`` record; the rebuild keys on ``status``
+    because that field is the executor's own success classification
+    and is invariant across actor backings (model/agent/shell/human).
+    Records without an invocation_id field are ignored (legacy or
+    non-state events).
 
     The result can be fed to ``VisibilityIndex.replace_from`` to
     initialise a fresh process's index from a log on disk.
@@ -210,9 +215,16 @@ def rebuild_from_records(
         if event == "state_enter":
             statuses[invocation_id] = "pending"
         elif event == "state_exit":
-            outcome = fields.get("outcome")
-            if outcome == "success" or outcome == "complete":
+            status = fields.get("status")
+            if status == "ok":
                 statuses[invocation_id] = "success"
             else:
-                statuses[invocation_id] = "error"
+                # Some legacy or pre-Slice-A logs may carry only
+                # ``outcome``. Treat ``complete``/``success`` as
+                # success there for back-compat.
+                outcome = fields.get("outcome")
+                if status is None and outcome in ("complete", "success"):
+                    statuses[invocation_id] = "success"
+                else:
+                    statuses[invocation_id] = "error"
     return statuses

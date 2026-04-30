@@ -71,6 +71,7 @@ from orchestra.spine import (
     Workflow,
 )
 from orchestra.store import ArtifactStore
+from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
 
@@ -102,6 +103,11 @@ class Executor:
         # backing_options at invoke time so adapters see the overrides
         # without polluting the workflow's external_inputs surface.
         invocation_options: dict[str, Any] | None = None,
+        # Slice A: an externally-supplied visibility index. The
+        # executor builds one with a persisted snapshot in run_dir
+        # when omitted. The store consults the same instance through
+        # set_visibility_index().
+        visibility_index: VisibilityIndex | None = None,
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -120,6 +126,17 @@ class Executor:
         self._payloads_dir = run_dir / "payloads"
         self._payloads_dir.mkdir(parents=True, exist_ok=True)
         self._invocation_options: dict[str, Any] = dict(invocation_options or {})
+        # Slice A: every per-state invocation gets a unique
+        # ``invocation_id = run_id::state_name::attempt_seq``. The
+        # VisibilityIndex tracks the per-invocation outcome so the
+        # artifact store can hide artifacts written by incomplete or
+        # errored invocations.
+        self._visibility_index: VisibilityIndex = (
+            visibility_index
+            if visibility_index is not None
+            else VisibilityIndex(persist_path=run_dir / "visibility.json")
+        )
+        self._store.set_visibility_index(self._visibility_index)
 
     # ----- entry points ------------------------------------------
 
@@ -161,6 +178,16 @@ class Executor:
         # for partial commits, so the discard is sufficient cleanup.
         self._discard_stale_tentatives(state.name, attempt)
 
+        # Slice A: mint the per-invocation key and pre-register it
+        # as pending in the visibility index BEFORE writing
+        # ``state_enter``. The order matters for crash atomicity:
+        # if a crash lands between insert_pending and the log
+        # write, replay rebuilds the index from the log; the
+        # transient pending entry is discarded because no
+        # state_enter record references the lost invocation_id.
+        invocation_id = make_invocation_id(self._run_id, state.name, attempt)
+        self._visibility_index.insert_pending(invocation_id)
+
         self._log.write(
             "state_enter",
             state_id=state.name,
@@ -168,6 +195,7 @@ class Executor:
             fields={
                 "attempts": dict(self._attempts),
                 "retries": dict(self._retries),
+                "invocation_id": invocation_id,
             },
         )
 
@@ -299,7 +327,7 @@ class Executor:
         if status == "ok" and state.writes and prepared is not None:
             try:
                 tentative_handles = self._dispatch_parsers(
-                    state, prepared, payload, attempt
+                    state, prepared, payload, attempt, invocation_id
                 )
             except Exception as exc:
                 self._store.discard_tentative(tentative_handles)
@@ -327,6 +355,7 @@ class Executor:
                     fields={
                         "artifact": entry["artifact"],
                         "version_id": entry["version_id"],
+                        "invocation_id": invocation_id,
                     },
                 )
 
@@ -349,6 +378,18 @@ class Executor:
             error=error_record,
         )
         self._envelopes[state.name] = envelope
+        # Slice A: mark the visibility-index outcome BEFORE writing
+        # state_exit. The order matters for crash atomicity. If a
+        # crash lands between the index update and the log write,
+        # replay rebuilds the index from the log and the in-memory
+        # success/error mark is discarded; the invocation goes back
+        # to "pending" until the next replay sees a durable
+        # state_exit. The persisted index file is best-effort
+        # informational.
+        if status == "ok":
+            self._visibility_index.mark_success(invocation_id)
+        else:
+            self._visibility_index.mark_error(invocation_id)
         self._log.write(
             "state_exit",
             state_id=state.name,
@@ -361,6 +402,7 @@ class Executor:
                 "artifacts_written": envelope.artifacts_written,
                 "error": _error_to_dict(envelope.error),
                 "payload_ref": payload_ref,
+                "invocation_id": invocation_id,
             },
         )
 
@@ -506,6 +548,7 @@ class Executor:
         prepared: PreparedInvocation,
         payload: dict[str, Any],
         attempt: int,
+        invocation_id: str | None = None,
     ) -> list[str]:
         """Run applicable parsers and produce tentative writes.
 
@@ -552,6 +595,7 @@ class Executor:
                         name,
                         value,
                         written_by=f"{state.name}#{attempt}",
+                        invocation_id=invocation_id,
                     )
                     handles.append(handle)
             except Exception:

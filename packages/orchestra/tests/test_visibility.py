@@ -130,7 +130,7 @@ def test_rebuild_marks_success_on_state_exit_success() -> None:
             _FakeRecord(event="state_enter", fields={"invocation_id": inv}),
             _FakeRecord(
                 event="state_exit",
-                fields={"invocation_id": inv, "outcome": "success"},
+                fields={"invocation_id": inv, "status": "ok"},
             ),
         ]
     )
@@ -144,11 +144,28 @@ def test_rebuild_marks_error_on_state_exit_error() -> None:
             _FakeRecord(event="state_enter", fields={"invocation_id": inv}),
             _FakeRecord(
                 event="state_exit",
-                fields={"invocation_id": inv, "outcome": "error"},
+                fields={"invocation_id": inv, "status": "error"},
             ),
         ]
     )
     assert statuses == {inv: "error"}
+
+
+def test_rebuild_legacy_outcome_only_maps_to_success() -> None:
+    """A pre-Slice-A log may carry only ``outcome`` on state_exit
+    (no ``status`` field). Back-compat: treat outcome=complete or
+    outcome=success as success."""
+    inv = make_invocation_id("r", "a", 1)
+    statuses = rebuild_from_records(
+        [
+            _FakeRecord(event="state_enter", fields={"invocation_id": inv}),
+            _FakeRecord(
+                event="state_exit",
+                fields={"invocation_id": inv, "outcome": "complete"},
+            ),
+        ]
+    )
+    assert statuses == {inv: "success"}
 
 
 def test_rebuild_handles_two_invocations_of_same_state() -> None:
@@ -161,12 +178,12 @@ def test_rebuild_handles_two_invocations_of_same_state() -> None:
             _FakeRecord(event="state_enter", fields={"invocation_id": inv1}),
             _FakeRecord(
                 event="state_exit",
-                fields={"invocation_id": inv1, "outcome": "success"},
+                fields={"invocation_id": inv1, "status": "ok"},
             ),
             _FakeRecord(event="state_enter", fields={"invocation_id": inv2}),
             _FakeRecord(
                 event="state_exit",
-                fields={"invocation_id": inv2, "outcome": "error"},
+                fields={"invocation_id": inv2, "status": "error"},
             ),
         ]
     )
