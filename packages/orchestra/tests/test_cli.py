@@ -191,6 +191,42 @@ def test_help_lists_configured_verbs(
     assert "resume <run_id>" in out
 
 
+def test_no_args_prints_help_and_exits_0(
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``orchestra`` with no arguments shows the help overview on
+    stdout and exits 0. Treating this as an argparse "required: cmd"
+    error is the wrong answer when the user is asking what the tool
+    does."""
+    _write_global_config(isolated_home, _ask_config_body())
+    rc = cli.main([])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.err == ""
+    out = captured.out
+    assert "Configured verbs:" in out
+    assert "ask" in out and "ask_single" in out
+    assert "Direct workflow execution:" in out
+    assert "run <workflow.orc>" in out
+    assert "resume <run_id>" in out
+
+
+def test_no_args_with_no_global_config_still_prints_help(
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Even without a global config, bare ``orchestra`` prints the
+    help overview (with the "(none)" hint) and exits 0."""
+    rc = cli.main([])
+    captured = capsys.readouterr()
+    assert rc == 0
+    out = captured.out
+    assert "Configured verbs:" in out
+    assert "(none" in out
+    assert "Direct workflow execution:" in out
+
+
 def test_help_when_no_config_shows_setup_hint(
     isolated_home: Path,
     capsys: pytest.CaptureFixture[str],
