@@ -674,3 +674,139 @@ workflow sib
     assert slow_reads["frame_out"]["__version_id"] == "snapshot"
     assert slow_reads["fast_out"]["value"] is None
     assert slow_reads["fast_out"]["__version_id"] == ""
+
+
+def test_fan_out_child_retry_budget_is_per_entry(tmp_path: Path) -> None:
+    """A fan-out child whose state declares
+    ``on error retry max 2 then stop`` retries up to twice on error.
+    Each retry mints a fresh invocation_id (new attempt_seq). The
+    final invocation succeeds; the worker returns success and the
+    group's aggregate is success.
+
+    Tests Blocker 2's child-local retry support.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow retry
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_flaky
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact flaky_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role fr
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [flaky] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state flaky
+    actor model m_flaky
+    role fr
+    reads topic
+    writes flaky_out text
+    on complete => done
+    on error retry max 2 then stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads flaky_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role ar
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    flaky_calls = {"n": 0}
+    inv_lock = threading.Lock()
+
+    class _Flaky(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_flaky":
+                with inv_lock:
+                    flaky_calls["n"] += 1
+                    n = flaky_calls["n"]
+                if n <= 2:
+                    raise RuntimeError(f"synthetic flaky failure #{n}")
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Flaky()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+    # Two failures + one success = three adapter invocations on the
+    # flaky child.
+    assert flaky_calls["n"] == 3
+    # The child eventually succeeded so the group routes to the
+    # join target.
+    assert terminal == "done"
+
+    # Three distinct invocation_ids on the flaky child's state_enter
+    # records (one per attempt).
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "flaky"
+    ]
+    assert len(enters) == 3
+    inv_ids = [r.fields.get("invocation_id") for r in enters]
+    assert len(set(inv_ids)) == 3
+    # attempt_seq monotonic 1, 2, 3.
+    seqs = sorted(int(i.split("::")[2]) for i in inv_ids)
+    assert seqs == [1, 2, 3]
+    # The fan_out_end aggregate is success.
+    fan_end = next(r for r in records if r.event == "fan_out_end")
+    assert fan_end.fields["aggregate"] == "success"
+    assert fan_end.fields["per_child_outcome"]["flaky"] == "success"

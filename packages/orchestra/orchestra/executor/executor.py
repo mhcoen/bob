@@ -981,22 +981,61 @@ class Executor:
         owns those. Artifact reads and prompt template substitutions
         consume the captured snapshot, never the live store, so a
         sibling write that lands mid-fan-out is invisible.
+
+        Slice A child-local retry: when the per-state body returns
+        an error or timeout envelope and the child's state declares
+        ``on error retry max N then T`` (or the timeout equivalent),
+        the worker increments ``retries[child_name]`` under
+        ``_attempt_lock``, mints a fresh invocation_id with a new
+        attempt_seq, and re-runs the body. Loops until success or
+        retry budget exhausted, then returns the final envelope.
+        The per-entry budget rule applies: ``retries[child_name]``
+        starts at 0 on first entry; the controller resets it to 0
+        before submitting (in ``_run_fan_out_group``). The
+        fresh-budget-on-replay rule (per the plan) is separate and
+        applies only after a CRASH and replay re-entry.
         """
         snapshot = FanOutSnapshot(
             envelopes=dict(snapshot_envelopes),
             artifacts=dict(snapshot_artifacts),
         )
-        if registry.is_cancelled(child_name):
-            return self._write_cancelled_state_exit(child_name, attempt)
-        invocation_id = make_invocation_id(self._run_id, child_name, attempt)
-        registry.mark_started(child_name, invocation_id)
-        if registry.is_cancelled(child_name):
-            return self._write_cancelled_state_exit(child_name, attempt)
-        envelope = self._execute_state_body(
-            child_name, attempt, invocation_id, snapshot=snapshot
-        )
-        registry.mark_done(child_name)
-        return envelope
+        state = self._wf.state(child_name)
+        current_attempt = attempt
+        while True:
+            if registry.is_cancelled(child_name):
+                return self._write_cancelled_state_exit(
+                    child_name, current_attempt
+                )
+            invocation_id = make_invocation_id(
+                self._run_id, child_name, current_attempt
+            )
+            registry.mark_started(child_name, invocation_id)
+            if registry.is_cancelled(child_name):
+                return self._write_cancelled_state_exit(
+                    child_name, current_attempt
+                )
+            envelope = self._execute_state_body(
+                child_name, current_attempt, invocation_id, snapshot=snapshot
+            )
+            should_retry = False
+            outcome = envelope.outcome
+            for t in state.transitions:
+                if t.outcome != outcome or t.retry_max is None:
+                    continue
+                with self._attempt_lock:
+                    used = self._retries.get(child_name, 0)
+                    if used < t.retry_max:
+                        self._retries[child_name] = used + 1
+                        should_retry = True
+                break
+            if not should_retry:
+                registry.mark_done(child_name)
+                return envelope
+            with self._attempt_lock:
+                self._attempts[child_name] = (
+                    self._attempts.get(child_name, 0) + 1
+                )
+                current_attempt = self._attempts[child_name]
 
     def _write_cancelled_state_exit(
         self, child_name: str, attempt: int
