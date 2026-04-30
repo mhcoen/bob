@@ -21,6 +21,11 @@ from typing import Any, Protocol
 
 from orchestra.errors import RegistryConflict
 from orchestra.spine import Envelope, StateDecl
+from orchestra.transforms import (
+    Transform,
+    TransformCallable,
+    validate_schema,
+)
 
 # --------------------------------------------------------------------
 # Protocols and small types
@@ -91,6 +96,7 @@ class ProfileRegistry:
     validation_rules: dict[str, Callable[..., None]] = field(default_factory=dict)
     default_policies: dict[str, Any] = field(default_factory=dict)
     resume_hooks: dict[str, Any] = field(default_factory=dict)
+    transforms: dict[str, Transform] = field(default_factory=dict)
     _adapter_cache: dict[str, Any] = field(default_factory=dict, repr=False)
 
     # ----- registration -------------------------------------------
@@ -118,6 +124,32 @@ class ProfileRegistry:
         if name in self.validation_rules:
             raise RegistryConflict(f"validation rule already registered: {name!r}")
         self.validation_rules[name] = fn
+
+    def register_transform(
+        self,
+        name: str,
+        callable: TransformCallable,
+        input_schema: dict[str, Any],
+        output_schema: dict[str, Any],
+    ) -> None:
+        """Register a transform for use in ``actor transform <name>``.
+
+        The schemas restrict types to the Slice B vocabulary. The
+        validator and the executor read from this record so static
+        and runtime checks see the same shape.
+        """
+        if name in self.transforms:
+            raise RegistryConflict(
+                f"transform already registered: {name!r}"
+            )
+        validate_schema(input_schema, where=f"{name!r} input_schema")
+        validate_schema(output_schema, where=f"{name!r} output_schema")
+        self.transforms[name] = Transform(
+            name=name,
+            callable=callable,
+            input_schema=dict(input_schema),
+            output_schema=dict(output_schema),
+        )
 
     # ----- lookup -------------------------------------------------
 

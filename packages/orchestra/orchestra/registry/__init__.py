@@ -12,6 +12,11 @@ from orchestra.registry.registry import (
     ResultParser,
     ScopePredicate,
 )
+from orchestra.transforms import (
+    Transform,
+    TransformCallable,
+    TransformContext,
+)
 
 __all__ = [
     "AdapterFactory",
@@ -19,4 +24,7 @@ __all__ = [
     "ProfileRegistry",
     "ResultParser",
     "ScopePredicate",
+    "Transform",
+    "TransformCallable",
+    "TransformContext",
 ]

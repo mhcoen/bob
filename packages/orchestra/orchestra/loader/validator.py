@@ -19,6 +19,7 @@ from orchestra.spine import (
     TruthyTest,
     Workflow,
 )
+from orchestra.transforms import schema_artifact_type, type_label
 
 # Backing-scoped keywords admitted by the parser. Each maps to the set
 # of actor backings on which the keyword is legal. v0 has no profile
@@ -150,7 +151,10 @@ def _phase5_state_validation(
     agent_names = {a.name for a in workflow.agents}
 
     for state in workflow.states:
-        if state.actor.kind not in registry.actor_backings:
+        if (
+            state.actor.kind != "transform"
+            and state.actor.kind not in registry.actor_backings
+        ):
             raise ValidationError(
                 f"state {state.name!r}: unknown actor backing {state.actor.kind!r}"
             )
@@ -164,6 +168,10 @@ def _phase5_state_validation(
                 raise ValidationError(
                     f"state {state.name!r}: undeclared agent {state.actor.ref!r}"
                 )
+        if state.actor.kind == "transform":
+            _validate_transform_state(
+                state, workflow, registry, artifact_types
+            )
         if state.role is not None and state.role not in role_names:
             raise ValidationError(
                 f"state {state.name!r}: undeclared role {state.role!r}"
@@ -252,12 +260,14 @@ def _phase5_state_validation(
 
         # Per design rule 9: model and shell backings need both
         # 'on error' and 'on timeout'; human (choice gate) backings
-        # only need 'on timeout'. The executor's error path is not
-        # invoked for human gates in the same way it is for actor
-        # invocations that can fail mid-run.
+        # only need 'on timeout'. Transform states are synchronous
+        # pure functions and cannot time out, so they require only
+        # 'on error'.
         required_outcomes: tuple[str, ...]
         if state.actor.kind == "human":
             required_outcomes = ("timeout",)
+        elif state.actor.kind == "transform":
+            required_outcomes = ("error",)
         else:
             required_outcomes = ("error", "timeout")
         for required in required_outcomes:
@@ -283,8 +293,10 @@ def _phase5_state_validation(
 
         # Parser coverage: every declared write's type must be served
         # by at least one applicable parser. The "any matches any"
-        # rule is wrong; we check each write individually.
-        if state.writes:
+        # rule is wrong; we check each write individually. Transform
+        # states bypass the parser dispatch, so the parser-coverage
+        # rule does not apply to them.
+        if state.writes and state.actor.kind != "transform":
             for w in state.writes:
                 applicable = registry.parsers_for(
                     backing=state.actor.kind,
@@ -301,6 +313,111 @@ def _phase5_state_validation(
                 _validate_guard_refs(
                     state, t.guard, state_names, artifact_names, external_names
                 )
+
+
+def _validate_transform_state(
+    state: StateDecl,
+    workflow: Workflow,
+    registry: ProfileRegistry,
+    artifact_types: dict[str, str],
+) -> None:
+    """Slice B: enforce the transform registry contract for a state
+    whose actor backing is ``transform``.
+
+    Checks the registered transform exists, the workflow's ``reads``
+    keys exactly match ``input_schema`` keys, the workflow's ``writes``
+    keys exactly match ``output_schema`` keys, every read's artifact
+    type matches the schema's expected artifact type, and every
+    write's artifact type matches the schema's expected artifact type.
+    Type checking on actual values is deferred to the executor.
+    """
+    if state.actor.ref is None:
+        raise ValidationError(
+            f"state {state.name!r}: transform actor must name a "
+            "registered transform"
+        )
+    transform = registry.transforms.get(state.actor.ref)
+    if transform is None:
+        raise ValidationError(
+            f"state {state.name!r}: transform {state.actor.ref!r} is not "
+            "registered"
+        )
+    if state.role is not None:
+        raise ValidationError(
+            f"state {state.name!r}: transform states do not take a "
+            "role binding"
+        )
+    if state.prompt is not None:
+        raise ValidationError(
+            f"state {state.name!r}: transform states do not take a "
+            "prompt clause"
+        )
+    for t in state.transitions:
+        if t.retry_max is not None:
+            raise ValidationError(
+                f"state {state.name!r}: transform states do not support "
+                "retry; transforms are pure functions"
+            )
+    expected_inputs = set(transform.input_schema.keys())
+    declared_reads = set(state.reads)
+    if declared_reads != expected_inputs:
+        missing = expected_inputs - declared_reads
+        extra = declared_reads - expected_inputs
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing reads: {sorted(missing)}")
+        if extra:
+            parts.append(f"unexpected reads: {sorted(extra)}")
+        raise ValidationError(
+            f"state {state.name!r}: transform {transform.name!r} reads "
+            f"do not match input_schema; {'; '.join(parts)}"
+        )
+    expected_outputs = set(transform.output_schema.keys())
+    declared_writes = {w.name for w in state.writes}
+    if declared_writes != expected_outputs:
+        missing = expected_outputs - declared_writes
+        extra = declared_writes - expected_outputs
+        parts = []
+        if missing:
+            parts.append(f"missing writes: {sorted(missing)}")
+        if extra:
+            parts.append(f"unexpected writes: {sorted(extra)}")
+        raise ValidationError(
+            f"state {state.name!r}: transform {transform.name!r} writes "
+            f"do not match output_schema; {'; '.join(parts)}"
+        )
+    # Each read's artifact must have an artifact-type that matches the
+    # schema's expected artifact-type. External inputs are not
+    # admissible reads for transforms in Slice B because they lack a
+    # declared artifact type the schema can be checked against.
+    artifact_names = {a.name for a in workflow.artifacts}
+    for read_name, read_type in transform.input_schema.items():
+        if read_name not in artifact_names:
+            raise ValidationError(
+                f"state {state.name!r}: transform {transform.name!r} input "
+                f"{read_name!r} is not a declared artifact"
+            )
+        expected_artifact_type = schema_artifact_type(read_type)
+        actual = artifact_types[read_name]
+        if actual != expected_artifact_type:
+            raise ValidationError(
+                f"state {state.name!r}: transform {transform.name!r} input "
+                f"{read_name!r} has schema type {type_label(read_type)} "
+                f"(expects artifact type {expected_artifact_type!r}) but "
+                f"the workflow declares artifact {read_name!r} as "
+                f"{actual!r}"
+            )
+    for write_name, write_type in transform.output_schema.items():
+        expected_artifact_type = schema_artifact_type(write_type)
+        actual = artifact_types[write_name]
+        if actual != expected_artifact_type:
+            raise ValidationError(
+                f"state {state.name!r}: transform {transform.name!r} output "
+                f"{write_name!r} has schema type {type_label(write_type)} "
+                f"(expects artifact type {expected_artifact_type!r}) but "
+                f"the workflow declares artifact {write_name!r} as "
+                f"{actual!r}"
+            )
 
 
 def _validate_guard_refs(

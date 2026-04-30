@@ -75,6 +75,11 @@ from orchestra.spine import (
     Workflow,
 )
 from orchestra.store import ArtifactStore
+from orchestra.transforms import (
+    TransformContext,
+    runtime_check,
+    type_label,
+)
 from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
@@ -172,6 +177,8 @@ class Executor:
 
     def _run_one_state(self) -> str:
         state = self._wf.state(self._current_state)
+        if state.actor.kind == "transform":
+            return self._run_transform_linear(state)
 
         # Step 1: increment counters.
         is_retry_from_self = (
@@ -450,6 +457,8 @@ class Executor:
                 binding["model"] = state.actor.ref
             elif state.actor.kind == "agent":
                 binding["agent"] = state.actor.ref
+            elif state.actor.kind == "transform":
+                binding["transform"] = state.actor.ref
         if state.role is not None:
             binding["role"] = state.role
         return binding
@@ -867,6 +876,290 @@ class Executor:
                 continue
             return t
         return None
+
+    # ----- transform execution (Slice B) -------------------------
+
+    def _run_transform_linear(self, state: StateDecl) -> str:
+        """Linear-path entry point for transform states.
+
+        Mirrors the adapter-path control flow in ``_run_one_state``
+        (envelope, transition selection, step budget, route) but
+        delegates the actual per-state work to
+        ``_execute_transform_body``. Transform states do not retry
+        because transforms are pure functions, so the retry branch is
+        omitted.
+        """
+        envelope = self._execute_transform_body(state.name)
+        decl = self._select_transition_decl(state, envelope)
+        if decl is None:
+            raise ExecutorError(
+                f"state {state.name!r}: no transition matched outcome "
+                f"{envelope.outcome!r}"
+            )
+        if decl.is_fan_out():
+            target = self._run_fan_out_group(state, envelope, decl)
+        else:
+            target = decl.target
+
+        self._step_count += 1
+        if self._step_count >= self._wf.max_total_steps:
+            if target not in _TERMINAL_TARGETS:
+                self._log.write(
+                    "step_budget_exhausted",
+                    state_id=state.name,
+                    attempt=envelope.attempt,
+                    fields={"max_total_steps": self._wf.max_total_steps},
+                )
+                target = "stop"
+
+        self._log.write(
+            "transition",
+            state_id=state.name,
+            attempt=envelope.attempt,
+            fields={
+                "outcome": envelope.outcome,
+                "target": target,
+                "step_count": self._step_count,
+            },
+        )
+
+        self._last_state = state.name
+        self._last_outcome = envelope.outcome
+        self._current_state = target
+        return target
+
+    def _execute_transform_body(
+        self,
+        state_name: str,
+        snapshot: FanOutSnapshot | None = None,
+    ) -> Envelope:
+        """Run a transform state's per-state sequence and return the
+        envelope.
+
+        Slice B contract: invocation_id is minted at state_enter time,
+        the transform callable is invoked synchronously with a
+        ``TransformContext`` carrying ``(run_id, state_name,
+        sorted_input_keys)``, runtime type checks gate both inputs and
+        outputs against the registered schema, output values flow
+        through the same tentative_write/commit_tentative path adapter
+        states use, and a Python exception (or a type violation)
+        produces an error ``state_exit`` with no retry.
+
+        The fan-out child worker can call this helper through
+        ``_execute_state_body`` so transforms can participate in
+        fan-out groups.
+        """
+        state = self._wf.state(state_name)
+        assert state.actor.kind == "transform"
+        assert state.actor.ref is not None
+        transform = self._registry.transforms[state.actor.ref]
+
+        with self._attempt_lock:
+            self._attempts[state_name] = (
+                self._attempts.get(state_name, 0) + 1
+            )
+            attempt = self._attempts[state_name]
+            attempts_snapshot = dict(self._attempts)
+            retries_snapshot = dict(self._retries)
+        invocation_id = make_invocation_id(self._run_id, state_name, attempt)
+        self._discard_stale_tentatives(state.name)
+        self._visibility_index.insert_pending(invocation_id)
+        self._log.write(
+            "state_enter",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "attempts": attempts_snapshot,
+                "retries": retries_snapshot,
+                "invocation_id": invocation_id,
+            },
+        )
+
+        actor_binding = self._build_actor_binding(state)
+        reads = self._read_artifacts(state, snapshot=snapshot)
+        inputs: dict[str, Any] = {
+            name: wrapper.get("value")
+            for name, wrapper in reads.items()
+        }
+        sorted_input_keys = sorted(inputs.keys())
+        ctx = TransformContext(
+            run_id=self._run_id,
+            state_name=state_name,
+            sorted_input_keys=list(sorted_input_keys),
+        )
+
+        started_at = _now_iso()
+        started_perf = time.perf_counter()
+        error_record: ErrorRecord | None = None
+        outputs: dict[str, Any] = {}
+
+        # Slice B contract: the validator pins the input/output shape,
+        # but the runtime values may diverge if upstream states wrote
+        # the wrong type (a model-backed write that smuggled in a
+        # non-string, for example). The runtime check catches that
+        # before the transform callable runs.
+        for read_name, expected_type in transform.input_schema.items():
+            value = inputs.get(read_name)
+            if not runtime_check(value, expected_type):
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=(
+                        f"transform input {read_name!r}: value does not "
+                        f"match declared type {type_label(expected_type)}"
+                    ),
+                    detail={"phase": "transform_input_typecheck"},
+                )
+                break
+
+        if error_record is None:
+            try:
+                outputs = transform.callable(inputs, ctx)
+            except Exception as exc:
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=str(exc),
+                    detail={
+                        "exception": type(exc).__name__,
+                        "phase": "transform",
+                    },
+                )
+
+        ended_at = _now_iso()
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+
+        if error_record is None:
+            if not isinstance(outputs, dict):
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=(
+                        f"transform returned {type(outputs).__name__}, "
+                        "expected dict"
+                    ),
+                    detail={"phase": "transform_output_shape"},
+                )
+            else:
+                expected_keys = set(transform.output_schema.keys())
+                actual_keys = set(outputs.keys())
+                if actual_keys != expected_keys:
+                    missing = expected_keys - actual_keys
+                    extra = actual_keys - expected_keys
+                    error_record = ErrorRecord(
+                        kind="actor_failure",
+                        message=(
+                            "transform output keys do not match "
+                            f"output_schema; missing={sorted(missing)} "
+                            f"extra={sorted(extra)}"
+                        ),
+                        detail={"phase": "transform_output_shape"},
+                    )
+                else:
+                    for write_name, expected_type in (
+                        transform.output_schema.items()
+                    ):
+                        if not runtime_check(
+                            outputs[write_name], expected_type
+                        ):
+                            error_record = ErrorRecord(
+                                kind="actor_failure",
+                                message=(
+                                    f"transform output {write_name!r}: "
+                                    "value does not match declared type "
+                                    f"{type_label(expected_type)}"
+                                ),
+                                detail={
+                                    "phase": "transform_output_typecheck"
+                                },
+                            )
+                            break
+
+        status: str = "ok" if error_record is None else "error"
+        outcome = "complete" if status == "ok" else "error"
+
+        artifacts_written: list[dict[str, str]] = []
+        if status == "ok":
+            tentative_handles: list[str] = []
+            try:
+                for w in state.writes:
+                    handle = self._store.tentative_write(
+                        w.name,
+                        outputs[w.name],
+                        written_by=f"{state.name}#{attempt}",
+                        invocation_id=invocation_id,
+                    )
+                    tentative_handles.append(handle)
+            except Exception as exc:
+                self._store.discard_tentative(tentative_handles)
+                tentative_handles = []
+                status = "error"
+                outcome = "error"
+                error_record = ErrorRecord(
+                    kind="actor_failure",
+                    message=f"tentative_write failed: {exc}",
+                    detail={
+                        "exception": type(exc).__name__,
+                        "phase": "transform_commit",
+                    },
+                )
+            if status == "ok" and tentative_handles:
+                committed_ids = self._store.commit_tentative(
+                    tentative_handles
+                )
+                for w, vid in zip(
+                    state.writes, committed_ids, strict=False
+                ):
+                    artifacts_written.append(
+                        {"artifact": w.name, "version_id": vid}
+                    )
+                    self._log.write(
+                        "artifact_write",
+                        state_id=state.name,
+                        attempt=attempt,
+                        fields={
+                            "artifact": w.name,
+                            "version_id": vid,
+                            "invocation_id": invocation_id,
+                        },
+                    )
+
+        envelope = Envelope(
+            state_id=state.name,
+            attempt=attempt,
+            actor_binding=actor_binding,
+            status=status,  # type: ignore[arg-type]
+            outcome=outcome,
+            started_at=started_at,
+            ended_at=ended_at,
+            duration_ms=duration_ms,
+            inputs_read=[
+                {"artifact": name, "version_id": v.get("__version_id", "")}
+                for name, v in (reads or {}).items()
+            ],
+            artifacts_written=artifacts_written,
+            payload={},
+            error=error_record,
+        )
+        with self._envelope_lock:
+            self._envelopes[state.name] = envelope
+        self._log.write(
+            "state_exit",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "status": status,
+                "outcome": outcome,
+                "duration_ms": duration_ms,
+                "inputs_read": envelope.inputs_read,
+                "artifacts_written": envelope.artifacts_written,
+                "error": _error_to_dict(error_record),
+                "payload_ref": None,
+                "invocation_id": invocation_id,
+            },
+        )
+        if status == "ok":
+            self._visibility_index.mark_success(invocation_id)
+        else:
+            self._visibility_index.mark_error(invocation_id)
+        return envelope
 
     # ----- fan-out execution -------------------------------------
 
@@ -1509,8 +1802,17 @@ class Executor:
         envelope; ``on_prepared`` (if provided) receives the
         ``invocation_id`` alongside the prepared invocation so the
         fan-out cancellation registry can record the handle.
+
+        Slice B: when ``state.actor.kind == 'transform'`` the helper
+        delegates to ``_execute_transform_body``. Transforms have no
+        adapter to prepare or cancel, so the cancellation callbacks
+        are unused on the transform path.
         """
         state = self._wf.state(state_name)
+        if state.actor.kind == "transform":
+            return self._execute_transform_body(
+                state_name, snapshot=snapshot
+            )
         with self._attempt_lock:
             self._attempts[state_name] = (
                 self._attempts.get(state_name, 0) + 1

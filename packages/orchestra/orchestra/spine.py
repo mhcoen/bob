@@ -147,8 +147,12 @@ class WriteDecl:
 class ActorBinding:
     """What the state's ``actor`` clause names."""
 
-    kind: Literal["model", "agent", "shell", "human"]
-    ref: str | None = None  # model id, agent id; None for shell/human
+    kind: Literal["model", "agent", "shell", "human", "transform"]
+    ref: str | None = None
+    """For ``model``: the model id. For ``agent``: the agent id.
+    For ``transform``: the registered transform name. ``None`` for
+    ``shell`` and ``human``.
+    """
 
 
 @dataclass(frozen=True)

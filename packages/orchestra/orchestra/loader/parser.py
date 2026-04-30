@@ -344,6 +344,11 @@ class Parser:
                 ref: str | None = None
                 if kind in ("model", "agent"):
                     ref = self._expect("IDENT").value
+                elif kind == "transform":
+                    # The transform name is an IDENT referring to a
+                    # registry entry; arbitrary Python is not permitted
+                    # in .orc files.
+                    ref = self._expect("IDENT").value
                 elif kind in ("shell", "human"):
                     ref = None
                 else:
