@@ -530,9 +530,69 @@ class Parser:
             return Transition(
                 outcome=outcome, target=target, guard=None, retry_max=n
             )
+        if self._peek().kind == "IDENT" and self._peek().value == "fan_out":
+            if guard is not None:
+                raise ParseError(
+                    "v0 grammar does not admit 'when <guard>' before 'fan_out'",
+                    line=on_tok.line,
+                )
+            if outcome != "complete":
+                raise ParseError(
+                    "fan_out is legal only on 'complete', got "
+                    f"{outcome!r}",
+                    line=on_tok.line,
+                )
+            return self._parse_fan_out_tail(outcome=outcome, line=on_tok.line)
         raise ParseError(
-            "expected '=> <target>' or 'retry max N then <target>'",
+            "expected '=> <target>', 'retry max N then <target>', or "
+            "'fan_out [<children>] join <target> on error <target>'",
             line=self._peek().line,
+        )
+
+    def _parse_fan_out_tail(self, *, outcome: str, line: int) -> Transition:
+        """Consume ``fan_out [a, b, c] join <target> on error <target>``.
+
+        The leading ``on complete`` plus optional ``when`` clause has
+        already been consumed; the next token is the ``fan_out``
+        identifier. The transition's ``target`` carries the join state
+        name; ``error_target`` carries the on-error routing target;
+        ``fan_out`` carries the ordered child state names.
+        """
+        self._advance()  # consume 'fan_out'
+        self._expect("LBRACKET")
+        children: list[str] = []
+        if self._peek().kind != "RBRACKET":
+            children.append(self._expect("IDENT").value)
+            while self._peek().kind == "COMMA":
+                self._advance()
+                children.append(self._expect("IDENT").value)
+        self._expect("RBRACKET")
+        if not children:
+            raise ParseError(
+                "fan_out requires at least one child state",
+                line=line,
+            )
+        seen: set[str] = set()
+        for c in children:
+            if c in seen:
+                raise ParseError(
+                    f"fan_out child {c!r} appears more than once",
+                    line=line,
+                )
+            seen.add(c)
+        self._expect_keyword("join")
+        join_target = self._expect("IDENT").value
+        self._expect_keyword("on")
+        self._expect_keyword("error")
+        error_target = self._expect("IDENT").value
+        self._expect("NEWLINE")
+        return Transition(
+            outcome=outcome,
+            target=join_target,
+            guard=None,
+            retry_max=None,
+            fan_out=tuple(children),
+            error_target=error_target,
         )
 
     # ----- guard expressions -------------------------------------

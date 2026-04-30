@@ -210,6 +210,45 @@ def _phase5_state_validation(
                     f"state {state.name!r}: transition target {t.target!r} is not a declared state"
                 )
             seen_outcomes.add(t.outcome)
+            if t.is_fan_out():
+                # Validate fan-out children are declared states.
+                for child in t.fan_out:
+                    if child not in state_names:
+                        raise ValidationError(
+                            f"state {state.name!r}: fan_out child {child!r} "
+                            "is not a declared state"
+                        )
+                if t.error_target is None:
+                    raise ValidationError(
+                        f"state {state.name!r}: fan_out transition is missing "
+                        "the 'on error <target>' clause"
+                    )
+                if (
+                    t.error_target not in state_names
+                    and t.error_target not in {"done", "stop"}
+                ):
+                    raise ValidationError(
+                        f"state {state.name!r}: fan_out error target "
+                        f"{t.error_target!r} is not a declared state"
+                    )
+                # Sibling write collision: per the real-council plan,
+                # two children of the same fan-out group writing the
+                # same artifact name is a load error (caught here so
+                # the runtime never has to mediate conflicting
+                # writes).
+                child_decls = [s for s in workflow.states if s.name in t.fan_out]
+                seen_writes: dict[str, str] = {}
+                for child_decl in child_decls:
+                    for w in child_decl.writes:
+                        prior = seen_writes.get(w.name)
+                        if prior is not None:
+                            raise ValidationError(
+                                f"state {state.name!r}: fan_out children "
+                                f"{prior!r} and {child_decl.name!r} both write "
+                                f"artifact {w.name!r}; sibling writes to "
+                                "the same artifact are not permitted"
+                            )
+                        seen_writes[w.name] = child_decl.name
 
         # Per design rule 9: model and shell backings need both
         # 'on error' and 'on timeout'; human (choice gate) backings

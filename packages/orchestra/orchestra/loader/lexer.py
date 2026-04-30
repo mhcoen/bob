@@ -40,6 +40,8 @@ TokenKind = Literal[
     "BANG",      # !
     "LPAREN",
     "RPAREN",
+    "LBRACKET",  # [
+    "RBRACKET",  # ]
     "NEWLINE",
     "INDENT",
     "DEDENT",
@@ -266,6 +268,16 @@ class Lexer:
                 continue
             if ch == ")":
                 yield Token("RPAREN", ")", self._line, self._col)
+                self._pos += 1
+                self._col += 1
+                continue
+            if ch == "[":
+                yield Token("LBRACKET", "[", self._line, self._col)
+                self._pos += 1
+                self._col += 1
+                continue
+            if ch == "]":
+                yield Token("RBRACKET", "]", self._line, self._col)
                 self._pos += 1
                 self._col += 1
                 continue

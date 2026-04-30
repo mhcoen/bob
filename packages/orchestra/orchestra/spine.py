@@ -115,13 +115,26 @@ class ArtifactDecl:
 @dataclass(frozen=True)
 class Transition:
     outcome: str
-    target: str  # state name, "done", or "stop"
+    target: str  # state name, "done", "stop", or the join target for fan_out
     guard: GuardExpr | None = None
     retry_max: int | None = None
     """If set, this transition was declared as ``on <outcome> retry max
     N then <target>``. The executor uses ``retry_max`` together with
     ``retries.<state>`` to decide whether to re-enter the state or
     fall through to ``target``."""
+    fan_out: tuple[str, ...] = ()
+    """Non-empty when this transition was declared as
+    ``on complete fan_out [<children>] join <target> on error <err>``.
+    The listed child state names are spawned in parallel. ``target``
+    carries the join target. ``error_target`` carries the on-error
+    routing target. Empty for ordinary linear transitions."""
+    error_target: str | None = None
+    """Required companion to ``fan_out``: the state to route to when
+    any child of the fan-out group produces a durable error
+    ``state_exit``. Unused for non-fan-out transitions."""
+
+    def is_fan_out(self) -> bool:
+        return bool(self.fan_out)
 
 
 @dataclass(frozen=True)
