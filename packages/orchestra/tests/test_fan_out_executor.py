@@ -1496,6 +1496,134 @@ def test_resume_visibility_log_wins_over_persisted_json(
     assert "phantom-run::ghost::1" not in snapshot
 
 
+def test_resume_open_fan_out_with_errored_completed_child_does_not_launch_pending(
+    tmp_path: Path,
+) -> None:
+    """When a fan-out group's log shows one child completed success
+    and another completed error before the crash, the group has
+    already failed: the cancellation race rule fixes the routing
+    decision at error. Resume must NOT launch new invocations for
+    the still-pending child during replay; doing so would create new
+    fan-out invocations of an already-failed group.
+
+    The fix short-circuits inside ``resume_fan_out`` when any
+    completed child has an error status: pending children are
+    flagged ``not_launched`` in ``per_child_outcome``, the cleanup
+    pass runs, ``fan_out_end`` is written with aggregate=error,
+    and the group routes to the error target.
+
+    Tests Re-audit Blocker 2.
+    """
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+    # Inject an adapter that errors on advise_b's model so the fan
+    # out completes with one success and one error before our
+    # truncation cuts it off.
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    class _ErrorOnB:
+        backing = "model"
+
+        def prepare(self, request: Any) -> Any:
+            return MockModelAdapter().prepare(request)
+
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_b":
+                raise RuntimeError("synthetic adapter failure for advise_b")
+            return MockModelAdapter().invoke(prepared)
+
+        def cancel(self, prepared: Any) -> None:
+            return None
+
+        def describe(self) -> dict[str, Any]:
+            return {"backing": "model"}
+
+    registry.actor_backings["model"] = lambda: _ErrorOnB()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(workflow_path)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello world"},
+    )
+    executor.run_to_completion()
+    log.close()
+    store.close()
+
+    log_path = run_dir / "log.jsonl"
+    # Truncate to mid-fan-out: keep advise_a (success) and advise_b
+    # (error) complete; drop advise_c entirely and drop fan_out_end
+    # plus everything after.
+    _filter_log_to_open_fan_out(
+        log_path,
+        keep_completed=["advise_a", "advise_b"],
+        keep_started_only=[],
+    )
+
+    # Resume: the fix should observe advise_b's error in
+    # completed_children and short-circuit BEFORE submitting any
+    # future for advise_c.
+    terminal, _ = _resume_open_fan_out(
+        run_dir, workflow_path, {"topic": "hello world"}
+    )
+
+    # The run reaches a terminal state via the abort_state branch.
+    assert terminal in ("done", "stop")
+
+    records = LogReader(log_path).read_all()
+
+    # advise_c was NOT launched: there is no fresh state_enter for
+    # advise_c added by the resume path. (The truncated log had no
+    # advise_c records to begin with.)
+    c_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "advise_c"
+    ]
+    assert c_enters == [], (
+        f"advise_c should not have been launched on resume; "
+        f"got state_enters {c_enters}"
+    )
+
+    # advise_a and advise_b retain exactly their original
+    # state_enter / state_exit pair (no resume re-entry of either).
+    for completed in ("advise_a", "advise_b"):
+        enters = [
+            r for r in records
+            if r.event == "state_enter" and r.state_id == completed
+        ]
+        exits = [
+            r for r in records
+            if r.event == "state_exit" and r.state_id == completed
+        ]
+        assert len(enters) == 1
+        assert len(exits) == 1
+
+    # fan_out_end records aggregate=error, routes to abort_state,
+    # and the per_child_outcome map carries a=success, b=error,
+    # c=not_launched.
+    fan_ends = [r for r in records if r.event == "fan_out_end"]
+    assert len(fan_ends) == 1
+    fan_end = fan_ends[0]
+    assert fan_end.fields["aggregate"] == "error"
+    assert fan_end.fields["target"] == "abort_state"
+    per_child = fan_end.fields["per_child_outcome"]
+    assert per_child.get("advise_a") == "success"
+    assert per_child.get("advise_b") == "error"
+    assert per_child.get("advise_c") == "not_launched"
+
+
 def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
     """``Executor._discard_stale_tentatives`` deletes tentative rows
     left over from a crashed prior attempt. The store has

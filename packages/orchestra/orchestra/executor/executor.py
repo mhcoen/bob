@@ -1056,6 +1056,38 @@ class Executor:
             if outcome == "error":
                 group_errored = True
 
+        # Re-audit RA-B2: if any completed child already errored, the
+        # group has already failed. The cancellation race rule says
+        # the routing decision is fixed once any child errors. The
+        # controller does NOT submit pending children: that would
+        # create new fan-out child invocations during replay of an
+        # already-failed group, which is the opposite of the
+        # contract. Pending children are flagged ``not_launched`` in
+        # the per-child outcome map so the log records they were
+        # never launched, the cleanup pass runs, and ``fan_out_end``
+        # routes to ``error_target``.
+        if group_errored:
+            for child_name in pending_children:
+                child_outcomes[child_name] = "not_launched"
+            aggregate: Literal["success", "error"] = "error"
+            target = error_target
+            purged = self._store.purge_invisible_state_invocation_versions()
+            self._log.write(
+                "fan_out_end",
+                state_id=parent_state.name,
+                attempt=parent_attempt,
+                fields={
+                    "parent_state": parent_state.name,
+                    "aggregate": aggregate,
+                    "per_child_outcome": child_outcomes,
+                    "child_invocation_ids": child_invocation_ids,
+                    "target": target,
+                    "purged_versions": purged,
+                },
+            )
+            self._current_state = str(target)
+            return str(target)
+
         registry = _CancellationRegistry()
         for child_name in pending_children:
             registry.register_pending(child_name)
@@ -1090,11 +1122,6 @@ class Executor:
                         snapshot_artifacts,
                     )
                     futures[child_name] = fut
-
-                # If a completed child had already errored, every
-                # pending child should be cancelled; drain anyway.
-                if group_errored:
-                    registry.request_cancel_all(futures)
 
                 from concurrent.futures import as_completed
 
@@ -1133,9 +1160,7 @@ class Executor:
             finally:
                 executor.shutdown(wait=True)
 
-        aggregate: Literal["success", "error"] = (
-            "error" if group_errored else "success"
-        )
+        aggregate = "error" if group_errored else "success"
         target = error_target if aggregate == "error" else join_target
         purged = self._store.purge_invisible_state_invocation_versions()
         self._log.write(
