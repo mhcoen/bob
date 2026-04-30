@@ -879,6 +879,245 @@ workflow retry
     assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
 
 
+def test_cancellation_race_preserves_concurrent_success(
+    tmp_path: Path,
+) -> None:
+    """Cancellation race rule: once any child errors the routing
+    decision is fixed at the error target, but other children that
+    successfully complete BEFORE ``fan_out_end`` is written must
+    have their outcomes recorded in the per-child outcome map. This
+    is the "A errors while B succeeds nearly simultaneously"
+    scenario the plan calls out.
+
+    Plus: the routing is stable across replay. A complete log
+    routes identically on replay. A truncated log without
+    ``fan_out_end`` (case 5) re-creates ``fan_out_end`` with both
+    children's outcomes from the durable child state_exits.
+
+    Tests Cleanup TEST 1.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow race_test
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact a_out text
+  artifact b_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  role br
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role abr
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [a, b] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role ar
+    reads topic
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role br
+    reads topic
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads a_out, b_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role abr
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    # ``b_proceed`` releases b's invoke after a has errored, so b
+    # finishes after the controller has already requested
+    # cancellation. The plan calls this the "subsequent successful
+    # child outcomes do not change routing" race; b's success must
+    # still appear in per_child_outcome but routing must stay at
+    # the error target.
+    a_invoked = threading.Event()
+    b_proceed = threading.Event()
+
+    class _Race(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_a":
+                a_invoked.set()
+                raise RuntimeError("synthetic failure on a")
+            if model_id == "m_b":
+                # Wait for a to error so the controller has called
+                # request_cancel_all by the time b completes. The
+                # mock adapter's cancel is a no-op, so b's invoke
+                # drains and returns success.
+                a_invoked.wait(timeout=5)
+                # Small additional delay so a's drain reaches the
+                # controller and request_cancel_all has fired.
+                import time as _time
+                _time.sleep(0.05)
+                b_proceed.set()
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Race()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+
+    # b's invoke completed after a's error, so b_proceed was set.
+    assert b_proceed.is_set()
+
+    # First-pass: per_child_outcome shows BOTH a=error AND b=success.
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    fan_end = next(r for r in records if r.event == "fan_out_end")
+    per_child = fan_end.fields["per_child_outcome"]
+    assert per_child["a"] == "error", (
+        f"a errored; got {per_child!r}"
+    )
+    assert per_child["b"] == "success", (
+        f"b's success after a's error must still be recorded "
+        f"(cancellation race rule); got {per_child!r}"
+    )
+    assert fan_end.fields["aggregate"] == "error"
+    assert fan_end.fields["target"] == "abort_state"
+
+    # Step 2: replay of the COMPLETE log routes identically. A run
+    # whose log already contains ``fan_out_end`` does not re-run any
+    # child on resume; the durable target is reused.
+    from orchestra.resume import replay_log
+    rep = replay_log(str(run_dir / "log.jsonl"))
+    assert rep.last_fan_out_target == "abort_state"
+    assert rep.open_fan_out is None
+
+    # Step 3: replay of a TRUNCATED log (drop fan_out_end and
+    # everything after) re-creates fan_out_end from the durable
+    # child state_exits. Both children's state_exits remain on
+    # disk; the resume path's resume_fan_out sees a's error in
+    # completed_children and short-circuits per RA-B2 (no pending
+    # children to launch since both already have state_exit, so
+    # all children are "completed").
+    truncated_dir = tmp_path / "truncated"
+    truncated_dir.mkdir()
+    log_path = truncated_dir / "log.jsonl"
+    # Copy SQLite store too.
+    import shutil
+    shutil.copy(run_dir / "store.sqlite", truncated_dir / "store.sqlite")
+    # Copy log without fan_out_end and everything after.
+    keep = []
+    for r in records:
+        if r.event in ("fan_out_end", "transition", "state_enter",
+                       "actor_prepare", "actor_invoke_start",
+                       "actor_invoke_end", "artifact_write",
+                       "state_exit", "run_end"):
+            # Keep state_enter / state_exit / artifact_write etc.
+            # only if they belong to launch / a / b (drop
+            # post-fan-out abort_state records and fan_out_end).
+            if r.event == "fan_out_end":
+                continue
+            if r.state_id in ("launch", "a", "b") or r.state_id is None:
+                keep.append(r)
+            # Drop abort_state records (which ran AFTER fan_out_end).
+            continue
+        keep.append(r)
+    # Drop everything after the (now-removed) fan_out_end. The
+    # simpler approach: keep all records up to but not including
+    # fan_out_end.
+    keep = []
+    for r in records:
+        if r.event == "fan_out_end":
+            break
+        keep.append(r)
+    log_path.write_text(
+        "\n".join(r.to_json() for r in keep) + "\n", encoding="utf-8"
+    )
+
+    # Replay: open_fan_out should be set, with completed_children
+    # carrying both a (error) and b (success) envelopes.
+    rep_truncated = replay_log(str(log_path))
+    assert rep_truncated.open_fan_out is not None
+    assert rep_truncated.envelopes["a"].status == "error"
+    assert rep_truncated.envelopes["b"].status == "ok"
+
+    # Now drive resume_fan_out via the helper. RA-B2 short-circuits
+    # because completed_children includes a's error; pending
+    # children (none in this case, since a and b both completed)
+    # are not launched. fan_out_end is written with the per-child
+    # outcomes reconstructed from completed_children.
+    terminal2, _ = _resume_open_fan_out(
+        truncated_dir, src, {"topic": "hello"}
+    )
+
+    # The resumed log has a fresh fan_out_end with both outcomes.
+    resumed_records = LogReader(log_path).read_all()
+    fan_ends = [r for r in resumed_records if r.event == "fan_out_end"]
+    assert len(fan_ends) == 1
+    fan_end_resumed = fan_ends[0]
+    assert fan_end_resumed.fields["per_child_outcome"]["a"] == "error"
+    assert fan_end_resumed.fields["per_child_outcome"]["b"] == "success"
+    assert fan_end_resumed.fields["aggregate"] == "error"
+    assert fan_end_resumed.fields["target"] == "abort_state"
+
+
 def test_lock_order_deadlock_prevention(tmp_path: Path) -> None:
     """The plan's lock-ordering rule: LogWriter is the OUTER lock,
     ArtifactStore is the INNER lock. Anywhere both locks are held,
