@@ -145,30 +145,69 @@ the consumer project (McLoop's repo). It is not embedded in
 McLoop, Duplo, or directly, and burying it in McLoop's config would
 couple them.
 
-Structure is nested:
+Structure is two-tier per the proposal in
+`design/orchestra-shared-role-bindings-proposal.md`. The top-level
+`roles` table holds the canonical role-to-binding identities once.
+Each workflow names a `pattern` and may specify `role_overrides` that
+replace individual binding keys for that workflow only.
 
 ```json
 {
+  "roles": {
+    "editor": {
+      "adapter": "claude_code_agent",
+      "model": "opus",
+      "instruction_template": "templates/code_edit_editor.md",
+      "tools": "default",
+      "parameters": {}
+    }
+  },
   "workflows": {
     "code_edit": {
-      "pattern": "single",
-      "roles": {
-        "editor": {
-          "adapter": "claude_code_agent",
-          "model": "opus",
-          "instruction_template": "templates/code_edit_editor.md",
-          "tools": "default",
-          "parameters": {}
-        }
+      "pattern": "single"
+    }
+  }
+}
+```
+
+For multi-role patterns, every role the pattern uses (`drafter`,
+`adjudicator`, `editor` for `draft_then_adjudicate`) gets a single
+top-level entry. Workflows that share a role share the binding by
+name. To diverge for one workflow, add `role_overrides`:
+
+```json
+{
+  "roles": {
+    "drafter": {
+      "adapter": "claude_code_text",
+      "model": "kimi-k2.6",
+      "parameters": {}
+    },
+    "editor": {
+      "adapter": "claude_code_agent",
+      "model": "opus",
+      "tools": "default",
+      "parameters": {}
+    }
+  },
+  "workflows": {
+    "code_edit": {
+      "pattern": "draft_then_adjudicate"
+    },
+    "code_edit_aggressive": {
+      "pattern": "draft_then_adjudicate",
+      "role_overrides": {
+        "drafter": { "model": "deepseek-v4-pro" }
       }
     }
   }
 }
 ```
 
-For multi-role patterns, each role defined by the pattern (e.g.
-`drafter`, `adjudicator`, `editor` for `draft_then_adjudicate`) gets
-its own entry under `roles`.
+Override values replace top-level values entirely. A `parameters`
+override replaces the whole dict, not individual keys. Overrides are
+only valid on top of an existing top-level binding; an override that
+references a role with no top-level entry is a load error.
 
 ### Role-binding keys
 
@@ -189,6 +228,11 @@ contracts. The distinction between text role and edit-agent role is
 captured by which adapter is named, plus the `tools` key (absent for
 text roles, restricted by adapter implementation; present for
 edit-agent roles, defaulting to McLoop's current tool set).
+
+The legacy per-workflow `roles` block (where each workflow restated
+its bindings) is no longer accepted. Configs that still embed `roles`
+inside a workflow entry fail to load with a clear migration message
+pointing at the proposal doc.
 
 ## Step 4: first integration
 
