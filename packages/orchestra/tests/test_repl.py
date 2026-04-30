@@ -280,6 +280,72 @@ def test_handle_query_error_keeps_state_unchanged(
     assert state.turns == []
 
 
+def test_handle_query_first_word_verb_routes_per_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the first word matches a configured verb, that word is
+    the per-turn dispatcher and the remainder of the line is the
+    query. The session's current_verb does not change."""
+    state = _state_with_turns()  # current_verb is "ask" in _config()
+    captured: dict[str, Any] = {}
+
+    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+        captured["verb"] = verb
+        captured["query"] = query
+        return "deliberated answer"
+
+    monkeypatch.setattr(repl, "run_verb", _stub)
+    repl.handle_query(state, "council should I rewrite this in rust")
+    assert captured["verb"] == "council"
+    assert captured["query"] == "should I rewrite this in rust"
+    # The recorded turn matches what the model actually saw, not
+    # what the user typed including the dispatcher word.
+    assert state.turns[-1].verb == "council"
+    assert state.turns[-1].query == "should I rewrite this in rust"
+    # current_verb is unchanged: per-turn dispatch only.
+    assert state.current_verb == "ask"
+
+
+def test_handle_query_verb_only_with_no_query_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A line that is just a verb name with no following words
+    prints a usage hint to stderr and does not invoke the verb."""
+    state = _state_with_turns()
+    monkeypatch.setattr(
+        repl,
+        "run_verb",
+        lambda *a, **k: pytest.fail("run_verb should not fire"),
+    )
+    repl.handle_query(state, "council")
+    err = capsys.readouterr().err
+    assert "usage: council <query>" in err
+    assert state.turns == []
+
+
+def test_handle_query_unknown_first_word_falls_back_to_current_verb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A line whose first word is not a configured verb runs as a
+    full-line query under the session's current_verb. The legacy
+    path stays intact."""
+    state = _state_with_turns()
+    state.current_verb = "ask"
+    captured: dict[str, Any] = {}
+
+    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+        captured["verb"] = verb
+        captured["query"] = query
+        return "Paris."
+
+    monkeypatch.setattr(repl, "run_verb", _stub)
+    repl.handle_query(state, "what is the capital of france")
+    assert captured["verb"] == "ask"
+    assert captured["query"] == "what is the capital of france"
+
+
 # --------------------------------------------------------------------
 # Loop-level behavior with a fake PromptSession
 # --------------------------------------------------------------------

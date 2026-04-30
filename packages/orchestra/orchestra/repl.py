@@ -254,24 +254,40 @@ def dispatch_slash(state: ReplState, line: str) -> SlashOutcome:
 
 
 def handle_query(state: ReplState, line: str) -> None:
-    """Run ``state.current_verb`` against ``line`` plus the running
-    history. Append the resulting turn on success; print the error
-    and stay in the REPL on failure."""
+    """Run a query line against a verb, append a turn on success.
+
+    If the line's first word matches a configured verb name, that
+    word is the per-turn verb dispatcher and the rest of the line
+    is the query. The user's typed verb word is dispatcher metadata,
+    not content the model should see, so it is peeled off before
+    the prompt is built. The session's persistent ``current_verb``
+    is unchanged. The next bare-line entry still routes through
+    ``current_verb``; the user persistently switches via ``/use``.
+
+    If the first word does not match a configured verb, the line
+    is treated as a query under ``current_verb`` (the legacy path).
+
+    Errors print to stderr but do not exit the REPL.
+    """
+    parts = line.strip().split(None, 1)
+    first = parts[0] if parts else ""
+    if first in state.config.verbs:
+        verb = first
+        query = parts[1] if len(parts) > 1 else ""
+        if not query:
+            print(f"usage: {verb} <query>", file=sys.stderr)
+            return
+    else:
+        verb = state.current_verb
+        query = line
     history = format_history(state.turns)
     try:
-        answer = run_verb(
-            state.current_verb,
-            line,
-            state.config,
-            history=history,
-        )
+        answer = run_verb(verb, query, state.config, history=history)
     except OrchestraError as exc:
         print(str(exc), file=sys.stderr)
         return
     print(answer)
-    state.turns.append(
-        Turn(verb=state.current_verb, query=line, answer=answer)
-    )
+    state.turns.append(Turn(verb=verb, query=query, answer=answer))
 
 
 # --------------------------------------------------------------------
