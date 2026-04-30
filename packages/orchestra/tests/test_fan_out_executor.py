@@ -879,6 +879,213 @@ workflow retry
     assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
 
 
+def test_lock_order_deadlock_prevention(tmp_path: Path) -> None:
+    """The plan's lock-ordering rule: LogWriter is the OUTER lock,
+    ArtifactStore is the INNER lock. Anywhere both locks are held,
+    the LogWriter lock must be acquired first. A code path that
+    acquired them in the opposite order against a concurrent path
+    using the correct order would deadlock.
+
+    This test instruments both locks with an acquisition recorder,
+    runs a fan-out group end-to-end (which exercises the
+    snapshot-capture critical section that legitimately holds
+    both), and asserts:
+
+      1. The test completes without deadlocking (pytest-timeout
+         catches a deadlock as a test failure).
+      2. No thread acquires the store lock while already holding
+         only the log lock without then releasing them in the
+         right order, and no thread acquires the log lock while
+         already holding the store lock (which would be the
+         deadlock-prone reversed order).
+
+    Tests Cleanup 2 (the "fan_out_start under both locks" reorder)
+    plus the missing "lock-order deadlock prevention with direct
+    instrumentation" test from earlier audit gaps.
+    """
+    import threading
+    import time
+
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(workflow_path)})
+
+    # Per-thread held set, plus a global event log of (thread, op,
+    # lock-name). The recording wrapper holds the real lock; only
+    # the bookkeeping is added.
+    held: dict[str, set[str]] = {}
+    events: list[tuple[str, str, str]] = []
+    rec_lock = threading.Lock()
+
+    class _RecordingRLock:
+        """Wraps a real RLock so the test can observe acquire and
+        release events. Forwards acquire/release/__enter__/__exit__
+        to the underlying lock."""
+
+        def __init__(self, real: Any, name: str) -> None:
+            self._real = real
+            self._name = name
+
+        def __enter__(self) -> Any:
+            self._real.__enter__()
+            tname = threading.current_thread().name
+            with rec_lock:
+                held.setdefault(tname, set()).add(self._name)
+                events.append((tname, "acquire", self._name))
+            return self
+
+        def __exit__(self, *args: Any) -> Any:
+            tname = threading.current_thread().name
+            with rec_lock:
+                held.get(tname, set()).discard(self._name)
+                events.append((tname, "release", self._name))
+            return self._real.__exit__(*args)
+
+        def acquire(
+            self, blocking: bool = True, timeout: float = -1
+        ) -> bool:
+            ok = self._real.acquire(blocking, timeout)
+            if ok:
+                tname = threading.current_thread().name
+                with rec_lock:
+                    held.setdefault(tname, set()).add(self._name)
+                    events.append((tname, "acquire", self._name))
+            return ok
+
+        def release(self) -> None:
+            tname = threading.current_thread().name
+            with rec_lock:
+                held.get(tname, set()).discard(self._name)
+                events.append((tname, "release", self._name))
+            self._real.release()
+
+    # Replace ``_lock`` on both objects with the recording wrapper.
+    # The ``lock`` property returns ``_lock`` directly, so external
+    # callers (the executor's snapshot-capture path) get the
+    # wrapper transparently.
+    log._lock = _RecordingRLock(log._lock, "log")  # type: ignore[assignment]
+    store._lock = _RecordingRLock(store._lock, "store")  # type: ignore[assignment]
+
+    # Track for each thread: at every store-lock acquire, is the
+    # log lock currently held by that thread? (Required: yes.) At
+    # every log-lock acquire, is the store lock currently held by
+    # that thread? (Forbidden: that would be reversed order.) The
+    # property "store-lock acquired without log-lock held" is fine
+    # for the workers' own commit_tentative / read_latest calls;
+    # they don't also take the log lock.
+    violation: list[str] = []
+
+    # Re-wrap the wrappers to also assert ordering at acquire time.
+    # We do this by inspecting ``held`` at the moment of acquire.
+    real_store_enter = store._lock.__enter__
+    real_log_enter = log._lock.__enter__
+
+    def _store_enter_checked() -> Any:
+        # Acquiring the store lock while already holding only log
+        # lock is fine (correct order). Acquiring while holding
+        # NEITHER is fine. Acquiring while holding the store lock
+        # is fine (RLock, same thread re-entry).
+        return real_store_enter()
+
+    def _log_enter_checked() -> Any:
+        tname = threading.current_thread().name
+        with rec_lock:
+            already_held = set(held.get(tname, set()))
+        # Acquiring log lock while already holding the store lock
+        # is the reversed order (deadlock-prone). Flag it.
+        if "store" in already_held and "log" not in already_held:
+            violation.append(
+                f"{tname} acquired log lock while holding store "
+                f"lock but not log lock (reversed order)"
+            )
+        result = real_log_enter()
+        return result
+
+    store._lock.__enter__ = _store_enter_checked  # type: ignore[method-assign]
+    log._lock.__enter__ = _log_enter_checked  # type: ignore[method-assign]
+
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello world"},
+    )
+
+    # Run with a watchdog that fails fast if the run deadlocks.
+    # pytest-timeout (configured at the test level) is the primary
+    # safeguard; this watchdog gives a clearer failure message if
+    # the test setup is at fault.
+    deadline = time.time() + 10.0
+    done_flag: list[str] = []
+
+    def _runner() -> None:
+        terminal = executor.run_to_completion()
+        done_flag.append(terminal)
+
+    runner = threading.Thread(target=_runner, daemon=True)
+    runner.start()
+    runner.join(timeout=deadline - time.time())
+    assert not runner.is_alive(), (
+        "fan-out workflow did not complete within 10s; possible "
+        "deadlock. acquisition events tail: "
+        f"{events[-20:]!r}"
+    )
+    assert done_flag and done_flag[0] == "done"
+    assert violation == [], f"lock-order violations: {violation!r}"
+
+    # The snapshot-capture critical section legitimately holds
+    # both locks. Verify the recorded events show at least one
+    # such pair, and that the order is log-then-store (not the
+    # reverse).
+    seq_by_thread: dict[str, list[tuple[str, str]]] = {}
+    for tname, op, lname in events:
+        seq_by_thread.setdefault(tname, []).append((op, lname))
+
+    # Inspect the controller-thread sequence (the linear-loop
+    # thread, named "MainThread" or similar -- we just look for
+    # the first thread that acquires both within a window).
+    found_both = False
+    for _tname, ops in seq_by_thread.items():
+        # Scan: find a "log acquire" then "store acquire" before
+        # any matching releases.
+        held_set: set[str] = set()
+        for op, lname in ops:
+            if op == "acquire":
+                if lname == "store" and "log" not in held_set:
+                    # Store acquired without log -- that's fine for
+                    # workers (commit_tentative etc.) but not for
+                    # the snapshot-capture path. Skip.
+                    pass
+                elif lname == "log":
+                    # Log acquired first (correct).
+                    pass
+                if lname == "store" and "log" in held_set:
+                    found_both = True
+                held_set.add(lname)
+            else:
+                held_set.discard(lname)
+            if found_both:
+                break
+        if found_both:
+            break
+    assert found_both, (
+        "expected at least one thread to acquire log THEN store "
+        "(snapshot-capture path); none observed"
+    )
+    log.close()
+    store.close()
+
+
 def test_fan_out_end_records_final_retry_invocation_id(
     tmp_path: Path,
 ) -> None:

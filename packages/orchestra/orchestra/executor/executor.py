@@ -852,6 +852,13 @@ class Executor:
         """
         # Step 1 + 2: snapshot capture and fan_out_start under the
         # LogWriter-then-store lock-ordering rule.
+        #
+        # Cleanup 2: fan_out_start is appended while BOTH locks are
+        # held (LogWriter outer, store inner). Releasing the store
+        # lock before the log write would let another thread mutate
+        # the store between snapshot capture and the durable
+        # fan_out_start record; per the spec the snapshot and the
+        # log record sit in one critical section.
         with self._log.lock:
             with self._store.lock:
                 snapshot_envelopes = {
@@ -863,17 +870,17 @@ class Executor:
                     v = self._store.read_latest(art.name)
                     if v is not None:
                         snapshot_artifacts[art.name] = v.value
-            self._log.write(
-                "fan_out_start",
-                state_id=parent_state.name,
-                attempt=parent_envelope.attempt,
-                fields={
-                    "parent_state": parent_state.name,
-                    "children": list(transition.fan_out),
-                    "join_target": transition.target,
-                    "error_target": transition.error_target,
-                },
-            )
+                self._log.write(
+                    "fan_out_start",
+                    state_id=parent_state.name,
+                    attempt=parent_envelope.attempt,
+                    fields={
+                        "parent_state": parent_state.name,
+                        "children": list(transition.fan_out),
+                        "join_target": transition.target,
+                        "error_target": transition.error_target,
+                    },
+                )
 
         registry = _CancellationRegistry()
         for child_name in transition.fan_out:
