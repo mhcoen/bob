@@ -1,43 +1,126 @@
 # Orchestra
 
-Orchestra organizes, coordinates, and directs interacting LLMs. It
-is a meta-language and runtime for declaring multi-model workflows,
-where models propose, critique, arbitrate, draft, and adjudicate
-under deterministic control.
+Orchestra is two things in one package:
 
-A deterministic shell around stochastic actors. The state machine,
-artifact store, log, and replay are deterministic and auditable.
-The nondeterminism lives at the adapter boundary, where it belongs.
+- **A command-line tool** for asking multiple LLMs to deliberate on a
+  question. You type a verb and a question; orchestra runs a workflow
+  of one or more models and prints the answer.
+- **A Python library** for embedding multi-model workflows inside other
+  tools. Other applications (like McLoop, an autonomous coding loop)
+  call into orchestra at decision points where one model isn't enough.
 
-Workflows are declarative `.orc` files that name states, roles, and
-transitions. Models, prompts, and parameters are configuration, not
-code. Swapping a single-model edit for a draft-then-adjudicate
+Both surfaces share the same workflow definitions, the same model
+adapters, and the same configuration file. Configure once, use
+everywhere.
+
+## What it looks like
+
+A simple question, answered by one model:
+
+```
+$ orchestra ask what is the capital of france
+Paris.
+```
+
+The same question routed through a council of three models that
+propose, critique, and synthesize:
+
+```
+$ orchestra council should I rewrite this service in rust or stay in go
+[council answer text, written after a proposer model drafts a take,
+a critic model challenges it, and a synthesizer model produces the
+final response]
+```
+
+A pair pattern where one model drafts and a second adjudicates before
+the final answer:
+
+```
+$ orchestra pair explain liskov substitution to someone who knows oop basics
+[final answer, after a drafter and an adjudicator]
+```
+
+No quotes around the question. The CLI takes the verb plus the rest
+of the line. The model's text response is the only thing printed; the
+full multi-model log lands at `~/.orchestra/runs/<run_id>/log.jsonl`
+if you ever need to see the intermediate steps.
+
+## Why it exists
+
+Single-model loops are brittle. Models confidently produce wrong
+answers, miss edge cases, fixate on bad approaches. The fix is having
+a second (or third) model in the loop: drafting, critiquing,
+arbitrating. But hand-built multi-model glue gets messy fast — every
+project ends up with its own ad-hoc shell scripts.
+
+Orchestra makes the multi-model pattern itself a first-class
+declarative thing. A workflow is a `.orc` file with named states,
+roles, and transitions. Models, prompts, and parameters are
+configuration. Swapping a single-model edit for a draft-then-adjudicate
 council is a config change, not a rewrite.
 
-Orchestra is invoked at decision points by other tools (McLoop,
-Duplo) where a single-agent loop is too brittle, and is also usable
-directly via a verb-style CLI for ad-hoc multi-model questions.
+A deterministic shell around stochastic actors. The state machine,
+artifact store, log, and replay are deterministic and auditable. The
+nondeterminism lives at the adapter boundary, where it belongs.
 
-## Status
+## Quick start
 
-The runner spine is in place: loader, validator, profile registry,
-artifact store, executor, logger, resume. Real adapters for Claude
-Code (text-role and edit-agent variants) are wired and tested. The
-library API (`orchestra.run_workflow`) is shipped along with a
-verb-style CLI (`orchestra ask`, `orchestra council`, `orchestra
-pair`) and a direct workflow execution CLI (`orchestra run` /
-`orchestra resume`).
+Install:
 
-McLoop's code-edit decision point integrates through `run_workflow`,
-verified by a parity smoke test against the legacy direct path.
+```
+pip install -e '.[dev]'
+```
 
-Configuration is layered: a global `~/.orchestra/config.json`
-defines the default roles, verbs, and workflows, and an optional
-project-local `<project>/.orchestra/config.json` overrides specific
-entries per project.
+Create `~/.orchestra/config.json`:
 
-Six workflow patterns ship as packaged `.orc` files. Three are for
-code edits, where the final state mutates the workspace:
+```json
+{
+  "verbs": {
+    "ask":     { "workflow": "ask_single" },
+    "council": { "workflow": "ask_propose_critique_synthesize" },
+    "pair":    { "workflow": "ask_draft_then_adjudicate" }
+  },
+  "roles": {
+    "editor":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
+  },
+  "workflows": {
+    "ask_single":                       { "pattern": "ask_single" },
+    "ask_propose_critique_synthesize":  { "pattern": "ask_propose_critique_synthesize" },
+    "ask_draft_then_adjudicate":        { "pattern": "ask_draft_then_adjudicate" }
+  }
+}
+```
+
+Try it:
+
+```
+orchestra help
+orchestra ask what is the capital of france
+orchestra council should I rewrite this in rust
+```
+
+That's the whole CLI surface for ad-hoc questions.
+
+## Workflow patterns
+
+Six packaged patterns ship out of the box. Three are conversational
+(used by the verb CLI):
+
+- `ask_single`: one model produces the answer. Useful for quick
+  factual queries where deliberation isn't worth the latency.
+- `ask_draft_then_adjudicate`: one model drafts an answer, a second
+  rewrites or refines it, a third produces the final response. The
+  middle role catches obvious mistakes before they ship.
+- `ask_propose_critique_synthesize`: a proposer drafts a take, a
+  critic argues against it, a synthesizer reconciles. Useful for
+  contested or open-ended questions.
+
+Three are code-edit (used by McLoop and other coding tools):
 
 - `single`: one edit-agent performs the edit.
 - `draft_then_adjudicate`: text-role drafts, text-role adjudicates,
@@ -46,27 +129,89 @@ code edits, where the final state mutates the workspace:
   critiques, text-role synthesizes, one edit-agent performs the
   edit.
 
-Three are ask-flavored variants used by the verb CLI. They are
-read-only; no workspace is touched:
-
-- `ask_single`: one model produces the answer.
-- `ask_draft_then_adjudicate`: drafter, adjudicator, editor (all
-  text-role).
-- `ask_propose_critique_synthesize`: proposer, critic, synthesizer,
-  editor (all text-role).
-
 For the code-edit workflows, exactly one invocation per orchestra
-call mutates the workspace; earlier roles are advisory.
+call mutates the workspace; earlier roles are advisory. The ask
+variants are read-only.
+
+You can write your own `.orc` files too. The grammar is documented
+in `design/orchestra-grammar.md`.
+
+## Configuration
+
+Orchestra reads up to two config files and merges them:
+
+1. `~/.orchestra/config.json` (global). Defines roles, verbs, and
+   workflows shared across all projects.
+2. `<project>/.orchestra/config.json` (project, optional). Overrides
+   specific entries.
+
+The merge rule is replace, not nest: a role or verb or workflow
+defined in the project config replaces the global entry of the same
+name in full. Entries the project does not redefine are inherited
+from the global.
+
+A project that wants to override only the editor model:
+
+```json
+{
+  "roles": {
+    "editor": {
+      "adapter": "claude_code_text",
+      "model": "deepseek-v4-pro",
+      "parameters": {}
+    }
+  }
+}
+```
+
+That project keeps every other role from the global config and just
+swaps the editor's binding for itself. The CLI and any library
+consumer (McLoop, Duplo, your own tool) both pick up the merged
+view, so the override applies consistently across consumers.
+
+### Verbs
+
+Verb names in `~/.orchestra/config.json` are user-defined. Rename,
+add, or remove freely. Each verb just names which workflow runs.
+
+```json
+"verbs": {
+  "fast":    { "workflow": "ask_single" },
+  "careful": { "workflow": "ask_propose_critique_synthesize" }
+}
+```
+
+Then `orchestra fast ...` and `orchestra careful ...` work.
+
+### Roles
+
+A role binding has three required keys (plus an optional fourth):
+
+- `adapter`: which adapter implementation to use. Currently shipped:
+  `claude_code_text` (read-only Claude Code, used for text-role
+  states) and `claude_code_agent` (full edit-capable Claude Code,
+  used for edit-agent states).
+- `model`: model name passed to the adapter (e.g. `opus`, `sonnet`,
+  `kimi-k2.6`, `deepseek-v4-pro`).
+- `parameters`: adapter-specific extras, usually `{}`.
+- `tools` (edit-agent roles only): tool restriction for the agent,
+  e.g. `"default"` for the standard McLoop tool set.
+
+### Help
+
+```
+orchestra
+orchestra help
+```
+
+Lists every configured verb plus the workflow it runs.
+`orchestra help <verb>` shows the required roles and the binding
+configured for each, flagging any role with no binding as
+`NOT CONFIGURED`.
 
 ## Library use
 
-Install:
-
-```
-pip install -e '.[dev]'
-```
-
-Call from Python:
+Embed orchestra in another tool by importing `run_workflow`:
 
 ```python
 from pathlib import Path
@@ -106,112 +251,20 @@ defaults to the `single` pattern with a default editor binding so
 that consumers like McLoop work out of the box without any
 configuration.
 
-## CLI use
+McLoop integrates through this surface. See
+`design/orchestra-mcloop-integration-plan.md` for the contract.
 
-Two surfaces: the verb-style surface (short, conversational) and the
-direct execution surface (`run` / `resume`).
+## Direct workflow execution
 
-### Verb-style
-
-Type a verb and a question. Orchestra reads `~/.orchestra/config.json`,
-maps the verb to a workflow, and runs it with the rest of the line as
-the query.
+Bypass verbs and run a workflow file directly:
 
 ```
-orchestra ask what is the capital of france
-orchestra council should I rewrite this in rust
-orchestra pair explain the difference between liskov and dependency inversion
-```
-
-The model's text response prints to stdout. Nothing else: no run
-ids, no run-dir paths, no terminal-state debug. The full log still
-lands at `~/.orchestra/runs/<run_id>/log.jsonl` for forensics.
-
-### Configuring verbs
-
-Drop a config at `~/.orchestra/config.json` with a `verbs` table that
-maps verb names to workflow names, plus the `roles` and `workflows`
-the schema documents:
-
-```json
-{
-  "verbs": {
-    "ask":     { "workflow": "ask_single" },
-    "council": { "workflow": "ask_propose_critique_synthesize" },
-    "pair":    { "workflow": "ask_draft_then_adjudicate" }
-  },
-  "roles": {
-    "editor":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
-  },
-  "workflows": {
-    "ask_single":                       { "pattern": "ask_single" },
-    "ask_propose_critique_synthesize":  { "pattern": "ask_propose_critique_synthesize" },
-    "ask_draft_then_adjudicate":        { "pattern": "ask_draft_then_adjudicate" }
-  }
-}
-```
-
-Verb names are user-defined. Rename, add, or remove freely. Each
-verb just names which workflow runs.
-
-### Global plus project configs
-
-Orchestra reads up to two config files and merges them into a single
-view:
-
-1. `~/.orchestra/config.json` (global). Defines roles, verbs, and
-   workflows shared across projects.
-2. `<project>/.orchestra/config.json` (project, optional). Replaces
-   specific entries from the global on a per-key basis.
-
-The merge rule is replace, not nest: a role or verb or workflow
-defined in the project config replaces the global entry of the same
-name in full. Entries the project does not redefine are inherited
-from the global.
-
-A project that wants to override only the editor model:
-
-```json
-{
-  "roles": {
-    "editor": {
-      "adapter": "claude_code_text",
-      "model": "deepseek-v4-pro",
-      "parameters": {}
-    }
-  }
-}
-```
-
-That project keeps every other role from the global config and just
-swaps the editor's binding for itself. McLoop's
-`invoke_code_edit(project_dir=...)` and the verb CLI both consume
-the merged view, so the override applies consistently across
-consumers.
-
-### Help
-
-```
-orchestra help
-```
-
-Lists every configured verb plus the workflow it runs. `orchestra
-help <verb>` shows the required roles and the binding configured for
-each, flagging any role with no binding as `NOT CONFIGURED`.
-
-### Direct execution
-
-Bypass verbs and run a workflow file directly.
-
-```
-orchestra run tests/fixtures/slice1/echo.orc --input topic="hello world"
+orchestra run path/to/workflow.orc --input key=value
 orchestra resume <run_id>
 ```
+
+Useful for running custom `.orc` files that aren't named in a verb
+binding, or for debugging workflows.
 
 ## Layout
 
