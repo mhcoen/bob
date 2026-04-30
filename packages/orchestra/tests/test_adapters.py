@@ -398,6 +398,137 @@ def test_extract_final_text_falls_through_when_result_is_empty_string() -> None:
     assert extract_final_text("\n".join(lines)) == "Yes. Sleep is good."
 
 
+def test_empty_result_falls_through_to_deltas() -> None:
+    """Real-shape regression for run a4deee595138 (kimi-k2.6 via
+    moonshotai/Parasail). The proposer subprocess emits a thinking
+    content block at index 0, an answer text block at index 1 with
+    content_block_delta events carrying the actual answer, a
+    redacted_thinking block at index 2, and a final result record
+    with result == "". The previous helper returned "" because rule 1
+    accepted any string-typed result.result; now the empty result
+    falls through to rule 2 and the deltas at index 1 are
+    concatenated as the answer."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    answer_text = (
+        " Yes. Go to sleep early. Adequate rest is more valuable "
+        "than whatever you would get done while tired."
+    )
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        # Thinking block at index 0 (the model's reasoning, not part
+        # of the answer). Some providers stream this as text_delta on
+        # the thinking block. The current helper accepts every
+        # text_delta delta in order; this test fixture only emits
+        # text_delta on the answer block at index 1 so the resolver
+        # picks up the answer text.
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "thinking"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {"type": "content_block_stop", "index": 0},
+            }
+        ),
+        # Answer text block at index 1.
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {"type": "text"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 1,
+                    "delta": {"type": "text_delta", "text": answer_text},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {"type": "content_block_stop", "index": 1},
+            }
+        ),
+        # Redacted thinking at index 2 (no text_delta emitted).
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 2,
+                    "content_block": {"type": "redacted_thinking"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {"type": "content_block_stop", "index": 2},
+            }
+        ),
+        # Final result record with empty result. This is the kimi
+        # quirk: result.result is "" while the actual answer lives in
+        # the deltas above.
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "",
+                "stop_reason": "end_turn",
+            }
+        ),
+    ]
+    transcript = "\n".join(lines) + "\n"
+    assert extract_final_text(transcript) == answer_text
+
+
+def test_empty_result_with_no_deltas_falls_through_to_raw() -> None:
+    """When the final result.result is empty AND no
+    content_block_delta events emitted any text, the resolver falls
+    through to rule 3 (raw passthrough). Confirms the empty-result-
+    treated-as-missing behavior is consistent across both fallback
+    rules."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "",
+                "stop_reason": "end_turn",
+            }
+        ),
+    ]
+    transcript = "\n".join(lines) + "\n"
+    # No deltas to fall back to. Rule 3 returns the raw input so the
+    # caller still has something to inspect.
+    assert extract_final_text(transcript) == transcript
+
+
 def test_extract_final_text_ignores_non_text_deltas() -> None:
     """Tool-use deltas should not pollute the final text."""
     import json
