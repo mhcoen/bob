@@ -746,11 +746,18 @@ class Executor:
                 )
                 rows = cur.fetchall()
                 seqs = [r[0] for r in rows]
+                # FK ordering: ``tentative_handles.seq`` references
+                # ``versions.seq``. Under ``PRAGMA foreign_keys=ON``
+                # the parent must be deleted AFTER the child,
+                # otherwise the child delete fails with an
+                # IntegrityError. ``store.discard_tentative`` does
+                # the same thing (handle row first, then version
+                # row); mirror that order here.
                 for seq in seqs:
-                    cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
                     cur.execute(
                         "DELETE FROM tentative_handles WHERE seq = ?", (seq,)
                     )
+                    cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
                 conn.commit()
             except Exception:
                 conn.rollback()

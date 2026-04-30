@@ -1282,3 +1282,76 @@ def test_resume_visibility_log_wins_over_persisted_json(
     # (taken AFTER resume) and the phantom entry is gone.
     assert snapshot.get(a_inv) == "success"
     assert "phantom-run::ghost::1" not in snapshot
+
+
+def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
+    """``Executor._discard_stale_tentatives`` deletes tentative rows
+    left over from a crashed prior attempt. The store has
+    ``PRAGMA foreign_keys=ON``, and ``tentative_handles.seq``
+    references ``versions.seq``: deleting ``versions`` first violates
+    the FK and raises IntegrityError. The fix mirrors
+    ``store.discard_tentative``: delete the handle row first, then
+    the version row.
+
+    Tests Follow-up 1.
+    """
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(workflow_path)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+
+    # Stage a tentative write attributed to advise_a's first attempt
+    # but never commit or discard. This simulates a crash that
+    # interrupted between ``tentative_write`` and ``commit_tentative``.
+    store.tentative_write(
+        "a_out",
+        "tentative leftover",
+        written_by="advise_a#1",
+        invocation_id=f"{run_id}::advise_a::1",
+    )
+
+    # Sanity: the tentative row is staged.
+    cur = store._conn.cursor()
+    pre_versions = cur.execute(
+        "SELECT seq FROM versions WHERE is_tentative = 1 "
+        "AND written_by LIKE 'advise_a#%'"
+    ).fetchall()
+    assert len(pre_versions) == 1
+    pre_handles = cur.execute(
+        "SELECT seq FROM tentative_handles"
+    ).fetchall()
+    assert len(pre_handles) == 1
+
+    # The discard must not raise: under FK=ON, the wrong delete
+    # order would trip ``IntegrityError``. The fix mirrors
+    # store.discard_tentative's handle-first-then-version order.
+    executor._discard_stale_tentatives("advise_a", attempt=2)
+
+    # Both rows are gone.
+    post_versions = cur.execute(
+        "SELECT seq FROM versions WHERE is_tentative = 1 "
+        "AND written_by LIKE 'advise_a#%'"
+    ).fetchall()
+    assert len(post_versions) == 0
+    post_handles = cur.execute(
+        "SELECT seq FROM tentative_handles"
+    ).fetchall()
+    assert len(post_handles) == 0
+
+    log.close()
+    store.close()
