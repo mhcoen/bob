@@ -14,6 +14,7 @@ from mcloop.lifecycle import (
     _kill_active_process,
     _kill_orphan_sessions,
     _save_interrupt_state,
+    _unlink_active_pid_file,
     _write_eliminated_json,
     _write_ruledout_to_plan,
     register_signal_handlers,
@@ -661,6 +662,101 @@ def test_save_interrupt_state_noop_when_no_project():
         _save_interrupt_state()
     finally:
         lifecycle_mod._project_dir = orig
+
+
+# ── _unlink_active_pid_file ──
+
+
+def test_unlink_active_pid_file_removes_existing_file(tmp_path):
+    """Removes .mcloop/active-pid when it exists.
+
+    The signal handler calls this after _graceful_kill_active_process
+    so the on-disk PID record does not survive a clean interrupt and
+    get picked up as an orphan on next startup.
+    """
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text('{"pid": 12345}\n')
+    assert pid_file.exists()
+
+    orig = lifecycle_mod._project_dir
+    try:
+        lifecycle_mod._project_dir = tmp_path
+        _unlink_active_pid_file()
+    finally:
+        lifecycle_mod._project_dir = orig
+
+    assert not pid_file.exists()
+
+
+def test_unlink_active_pid_file_noop_when_no_file(tmp_path):
+    """No error when .mcloop/active-pid is already absent."""
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    assert not pid_file.exists()
+
+    orig = lifecycle_mod._project_dir
+    try:
+        lifecycle_mod._project_dir = tmp_path
+        _unlink_active_pid_file()
+    finally:
+        lifecycle_mod._project_dir = orig
+
+    assert not pid_file.exists()
+
+
+def test_unlink_active_pid_file_noop_when_no_project():
+    """No-op when _project_dir is None.
+
+    The signal handler can fire before run_loop has had a chance to
+    register a project directory (e.g. during very early startup).
+    The helper must not crash in that case.
+    """
+    orig = lifecycle_mod._project_dir
+    try:
+        lifecycle_mod._project_dir = None
+        _unlink_active_pid_file()
+    finally:
+        lifecycle_mod._project_dir = orig
+
+
+def test_register_signal_handlers_unlinks_active_pid(tmp_path):
+    """The signal handler removes .mcloop/active-pid before exiting.
+
+    Exercises the full handler flow: interrupt arrives, handler runs
+    save/cleanup/graceful-kill, then unlinks the PID file, then
+    would call os._exit(130). os._exit is patched so the test can
+    observe the file system after the handler returns.
+    """
+    mcloop_dir = tmp_path / ".mcloop"
+    mcloop_dir.mkdir()
+    pid_file = mcloop_dir / "active-pid"
+    pid_file.write_text('{"pid": 99999}\n')
+
+    process_ref = MagicMock()
+    process_ref._interrupted = False
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    orig_project = lifecycle_mod._project_dir
+    try:
+        lifecycle_mod._project_dir = tmp_path
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit"),
+        ):
+            handler(signal.SIGINT, None)
+        assert not pid_file.exists()
+    finally:
+        lifecycle_mod._project_dir = orig_project
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
 
 
 # ── _check_interrupted ──

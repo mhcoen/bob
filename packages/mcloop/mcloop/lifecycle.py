@@ -55,6 +55,24 @@ def _save_interrupt_state() -> None:
         pass
 
 
+def _unlink_active_pid_file() -> None:
+    """Remove .mcloop/active-pid after the signal handler has killed
+    the active subprocess group. The file is mcloop's record of an
+    in-flight inner CLI subprocess; once we have killed it, the file
+    no longer refers to anything live and should not persist on disk
+    to be detected by the orphan-cleanup path on next startup. The
+    orphan cleanup remains the safety net for unclean death (kill -9,
+    OOM, power loss); this helper handles the clean-interrupt case.
+    """
+    if _project_dir is None:
+        return
+    pid_file = _project_dir / ".mcloop" / "active-pid"
+    try:
+        pid_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _check_interrupted(
     project_dir: Path,
     checklist_path: Path,
@@ -387,6 +405,7 @@ def register_signal_handlers(
         if cleanup_callback is not None:
             cleanup_callback()  # type: ignore[operator]
         _graceful_kill_active_process()
+        _unlink_active_pid_file()
         print("State saved. Exiting.", flush=True)
         os._exit(130)
 
