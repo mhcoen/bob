@@ -535,6 +535,7 @@ def test_fan_out_sibling_reads_use_snapshot_not_live_store(
     Tests Blocker 1's snapshot threading.
     """
     import threading
+    import time
 
     from orchestra.adapters.mock_model import MockModelAdapter
 
@@ -611,12 +612,9 @@ workflow sib
     registry = with_core()
     workflow = load_workflow(src, registry)
 
-    # An adapter that signals "fast" is done, then sleeps inside
-    # "slow" until the test confirms fast has reached state_exit. The
-    # adapter records every prepared invocation's reads dict so the
-    # test can inspect what the slow child actually saw.
+    # The adapter records every prepared invocation's reads dict so
+    # the test can inspect what each child actually saw.
     fast_done = threading.Event()
-    slow_started = threading.Event()
     invocations: list[tuple[str, dict[str, Any]]] = []
     inv_lock = threading.Lock()
 
@@ -625,18 +623,23 @@ workflow sib
             model_id = prepared.summary.get("model")
             with inv_lock:
                 invocations.append((str(model_id), prepared.request.reads))
+            if model_id == "m_fast":
+                # Run fast first, then signal slow to proceed.
+                result = super().invoke(prepared)
+                # Note: state_exit and the artifact commit have not
+                # yet happened at this point inside invoke; the
+                # commit lands shortly after invoke returns. The
+                # ``fast_done`` event is set in fast's adapter cancel
+                # hook below, after the worker has finished.
+                return result
             if model_id == "m_slow":
-                slow_started.set()
-                # Wait for fast to reach durable state_exit (its
-                # invocation completed). If the snapshot threading
-                # is correct, slow's read of fast_out has ALREADY
-                # been resolved (against the snapshot) before this
-                # adapter call begins, so even though we wait now,
-                # the prepared.request.reads has already been
-                # captured.
+                # Slow waits for fast to reach a durable state_exit
+                # before continuing inside invoke. Even if a buggy
+                # implementation reached past _read_artifacts to
+                # call store.read_latest, the wrap below records the
+                # call and blocks until fast_done so the test can
+                # observe both the call and (if any) returned value.
                 fast_done.wait(timeout=5)
-            elif model_id == "m_fast":
-                fast_done.set()
             return super().invoke(prepared)
 
     registry.actor_backings["model"] = lambda: _Recording()
@@ -646,6 +649,31 @@ workflow sib
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     store = _initialize_store(workflow, run_dir / "store.sqlite")
+
+    # Test rigor (TEST GAP 1): wrap ``store.read_latest`` with a
+    # per-artifact, per-thread-class call counter so the test can
+    # assert no fan-out worker hit the live store while reading its
+    # declared ``reads`` artifacts. A correct snapshot-using
+    # implementation never calls ``read_latest`` from a fan-out
+    # worker thread (the snapshot is captured on the controller
+    # thread before workers start). Other paths -- snapshot capture
+    # itself, transition selection, the linear join_state body --
+    # legitimately read the live store, but those run on the
+    # controller / linear-loop thread, not on a worker.
+    worker_read_latest_calls: dict[str, int] = {}
+    rl_lock = threading.Lock()
+    real_read_latest = store.read_latest
+
+    def _wrapped_read_latest(name: str) -> Any:
+        if threading.current_thread().name.startswith("orchestra-fan-out"):
+            with rl_lock:
+                worker_read_latest_calls[name] = (
+                    worker_read_latest_calls.get(name, 0) + 1
+                )
+        return real_read_latest(name)
+
+    store.read_latest = _wrapped_read_latest  # type: ignore[method-assign]
+
     log = LogWriter(run_dir / "log.jsonl", run_id)
     log.write("run_start", fields={"workflow_path": str(src)})
     executor = Executor(
@@ -657,10 +685,37 @@ workflow sib
         run_id=run_id,
         external_inputs={"topic": "hello"},
     )
+
+    # Helper thread: poll the log until fast's state_exit is
+    # durable, then set fast_done so slow can proceed. This places
+    # the barrier AFTER fast has a durable state_exit (per
+    # TEST GAP 1's "ensure the race the test claims to exercise
+    # actually happens").
+    def _watch_for_fast_durable() -> None:
+        log_path = run_dir / "log.jsonl"
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if log_path.exists():
+                try:
+                    records = LogReader(log_path).read_all()
+                except Exception:
+                    records = []
+                if any(
+                    r.event == "state_exit" and r.state_id == "fast"
+                    for r in records
+                ):
+                    fast_done.set()
+                    return
+            time.sleep(0.02)
+
+    watcher = threading.Thread(target=_watch_for_fast_durable, daemon=True)
+    watcher.start()
+
     terminal = executor.run_to_completion()
     log.write("run_end", fields={"terminal": terminal})
     log.close()
     store.close()
+    watcher.join(timeout=2)
     assert terminal == "done"
 
     # Find slow's recorded reads. frame_out should be populated
@@ -674,6 +729,18 @@ workflow sib
     assert slow_reads["frame_out"]["__version_id"] == "snapshot"
     assert slow_reads["fast_out"]["value"] is None
     assert slow_reads["fast_out"]["__version_id"] == ""
+
+    # TEST GAP 1: the per-thread wrap proves no live-store reads
+    # were issued FROM A WORKER THREAD for the fan-out children's
+    # declared reads. A correct snapshot-using implementation has
+    # workers consult only the snapshot dict; only the controller
+    # (snapshot capture) and the linear loop (transition selection,
+    # post-fan-out states) read the live store. Anything > 0 in
+    # this map is a worker hitting the live store.
+    assert worker_read_latest_calls == {}, (
+        f"no fan-out worker should hit the live store for any "
+        f"artifact; got {worker_read_latest_calls!r}"
+    )
 
 
 def test_fan_out_child_retry_budget_is_per_entry(tmp_path: Path) -> None:
@@ -1494,6 +1561,253 @@ def test_resume_visibility_log_wins_over_persisted_json(
     # (taken AFTER resume) and the phantom entry is gone.
     assert snapshot.get(a_inv) == "success"
     assert "phantom-run::ghost::1" not in snapshot
+
+
+def test_resume_pending_child_does_not_see_completed_sibling_output(
+    tmp_path: Path,
+) -> None:
+    """The fan-out invariant: no child sees any sibling's output,
+    regardless of when the sibling completed. After
+    ``cli.cmd_resume`` applies the log-derived VisibilityIndex, the
+    completed sibling's invocation is marked ``success`` and its
+    committed artifacts are visible to ``read_latest`` per the
+    visibility rule. ``resume_fan_out``'s reconstructed snapshot
+    must EXCLUDE those artifacts so a pending child re-entered
+    after the crash still sees only the pre-fan-out state, not the
+    completed sibling's output.
+
+    Tests Re-audit Blocker 1.
+    """
+    import threading
+
+    # Use the sibling-visibility fixture: parent ``frame`` writes
+    # ``frame_out`` before the fan-out; ``fast`` writes ``fast_out``
+    # quickly; ``slow`` declares ``reads frame_out, fast_out``.
+    # Run, then truncate so ``fast`` is durable-success and ``slow``
+    # is unstarted; resume; assert ``slow`` sees frame_out (parent,
+    # pre-fan-out) but NOT fast_out (sibling).
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow sib_resume
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_fast
+  model m_slow
+  model m_join
+  model m_abort
+  artifact frame_out text
+  artifact fast_out text
+  artifact slow_out text
+  artifact joined text
+  artifact aborted text
+  role parent_role
+    prompt template "templates/dummy.md"
+  role fast_role
+    prompt template "templates/dummy.md"
+  role slow_role
+    prompt template "templates/dummy.md"
+  role joiner
+    prompt template "templates/dummy.md"
+  role aborter
+    prompt template "templates/dummy.md"
+  state frame
+    actor model m_parent
+    role parent_role
+    reads topic
+    writes frame_out text
+    on complete fan_out [fast, slow] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state fast
+    actor model m_fast
+    role fast_role
+    reads frame_out
+    writes fast_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state slow
+    actor model m_slow
+    role slow_role
+    reads frame_out, fast_out
+    writes slow_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role joiner
+    reads fast_out, slow_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role aborter
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    # Step 1: run the workflow to completion so a real durable log
+    # exists with both fast and slow's commits. We will then
+    # truncate to simulate a crash with fast complete and slow not.
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    executor.run_to_completion()
+    log.close()
+    store.close()
+
+    log_path = run_dir / "log.jsonl"
+    # Truncate: keep fast (success) complete, drop slow's records,
+    # drop fan_out_end and everything after.
+    _filter_log_to_open_fan_out(
+        log_path,
+        keep_completed=["fast"],
+        keep_started_only=[],
+    )
+
+    # Step 2: capture what slow sees on resume by recording every
+    # prepared invocation's reads dict from the worker's
+    # InvocationRequest (which is what _read_artifacts populated).
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    slow_request_reads: dict[str, dict[str, Any]] = {}
+
+    class _Recording(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_slow":
+                slow_request_reads.update(prepared.request.reads)
+            return super().invoke(prepared)
+
+    # Step 3: also wrap read_latest to confirm that during slow's
+    # resume invocation the worker NEVER hits the live store for
+    # fast_out (which would otherwise be visible because fast's
+    # invocation_id is success in the rebuilt index).
+    workflow_resume = load_workflow(src, with_core())  # fresh registry
+    resume_registry = with_core()
+    resume_registry.actor_backings["model"] = lambda: _Recording()
+    resume_registry._adapter_cache.pop("model", None)
+
+    from orchestra.resume import replay_log
+    from orchestra.visibility import VisibilityIndex
+
+    replay = replay_log(str(log_path))
+
+    resume_store = ArtifactStore(run_dir / "store.sqlite")
+    # Per-thread call counter on read_latest (TEST GAP 1 style).
+    worker_reads: dict[str, int] = {}
+    rl_lock = threading.Lock()
+    real_read_latest = resume_store.read_latest
+
+    def _wrapped_read_latest(name: str) -> Any:
+        if threading.current_thread().name.startswith("orchestra-fan-out"):
+            with rl_lock:
+                worker_reads[name] = worker_reads.get(name, 0) + 1
+        return real_read_latest(name)
+
+    resume_store.read_latest = _wrapped_read_latest  # type: ignore[method-assign]
+
+    resume_log = LogWriter(
+        log_path, replay.last_run_id, start_seq=replay.next_seq
+    )
+    visibility_index = VisibilityIndex(
+        persist_path=run_dir / "visibility.json"
+    )
+    visibility_index.replace_from(replay.visibility_statuses)
+
+    # Sanity: the visibility index marks fast's invocation as
+    # success, so a naive ``read_latest("fast_out")`` would return
+    # the committed value (we are exercising the path the bug
+    # makes vulnerable).
+    fast_inv_id = next(
+        inv for inv, status in replay.visibility_statuses.items()
+        if "::fast::" in inv and status == "success"
+    )
+    assert visibility_index.status(fast_inv_id) == "success"
+    naive_fast_read = real_read_latest("fast_out")
+    assert naive_fast_read is not None and naive_fast_read.value is not None
+
+    resume_executor = Executor(
+        workflow=workflow_resume,
+        registry=resume_registry,
+        store=resume_store,
+        log=resume_log,
+        run_dir=run_dir,
+        run_id=replay.last_run_id,
+        external_inputs={"topic": "hello"},
+        attempts=replay.attempts,
+        retries=replay.retries,
+        envelopes=replay.envelopes,
+        current_state=replay.current_state,
+        step_count=replay.step_count,
+        visibility_index=visibility_index,
+    )
+
+    assert replay.open_fan_out is not None
+    of = replay.open_fan_out
+    children_list = [str(c) for c in of["children"]]
+    completed = {
+        n: env
+        for n, env in replay.envelopes.items()
+        if n in children_list
+    }
+    resume_executor.resume_fan_out(
+        parent_state_name=str(of["parent_state"]),
+        children=children_list,
+        join_target=str(of["join_target"]),
+        error_target=str(of["error_target"]),
+        completed_children=completed,
+    )
+    resume_executor.run_to_completion()
+    resume_log.close()
+    resume_store.close()
+
+    # frame_out is visible (parent ran before fan-out; not a
+    # completed sibling of THIS fan-out group's children).
+    assert slow_request_reads["frame_out"]["value"] is not None
+    assert slow_request_reads["frame_out"]["__version_id"] == "snapshot"
+    # fast_out is NOT visible: fast is a completed sibling of this
+    # group, and the fix excludes it from the reconstructed
+    # snapshot. Without the fix, slow would see fast's committed
+    # value here.
+    assert slow_request_reads["fast_out"]["value"] is None, (
+        f"slow saw fast_out's committed value, violating the "
+        f"sibling-visibility rule on resume; got "
+        f"{slow_request_reads['fast_out']!r}"
+    )
+    assert slow_request_reads["fast_out"]["__version_id"] == ""
+
+    # No worker thread hit the live store: snapshot threading still
+    # holds across the resume path.
+    assert worker_reads == {}, (
+        f"no fan-out worker should hit the live store on resume; "
+        f"got {worker_reads!r}"
+    )
 
 
 def test_resume_open_fan_out_with_errored_completed_child_does_not_launch_pending(

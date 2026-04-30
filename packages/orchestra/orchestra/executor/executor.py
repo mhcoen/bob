@@ -1005,23 +1005,42 @@ class Executor:
         """
         parent_state = self._wf.state(parent_state_name)
 
-        # Reconstruct the snapshot from currently-visible artifacts
-        # and envelopes. The VisibilityIndex was rebuilt from the
-        # log before this method was called, so the snapshot
-        # reflects only producers whose state_exit was durable; this
-        # is equivalent to the snapshot the original fan_out_start
-        # would have captured.
+        # Re-audit RA-B1: reconstruct the snapshot from currently-
+        # visible artifacts and envelopes, but EXCLUDE every
+        # completed fan-out sibling from this group. The
+        # VisibilityIndex (rebuilt from the log) marks completed
+        # siblings as ``success`` so their committed artifacts are
+        # visible to ``read_latest`` per the visibility rule. Without
+        # filtering, a pending child re-entered after the crash
+        # would see its completed siblings' outputs, violating the
+        # sibling-visibility rule the snapshot machinery exists to
+        # enforce. Other states completed before the fan-out
+        # (e.g. the parent that produced the framing artifact)
+        # remain visible.
+        excluded_sibling_names = set(completed_children.keys())
+        excluded_sibling_inv_ids = {
+            make_invocation_id(self._run_id, name, env.attempt)
+            for name, env in completed_children.items()
+        }
         with self._log.lock:
             with self._store.lock:
                 snapshot_envelopes = {
                     name: _envelope_to_view(env)
                     for name, env in self._envelopes.items()
+                    if name not in excluded_sibling_names
                 }
                 snapshot_artifacts: dict[str, Any] = {}
                 for art in self._wf.artifacts:
                     v = self._store.read_latest(art.name)
-                    if v is not None:
-                        snapshot_artifacts[art.name] = v.value
+                    if v is None:
+                        continue
+                    if v.invocation_id in excluded_sibling_inv_ids:
+                        # A completed fan-out sibling produced this
+                        # version. Hide it from the pending child
+                        # so the sibling-visibility rule is honored
+                        # across resume.
+                        continue
+                    snapshot_artifacts[art.name] = v.value
             self._log.write(
                 "fan_out_resume",
                 state_id=parent_state.name,

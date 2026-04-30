@@ -101,12 +101,21 @@ class _AlwaysVisibleIndex:
 
 @dataclass(frozen=True)
 class StoredVersion:
-    """A read result: the value of an artifact at a particular version."""
+    """A read result: the value of an artifact at a particular version.
+
+    ``invocation_id`` carries the producing per-state invocation key
+    (``run_id::state::attempt_seq``) when the row was written by a
+    state invocation; it is ``None`` for ``external``, ``initial``,
+    and ``legacy`` rows. Callers that need to filter by producer
+    (e.g. resume's snapshot reconstruction excluding completed
+    fan-out siblings) read this field to identify the source.
+    """
 
     name: str
     type: str
     version_id: str
     value: Any
+    invocation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +419,7 @@ class ArtifactStore:
                     type=type,
                     version_id=str(version_id),
                     value=json.loads(value_blob),
+                    invocation_id=invocation_id,
                 )
             return None
 
@@ -435,6 +445,7 @@ class ArtifactStore:
                 type=type,
                 version_id=version_id,
                 value=json.loads(value_blob),
+                invocation_id=invocation_id,
             )
 
     def list_versions(self, name: str) -> list[VersionRecord]:
