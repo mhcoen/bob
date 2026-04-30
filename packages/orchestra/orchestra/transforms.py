@@ -6,9 +6,17 @@ synchronously inside the per-state sequence, and replay treats a
 completed transform state like any other completed state.
 
 The schema vocabulary is intentionally narrow. Slice B accepts the
-primitive types ``str``, ``int``, ``float``, ``bool``, ``bytes`` plus
-the parameterized type ``dict[str, str]``. Other types are rejected at
+primitive types ``str``, ``int``, ``float``, ``bool`` plus the
+parameterized type ``dict[str, str]``. Other types are rejected at
 registration time. No third-party type-checking library is pulled in.
+
+``bytes`` was in the plan's draft type list but is not supported
+here. The artifact store hashes values via ``json.dumps``
+(``orchestra/store/store.py`` ``_canonicalize``), which rejects
+``bytes``, so a registered ``bytes`` schema would pass the runtime
+typecheck and then crash at ``tentative_write``. A binary artifact
+contract is deferred to a later slice and the plan's Section 2 type
+list should be updated to drop ``bytes``.
 
 The runtime type checker uses ``isinstance`` for primitives plus a
 custom recursive walk for ``dict[str, str]``.
@@ -26,7 +34,7 @@ from typing import Any
 
 from orchestra.errors import RegistryConflict
 
-_PRIMITIVE_TYPES: tuple[type, ...] = (str, int, float, bool, bytes)
+_PRIMITIVE_TYPES: tuple[type, ...] = (str, int, float, bool)
 """Schema-supported primitive Python types."""
 
 # Canonical artifact-type that each Python type maps to. The validator
@@ -37,7 +45,6 @@ _TYPE_TO_ARTIFACT_TYPE: dict[Any, str] = {
     int: "json",
     float: "json",
     bool: "json",
-    bytes: "json",
 }
 
 
@@ -85,7 +92,7 @@ def schema_artifact_type(t: Any) -> str:
         return "json"
     raise RegistryConflict(
         f"transform schema: type {type_label(t)} is not supported "
-        "(supported: str, int, float, bool, bytes, dict[str, str])"
+        "(supported: str, int, float, bool, dict[str, str])"
     )
 
 
@@ -108,7 +115,7 @@ def validate_schema(schema: dict[str, Any], *, where: str) -> None:
             raise RegistryConflict(
                 f"transform {where}: type for {key!r} is {type_label(t)}, "
                 "which is not supported (supported: str, int, float, "
-                "bool, bytes, dict[str, str])"
+                "bool, dict[str, str])"
             )
 
 
@@ -193,10 +200,14 @@ def anonymize_outputs(
     iteration order cannot perturb the result.
     """
     sorted_keys = sorted(inputs.keys())
+    # Slice B contract: the seed is the literal default
+    # ``json.dumps([run_id, state_name, sorted_input_keys])``. Custom
+    # encoder flags would change the byte representation for
+    # non-ASCII characters (``ensure_ascii=False`` emits raw UTF-8;
+    # the default escapes to ``\uXXXX``). Determinism across
+    # platforms and Python versions requires the literal default.
     seed_material = json.dumps(
-        [ctx.run_id, ctx.state_name, sorted_keys],
-        sort_keys=True,
-        ensure_ascii=False,
+        [ctx.run_id, ctx.state_name, sorted_keys]
     )
     seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
     seed_int = int(seed_hash, 16)

@@ -1672,6 +1672,24 @@ class Executor:
             artifacts=dict(snapshot_artifacts),
         )
         state = self._wf.state(child_name)
+        if state.actor.kind == "transform":
+            # Slice B fix: transform children have no adapter to look
+            # up, prepare, or cancel. ``adapter_for("transform")``
+            # would raise because transform is not an actor backing.
+            # Skip the cancellation registry's prepare-side hooks
+            # (there is no in-flight adapter call) and dispatch
+            # directly to ``_execute_state_body`` which routes to
+            # ``_execute_transform_body``. Transforms do not retry.
+            if registry.is_cancelled(child_name):
+                envelope = self._write_cancelled_state_exit(child_name)
+                registry.mark_done(child_name)
+                return envelope
+            envelope = self._execute_state_body(
+                child_name,
+                snapshot=snapshot,
+            )
+            registry.mark_done(child_name)
+            return envelope
         adapter = self._registry.adapter_for(state.actor.kind)
         while True:
             if registry.is_cancelled(child_name):
