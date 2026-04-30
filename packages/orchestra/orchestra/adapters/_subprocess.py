@@ -317,6 +317,79 @@ def _remove_pid_file(pid_file: Path) -> None:
 # --------------------------------------------------------------------
 
 
+def extract_final_text(stream_json_output: str) -> str:
+    """Pull the assistant's final text out of a stream-json transcript.
+
+    Claude Code is invoked with ``--output-format stream-json --verbose
+    --include-partial-messages``, which emits one JSON record per
+    line: hook events, init events, message_start, content_block_delta
+    deltas, content_block_stop, message_stop, rate_limit events, and
+    finally a ``{"type":"result","subtype":"success",...}`` record
+    whose ``result`` field carries the final assistant text.
+
+    Resolution order:
+
+    1. The most recent record with ``type == "result"`` and a
+       string-typed ``result`` field. Wins when the run completed
+       cleanly and Claude Code emitted the canonical summary record.
+    2. Concatenated ``text_delta`` text fields from every
+       ``content_block_delta`` event in order. Used when the run
+       crashed mid-stream and never produced a result record but did
+       emit incremental text.
+    3. The raw ``stream_json_output`` unchanged. Last resort when the
+       output is not stream-json at all (e.g. an early subprocess
+       failure that printed a traceback before any JSON).
+    """
+    if not stream_json_output:
+        return ""
+    last_result_text: str | None = None
+    deltas: list[str] = []
+    saw_any_json = False
+    for line in stream_json_output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        saw_any_json = True
+        if not isinstance(record, dict):
+            continue
+        rtype = record.get("type")
+        if rtype == "result":
+            result = record.get("result")
+            if isinstance(result, str):
+                last_result_text = result
+        elif rtype == "stream_event":
+            event = record.get("event")
+            if isinstance(event, dict) and event.get("type") == "content_block_delta":
+                delta = event.get("delta")
+                if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                    text = delta.get("text")
+                    if isinstance(text, str):
+                        deltas.append(text)
+        elif rtype == "content_block_delta":
+            # Some Claude Code versions emit the delta record at the
+            # top level instead of wrapping it in a stream_event. Treat
+            # both shapes the same.
+            delta = record.get("delta")
+            if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                text = delta.get("text")
+                if isinstance(text, str):
+                    deltas.append(text)
+    if last_result_text is not None:
+        return last_result_text
+    if deltas:
+        return "".join(deltas)
+    if saw_any_json:
+        # Stream-json shape was present but neither summary nor deltas
+        # appeared. Returning the raw stream is more useful than empty
+        # string for debugging.
+        return stream_json_output
+    return stream_json_output
+
+
 def write_log(
     log_dir: Path,
     task_text: str,

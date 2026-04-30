@@ -212,3 +212,166 @@ def test_mock_shell_command_form():
     payload = adapter.invoke(adapter.prepare(req))
     assert payload["commands"][0]["command"] == "echo hi"
     assert payload["aggregate"]["pass_count"] == 1
+
+
+# --------------------------------------------------------------------
+# extract_final_text: stream-json -> assistant text
+# --------------------------------------------------------------------
+
+
+def test_extract_final_text_returns_result_field() -> None:
+    """The canonical happy path: Claude Code emits a stream of
+    delta events followed by a result record, and the helper pulls
+    the result.result string out as the final assistant text."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    expected = "I'm doing well, thanks. Ready when you are. What would you like to work on?"
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "I"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "text_delta",
+                        "text": (
+                            "'m doing well, thanks. Ready when you are. "
+                            "What would you like to work on?"
+                        ),
+                    },
+                },
+            }
+        ),
+        json.dumps({"type": "stream_event", "event": {"type": "message_stop"}}),
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": expected,
+            }
+        ),
+    ]
+    transcript = "\n".join(lines) + "\n"
+    assert extract_final_text(transcript) == expected
+
+
+def test_extract_final_text_uses_last_result_when_multiple() -> None:
+    """If for some reason multiple result records appear, the last
+    one wins so a clean retry's summary supersedes a prior failure."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps({"type": "result", "subtype": "error", "result": "first try"}),
+        json.dumps({"type": "result", "subtype": "success", "result": "final"}),
+    ]
+    assert extract_final_text("\n".join(lines)) == "final"
+
+
+def test_extract_final_text_falls_back_to_text_deltas() -> None:
+    """When the stream lacks a result record (subprocess crashed
+    mid-stream), concatenate every text_delta in order."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "Hello, "},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "world"},
+                },
+            }
+        ),
+    ]
+    assert extract_final_text("\n".join(lines)) == "Hello, world"
+
+
+def test_extract_final_text_handles_top_level_content_block_delta() -> None:
+    """Some Claude Code versions emit content_block_delta at the top
+    level instead of wrapping in stream_event. Both shapes should
+    yield the same text on the fallback path."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps(
+            {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "foo"},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "bar"},
+            }
+        ),
+    ]
+    assert extract_final_text("\n".join(lines)) == "foobar"
+
+
+def test_extract_final_text_returns_raw_when_not_jsonl() -> None:
+    """A subprocess that crashed before emitting any JSON (e.g.
+    printed a Python traceback) returns the raw output unchanged so
+    the user can still see what went wrong."""
+    from orchestra.adapters._subprocess import extract_final_text
+
+    raw = "Traceback (most recent call last):\n  File ...\n"
+    assert extract_final_text(raw) == raw
+
+
+def test_extract_final_text_handles_empty_input() -> None:
+    from orchestra.adapters._subprocess import extract_final_text
+
+    assert extract_final_text("") == ""
+
+
+def test_extract_final_text_ignores_non_text_deltas() -> None:
+    """Tool-use deltas should not pollute the final text."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    lines = [
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {"type": "input_json_delta", "partial_json": "{}"},
+                },
+            }
+        ),
+        json.dumps({"type": "result", "subtype": "success", "result": "ok"}),
+    ]
+    assert extract_final_text("\n".join(lines)) == "ok"

@@ -24,6 +24,7 @@ from typing import Any
 from orchestra.adapters._subprocess import (
     DEFAULT_TIMEOUT_S,
     build_session_env,
+    extract_final_text,
     run_session,
     write_log,
 )
@@ -140,9 +141,13 @@ class ClaudeCodeTextAdapter:
             output,
             exit_code,
         )
+        # The CLI emits stream-json. Extract the final assistant text
+        # so callers see the answer, not the entire transcript. The
+        # raw stream is preserved at log_path for debugging.
+        final_text = extract_final_text(output)
         verdict = _verdict_for_exit_code(exit_code)
         return {
-            "output": output,
+            "output": final_text,
             "verdict": verdict,
             "fields": {
                 "exit_code": exit_code,
