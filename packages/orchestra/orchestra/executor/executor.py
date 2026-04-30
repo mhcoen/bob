@@ -935,8 +935,16 @@ class Executor:
                     group_errored = True
                     registry.request_cancel_all(futures)
                     continue
+                # Re-audit P2: use ``envelope.attempt`` (the FINAL
+                # attempt after any child-local retries) rather than
+                # ``per_child_attempt[child_name]`` (which captures
+                # only the initial attempt). The state_exit and
+                # artifact commits are keyed to the final attempt;
+                # the aggregate must agree so downstream tooling can
+                # correlate the per-child invocation_ids back to
+                # the durable records.
                 inv_id = make_invocation_id(
-                    self._run_id, child_name, per_child_attempt[child_name]
+                    self._run_id, child_name, envelope.attempt
                 )
                 child_invocation_ids[child_name] = inv_id
                 outcome = "success" if envelope.status == "ok" else "error"
@@ -1163,10 +1171,15 @@ class Executor:
                         group_errored = True
                         registry.request_cancel_all(futures)
                         continue
+                    # Re-audit P2: use ``envelope.attempt`` so the
+                    # aggregate's per-child invocation_id matches
+                    # the final attempt's durable state_exit /
+                    # artifact commits when child-local retries
+                    # promoted the seq.
                     inv_id = make_invocation_id(
                         self._run_id,
                         child_name,
-                        per_child_attempt[child_name],
+                        envelope.attempt,
                     )
                     child_invocation_ids[child_name] = inv_id
                     outcome = (
