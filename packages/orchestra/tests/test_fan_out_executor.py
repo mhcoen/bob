@@ -431,3 +431,94 @@ def test_fan_out_replay_open_group_on_partial(tmp_path: Path) -> None:
     assert rep.open_fan_out is not None
     assert rep.open_fan_out["parent_state"] == "launch"
     assert rep.last_fan_out_target is None
+
+
+def test_visibility_not_success_until_state_exit_durable(tmp_path: Path) -> None:
+    """The executor writes ``state_exit`` BEFORE updating the
+    VisibilityIndex. While ``state_exit`` is being persisted, the
+    artifact written by that state_invocation is still hidden by the
+    visibility rule. After the visibility update lands, it becomes
+    visible. Tests the Blocker 3 reorder."""
+    import threading
+
+    from orchestra.log import LogWriter as _LogWriter
+    from orchestra.visibility import VisibilityIndex, make_invocation_id
+
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+
+    # A LogWriter wrapper that pauses on the FIRST state_exit write,
+    # so the test can observe the visibility-vs-durability order
+    # from another thread.
+    paused = threading.Event()
+    released = threading.Event()
+    saw_state_exit = threading.Event()
+
+    real_writer = _LogWriter(tmp_path / "log.jsonl", "test-run")
+
+    class _PausingWriter:
+        def __init__(self, inner): self._inner = inner
+        @property
+        def lock(self): return self._inner.lock
+        def critical_section(self): return self._inner.critical_section()
+        @property
+        def next_seq(self): return self._inner.next_seq
+        def close(self): self._inner.close()
+        def write(self, event, *, state_id=None, attempt=None, fields=None):
+            rec = self._inner.write(
+                event, state_id=state_id, attempt=attempt, fields=fields
+            )
+            if event == "state_exit" and not saw_state_exit.is_set():
+                saw_state_exit.set()
+                paused.set()
+                released.wait(timeout=5)
+            return rec
+
+    log = _PausingWriter(real_writer)
+    log.write("run_start", fields={})
+
+    store = _initialize_store(workflow, tmp_path / "store.sqlite")
+    persist = tmp_path / "visibility.json"
+    idx = VisibilityIndex(persist_path=persist)
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=tmp_path,
+        run_id="test-run",
+        external_inputs={"topic": "hello"},
+        visibility_index=idx,
+    )
+
+    invocation_id = make_invocation_id("test-run", "launch", 1)
+    observed_visibility: dict[str, Any] = {}
+
+    def _runner() -> None:
+        executor.run_to_completion()
+
+    def _observer() -> None:
+        paused.wait(timeout=5)
+        # state_exit has been written for some state. Inspect the
+        # visibility index status for the launch state's
+        # invocation_id BEFORE the executor's mark_success call
+        # runs (the runner thread is blocked inside the wrapper's
+        # write).
+        observed_visibility["status_during_pause"] = idx.status(invocation_id)
+        released.set()
+
+    runner_thread = threading.Thread(target=_runner)
+    observer_thread = threading.Thread(target=_observer)
+    runner_thread.start()
+    observer_thread.start()
+    runner_thread.join()
+    observer_thread.join()
+
+    # The first state_exit that fires is for the parent state
+    # ``launch``. At the moment that record was just written but
+    # the visibility-index update hasn't happened yet, the index
+    # should still report "pending".
+    assert observed_visibility.get("status_during_pause") == "pending"
+    # After the run completes, the index reports success.
+    assert idx.status(invocation_id) == "success"

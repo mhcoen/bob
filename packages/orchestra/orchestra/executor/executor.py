@@ -388,18 +388,16 @@ class Executor:
             error=error_record,
         )
         self._envelopes[state.name] = envelope
-        # Slice A: mark the visibility-index outcome BEFORE writing
-        # state_exit. The order matters for crash atomicity. If a
-        # crash lands between the index update and the log write,
-        # replay rebuilds the index from the log and the in-memory
-        # success/error mark is discarded; the invocation goes back
-        # to "pending" until the next replay sees a durable
-        # state_exit. The persisted index file is best-effort
-        # informational.
-        if status == "ok":
-            self._visibility_index.mark_success(invocation_id)
-        else:
-            self._visibility_index.mark_error(invocation_id)
+        # Slice A: write state_exit FIRST so the durable record is
+        # the completion point, then update the visibility index.
+        # A crash between the two leaves the index at "pending" plus
+        # a durable state_exit on disk; replay's rebuild_from_records
+        # reconstructs the correct visibility from the log. Doing
+        # this in the opposite order would mean the in-memory index
+        # could mark a row visible before the state_exit record is
+        # actually durable, and a crash in that window would leak
+        # visibility to a hypothetical concurrent reader on the
+        # store-side path.
         self._log.write(
             "state_exit",
             state_id=state.name,
@@ -415,6 +413,10 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        if status == "ok":
+            self._visibility_index.mark_success(invocation_id)
+        else:
+            self._visibility_index.mark_error(invocation_id)
 
         # Step 9: transition selection.
         decl = self._select_transition_decl(state, envelope)
@@ -994,7 +996,7 @@ class Executor:
         )
         with self._envelope_lock:
             self._envelopes[child_name] = envelope
-        self._visibility_index.mark_error(invocation_id)
+        # state_exit FIRST, then visibility update (Slice A).
         self._log.write(
             "state_exit",
             state_id=child_name,
@@ -1010,6 +1012,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        self._visibility_index.mark_error(invocation_id)
         return envelope
 
     def _execute_state_body(
@@ -1200,10 +1203,11 @@ class Executor:
         )
         with self._envelope_lock:
             self._envelopes[state.name] = envelope
-        if status == "ok":
-            self._visibility_index.mark_success(invocation_id)
-        else:
-            self._visibility_index.mark_error(invocation_id)
+        # Slice A: state_exit durability is the completion point.
+        # Write the record FIRST, then update the visibility index.
+        # A crash between the two leaves the index pending and the
+        # state_exit on disk; replay's rebuild_from_records uses the
+        # log to derive the correct visibility status.
         self._log.write(
             "state_exit",
             state_id=state.name,
@@ -1219,6 +1223,10 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        if status == "ok":
+            self._visibility_index.mark_success(invocation_id)
+        else:
+            self._visibility_index.mark_error(invocation_id)
         return envelope
 
     # ----- timeout enforcement -----------------------------------
