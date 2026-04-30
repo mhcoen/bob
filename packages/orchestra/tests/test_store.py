@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 from orchestra.errors import StoreError
@@ -139,3 +141,248 @@ def test_unknown_artifact_read_raises(tmp_path):
     with pytest.raises(StoreError):
         store.read_latest("never-declared")
     store.close()
+
+
+# --------------------------------------------------------------------
+# Slice A: producer_kind, invocation_id, visibility rule, migration
+# --------------------------------------------------------------------
+
+
+class _StubVisibilityIndex:
+    """Test double for the VisibilityIndex protocol."""
+
+    def __init__(self) -> None:
+        self._statuses: dict[str, Literal["pending", "success", "error"]] = {}
+
+    def set(self, invocation_id, status):
+        self._statuses[invocation_id] = status
+
+    def status(self, invocation_id):
+        return self._statuses.get(invocation_id)
+
+
+def test_external_artifact_always_visible(tmp_path):
+    """External artifact versions (write_external) are visible
+    regardless of visibility-index state."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("topic", "text")
+    store.write_external("topic", "hello world")
+    v = store.read_latest("topic")
+    assert v is not None
+    assert v.value == "hello world"
+    versions = store.list_versions("topic")
+    assert len(versions) == 1
+    assert versions[0].producer_kind == "external"
+    assert versions[0].invocation_id is None
+    store.close()
+
+
+def test_initial_artifact_always_visible(tmp_path):
+    """Initial-qualifier rows are tagged producer_kind=initial and
+    visible regardless of index state."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("seed", "text", qualifiers={"initial": "default"})
+    v = store.read_latest("seed")
+    assert v.value == "default"
+    versions = store.list_versions("seed")
+    assert versions[0].producer_kind == "initial"
+    store.close()
+
+
+def test_state_invocation_visible_only_when_success(tmp_path):
+    """A version tagged producer_kind=state_invocation is visible only
+    when the producing invocation_id has status=success in the index.
+    Pending and error invocations have their versions hidden."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("a", "text")
+    inv = "run-1::state-a::1"
+    h = store.tentative_write(
+        "a", "answer", written_by="state-a", invocation_id=inv
+    )
+    store.commit_tentative([h])
+    # Pending invocation: hidden.
+    idx.set(inv, "pending")
+    assert store.read_latest("a") is None
+    # Errored invocation: hidden.
+    idx.set(inv, "error")
+    assert store.read_latest("a") is None
+    # Success: visible.
+    idx.set(inv, "success")
+    v = store.read_latest("a")
+    assert v is not None
+    assert v.value == "answer"
+    store.close()
+
+
+def test_visibility_key_by_invocation_not_state(tmp_path):
+    """Two invocations of the same state name produce independently
+    keyed versions whose visibility is independent. V1 from
+    invocation_1 stays visible even when V2 from invocation_2 errors.
+    """
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("a", "text")
+    inv1 = "run::a::1"
+    inv2 = "run::a::2"
+    h1 = store.tentative_write("a", "V1", written_by="a", invocation_id=inv1)
+    store.commit_tentative([h1])
+    idx.set(inv1, "success")
+    h2 = store.tentative_write("a", "V2", written_by="a", invocation_id=inv2)
+    store.commit_tentative([h2])
+    # invocation_2 is pending: hidden. The store should fall back
+    # to the latest visible version, which is V1.
+    idx.set(inv2, "pending")
+    v = store.read_latest("a")
+    assert v is not None
+    assert v.value == "V1"
+    # invocation_2 errors. V1 remains visible.
+    idx.set(inv2, "error")
+    v = store.read_latest("a")
+    assert v is not None
+    assert v.value == "V1"
+    # invocation_2 succeeds. V2 wins as the most recent visible
+    # version.
+    idx.set(inv2, "success")
+    v = store.read_latest("a")
+    assert v.value == "V2"
+    store.close()
+
+
+def test_legacy_rows_always_visible(tmp_path):
+    """A version written without an invocation_id (the legacy slice-1
+    path) is tagged producer_kind=legacy and always visible. This is
+    the migration safety guarantee for runs that pre-date Slice A."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("a", "text")
+    h = store.tentative_write("a", "old", written_by="legacy")
+    store.commit_tentative([h])
+    versions = store.list_versions("a")
+    assert versions[0].producer_kind == "legacy"
+    v = store.read_latest("a")
+    assert v.value == "old"
+    store.close()
+
+
+def test_schema_migration_tags_pre_slice_a_rows_as_legacy(tmp_path):
+    """Open a store created by the slice-1 schema (no producer_kind /
+    invocation_id columns), reopen it under the Slice A schema, and
+    confirm the migration adds the columns and existing rows behave
+    as legacy (always visible)."""
+    import sqlite3
+
+    db = tmp_path / "store.sqlite"
+    # Hand-build the slice-1 schema and write one row.
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE artifacts (name TEXT PRIMARY KEY, type TEXT NOT NULL, "
+        "qualifiers TEXT NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE versions ("
+        "seq INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "artifact TEXT NOT NULL REFERENCES artifacts(name), "
+        "version_id TEXT NOT NULL, "
+        "value BLOB NOT NULL, "
+        "written_at TEXT NOT NULL, "
+        "written_by TEXT NOT NULL, "
+        "is_tentative INTEGER NOT NULL, "
+        "tentative_handle TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE tentative_handles (handle TEXT PRIMARY KEY, "
+        "seq INTEGER NOT NULL REFERENCES versions(seq))"
+    )
+    conn.execute(
+        "INSERT INTO artifacts (name, type, qualifiers) VALUES (?, ?, ?)",
+        ("a", "text", "{}"),
+    )
+    conn.execute(
+        "INSERT INTO versions (artifact, version_id, value, written_at, "
+        "written_by, is_tentative, tentative_handle) "
+        "VALUES (?, ?, ?, ?, ?, 0, NULL)",
+        ("a", "abc123", b'"old-row"', "2026-04-30T00:00:00.000Z", "legacy"),
+    )
+    conn.commit()
+    conn.close()
+    # Reopen under Slice A.
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(db, visibility_index=idx)
+    versions = store.list_versions("a")
+    assert len(versions) == 1
+    assert versions[0].producer_kind == "legacy"
+    assert versions[0].invocation_id is None
+    # Legacy rows visible without index entry.
+    v = store.read_latest("a")
+    assert v.value == "old-row"
+    # New writes use the strict invocation keying.
+    inv = "run::a::1"
+    h = store.tentative_write("a", "new-row", written_by="a", invocation_id=inv)
+    store.commit_tentative([h])
+    idx.set(inv, "success")
+    v = store.read_latest("a")
+    assert v.value == "new-row"
+    store.close()
+
+
+def test_purge_invisible_state_invocation_versions(tmp_path):
+    """Cleanup pass deletes committed state_invocation rows whose
+    producing invocation is not success. External, initial, and
+    legacy rows are not touched. Idempotent."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("a", "text", qualifiers={"initial": "init-value"})
+    store.declare("b", "text")
+    # External version on b.
+    store.write_external("b", "external-value")
+    # state_invocation versions: one success, one error.
+    h_ok = store.tentative_write("b", "good", written_by="s", invocation_id="i1")
+    store.commit_tentative([h_ok])
+    idx.set("i1", "success")
+    h_err = store.tentative_write("b", "bad", written_by="s", invocation_id="i2")
+    store.commit_tentative([h_err])
+    idx.set("i2", "error")
+    # Confirm pre-purge visible value is the success row.
+    assert store.read_latest("b").value == "good"
+    # Purge.
+    deleted = store.purge_invisible_state_invocation_versions()
+    assert deleted == 1
+    # Initial (a) still visible. External (b external) and success
+    # (b good) still in history.
+    assert store.read_latest("a").value == "init-value"
+    versions_b = store.list_versions("b")
+    kinds = sorted(v.producer_kind for v in versions_b)
+    assert kinds == ["external", "state_invocation"]
+    # Idempotent: a second purge deletes zero rows.
+    assert store.purge_invisible_state_invocation_versions() == 0
+    store.close()
+
+
+def test_cleanup_mid_purge_preserves_hidden_invariant(tmp_path):
+    """If a cleanup pass is interrupted mid-purge, the visibility rule
+    continues to hide the orphans; the next cleanup completes the
+    purge. Modeled here by not running the purge at all (interrupted
+    immediately) and asserting the rows remain hidden, then running
+    the purge to completion."""
+    idx = _StubVisibilityIndex()
+    store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
+    store.declare("b", "text")
+    h = store.tentative_write("b", "orphan", written_by="s", invocation_id="i1")
+    store.commit_tentative([h])
+    idx.set("i1", "error")
+    # Crash before cleanup. Visibility rule still hides the row.
+    assert store.read_latest("b") is None
+    # Reopen the store (simulating a fresh process). Index is rebuilt
+    # to the same status; the row remains hidden.
+    store.close()
+    idx2 = _StubVisibilityIndex()
+    idx2.set("i1", "error")
+    store2 = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx2)
+    assert store2.read_latest("b") is None
+    # Cleanup completes.
+    assert store2.purge_invisible_state_invocation_versions() == 1
+    assert store2.read_latest("b") is None
+    store2.close()

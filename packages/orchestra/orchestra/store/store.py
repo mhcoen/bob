@@ -25,6 +25,26 @@ by ``seq DESC`` so that rewriting an artifact to a previously-written
 content (A -> B -> A) correctly returns the most recent commit, not
 the older row with matching content hash. Version IDs remain
 content-addressed (SHA-256 of the canonicalized value).
+
+Visibility (Slice A of the real-council plan): every version row
+carries a ``producer_kind`` (one of ``state_invocation``, ``external``,
+``initial``, or ``legacy``) and, when ``state_invocation``, an
+``invocation_id``. ``read_latest`` and the snapshot constructor
+return only versions whose visibility rule passes:
+
+- ``external``, ``initial``, and ``legacy`` rows are always visible.
+- ``state_invocation`` rows are visible only when the producing
+  invocation has status ``success`` in the VisibilityIndex.
+
+The store consults the VisibilityIndex through a thread-safe
+interface (``VisibilityIndexProtocol``) registered at construction
+time. The store itself never parses logs.
+
+A single store-level Python lock guards every read, write, tentative
+stage, and commit. The connection is opened with
+``check_same_thread=False`` so worker threads share it under the
+Python lock. The lock is the inner lock in the LogWriter-then-store
+ordering rule used during snapshot capture.
 """
 
 from __future__ import annotations
@@ -32,17 +52,51 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol
 
 from orchestra.errors import StoreError
 
 # Inline types are serialized to JSON and hashed by SHA-256 to produce
 # stable, content-addressable version IDs. Other types are slice-2.
 _INLINE_TYPES = {"text", "json", "messages", "prompt", "schema", "document"}
+
+
+ProducerKind = Literal["state_invocation", "external", "initial", "legacy"]
+VisibilityStatus = Literal["pending", "success", "error"]
+
+
+class VisibilityIndexProtocol(Protocol):
+    """The thread-safe surface the store consults for visibility.
+
+    The executor and replay layer maintain the index. The store does
+    not own it. This protocol keeps the store decoupled from the
+    executor's internals so a test can inject a stub index.
+    """
+
+    def status(self, invocation_id: str) -> VisibilityStatus | None:
+        """Return the producing invocation's status, or None if unknown.
+
+        An ``invocation_id`` that is unknown to the index is treated
+        the same as ``pending``: not yet visible.
+        """
+        ...
+
+
+class _AlwaysVisibleIndex:
+    """Default visibility index used when no real one is provided.
+
+    Used during slice-1-style runs that have no fan-out and want
+    legacy-equivalent semantics: every version row is visible. The
+    runtime executor injects a real index for Slice A workflows.
+    """
+
+    def status(self, invocation_id: str) -> VisibilityStatus | None:
+        return "success"
 
 
 @dataclass(frozen=True)
@@ -64,6 +118,8 @@ class VersionRecord:
     version_id: str
     written_at: str
     written_by: str
+    producer_kind: ProducerKind = "legacy"
+    invocation_id: str | None = None
 
 
 def _canonicalize(value: Any) -> bytes:
@@ -99,11 +155,15 @@ CREATE TABLE IF NOT EXISTS versions (
     written_at       TEXT NOT NULL,
     written_by       TEXT NOT NULL,
     is_tentative     INTEGER NOT NULL,
-    tentative_handle TEXT
+    tentative_handle TEXT,
+    producer_kind    TEXT NOT NULL DEFAULT 'legacy',
+    invocation_id    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS versions_by_artifact ON versions(artifact, seq);
 CREATE INDEX IF NOT EXISTS versions_by_handle ON versions(tentative_handle);
+-- versions_by_invocation is created by _migrate_schema after the
+-- invocation_id column has been added to pre-existing tables.
 
 CREATE TABLE IF NOT EXISTS tentative_handles (
     handle      TEXT PRIMARY KEY,
@@ -118,22 +178,84 @@ class ArtifactStore:
     A store is bound to one workflow run. It owns its database file and
     closes the connection on ``close()``. Mutations execute as SQLite
     transactions so that ``commit_tentative`` is atomic.
+
+    A single Python ``threading.Lock`` guards every operation. The
+    SQLite connection is opened with ``check_same_thread=False`` so
+    worker threads can share it under the Python lock; SQLite-level
+    locking is irrelevant under this discipline.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        visibility_index: VisibilityIndexProtocol | None = None,
+    ) -> None:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._path)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self._path, check_same_thread=False)
         # Synchronous=FULL plus a single-connection model gives durability
         # at the cost of throughput. Slice 1 favors durability.
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
+        self._migrate_schema()
         self._conn.commit()
+        self._visibility: VisibilityIndexProtocol = (
+            visibility_index if visibility_index is not None else _AlwaysVisibleIndex()
+        )
+
+    @property
+    def lock(self) -> threading.Lock:
+        """Return the store-level lock for callers that need to pair
+        store ops with other state under a single critical section."""
+        return self._lock
+
+    def set_visibility_index(self, index: VisibilityIndexProtocol) -> None:
+        """Swap in a different visibility index after construction.
+
+        The executor uses this to attach the run's VisibilityIndex
+        once it is constructed and the store has already been built.
+        """
+        with self._lock:
+            self._visibility = index
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
+
+    # ----- schema migration ----------------------------------------
+
+    def _migrate_schema(self) -> None:
+        """Forward-only migration to add ``producer_kind`` and
+        ``invocation_id`` to existing version rows.
+
+        Slice A change. Stores opened from runs created before Slice A
+        had no ``producer_kind`` column. CREATE TABLE IF NOT EXISTS
+        adds the column for newly-created tables; ALTER TABLE catches
+        the pre-existing-table case. After the migration runs, every
+        existing row is tagged ``legacy`` and any new row is written
+        with the strict producer_kind and invocation_id keying.
+        """
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(versions)").fetchall()
+        }
+        if "producer_kind" not in cols:
+            self._conn.execute(
+                "ALTER TABLE versions ADD COLUMN producer_kind TEXT "
+                "NOT NULL DEFAULT 'legacy'"
+            )
+        if "invocation_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE versions ADD COLUMN invocation_id TEXT"
+            )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS versions_by_invocation "
+            "ON versions(invocation_id)"
+        )
 
     # ----- declare -------------------------------------------------
 
@@ -149,32 +271,62 @@ class ArtifactStore:
         no-op. Re-declaration with a different type is a StoreError.
 
         If ``qualifiers`` contains the ``initial`` key, an initial
-        committed version is written. The key being present is the
-        existence test, not the value being non-None: ``initial: null``
-        produces a row whose value is JSON null.
+        committed version is written with ``producer_kind='initial'``.
+        The key being present is the existence test, not the value
+        being non-None: ``initial: null`` produces a row whose value
+        is JSON null.
         """
         qualifiers = qualifiers or {}
         if type not in _INLINE_TYPES:
             raise StoreError(
                 f"slice 1 does not handle artifact type {type!r}; only inline types are supported"
             )
-        existing = self._conn.execute(
-            "SELECT type FROM artifacts WHERE name = ?", (name,)
-        ).fetchone()
-        if existing is not None:
-            (existing_type,) = existing
-            if existing_type != type:
-                raise StoreError(
-                    f"artifact {name!r} already declared with type {existing_type!r}, cannot redeclare as {type!r}"
-                )
-            return
-        self._conn.execute(
-            "INSERT INTO artifacts (name, type, qualifiers) VALUES (?, ?, ?)",
-            (name, type, json.dumps(qualifiers, sort_keys=True)),
-        )
-        self._conn.commit()
-        if "initial" in qualifiers:
-            self._write_initial(name, qualifiers["initial"])
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT type FROM artifacts WHERE name = ?", (name,)
+            ).fetchone()
+            if existing is not None:
+                (existing_type,) = existing
+                if existing_type != type:
+                    raise StoreError(
+                        f"artifact {name!r} already declared with type {existing_type!r}, cannot redeclare as {type!r}"
+                    )
+                return
+            self._conn.execute(
+                "INSERT INTO artifacts (name, type, qualifiers) VALUES (?, ?, ?)",
+                (name, type, json.dumps(qualifiers, sort_keys=True)),
+            )
+            self._conn.commit()
+            if "initial" in qualifiers:
+                self._write_initial(name, qualifiers["initial"])
+
+    def write_external(self, name: str, value: Any) -> str:
+        """Write an external (workflow-entry) artifact version.
+
+        External versions bypass the tentative path because they
+        exist before any state has run. They are tagged
+        ``producer_kind='external'`` and are always visible.
+        """
+        with self._lock:
+            self._artifact_type_unlocked(name)
+            version_id = _hash_value(value)
+            self._conn.execute(
+                """
+                INSERT INTO versions
+                    (artifact, version_id, value, written_at, written_by,
+                     is_tentative, tentative_handle, producer_kind, invocation_id)
+                VALUES (?, ?, ?, ?, ?, 0, NULL, 'external', NULL)
+                """,
+                (
+                    name,
+                    version_id,
+                    _canonicalize(value),
+                    _now_iso(),
+                    "<external>",
+                ),
+            )
+            self._conn.commit()
+            return version_id
 
     def _write_initial(self, name: str, value: Any) -> None:
         # Initial values bypass the tentative path because they exist
@@ -184,8 +336,9 @@ class ArtifactStore:
         self._conn.execute(
             """
             INSERT INTO versions
-                (artifact, version_id, value, written_at, written_by, is_tentative, tentative_handle)
-            VALUES (?, ?, ?, ?, ?, 0, NULL)
+                (artifact, version_id, value, written_at, written_by,
+                 is_tentative, tentative_handle, producer_kind, invocation_id)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, 'initial', NULL)
             """,
             (
                 name,
@@ -199,7 +352,7 @@ class ArtifactStore:
 
     # ----- read ----------------------------------------------------
 
-    def _artifact_type(self, name: str) -> str:
+    def _artifact_type_unlocked(self, name: str) -> str:
         row = self._conn.execute(
             "SELECT type FROM artifacts WHERE name = ?", (name,)
         ).fetchone()
@@ -207,63 +360,95 @@ class ArtifactStore:
             raise StoreError(f"unknown artifact: {name!r}")
         return str(row[0])
 
+    def _is_visible(
+        self, producer_kind: str, invocation_id: str | None
+    ) -> bool:
+        if producer_kind in ("external", "initial", "legacy"):
+            return True
+        if producer_kind == "state_invocation":
+            if invocation_id is None:
+                # state_invocation row missing its invocation_id is
+                # malformed; hide it conservatively.
+                return False
+            return self._visibility.status(invocation_id) == "success"
+        # Unknown producer_kind: hide.
+        return False
+
     def read_latest(self, name: str) -> StoredVersion | None:
-        type = self._artifact_type(name)
-        row = self._conn.execute(
-            """
-            SELECT version_id, value FROM versions
-            WHERE artifact = ? AND is_tentative = 0
-            ORDER BY seq DESC
-            LIMIT 1
-            """,
-            (name,),
-        ).fetchone()
-        if row is None:
+        with self._lock:
+            type = self._artifact_type_unlocked(name)
+            rows = self._conn.execute(
+                """
+                SELECT version_id, value, producer_kind, invocation_id
+                FROM versions
+                WHERE artifact = ? AND is_tentative = 0
+                ORDER BY seq DESC
+                """,
+                (name,),
+            ).fetchall()
+            for row in rows:
+                version_id, value_blob, producer_kind, invocation_id = row
+                if not self._is_visible(producer_kind, invocation_id):
+                    continue
+                return StoredVersion(
+                    name=name,
+                    type=type,
+                    version_id=str(version_id),
+                    value=json.loads(value_blob),
+                )
             return None
-        version_id, value_blob = row
-        return StoredVersion(
-            name=name,
-            type=type,
-            version_id=str(version_id),
-            value=json.loads(value_blob),
-        )
 
     def read_version(self, name: str, version_id: str) -> StoredVersion | None:
-        type = self._artifact_type(name)
-        row = self._conn.execute(
-            """
-            SELECT value FROM versions
-            WHERE artifact = ? AND version_id = ? AND is_tentative = 0
-            ORDER BY seq DESC
-            LIMIT 1
-            """,
-            (name, version_id),
-        ).fetchone()
-        if row is None:
-            return None
-        return StoredVersion(
-            name=name,
-            type=type,
-            version_id=version_id,
-            value=json.loads(row[0]),
-        )
+        with self._lock:
+            type = self._artifact_type_unlocked(name)
+            row = self._conn.execute(
+                """
+                SELECT value, producer_kind, invocation_id FROM versions
+                WHERE artifact = ? AND version_id = ? AND is_tentative = 0
+                ORDER BY seq DESC
+                LIMIT 1
+                """,
+                (name, version_id),
+            ).fetchone()
+            if row is None:
+                return None
+            value_blob, producer_kind, invocation_id = row
+            if not self._is_visible(producer_kind, invocation_id):
+                return None
+            return StoredVersion(
+                name=name,
+                type=type,
+                version_id=version_id,
+                value=json.loads(value_blob),
+            )
 
     def list_versions(self, name: str) -> list[VersionRecord]:
-        self._artifact_type(name)  # validate the name exists
-        rows = self._conn.execute(
-            """
-            SELECT version_id, written_at, written_by FROM versions
-            WHERE artifact = ? AND is_tentative = 0
-            ORDER BY seq ASC
-            """,
-            (name,),
-        ).fetchall()
+        """Return the full version history for ``name``.
+
+        Returns every committed version regardless of visibility (the
+        history listing is for diagnostic and replay purposes; callers
+        that want the visible-only view use ``read_latest``).
+        """
+        with self._lock:
+            self._artifact_type_unlocked(name)
+            rows = self._conn.execute(
+                """
+                SELECT version_id, written_at, written_by,
+                       producer_kind, invocation_id
+                FROM versions
+                WHERE artifact = ? AND is_tentative = 0
+                ORDER BY seq ASC
+                """,
+                (name,),
+            ).fetchall()
         return [
             VersionRecord(
                 name=name,
                 version_id=str(row[0]),
                 written_at=str(row[1]),
                 written_by=str(row[2]),
+                producer_kind=row[3] or "legacy",
+                invocation_id=row[4],
             )
             for row in rows
         ]
@@ -276,43 +461,55 @@ class ArtifactStore:
         value: Any,
         *,
         written_by: str,
+        invocation_id: str | None = None,
     ) -> str:
         """Stage a write. Returns a tentative handle that
         ``commit_tentative`` or ``discard_tentative`` can act on.
 
-        Each call produces a fresh row with a new ``seq``. Writing the
-        same content twice produces two rows that share a version_id
-        but order independently by ``seq``, so rewriting to a previous
-        value is correctly the latest version.
+        ``invocation_id`` is the producing per-state invocation key.
+        Slice A workflows pass the invocation_id minted at
+        ``state_enter``; the row is tagged
+        ``producer_kind='state_invocation'`` and the visibility index
+        gates its visibility on the invocation's outcome. Callers
+        that omit ``invocation_id`` (e.g. legacy slice-1 tests, mock
+        adapters) get rows tagged ``producer_kind='legacy'`` that
+        remain always visible.
         """
-        type = self._artifact_type(name)
-        if type not in _INLINE_TYPES:
-            raise StoreError(f"slice 1 does not handle artifact type {type!r}")
-        handle = str(uuid.uuid4())
-        version_id = _hash_value(value)
-        cur = self._conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO versions
-                (artifact, version_id, value, written_at, written_by, is_tentative, tentative_handle)
-            VALUES (?, ?, ?, ?, ?, 1, ?)
-            """,
-            (
-                name,
-                version_id,
-                _canonicalize(value),
-                _now_iso(),
-                written_by,
-                handle,
-            ),
-        )
-        seq = cur.lastrowid
-        cur.execute(
-            "INSERT INTO tentative_handles (handle, seq) VALUES (?, ?)",
-            (handle, seq),
-        )
-        self._conn.commit()
-        return handle
+        with self._lock:
+            type = self._artifact_type_unlocked(name)
+            if type not in _INLINE_TYPES:
+                raise StoreError(f"slice 1 does not handle artifact type {type!r}")
+            handle = str(uuid.uuid4())
+            version_id = _hash_value(value)
+            producer_kind: ProducerKind = (
+                "state_invocation" if invocation_id is not None else "legacy"
+            )
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO versions
+                    (artifact, version_id, value, written_at, written_by,
+                     is_tentative, tentative_handle, producer_kind, invocation_id)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                """,
+                (
+                    name,
+                    version_id,
+                    _canonicalize(value),
+                    _now_iso(),
+                    written_by,
+                    handle,
+                    producer_kind,
+                    invocation_id,
+                ),
+            )
+            seq = cur.lastrowid
+            cur.execute(
+                "INSERT INTO tentative_handles (handle, seq) VALUES (?, ?)",
+                (handle, seq),
+            )
+            self._conn.commit()
+            return handle
 
     def commit_tentative(self, handles: list[str]) -> list[str]:
         """Promote tentative writes to committed versions, atomically.
@@ -322,69 +519,109 @@ class ArtifactStore:
         """
         if not handles:
             return []
-        cur = self._conn.cursor()
-        try:
-            cur.execute("BEGIN")
-            committed_ids: list[str] = []
-            for handle in handles:
-                row = cur.execute(
-                    "SELECT seq FROM tentative_handles WHERE handle = ?",
-                    (handle,),
-                ).fetchone()
-                if row is None:
-                    raise StoreError(f"unknown tentative handle: {handle!r}")
-                (seq,) = row
-                vrow = cur.execute(
-                    "SELECT version_id FROM versions WHERE seq = ? AND is_tentative = 1",
-                    (seq,),
-                ).fetchone()
-                if vrow is None:
-                    raise StoreError(
-                        f"tentative handle {handle!r} points at no tentative row"
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute("BEGIN")
+                committed_ids: list[str] = []
+                for handle in handles:
+                    row = cur.execute(
+                        "SELECT seq FROM tentative_handles WHERE handle = ?",
+                        (handle,),
+                    ).fetchone()
+                    if row is None:
+                        raise StoreError(f"unknown tentative handle: {handle!r}")
+                    (seq,) = row
+                    vrow = cur.execute(
+                        "SELECT version_id FROM versions WHERE seq = ? AND is_tentative = 1",
+                        (seq,),
+                    ).fetchone()
+                    if vrow is None:
+                        raise StoreError(
+                            f"tentative handle {handle!r} points at no tentative row"
+                        )
+                    (version_id,) = vrow
+                    cur.execute(
+                        "UPDATE versions SET is_tentative = 0, tentative_handle = NULL WHERE seq = ?",
+                        (seq,),
                     )
-                (version_id,) = vrow
-                cur.execute(
-                    "UPDATE versions SET is_tentative = 0, tentative_handle = NULL WHERE seq = ?",
-                    (seq,),
-                )
-                cur.execute(
-                    "DELETE FROM tentative_handles WHERE handle = ?",
-                    (handle,),
-                )
-                committed_ids.append(str(version_id))
-            cur.execute("COMMIT")
-            return committed_ids
-        except Exception:
-            cur.execute("ROLLBACK")
-            raise
+                    cur.execute(
+                        "DELETE FROM tentative_handles WHERE handle = ?",
+                        (handle,),
+                    )
+                    committed_ids.append(str(version_id))
+                cur.execute("COMMIT")
+                return committed_ids
+            except Exception:
+                cur.execute("ROLLBACK")
+                raise
 
     def discard_tentative(self, handles: list[str]) -> None:
         if not handles:
             return
-        cur = self._conn.cursor()
-        try:
-            cur.execute("BEGIN")
-            for handle in handles:
-                row = cur.execute(
-                    "SELECT seq FROM tentative_handles WHERE handle = ?",
-                    (handle,),
-                ).fetchone()
-                if row is None:
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute("BEGIN")
+                for handle in handles:
+                    row = cur.execute(
+                        "SELECT seq FROM tentative_handles WHERE handle = ?",
+                        (handle,),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    (seq,) = row
+                    # Delete the handle row first: tentative_handles.seq
+                    # has a foreign key into versions(seq), so deleting
+                    # the version row before the handle row violates the
+                    # constraint.
+                    cur.execute(
+                        "DELETE FROM tentative_handles WHERE handle = ?",
+                        (handle,),
+                    )
+                    cur.execute(
+                        "DELETE FROM versions WHERE seq = ? AND is_tentative = 1",
+                        (seq,),
+                    )
+                cur.execute("COMMIT")
+            except Exception:
+                cur.execute("ROLLBACK")
+                raise
+
+    # ----- post-fan-out cleanup -----------------------------------
+
+    def purge_invisible_state_invocation_versions(self) -> int:
+        """Delete committed ``state_invocation`` rows whose producing
+        invocation is not ``success`` per the visibility index.
+
+        Used by the post-fan-out cleanup pass after ``fan_out_end`` is
+        durable. Idempotent: re-running against an already-clean store
+        deletes zero rows.
+
+        Returns the number of rows deleted.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT seq, invocation_id FROM versions
+                WHERE is_tentative = 0
+                  AND producer_kind = 'state_invocation'
+                """
+            ).fetchall()
+            to_delete: list[int] = []
+            for seq, inv_id in rows:
+                if inv_id is None:
+                    to_delete.append(int(seq))
                     continue
-                (seq,) = row
-                # Delete the handle row first: tentative_handles.seq
-                # has a foreign key into versions(seq), so deleting
-                # the version row before the handle row violates the
-                # constraint.
-                cur.execute(
-                    "DELETE FROM tentative_handles WHERE handle = ?",
-                    (handle,),
-                )
-                cur.execute(
-                    "DELETE FROM versions WHERE seq = ? AND is_tentative = 1",
-                    (seq,),
-                )
-            cur.execute("COMMIT")
-        except Exception:
-            cur.execute("ROLLBACK")
-            raise
+                if self._visibility.status(inv_id) != "success":
+                    to_delete.append(int(seq))
+            cur = self._conn.cursor()
+            try:
+                cur.execute("BEGIN")
+                for seq in to_delete:
+                    cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
+                cur.execute("COMMIT")
+            except Exception:
+                cur.execute("ROLLBACK")
+                raise
+            return len(to_delete)
