@@ -476,7 +476,12 @@ class Executor:
             binding["role"] = state.role
         return binding
 
-    def _resolve_prompt(self, state: StateDecl) -> str | None:
+    def _resolve_prompt(
+        self,
+        state: StateDecl,
+        *,
+        snapshot: FanOutSnapshot | None = None,
+    ) -> str | None:
         prompt = state.prompt
         if prompt is None and state.role is not None:
             for r in self._wf.roles:
@@ -485,9 +490,14 @@ class Executor:
                     break
         if prompt is None:
             return None
-        return self._render_prompt(prompt)
+        return self._render_prompt(prompt, snapshot=snapshot)
 
-    def _render_prompt(self, source: PromptSource) -> str:
+    def _render_prompt(
+        self,
+        source: PromptSource,
+        *,
+        snapshot: FanOutSnapshot | None = None,
+    ) -> str:
         if source.kind == "file":
             assert source.path is not None
             full = Path(self._wf.source_dir) / source.path
@@ -502,6 +512,15 @@ class Executor:
             for var in source.template_vars:
                 if var in self._external:
                     substitutions[var] = self._external[var]
+                elif snapshot is not None:
+                    # Slice A: fan-out children read from the captured
+                    # snapshot, NOT from the live store. A sibling
+                    # write that landed mid-fan-out is invisible to
+                    # this child.
+                    if var in snapshot.artifacts:
+                        substitutions[var] = snapshot.artifacts[var]
+                    else:
+                        substitutions[var] = None
                 else:
                     art = self._store.read_latest(var)
                     substitutions[var] = art.value if art else None
@@ -510,11 +529,30 @@ class Executor:
             raise ExecutorError("'prompt from' references are slice-2 territory")
         raise ExecutorError(f"unknown prompt source kind: {source.kind!r}")
 
-    def _read_artifacts(self, state: StateDecl) -> dict[str, Any]:
+    def _read_artifacts(
+        self,
+        state: StateDecl,
+        *,
+        snapshot: FanOutSnapshot | None = None,
+    ) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for r in state.reads:
             if r in self._external:
                 out[r] = {"value": self._external[r], "__version_id": ""}
+                continue
+            if snapshot is not None:
+                # Slice A: fan-out children consume the captured
+                # snapshot exclusively. Artifacts not in the snapshot
+                # (sibling writes that landed mid-fan-out) are not
+                # visible to the child, matching the plan's
+                # sibling-visibility rule.
+                if r in snapshot.artifacts:
+                    out[r] = {
+                        "value": snapshot.artifacts[r],
+                        "__version_id": "snapshot",
+                    }
+                else:
+                    out[r] = {"value": None, "__version_id": ""}
                 continue
             art = self._store.read_latest(r)
             if art is not None:
@@ -940,20 +978,22 @@ class Executor:
         the LogWriter and ArtifactStore (each lock-guarded). Workers
         do NOT mutate ``self._current_state``, ``self._step_count``,
         or write outgoing transition records; the fan-out controller
-        owns those.
+        owns those. Artifact reads and prompt template substitutions
+        consume the captured snapshot, never the live store, so a
+        sibling write that lands mid-fan-out is invisible.
         """
+        snapshot = FanOutSnapshot(
+            envelopes=dict(snapshot_envelopes),
+            artifacts=dict(snapshot_artifacts),
+        )
         if registry.is_cancelled(child_name):
             return self._write_cancelled_state_exit(child_name, attempt)
-        # Pre-mint the invocation_id so we can register the cancel
-        # handle before the adapter call.
         invocation_id = make_invocation_id(self._run_id, child_name, attempt)
         registry.mark_started(child_name, invocation_id)
         if registry.is_cancelled(child_name):
             return self._write_cancelled_state_exit(child_name, attempt)
-        # Run the same per-state body the linear path uses, but in
-        # fan-out child mode (no transition selection at the end).
         envelope = self._execute_state_body(
-            child_name, attempt, invocation_id
+            child_name, attempt, invocation_id, snapshot=snapshot
         )
         registry.mark_done(child_name)
         return envelope
@@ -1020,6 +1060,7 @@ class Executor:
         state_name: str,
         attempt: int,
         invocation_id: str,
+        snapshot: FanOutSnapshot | None = None,
     ) -> Envelope:
         """Run steps 1-9 of the per-state sequence for ``state_name``
         with the supplied attempt and invocation_id.
@@ -1049,8 +1090,8 @@ class Executor:
         )
 
         actor_binding = self._build_actor_binding(state)
-        prompt_artifact = self._resolve_prompt(state)
-        reads = self._read_artifacts(state)
+        prompt_artifact = self._resolve_prompt(state, snapshot=snapshot)
+        reads = self._read_artifacts(state, snapshot=snapshot)
         timeout_ms = state.timeout_ms
         backing_options = dict(state.backing_options)
         if state.options and state.actor.kind == "human":
@@ -1386,11 +1427,25 @@ def new_run_id() -> str:
 # --------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class FanOutSnapshot:
+    """Immutable read-only view a fan-out child sees of pre-fan-out
+    state. Captured atomically under the LogWriter-then-store
+    lock-ordering rule. Children consume the snapshot for prompt
+    resolution and ``reads`` clauses; live ``read_latest`` calls
+    against the store from inside a fan-out child are forbidden so
+    siblings cannot leak each other's writes."""
+
+    envelopes: dict[str, dict[str, Any]]
+    artifacts: dict[str, Any]
+
+
 @dataclass
 class _ChildEntry:
     cancel_requested: bool = False
     state: Literal["pending", "registered", "done"] = "pending"
     invocation_id: str | None = None
+    invocation_handle: Any = None
 
 
 class _CancellationRegistry:

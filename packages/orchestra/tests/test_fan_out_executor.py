@@ -522,3 +522,155 @@ def test_visibility_not_success_until_state_exit_durable(tmp_path: Path) -> None
     assert observed_visibility.get("status_during_pause") == "pending"
     # After the run completes, the index reports success.
     assert idx.status(invocation_id) == "success"
+
+
+def test_fan_out_sibling_reads_use_snapshot_not_live_store(
+    tmp_path: Path,
+) -> None:
+    """A fan-out child reads from the captured snapshot, not from
+    the live store. A sibling artifact written mid-fan-out is NOT
+    visible to a child that runs later in the same group, even if
+    the sibling has a durable state_exit.
+
+    Tests Blocker 1's snapshot threading.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow sib
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_fast
+  model m_slow
+  model m_join
+  model m_abort
+  artifact frame_out text
+  artifact fast_out text
+  artifact slow_out text
+  artifact joined text
+  artifact aborted text
+  role parent_role
+    prompt template "templates/dummy.md"
+  role fast_role
+    prompt template "templates/dummy.md"
+  role slow_role
+    prompt template "templates/dummy.md"
+  role joiner
+    prompt template "templates/dummy.md"
+  role aborter
+    prompt template "templates/dummy.md"
+  state frame
+    actor model m_parent
+    role parent_role
+    reads topic
+    writes frame_out text
+    on complete fan_out [fast, slow] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state fast
+    actor model m_fast
+    role fast_role
+    reads frame_out
+    writes fast_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state slow
+    actor model m_slow
+    role slow_role
+    reads frame_out, fast_out
+    writes slow_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role joiner
+    reads fast_out, slow_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role aborter
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    # An adapter that signals "fast" is done, then sleeps inside
+    # "slow" until the test confirms fast has reached state_exit. The
+    # adapter records every prepared invocation's reads dict so the
+    # test can inspect what the slow child actually saw.
+    fast_done = threading.Event()
+    slow_started = threading.Event()
+    invocations: list[tuple[str, dict[str, Any]]] = []
+    inv_lock = threading.Lock()
+
+    class _Recording(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            with inv_lock:
+                invocations.append((str(model_id), prepared.request.reads))
+            if model_id == "m_slow":
+                slow_started.set()
+                # Wait for fast to reach durable state_exit (its
+                # invocation completed). If the snapshot threading
+                # is correct, slow's read of fast_out has ALREADY
+                # been resolved (against the snapshot) before this
+                # adapter call begins, so even though we wait now,
+                # the prepared.request.reads has already been
+                # captured.
+                fast_done.wait(timeout=5)
+            elif model_id == "m_fast":
+                fast_done.set()
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Recording()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+    assert terminal == "done"
+
+    # Find slow's recorded reads. frame_out should be populated
+    # (parent state's commit landed before fan-out, and lives in the
+    # snapshot). fast_out should be None (its commit landed during
+    # fan-out, which the snapshot does not see).
+    slow_reads = next(
+        reads for model_id, reads in invocations if model_id == "m_slow"
+    )
+    assert slow_reads["frame_out"]["value"] is not None
+    assert slow_reads["frame_out"]["__version_id"] == "snapshot"
+    assert slow_reads["fast_out"]["value"] is None
+    assert slow_reads["fast_out"]["__version_id"] == ""
