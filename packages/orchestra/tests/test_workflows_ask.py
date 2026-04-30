@@ -19,16 +19,16 @@ from orchestra.loader.lookup import resolve_workflow_path
 @pytest.mark.parametrize(
     "name,expected_states,expected_roles",
     [
-        ("ask_single", ["answer"], ["editor"]),
+        ("ask_single", ["answer"], ["responder"]),
         (
             "ask_draft_then_adjudicate",
             ["draft", "adjudicate", "answer"],
-            ["adjudicator", "drafter", "editor"],
+            ["adjudicator", "drafter", "responder"],
         ),
         (
             "ask_propose_critique_synthesize",
             ["propose", "critique", "synthesize", "answer"],
-            ["critic", "editor", "proposer", "synthesizer"],
+            ["critic", "proposer", "responder", "synthesizer"],
         ),
     ],
 )

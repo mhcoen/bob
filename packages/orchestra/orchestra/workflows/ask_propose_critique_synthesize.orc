@@ -10,12 +10,12 @@ workflow ask_propose_critique_synthesize
   model m_proposer
   model m_critic
   model m_synthesizer
-  model m_editor
+  model m_responder
 
   artifact proposer_output text
   artifact critic_output text
   artifact synthesizer_output text
-  artifact editor_output text
+  artifact responder_output text
 
   role proposer
     prompt template "templates/ask_propose_critique_synthesize_proposer.md" with history, query
@@ -26,8 +26,8 @@ workflow ask_propose_critique_synthesize
   role synthesizer
     prompt template "templates/ask_propose_critique_synthesize_synthesizer.md" with history, proposer_output, critic_output, query
 
-  role editor
-    prompt template "templates/ask_propose_critique_synthesize_editor.md" with history, synthesizer_output, query
+  role responder
+    prompt template "templates/ask_propose_critique_synthesize_responder.md" with history, synthesizer_output, query
 
   state propose
     actor model m_proposer
@@ -57,10 +57,10 @@ workflow ask_propose_critique_synthesize
     on timeout => stop
 
   state answer
-    actor model m_editor
-    role editor
+    actor model m_responder
+    role responder
     reads synthesizer_output, query, history
-    writes editor_output text
+    writes responder_output text
     on complete => done
     on error => stop
     on timeout => stop

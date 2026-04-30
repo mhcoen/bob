@@ -34,7 +34,7 @@ def _ask_config_body() -> dict:
             "pair": {"workflow": "ask_draft_then_adjudicate"},
         },
         "roles": {
-            "editor": {
+            "responder": {
                 "adapter": "claude_code_text",
                 "model": "opus",
                 "parameters": {},
@@ -265,8 +265,8 @@ def test_help_for_specific_verb_shows_workflow_and_bindings(
     assert rc == 0
     out = capsys.readouterr().out
     assert "ask: runs workflow `ask_single`" in out
-    assert "Required roles: editor" in out
-    assert "editor:" in out
+    assert "Required roles: responder" in out
+    assert "responder:" in out
     assert "claude_code_text" in out
     assert "model=opus" in out
 
@@ -287,12 +287,12 @@ def test_help_for_verb_flags_unbound_role(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     body = _ask_config_body()
-    body["roles"].pop("editor")
+    body["roles"].pop("responder")
     _write_global_config(isolated_home, body)
     rc = cli.main(["help", "ask"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "editor: NOT CONFIGURED" in out
+    assert "responder: NOT CONFIGURED" in out
 
 
 # --------------------------------------------------------------------

@@ -7,18 +7,18 @@ workflow ask_single
 
   max_total_steps 5
 
-  model m_editor
+  model m_responder
 
-  artifact editor_output text
+  artifact responder_output text
 
-  role editor
-    prompt template "templates/ask_single_editor.md" with history, query
+  role responder
+    prompt template "templates/ask_single_responder.md" with history, query
 
   state answer
-    actor model m_editor
-    role editor
+    actor model m_responder
+    role responder
     reads query, history
-    writes editor_output text
+    writes responder_output text
     on complete => done
     on error => stop
     on timeout => stop

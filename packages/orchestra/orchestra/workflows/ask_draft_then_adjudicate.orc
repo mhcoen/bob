@@ -9,11 +9,11 @@ workflow ask_draft_then_adjudicate
 
   model m_drafter
   model m_adjudicator
-  model m_editor
+  model m_responder
 
   artifact drafter_output text
   artifact adjudicator_output text
-  artifact editor_output text
+  artifact responder_output text
 
   role drafter
     prompt template "templates/ask_draft_then_adjudicate_drafter.md" with history, query
@@ -21,8 +21,8 @@ workflow ask_draft_then_adjudicate
   role adjudicator
     prompt template "templates/ask_draft_then_adjudicate_adjudicator.md" with history, drafter_output, query
 
-  role editor
-    prompt template "templates/ask_draft_then_adjudicate_editor.md" with history, adjudicator_output, query
+  role responder
+    prompt template "templates/ask_draft_then_adjudicate_responder.md" with history, adjudicator_output, query
 
   state draft
     actor model m_drafter
@@ -43,10 +43,10 @@ workflow ask_draft_then_adjudicate
     on timeout => stop
 
   state answer
-    actor model m_editor
-    role editor
+    actor model m_responder
+    role responder
     reads adjudicator_output, query, history
-    writes editor_output text
+    writes responder_output text
     on complete => done
     on error => stop
     on timeout => stop

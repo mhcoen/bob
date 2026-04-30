@@ -100,7 +100,7 @@ Create `~/.orchestra/config.json`:
     "pair":    { "workflow": "ask_draft_then_adjudicate" }
   },
   "roles": {
-    "editor":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "responder":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
     "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
     "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
@@ -215,6 +215,24 @@ A role binding has three required keys (plus an optional fourth):
 - `parameters`: adapter-specific extras, usually `{}`.
 - `tools` (edit-agent roles only): tool restriction for the agent,
   e.g. `"default"` for the standard McLoop tool set.
+
+The packaged ask workflows use the role name `responder` for the
+final-answer state, since those workflows are read-only and need a
+text adapter. The packaged code-edit workflows use the role name
+`editor` for the final-edit state, since those workflows do mutate
+the workspace and need an edit-agent adapter. Different role names
+keep the two adapter kinds from colliding under one binding. A
+single `~/.orchestra/config.json` can define both:
+
+```json
+"roles": {
+  "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
+  "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
+}
+```
+
+A project-local config can still override either one for that project
+without having to rename anything.
 
 ### Help
 
