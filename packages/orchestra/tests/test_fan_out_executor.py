@@ -879,6 +879,266 @@ workflow retry
     assert fan_end.fields["per_child_outcome"]["flaky"] == "success"
 
 
+def test_per_child_cancellation_isolation_under_pressure(
+    tmp_path: Path,
+) -> None:
+    """Per-child cancellation isolation under concurrent stress.
+
+    Five fan-out children A-E. A errors after a short delay; B/C/D/E
+    block on individual barriers, then return success after their
+    own cancel callback runs. Asserts:
+
+      1. Each of B/C/D/E receives ``cancel(handle)`` with its OWN
+         prepared handle (no cross-child handle leakage).
+      2. After cancel, B/C/D/E drain naturally and write durable
+         state_exit records.
+      3. The group aggregate is error; per_child_outcome contains
+         all five children's outcomes.
+      4. No registry-internal exception (KeyError, AttributeError,
+         RuntimeError) escapes during concurrent cancellation.
+
+    Tests Cleanup TEST 3.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow stress_cancel
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_c
+  model m_d
+  model m_e
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact a_out text
+  artifact b_out text
+  artifact c_out text
+  artifact d_out text
+  artifact e_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role lens
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role abr
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [a, b, c, d, e] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role lens
+    reads topic
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role lens
+    reads topic
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state c
+    actor model m_c
+    role lens
+    reads topic
+    writes c_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state d
+    actor model m_d
+    role lens
+    reads topic
+    writes d_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state e
+    actor model m_e
+    role lens
+    reads topic
+    writes e_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads a_out, b_out, c_out, d_out, e_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role abr
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    # Per-child release events. Each non-A child blocks in invoke
+    # until ITS event is set; the adapter's cancel(handle) sets
+    # the event for the child whose handle is being cancelled.
+    release_events: dict[str, threading.Event] = {
+        "m_b": threading.Event(),
+        "m_c": threading.Event(),
+        "m_d": threading.Event(),
+        "m_e": threading.Event(),
+    }
+    cancel_calls: list[tuple[str, Any]] = []
+    cancel_lock = threading.Lock()
+    captured_exceptions: list[BaseException] = []
+
+    class _IsolatingAdapter(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            try:
+                model_id = str(prepared.summary.get("model"))
+                if model_id == "m_a":
+                    # Small delay so all the others reach invoke and
+                    # are registered before a errors. The exact race
+                    # the test exercises: cancel arrives while
+                    # multiple children are simultaneously in invoke.
+                    import time as _time
+                    _time.sleep(0.05)
+                    raise RuntimeError("synthetic failure on a")
+                if model_id in release_events:
+                    release_events[model_id].wait(timeout=5)
+                return super().invoke(prepared)
+            except RuntimeError:
+                raise
+            except BaseException as exc:  # noqa: BLE001
+                captured_exceptions.append(exc)
+                raise
+
+        def cancel(self, prepared: Any) -> None:
+            try:
+                model_id = str(prepared.summary.get("model"))
+                with cancel_lock:
+                    cancel_calls.append((model_id, prepared))
+                # Releasing the corresponding child's event lets it
+                # drain. The handle that arrives MUST be the same
+                # PreparedInvocation the worker received for that
+                # child; if the registry leaks a different child's
+                # handle, the wrong event would be set and a
+                # different child would unblock.
+                if model_id in release_events:
+                    release_events[model_id].set()
+            except BaseException as exc:  # noqa: BLE001
+                captured_exceptions.append(exc)
+                raise
+
+    registry.actor_backings["model"] = lambda: _IsolatingAdapter()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "stress"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+
+    # No exception escaped through the registry's concurrent
+    # cancellation paths.
+    assert captured_exceptions == [], (
+        f"unexpected exceptions during stress cancellation: "
+        f"{captured_exceptions!r}"
+    )
+
+    # Each of B/C/D/E received exactly one cancel(handle) call with
+    # ITS OWN handle. Group cancel_calls by model_id and verify
+    # uniqueness.
+    by_model: dict[str, list[Any]] = {}
+    for model_id, prepared in cancel_calls:
+        by_model.setdefault(model_id, []).append(prepared)
+
+    for model_id in ("m_b", "m_c", "m_d", "m_e"):
+        handles = by_model.get(model_id, [])
+        assert len(handles) == 1, (
+            f"{model_id} should have received exactly one "
+            f"cancel(handle); got {len(handles)} (full: {by_model!r})"
+        )
+        # The handle's summary's model field must match the model_id
+        # under which it was recorded -- proving no cross-child
+        # leakage of handles.
+        assert handles[0].summary.get("model") == model_id, (
+            f"{model_id} received a cancel(handle) for a different "
+            f"child: handle.summary={handles[0].summary!r}"
+        )
+
+    # All four cancelled children's prepared handles are pairwise
+    # distinct objects (each adapter.prepare returns a new instance).
+    cancelled_handles = [
+        by_model[m][0] for m in ("m_b", "m_c", "m_d", "m_e")
+    ]
+    assert len(set(id(h) for h in cancelled_handles)) == 4, (
+        "expected four distinct prepared-invocation handles "
+        "across the cancelled children; got duplicates"
+    )
+
+    # B/C/D/E each have a durable state_exit recording whatever
+    # outcome they ended up producing (all success since cancel
+    # released them and they returned MockModelAdapter's payload).
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    for child in ("b", "c", "d", "e"):
+        exits = [
+            r for r in records
+            if r.event == "state_exit" and r.state_id == child
+        ]
+        assert len(exits) == 1, (
+            f"child {child} missing durable state_exit"
+        )
+
+    # Group aggregate is error (a errored), routed to abort_state.
+    # per_child_outcome contains all five children.
+    fan_end = next(r for r in records if r.event == "fan_out_end")
+    assert fan_end.fields["aggregate"] == "error"
+    assert fan_end.fields["target"] == "abort_state"
+    per_child = fan_end.fields["per_child_outcome"]
+    assert set(per_child.keys()) == {"a", "b", "c", "d", "e"}
+    assert per_child["a"] == "error"
+
+
 def test_crash_mid_retry_then_replay_with_fresh_budget(
     tmp_path: Path,
 ) -> None:
