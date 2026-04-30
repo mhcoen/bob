@@ -984,6 +984,218 @@ workflow cancel_test
     assert fan_end.fields["target"] == "abort_state"
 
 
+def test_pending_cancellation_caught_between_register_and_invoke(
+    tmp_path: Path,
+) -> None:
+    """The cancellation registry's ``request_cancel_all`` can fire
+    AFTER a worker exits ``adapter.prepare()`` (so the registry has
+    transitioned to ``registered`` and the handle is stored) but
+    BEFORE the worker enters ``actor_invoke_start`` /
+    ``adapter.invoke()``. Without a re-check at that boundary the
+    pending-flag path's ``future.cancel()`` is a no-op against a
+    running future, the registered-cancel path's
+    ``adapter.cancel(handle)`` lands on a not-yet-invoked handle,
+    and the worker happily fires ``adapter.invoke`` regardless.
+
+    The fix re-checks ``cancel_requested`` after ``on_prepared`` and
+    before ``actor_invoke_start``; ``request_cancel_all`` now also
+    sets the flag for ``registered`` entries so the worker observes
+    the cancellation regardless of which branch the controller took.
+
+    Tests Re-audit Blocker 3.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow cancel_pre_invoke
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact a_out text
+  artifact b_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  role br
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role abr
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [a, b] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role ar
+    reads topic
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role br
+    reads topic
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads a_out, b_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role abr
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    # b errors immediately. a's prepare() blocks on ``a_prepare_release``
+    # until b's error has propagated through the controller and
+    # ``request_cancel_all`` has set a's cancel_requested flag. Once
+    # released, a's prepare returns; on_prepared transitions a to
+    # ``registered``; the new post-register cancel check observes
+    # the flag and takes the cancelled path WITHOUT calling
+    # adapter.invoke.
+    a_prepare_entered = threading.Event()
+    a_prepare_release = threading.Event()
+    invoke_calls: list[str] = []
+    invoke_lock = threading.Lock()
+
+    class _Coordinated(MockModelAdapter):
+        def prepare(self, request: Any) -> Any:
+            model_id = (request.actor_binding or {}).get("model")
+            if model_id == "m_a":
+                a_prepare_entered.set()
+                # Wait for the test to release: by the time we
+                # release, the controller has already processed b's
+                # error and called request_cancel_all, flipping a's
+                # cancel_requested flag. on_prepared then transitions
+                # the registry to ``registered``, and the worker's
+                # post-register check sees the flag.
+                a_prepare_release.wait(timeout=5)
+            return super().prepare(request)
+
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            with invoke_lock:
+                invoke_calls.append(str(model_id))
+            if model_id == "m_b":
+                raise RuntimeError("synthetic failure on b")
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Coordinated()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+
+    # Releaser: wait until a is in prepare, give the controller a
+    # moment to drive b through invoke -> error -> request_cancel_all,
+    # then release a. This drive ordering is what the production
+    # race looks like: b errors first, controller flags a, a returns
+    # from prepare and is registered, post-register check fires.
+    def _releaser() -> None:
+        a_prepare_entered.wait(timeout=5)
+        # Give the controller time to process b's error and call
+        # request_cancel_all. b's invoke runs, raises, the drain
+        # loop catches it and calls request_cancel_all. We then
+        # release a's prepare. Polling on b's invoke completion is
+        # cleaner than a fixed sleep but a small sleep is enough
+        # for the test's purposes; the assertion below catches a
+        # genuinely-broken implementation regardless.
+        import time as _time
+        _time.sleep(0.2)
+        a_prepare_release.set()
+
+    releaser = threading.Thread(target=_releaser)
+    releaser.start()
+    try:
+        terminal = executor.run_to_completion()
+    finally:
+        releaser.join(timeout=5)
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+
+    # b is the only fan-out child whose adapter.invoke was called.
+    # a was cancelled at the post-register boundary and never
+    # invoked. (m_parent and m_abort run before/after the fan-out
+    # and are unrelated; filter to the two fan-out child models.)
+    fan_invoke_calls = [c for c in invoke_calls if c in ("m_a", "m_b")]
+    assert fan_invoke_calls == ["m_b"], (
+        f"expected only m_b's invoke to run among fan-out children; "
+        f"got {fan_invoke_calls!r} (full: {invoke_calls!r})"
+    )
+
+    records = LogReader(run_dir / "log.jsonl").read_all()
+
+    # a has a state_exit with outcome=cancelled (the
+    # cancelled-post-register path).
+    a_exits = [
+        r for r in records
+        if r.event == "state_exit" and r.state_id == "a"
+    ]
+    assert len(a_exits) == 1
+    assert a_exits[0].fields["outcome"] == "cancelled"
+
+    # a wrote no actor_invoke_start (skipped invoke entirely).
+    a_invoke_starts = [
+        r for r in records
+        if r.event == "actor_invoke_start" and r.state_id == "a"
+    ]
+    assert a_invoke_starts == []
+
+    # The group routes to the error target because b errored.
+    fan_end = next(r for r in records if r.event == "fan_out_end")
+    assert fan_end.fields["aggregate"] == "error"
+    assert fan_end.fields["target"] == "abort_state"
+
+
 # --------------------------------------------------------------------
 # Resume of an open fan-out group (Blockers 4 + 5)
 # --------------------------------------------------------------------

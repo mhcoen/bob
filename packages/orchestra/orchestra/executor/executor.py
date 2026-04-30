@@ -1210,12 +1210,18 @@ class Executor:
             ) -> None:
                 registry.mark_started(_name, _id, prepared, _adapter)
 
+            def _is_cancelled_after_register(
+                _name: str = child_name,
+            ) -> bool:
+                return registry.is_cancelled(_name)
+
             envelope = self._execute_state_body(
                 child_name,
                 current_attempt,
                 invocation_id,
                 snapshot=snapshot,
                 on_prepared=_on_prepared,
+                is_cancelled_after_register=_is_cancelled_after_register,
             )
             should_retry = False
             outcome = envelope.outcome
@@ -1301,6 +1307,7 @@ class Executor:
         invocation_id: str,
         snapshot: FanOutSnapshot | None = None,
         on_prepared: Callable[[PreparedInvocation], None] | None = None,
+        is_cancelled_after_register: Callable[[], bool] | None = None,
     ) -> Envelope:
         """Run steps 1-9 of the per-state sequence for ``state_name``
         with the supplied attempt and invocation_id.
@@ -1369,6 +1376,18 @@ class Executor:
                 detail={"exception": type(exc).__name__, "phase": "prepare"},
             )
 
+        # Slice A: ``cancelled_post_register`` covers the small window
+        # between ``on_prepared`` (which transitions the cancellation
+        # registry from ``pending`` to ``registered`` and stores the
+        # handle) and ``actor_invoke_start``. Without this re-check
+        # the controller could call ``request_cancel_all`` after the
+        # worker passed its top-of-loop check and after the registry
+        # transitioned to ``registered``, but BEFORE the adapter was
+        # invoked. The pending-flag path would race past, the
+        # registered-cancel path would call ``adapter.cancel`` on a
+        # not-yet-invoked handle, and the worker would still call
+        # ``adapter.invoke``. Re-checking here closes the window.
+        cancelled_post_register = False
         if prepared is not None:
             self._log.write(
                 "actor_prepare",
@@ -1378,12 +1397,25 @@ class Executor:
             )
             if on_prepared is not None:
                 on_prepared(prepared)
+            if (
+                is_cancelled_after_register is not None
+                and is_cancelled_after_register()
+            ):
+                cancelled_post_register = True
 
         started_at = _now_iso()
         started_perf = time.perf_counter()
         error_record: ErrorRecord | None = prepare_error
+        if cancelled_post_register:
+            error_record = ErrorRecord(
+                kind="cancelled",
+                message=(
+                    "cancelled by fan-out controller after register, "
+                    "before invoke"
+                ),
+            )
         payload: dict[str, Any] = {}
-        if prepared is not None:
+        if prepared is not None and not cancelled_post_register:
             self._log.write(
                 "actor_invoke_start",
                 state_id=state.name,
@@ -1411,17 +1443,23 @@ class Executor:
         ended_at = _now_iso()
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
 
-        payload_ref = self._write_payload(self._log.next_seq, payload)
-        self._log.write(
-            "actor_invoke_end",
-            state_id=state.name,
-            attempt=attempt,
-            fields={
-                "summary": _payload_summary(state, payload),
-                "payload_ref": payload_ref,
-                "duration_ms": duration_ms,
-            },
-        )
+        # If we never wrote ``actor_invoke_start`` (cancelled before
+        # invoke), we also do not write ``actor_invoke_end`` and skip
+        # ``_write_payload``: there is no payload to record.
+        if prepared is not None and not cancelled_post_register:
+            payload_ref = self._write_payload(self._log.next_seq, payload)
+            self._log.write(
+                "actor_invoke_end",
+                state_id=state.name,
+                attempt=attempt,
+                fields={
+                    "summary": _payload_summary(state, payload),
+                    "payload_ref": payload_ref,
+                    "duration_ms": duration_ms,
+                },
+            )
+        else:
+            payload_ref = None
 
         if error_record is not None and error_record.kind == "timeout":
             status: str = "timeout"
@@ -1430,6 +1468,14 @@ class Executor:
         else:
             status = "ok"
         outcome = self._derive_outcome(state, payload, status)
+        # Preserve the "cancelled" outcome from the
+        # cancelled-post-register path so downstream tooling can
+        # distinguish a controller-cancelled invocation from a
+        # generic error. This matches the convention used by
+        # ``_write_cancelled_state_exit`` (cancellation observed
+        # before prepare).
+        if error_record is not None and error_record.kind == "cancelled":
+            outcome = "cancelled"
 
         artifacts_written: list[dict[str, str]] = []
         tentative_handles: list[str] = []
@@ -1767,6 +1813,19 @@ class _CancellationRegistry:
         # Snapshot the actions to take under the lock, then perform
         # them outside the lock so adapter cancel and future cancel
         # cannot deadlock against the registry lock.
+        #
+        # Slice A: ``cancel_requested`` is set for BOTH pending and
+        # registered entries. The pending case is the obvious one
+        # (worker has not yet invoked the adapter; flag short
+        # circuits the top-of-loop check). The registered case
+        # covers the small window between ``on_prepared`` and
+        # ``actor_invoke_start`` where the worker has registered the
+        # handle but not yet called ``adapter.invoke``: the worker's
+        # post-register check reads the flag and takes the
+        # cancelled path without invoking. Without this the
+        # registered-cancel branch would call ``adapter.cancel`` on
+        # a not-yet-invoked handle while the worker happily fires
+        # ``adapter.invoke`` anyway.
         pending_to_cancel: list[str] = []
         registered_to_cancel: list[tuple[Adapter, PreparedInvocation]] = []
         with self._lock:
@@ -1775,6 +1834,7 @@ class _CancellationRegistry:
                     entry.cancel_requested = True
                     pending_to_cancel.append(name)
                 elif entry.state == "registered":
+                    entry.cancel_requested = True
                     if (
                         entry.adapter is not None
                         and entry.invocation_handle is not None
