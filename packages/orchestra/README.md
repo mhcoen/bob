@@ -28,7 +28,7 @@ edit-agent variants) are wired and tested. The library API
 binding, per-role dispatch, and a `WorkflowRunResult` shaped for
 direct integration into existing tools.
 
-Three workflow patterns ship as packaged `.orc` files:
+Three code-edit workflow patterns ship as packaged `.orc` files:
 
 - `single`: one edit-agent performs the edit.
 - `draft_then_adjudicate`: text-role drafts, text-role adjudicates,
@@ -37,8 +37,17 @@ Three workflow patterns ship as packaged `.orc` files:
   critiques, text-role synthesizes, one edit-agent performs the
   edit.
 
-For the initial code-edit integration, exactly one invocation per
-orchestra call mutates the workspace; earlier roles are advisory.
+Three ask-flavored variants ship alongside them for the verb CLI:
+
+- `ask_single`: one model produces the answer.
+- `ask_draft_then_adjudicate`: drafter, adjudicator, editor (all
+  text-role).
+- `ask_propose_critique_synthesize`: proposer, critic, synthesizer,
+  editor (all text-role).
+
+For the code-edit integration, exactly one invocation per orchestra
+call mutates the workspace; earlier roles are advisory. The ask
+variants are read-only conversations; no workspace is touched.
 
 ## Library use
 
@@ -85,8 +94,70 @@ each role gets. Without a config file, `code_edit` defaults to
 
 ## CLI use
 
-The CLI is independent of the library API and remains the canonical
-command-line surface for direct workflow execution:
+Two surfaces: the verb-style surface (short, conversational) and the
+direct execution surface (`run`/`resume`).
+
+### Verb-style
+
+Type a verb and a question. Orchestra reads `~/.orchestra/config.json`,
+maps the verb to a workflow, and runs it with the rest of the line as
+the query.
+
+```
+orchestra ask what is the capital of france
+orchestra council should I rewrite this in rust
+orchestra pair explain the difference between liskov and dependency inversion
+```
+
+The model's text response prints to stdout. Nothing else: no run
+ids, no run-dir paths, no terminal-state debug. The full log still
+lands at `~/.orchestra/runs/<run_id>/log.jsonl` for forensics.
+
+### Configuring verbs
+
+Drop a config at `~/.orchestra/config.json` with a `verbs` table that
+maps verb names to workflow names, plus the `roles` and `workflows`
+the proposal-spec config schema already documents:
+
+```json
+{
+  "verbs": {
+    "ask":     { "workflow": "ask_single" },
+    "council": { "workflow": "ask_propose_critique_synthesize" },
+    "pair":    { "workflow": "ask_draft_then_adjudicate" }
+  },
+  "roles": {
+    "editor":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
+  },
+  "workflows": {
+    "ask_single":                       { "pattern": "ask_single" },
+    "ask_propose_critique_synthesize":  { "pattern": "ask_propose_critique_synthesize" },
+    "ask_draft_then_adjudicate":        { "pattern": "ask_draft_then_adjudicate" }
+  }
+}
+```
+
+Verb names are user-defined; rename, add, or remove freely. Each
+verb just names which workflow runs.
+
+### Help
+
+```
+orchestra help
+```
+
+Lists every configured verb plus the workflow it runs. `orchestra
+help <verb>` shows the required roles and the binding configured for
+each, flagging any role with no binding as `NOT CONFIGURED`.
+
+### Direct execution
+
+Same as before: bypass verbs and run a workflow file directly.
 
 ```
 orchestra run tests/fixtures/slice1/echo.orc --input topic="hello world"

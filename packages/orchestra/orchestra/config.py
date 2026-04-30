@@ -183,6 +183,36 @@ def _role_optional_fields(
 
 
 @dataclass(frozen=True)
+class VerbBinding:
+    """Maps a verb name to a workflow name.
+
+    The CLI's verb dispatcher looks up the user-typed verb in the
+    global config and runs the named workflow with a single ``query``
+    input. Verb names are arbitrary; the user picks them. The
+    referenced workflow must exist in the same config's ``workflows``
+    table, but the loader does not enforce that to keep the config
+    forgiving (a verb that points at a nonexistent workflow surfaces
+    when the user invokes it, not at config load time).
+    """
+
+    workflow: str
+
+    @classmethod
+    def from_dict(cls, verb_name: str, raw: dict[str, Any]) -> VerbBinding:
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"verb {verb_name!r}: expected an object, got "
+                f"{type(raw).__name__}"
+            )
+        workflow = raw.get("workflow")
+        if not isinstance(workflow, str) or not workflow:
+            raise ConfigError(
+                f"verb {verb_name!r}: missing or empty 'workflow' key"
+            )
+        return cls(workflow=workflow)
+
+
+@dataclass(frozen=True)
 class WorkflowConfig:
     """Per-workflow config: which pattern to run plus optional role overrides.
 
@@ -237,10 +267,16 @@ class OrchestraConfig:
     ``roles`` holds the canonical role-to-binding table. ``workflows``
     maps workflow names to a pattern plus optional per-workflow
     overrides. Resolution lives in ``orchestra.api._resolve_role_binding``.
+
+    ``verbs`` maps verb names to workflow names for the verb-style CLI
+    surface. The verb section is optional: a project-local config that
+    only powers the McLoop integration omits it. The global config at
+    ``~/.orchestra/config.json`` typically populates it.
     """
 
     roles: dict[str, RoleBinding] = field(default_factory=dict)
     workflows: dict[str, WorkflowConfig] = field(default_factory=dict)
+    verbs: dict[str, VerbBinding] = field(default_factory=dict)
 
     def workflow(self, name: str) -> WorkflowConfig:
         try:
@@ -275,7 +311,14 @@ class OrchestraConfig:
             name: WorkflowConfig.from_dict(name, body)
             for name, body in workflows_raw.items()
         }
-        return cls(roles=roles, workflows=workflows)
+        verbs_raw = raw.get("verbs") or {}
+        if not isinstance(verbs_raw, dict):
+            raise ConfigError("'verbs' must be an object")
+        verbs = {
+            name: VerbBinding.from_dict(name, body)
+            for name, body in verbs_raw.items()
+        }
+        return cls(roles=roles, workflows=workflows, verbs=verbs)
 
 
 def default_config() -> OrchestraConfig:
@@ -315,6 +358,36 @@ def load_config(project_dir: Path | str) -> OrchestraConfig:
     path = Path(project_dir) / CONFIG_RELATIVE_PATH
     if not path.is_file():
         return default_config()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(
+            f"{path}: invalid JSON ({exc})"
+        ) from exc
+    return OrchestraConfig.from_dict(raw)
+
+
+def global_config_path() -> Path:
+    """Return the path the global verb-config lives at."""
+    return Path.home() / ".orchestra" / "config.json"
+
+
+def load_global_config() -> OrchestraConfig:
+    """Load the user-level config from ``~/.orchestra/config.json``.
+
+    Distinct from ``load_config`` (which reads project-local config):
+    this is the source of truth for verb-style CLI invocations. The
+    global config typically populates ``verbs``; project-local configs
+    typically do not. Raises ``ConfigError`` if the file is missing or
+    malformed; the CLI catches the missing-file case to emit a
+    friendlier setup hint.
+    """
+    path = global_config_path()
+    if not path.is_file():
+        raise ConfigError(
+            f"no config at {path}; create one with verb mappings to "
+            "use this command. See `orchestra help` for the format."
+        )
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

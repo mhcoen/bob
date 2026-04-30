@@ -1,4 +1,18 @@
-"""Command-line entry point for the runner."""
+"""Command-line entry point for the runner.
+
+Two surfaces:
+
+- ``orchestra run`` and ``orchestra resume`` are the named subparsers
+  for direct workflow execution. They take a workflow path or run id
+  and pass through the underlying executor.
+- ``orchestra <verb> <words...>`` is the verb-style surface. The
+  CLI loads ``~/.orchestra/config.json`` at startup, finds the
+  ``verbs`` section, and dispatches: if ``argv[1]`` matches a
+  configured verb, ``argv[2:]`` is joined with spaces and passed as
+  the workflow's ``query`` input. ``orchestra help`` lists all
+  configured verbs; ``orchestra help <verb>`` shows the workflow that
+  verb runs and the role bindings it requires.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +22,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from orchestra.api import run_verb
+from orchestra.config import (
+    ConfigError,
+    OrchestraConfig,
+    global_config_path,
+    load_global_config,
+)
+from orchestra.errors import OrchestraError
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
+from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.log import LogWriter
 from orchestra.registry.registry import with_core
 from orchestra.resume import replay_log, run_resume_hooks
@@ -224,7 +247,140 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0 if terminal == "done" else 1
 
 
+_RESERVED_COMMANDS: frozenset[str] = frozenset({"run", "resume", "help"})
+
+
+def _print_help_overview(config: OrchestraConfig | None) -> int:
+    out = sys.stdout
+    print("Configured verbs:", file=out)
+    if config is None or not config.verbs:
+        print(
+            f"  (none; create {global_config_path()} with a 'verbs' section)",
+            file=out,
+        )
+    else:
+        width = max(len(name) for name in config.verbs)
+        for verb_name in sorted(config.verbs):
+            workflow = config.verbs[verb_name].workflow
+            print(f"  {verb_name.ljust(width)}  runs {workflow}", file=out)
+    print("", file=out)
+    print("Direct workflow execution:", file=out)
+    print("  run <workflow.orc> --input k=v ...", file=out)
+    print("  resume <run_id>", file=out)
+    print("", file=out)
+    print("Use `orchestra help <verb>` for verb details.", file=out)
+    return 0
+
+
+def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
+    out = sys.stdout
+    err = sys.stderr
+    if verb_name not in config.verbs:
+        print(
+            f"unknown verb {verb_name!r}. Configured: "
+            f"{sorted(config.verbs)}",
+            file=err,
+        )
+        return 2
+    workflow_name = config.verbs[verb_name].workflow
+    print(f"{verb_name}: runs workflow `{workflow_name}`", file=out)
+    try:
+        workflow_path = resolve_workflow_path(workflow_name, project_dir=None)
+    except OrchestraError as exc:
+        print(f"  workflow file not found: {exc}", file=err)
+        return 1
+    try:
+        from orchestra.api import _pre_load_registry
+        workflow = load_workflow(workflow_path, _pre_load_registry())
+    except OrchestraError as exc:
+        print(f"  workflow failed to load: {exc}", file=err)
+        return 1
+    role_names = sorted(
+        {state.role for state in workflow.states if state.role is not None}
+    )
+    print(
+        "Required roles: " + (", ".join(role_names) if role_names else "(none)"),
+        file=out,
+    )
+    print(
+        f"Configured bindings (from {global_config_path()}):",
+        file=out,
+    )
+    for role in role_names:
+        binding = config.roles.get(role)
+        if binding is None:
+            print(f"  {role}: NOT CONFIGURED", file=out)
+            continue
+        details = [binding.adapter]
+        if binding.model:
+            details.append(f"model={binding.model}")
+        print(f"  {role}: " + ", ".join(details), file=out)
+    return 0
+
+
+def _try_load_global_config() -> tuple[OrchestraConfig | None, str | None]:
+    """Return ``(config, error_message)``.
+
+    Returns ``(config, None)`` when the file loaded successfully, or
+    ``(None, message)`` when it is missing or malformed. The CLI
+    branches on the return so it can show the right friendly error
+    for each case without leaking exception text into help output.
+    """
+    try:
+        return load_global_config(), None
+    except ConfigError as exc:
+        return None, str(exc)
+
+
+def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
+    config, err = _try_load_global_config()
+    if config is None:
+        print(err or "global config unavailable", file=sys.stderr)
+        return 1
+    if verb_name not in config.verbs:
+        print(
+            f"unknown command: {verb_name}; try `orchestra help`",
+            file=sys.stderr,
+        )
+        return 2
+    if not query_words:
+        print(
+            f"verb {verb_name!r}: no query supplied. "
+            f"Usage: orchestra {verb_name} <words...>",
+            file=sys.stderr,
+        )
+        return 2
+    query = " ".join(query_words)
+    try:
+        answer = run_verb(verb_name, query, config)
+    except OrchestraError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(answer)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    # Handle the verb-style surface before argparse so positional
+    # words can flow through unmangled.
+    if raw_args and raw_args[0] not in _RESERVED_COMMANDS and not raw_args[0].startswith("-"):
+        return _dispatch_verb(raw_args[0], raw_args[1:])
+
+    if raw_args and raw_args[0] == "help":
+        config, _err = _try_load_global_config()
+        if len(raw_args) == 1:
+            return _print_help_overview(config)
+        if config is None:
+            print(
+                "no global config; cannot describe verb. Create "
+                f"{global_config_path()} first.",
+                file=sys.stderr,
+            )
+            return 1
+        return _print_help_for_verb(raw_args[1], config)
+
     parser = argparse.ArgumentParser(prog="orchestra")
     parser.add_argument(
         "--data-root",
@@ -243,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     resume_p.add_argument("run_id")
     resume_p.set_defaults(func=cmd_resume)
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_args)
     return int(args.func(args))
 
 

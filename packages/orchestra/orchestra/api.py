@@ -800,3 +800,40 @@ def _safe_options(opts: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+def run_verb(
+    verb_name: str,
+    query: str,
+    config: OrchestraConfig,
+) -> str:
+    """Run the workflow named by ``verb_name`` and return the answer text.
+
+    The verb resolves to a workflow name through ``config.verbs``. The
+    workflow runs with ``inputs={"query": query}``. The return value
+    is the final state's text payload, which the CLI prints to stdout.
+    Raises ``WorkflowApiError`` if the verb is unknown, the workflow
+    does not terminate in ``done``, or the final envelope carries no
+    text response.
+    """
+    if verb_name not in config.verbs:
+        raise WorkflowApiError(
+            f"unknown verb {verb_name!r}. Configured: "
+            f"{sorted(config.verbs)}"
+        )
+    workflow_name = config.verbs[verb_name].workflow
+    result = run_workflow(workflow_name, {"query": query}, config)
+    if result.terminal != "done":
+        raise WorkflowApiError(
+            f"verb {verb_name!r} (workflow {workflow_name!r}) did not "
+            f"complete: terminal={result.terminal!r}. Run dir: "
+            f"{result.log_path.parent}"
+        )
+    output = result.summary.get("output", "")
+    if not isinstance(output, str) or not output:
+        raise WorkflowApiError(
+            f"verb {verb_name!r} (workflow {workflow_name!r}) produced "
+            "no text response. Check the run log for details: "
+            f"{result.log_path}"
+        )
+    return output
