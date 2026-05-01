@@ -15,6 +15,7 @@ McLoop lets you run AI coding agents for hours at a time without babysitting the
 - **Model fallback** from a cheaper model to a stronger one when tasks fail or hit rate limits
 - **Stages** for phased execution with testing between stages
 - **Continuous code review** of every commit via a second AI model, without blocking the main loop
+- **Multi-model coding patterns** via [Orchestra](https://github.com/mhcoen/orchestra) integration: opt-in per project to route each edit attempt through a draft-then-adjudicate or propose-critique-synthesize pattern instead of a single-model invocation
 - **Targeted testing** after each task (full suite only at stage boundaries)
 - **Syncing** PLAN.md with the codebase after manual changes
 - **Visual verification** with deterministic app screenshots
@@ -1034,6 +1035,172 @@ McLoop prints the reviewer status at startup when configured (e.g.,
 `Reviewer: deepseek/deepseek-v3.2 via openrouter.ai (API key set)`).
 Stale review files older than 24 hours are cleaned up automatically.
 
+## Multi-model coding patterns via Orchestra
+
+McLoop can route the per-edit invocation through
+[Orchestra](https://github.com/mhcoen/orchestra), a deterministic
+runner that coordinates multiple models per coding decision. Instead
+of one model writing each fix, two or three text models advise on
+the approach before a single edit-capable model performs the actual
+file changes. The outer loop (retry, rate-limit detection, success
+classification, Telegram approval, audit cycle) is unchanged. Only
+the inner edit invocation goes through Orchestra.
+
+Three patterns ship out of the box:
+
+- **`single`**: one edit-agent performs the edit. Equivalent to the
+  default direct backend; useful as a parity baseline.
+- **`draft_then_adjudicate`**: a text-role drafts the approach, a
+  second text-role adjudicates or rewrites it, then one edit-agent
+  performs the edit. Three model calls per edit attempt.
+- **`propose_critique_synthesize`**: a text-role proposes, a
+  text-role critiques, a text-role synthesizes, then one edit-agent
+  performs the edit. Four model calls per edit attempt.
+
+For every pattern, exactly one invocation per attempt mutates the
+workspace; the earlier roles produce text-only advice that the
+final edit-agent receives in its prompt. This avoids needing
+multi-writer arbitration, which Orchestra defers.
+
+### Why this helps
+
+The single-model failure mode that costs McLoop the most retries is
+"confident draft, wrong approach." A model produces an edit that
+looks reasonable, makes the change, fails the checks, then retries
+with a slightly different version of the same wrong idea. A
+separate adjudicator reading the draft with the original problem
+statement in hand catches a class of these mistakes before any
+file is touched.
+
+A single bug-finding example on this codebase showed which models
+complement each other:
+
+![Matrix from a single bug-finding example. Kimi K2.6: 10 bugs found, 6 unique, 0 false positives. Claude Opus: 4 found, 3 unique, 0 false positives. Codex GPT: 2 found, 1 unique, many false positives requiring manual filtering. DeepSeek V4 Pro: 4 found, 0 unique, 0 false positives.](https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png)
+
+Kimi K2.6 produced the most independent coverage and Opus
+contributed complementary unique finds, which makes them a
+reasonable starting pair for `draft_then_adjudicate`: Kimi as
+drafter, Opus as adjudicator. This is one example on one codebase
+and should be re-evaluated when model versions change. The orchestra
+README has the longer discussion at
+[Choosing model bindings](https://github.com/mhcoen/orchestra#choosing-model-bindings).
+
+### Enabling Orchestra for a project
+
+Orchestra is opt-in per project. McLoop selects the backend by
+looking for `<project>/.orchestra/config.json`. If absent,
+malformed, or set to `"pattern": "direct"`, the original direct
+backend runs. Otherwise the configured pattern runs. Errors during
+config load fall back to the direct backend with a stderr warning,
+so a misconfigured project still makes progress.
+
+Prerequisites:
+
+- Install orchestra in the same Python environment as mcloop:
+  `pip install -e /path/to/orchestra` (or whatever installer is
+  appropriate). McLoop imports orchestra directly via
+  `from orchestra import run_workflow`. There is no subprocess
+  boundary; orchestra has to be importable.
+- A populated `~/.orchestra/config.json` with role bindings (see
+  orchestra's README for the schema). McLoop reads the merged
+  view of the global config plus the project config.
+
+Once orchestra is installed, create `<project>/.orchestra/config.json`
+in the project mcloop will run against. The minimal example wires
+the `code_edit` workflow to the `draft_then_adjudicate` pattern and
+overrides only the bindings you want to differ from the global:
+
+```json
+{
+  "workflows": {
+    "code_edit": { "pattern": "draft_then_adjudicate" }
+  }
+}
+```
+
+The role bindings (`drafter`, `adjudicator`, `editor`) come from
+`~/.orchestra/config.json`. Add them there if they do not already
+exist:
+
+```json
+{
+  "roles": {
+    "drafter":     { "adapter": "claude_code_text",  "model": "kimi-k2.6", "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text",  "model": "opus",     "parameters": {} },
+    "editor":      { "adapter": "claude_code_agent", "model": "opus",     "tools": "default", "parameters": {} }
+  }
+}
+```
+
+The `claude_code_text` adapter runs Claude Code in a constrained,
+read-only configuration (no Edit, Write, Bash, or web tools). Only
+the `claude_code_agent` adapter for the `editor` role mutates the
+workspace. This is the workflow contract: text roles advise, the
+agent role acts.
+
+To run the same pattern on a different model mix without editing
+the global config, use `role_overrides` in the project config:
+
+```json
+{
+  "workflows": {
+    "code_edit": {
+      "pattern": "draft_then_adjudicate",
+      "role_overrides": {
+        "drafter": { "model": "deepseek-v4-pro" }
+      }
+    }
+  }
+}
+```
+
+Overrides replace top-level binding keys for that workflow only.
+See orchestra's README for the full two-tier merge rules.
+
+### Verifying the integration
+
+After enabling orchestra, mcloop's per-task log file shows
+additional records when the orchestra backend ran (state
+transitions, per-state durations, per-model invocation summaries).
+The `CodeEditResult` mcloop receives back carries the same
+`success`, `exit_code`, `log_path`, and `changed_files` fields the
+direct backend produces, so retry and rate-limit logic are
+unchanged. If the orchestra backend produces a structured summary,
+mcloop surfaces it in the run summary at `.mcloop/runs/latest.json`
+under the task's entry.
+
+To opt out for a single project after enabling, set the pattern to
+`"direct"`:
+
+```json
+{
+  "workflows": {
+    "code_edit": { "pattern": "direct" }
+  }
+}
+```
+
+McLoop falls back to the direct backend with no behavior change
+from that project's perspective.
+
+### Bug verification
+
+The `bug_verify` workflow uses the same wiring shape but is not yet
+available in orchestra's packaged workflow set. Until it lands,
+leave `bug_verify` out of the project config (or explicitly set
+`"pattern": "direct"`); the direct bug-verify path remains the
+working default.
+
+### Cost and latency
+
+Multi-role patterns multiply the per-edit token usage and wall
+clock by the number of roles. `draft_then_adjudicate` is roughly
+3x a single-model edit; `propose_critique_synthesize` is roughly
+4x. The retries-saved benefit has to outweigh that cost for the
+pattern to pay off. Run on a representative task batch and
+compare the run summaries before deciding which pattern to keep
+on for production work.
+
 ## Syncing PLAN.md
 
 Run `mcloop sync` to reconcile PLAN.md with the actual codebase. This
@@ -1447,7 +1614,7 @@ background on every commit.
 |-------|----------|-----------|------------|-----------|---------|-------|
 | DeepSeek V3.2 | OpenRouter | $0.28 | $0.42 | 73.1% | 128K | Best value. 90% cache discount on repeated context. |
 | GLM-5 | OpenRouter | $0.72 | $2.30 | 95.8% | 200K | Strongest open model. Near-zero hallucination rate. |
-| Kimi K2.5 | OpenRouter | $0.50 | $2.80 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. |
+| Kimi K2.6 | OpenRouter | $0.50 | $2.80 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. See note below. |
 | Gemini 2.5 Flash | Google | $0.30 | $2.50 | N/A | 1M | Fast, cheap, very large context window. |
 | Gemini 2.5 Pro | Google | $1.25 | $10.00 | 63.8% | 1M | Strong reasoning, 1M context. Free tier available. |
 | Claude Sonnet 4.6 | Anthropic | $3.00 | $15.00 | 79.6% | 200K | For comparison. McLoop's default task executor. |
@@ -1460,10 +1627,17 @@ To use any of these, set the model string in `.mcloop/config.json`:
 ```
 
 OpenRouter model strings: `deepseek/deepseek-v3.2`, `z-ai/glm-5`,
-`moonshotai/kimi-k2.5`, `google/gemini-2.5-flash`,
+`moonshotai/kimi-k2.6`, `google/gemini-2.5-flash`,
 `google/gemini-2.5-pro`. Pricing may vary by provider and change
 over time. Check [OpenRouter](https://openrouter.ai) for current
 rates.
+
+The table above lists generic SWE-bench-derived suitability. For a
+local observation about how these models behave on this codebase,
+see the bug-finding example in [Multi-model coding patterns via
+Orchestra](#multi-model-coding-patterns-via-orchestra), where Kimi
+K2.6 had the highest unique-find rate with zero false positives on
+a single bug-finding pass over McLoop's source.
 
 ## License
 
