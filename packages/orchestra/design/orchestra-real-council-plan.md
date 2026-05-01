@@ -526,13 +526,17 @@ callable with the following surface:
   match `output_schema` keys exactly.
 - **Type checking scope (Slice B).** Schemas use a fixed, narrow
   set of types. Slice B supports:
-  - primitive types: `str`, `int`, `float`, `bool`, `bytes`.
+  - primitive types: `str`, `int`, `float`, `bool`.
   - the parameterized type `dict[str, str]` (because
     `anonymize_outputs` needs it).
   Other parameterized generics (`list[T]`, `tuple[T, ...]`,
-  arbitrary nested dicts) are NOT supported in Slice B. Adding
-  more types is a future slice; the registry rejects schema
-  declarations using unsupported types at registration time.
+  arbitrary nested dicts) are NOT supported in Slice B. `bytes`
+  is also NOT supported in Slice B: the artifact store hashes
+  via `json.dumps` which rejects bytes, so a binary artifact
+  contract requires a separate canonical-encoding decision
+  deferred to a later slice. Adding more types is a future slice;
+  the registry rejects schema declarations using unsupported
+  types at registration time.
 
   The validator checks both key sets and value types statically
   against the workflow's artifact type declarations. Runtime
@@ -628,12 +632,19 @@ States:
 4. Fan-out from `anonymize` into five parallel reviewer states:
    `reviewer_1` through `reviewer_5`, all using the `reviewer` role.
    Each reads `anon_map` and writes its own `review_N_output`.
-5. Join into `chairman`: text-role state using the `chairman` role.
-   Reads `framed_question`, all five advisor outputs by their named
-   artifacts (`contrarian_output`, `first_principles_output`, etc.),
-   and all five reviewer outputs. Writes `chairman_output`: the
-   structured verdict (Where Council Agrees / Where Council Clashes
-   / Blind Spots / Recommendation / One Thing First).
+5. Join into `synthesize`: text-role state using the `chairman`
+   role. Reads `framed_question`, all five advisor outputs by their
+   named artifacts (`contrarian_output`, `first_principles_output`,
+   etc.), and all five reviewer outputs. Writes `chairman_output`:
+   the structured verdict (Where Council Agrees / Where Council
+   Clashes / Blind Spots / Recommendation / One Thing First).
+
+   Note on the state name. The terminal state is named `synthesize`
+   rather than `chairman` because the loader's phase-4 validator
+   enforces a single namespace across state, artifact, model, role,
+   agent, and group names. The role binding remains `chairman` per
+   Section 3, so the user-facing config contract is unchanged. Only
+   the workflow-internal state name differs.
 
 The chairman reads named advisor outputs directly from the artifact
 store. Anonymization affects only what the reviewers see. There is
@@ -951,9 +962,11 @@ Do not do all of this in one push. Stop after each slice and report.
   checks input/output shape statically (both key sets and value
   types against the workflow's artifact type declarations).
 - Restrict schema types to the supported set (Slice B): `str`,
-  `int`, `float`, `bool`, `bytes`, plus the parameterized type
-  `dict[str, str]`. Other types are rejected at registration
-  time. No third-party type-checking libraries are pulled in.
+  `int`, `float`, `bool`, plus the parameterized type
+  `dict[str, str]`. `bytes` is excluded; binary artifact support
+  requires a canonical-encoding decision deferred to a later
+  slice. Other types are rejected at registration time. No
+  third-party type-checking libraries are pulled in.
 - Runtime type checking: `isinstance` for primitive types, a small
   custom recursive checker for `dict[str, str]` (asserts value
   is a `dict`, every key is a `str`, every value is a `str`).

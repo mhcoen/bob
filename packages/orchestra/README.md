@@ -96,7 +96,8 @@ Create `~/.orchestra/config.json`:
 {
   "verbs": {
     "ask":     { "workflow": "ask_single" },
-    "council": { "workflow": "ask_propose_critique_synthesize" },
+    "refine":  { "workflow": "ask_propose_critique_synthesize" },
+    "council": { "workflow": "ask_council" },
     "pair":    { "workflow": "ask_draft_then_adjudicate" }
   },
   "roles": {
@@ -105,15 +106,31 @@ Create `~/.orchestra/config.json`:
     "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
     "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
+    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "framer":         { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "contrarian":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "first_principles":{ "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "expansionist":   { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "outsider":       { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "executor_lens":  { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "reviewer":       { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "chairman":       { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
   },
   "workflows": {
     "ask_single":                       { "pattern": "ask_single" },
     "ask_propose_critique_synthesize":  { "pattern": "ask_propose_critique_synthesize" },
+    "ask_council":                      { "pattern": "ask_council" },
     "ask_draft_then_adjudicate":        { "pattern": "ask_draft_then_adjudicate" }
   }
 }
 ```
+
+The role bindings for `ask_council` (`framer`, the five lens roles,
+`reviewer`, `chairman`) are eight separate bindings; the validator
+rejects an `ask_council` invocation that does not bind all eight. The
+other conversational verbs need fewer bindings: `ask` only `responder`;
+`refine` only `proposer`, `critic`, and `synthesizer`; `pair` only
+`drafter` and `adjudicator`. Drop the bindings you do not use.
 
 Try it:
 
@@ -125,9 +142,48 @@ orchestra council should I rewrite this in rust
 
 That's the whole CLI surface for ad-hoc questions.
 
+## Choosing model bindings
+
+The role-to-model bindings in the quick-start config above are not
+arbitrary, but they are not benchmarks either. They reflect a single
+bug-finding example on the McLoop codebase, where four models were
+each asked to find bugs in the same code independently. The matrix:
+
+![Matrix from a single bug-finding example. Kimi K2.6: 10 bugs found, 6 unique, 0 false positives. Claude Opus: 4 found, 3 unique, 0 false positives. Codex GPT: 2 found, 1 unique, many false positives requiring manual filtering. DeepSeek V4 Pro: 4 found, 0 unique, 0 false positives.](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-matrix.png)
+
+The headline observations from this one example: Kimi K2.6 produced
+the most independent coverage (six unique finds, zero false
+positives), Opus contributed complementary unique finds, DeepSeek
+confirmed findings other models had already surfaced (zero unique),
+and Codex required manual filtering to be usable. The per-bug
+detail:
+
+![Per-bug coverage detail from the same example, showing which of Kimi K2.6, DeepSeek, Claude, and Codex flagged each bug and at what severity.](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-detail.png)
+
+This is one example on one codebase. The rankings may differ on
+architecture critique, code generation, or non-coding consultation;
+model versions update; new candidate models will arrive. Re-evaluate
+before making large binding changes.
+
+The practical implications for the bindings above: Kimi K2.6 is a
+reasonable default for divergent-thinking roles (`drafter`,
+`proposer`, `contrarian`, `outsider`), Opus for synthesis-shaped
+roles (`adjudicator`, `synthesizer`, `first_principles`,
+`executor_lens`, `chairman`), and Sonnet for cheap-but-capable
+roles (`framer`, `critic`, `expansionist`, `reviewer`). DeepSeek
+fits as a confirming third opinion when you want a sanity check on
+an already-flagged finding. Codex stays out of automated paths
+because its triage cost compounds across many invocations.
+
+For consumers like McLoop that integrate orchestra at the
+edit-attempt level, the `draft_then_adjudicate` pattern with Kimi
+as drafter and Opus as adjudicator is the natural starting point
+from this example. See [the McLoop README](https://github.com/mhcoen/mcloop)
+for the integration mechanics.
+
 ## Workflow patterns
 
-Six packaged patterns ship out of the box. Three are conversational
+Eight packaged patterns ship out of the box. Four are conversational
 (used by the verb CLI):
 
 - `ask_single`: one model produces the answer. Useful for quick
@@ -138,6 +194,13 @@ Six packaged patterns ship out of the box. Three are conversational
 - `ask_propose_critique_synthesize`: a proposer drafts a take, a
   critic argues against it, a synthesizer reconciles. Useful for
   contested or open-ended questions.
+- `ask_council`: a framer reformulates the question; five lens
+  advisors (contrarian, first principles, expansionist, outsider,
+  executor) answer in parallel; their outputs are anonymized to
+  letters A through E; five reviewer invocations critique the
+  anonymized panel; a chairman synthesizes a structured verdict.
+  Twelve LLM calls per invocation; useful for high-leverage
+  decisions where a single perspective is not enough.
 
 Three are code-edit (used by McLoop and other coding tools):
 
