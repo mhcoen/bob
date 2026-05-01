@@ -12,6 +12,7 @@ CI on machines without the Codex CLI does not fail.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -381,8 +382,8 @@ def test_register_factory_constructs_adapter_with_default_model() -> None:
 
 
 @pytest.mark.skipif(
-    shutil.which("codex") is None,
-    reason="codex CLI not on PATH; live smoke test skipped",
+    shutil.which("codex") is None or os.environ.get("ORCHESTRA_LIVE_CODEX") != "1",
+    reason="live Codex test requires codex on PATH and ORCHESTRA_LIVE_CODEX=1",
 )
 def test_live_codex_text_smoke(tmp_path: Path) -> None:
     """Live invocation: run a trivial prompt through Codex.

@@ -35,7 +35,7 @@ moves into a library consumer unchanged.
 LLMs make mistakes. They confidently produce wrong answers, miss
 edge cases, fixate on bad approaches, and hallucinate facts that
 look plausible. Every current model does this, including the
-strongest ones. A single-model loop has no mechanism for catching
+strongest ones. A single model call has no mechanism for catching
 these mistakes before they propagate, and the result is exactly the
 buggy unmaintainable junk that gives AI-generated code its
 reputation.
@@ -68,10 +68,20 @@ you can ship with and LLM tools you cannot.
 Orchestra does not necessarily call model APIs directly. It can
 drive CLI tools the user already has installed and pays for. The
 shipped adapter set today is Claude Code (subscription billing, no
-API tokens). Codex adapters using a ChatGPT subscription are being
-added; once present, any role in any workflow — a Council
-panelist, a draft-then-adjudicate drafter, anything — binds to
-Codex by name, the same way it binds to Claude.
+API tokens) and Codex (ChatGPT subscription, no API tokens). Any
+role in any workflow, a Council panelist, a draft-then-adjudicate
+drafter, anything, binds to either by name. Set `adapter` to
+`claude_code_text` or `claude_code_agent` for Claude Code, or
+`codex_text` or `codex_agent` for Codex. One-line example role
+binding:
+
+```json
+{"roles": {"proposer": {"adapter": "codex_text", "model": "gpt-5-codex"}}}
+```
+
+The `*_text` adapters are read-only and used for synthesis or
+discussion roles. The `*_agent` adapters can edit the workspace and
+are used for the single mutating step in a code-edit workflow.
 
 Third-party models (DeepSeek, Moonshot/Kimi, GLM, Gemini, others) are
 reached by pointing Claude Code at an OpenRouter endpoint with

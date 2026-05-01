@@ -8,6 +8,7 @@ Codex CLI being on PATH.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -58,11 +59,11 @@ def test_build_command_default_sandbox_no_model_no_prompt() -> None:
     )
     assert cmd == [
         "codex",
-        "exec",
         "--ask-for-approval",
         "never",
         "--sandbox",
         "workspace-write",
+        "exec",
     ]
 
 
@@ -73,11 +74,11 @@ def test_build_command_with_model_and_prompt() -> None:
     )
     assert cmd == [
         "codex",
-        "exec",
         "--ask-for-approval",
         "never",
         "--sandbox",
         "workspace-write",
+        "exec",
         "--model",
         "gpt-5-codex",
         "edit foo.py",
@@ -91,6 +92,18 @@ def test_build_command_sandbox_override() -> None:
     )
     assert "--sandbox" in cmd
     assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+
+
+def test_build_command_top_level_flags_precede_exec() -> None:
+    """The Codex CLI rejects ``--ask-for-approval`` and ``--sandbox``
+    when they appear after the ``exec`` subcommand. Pin the ordering."""
+    adapter = CodexAgentAdapter()
+    cmd = adapter._build_command(prompt="x", model="m", sandbox="workspace-write")
+    exec_idx = cmd.index("exec")
+    approval_idx = cmd.index("--ask-for-approval")
+    sandbox_idx = cmd.index("--sandbox")
+    assert approval_idx < exec_idx
+    assert sandbox_idx < exec_idx
 
 
 # --------------------------------------------------------------------
@@ -116,11 +129,11 @@ def test_prepare_summary_kind_agent_and_full_command(tmp_path: Path) -> None:
     assert prepared.summary["sandbox"] == "workspace-write"
     assert prepared.summary["command"] == [
         "codex",
-        "exec",
         "--ask-for-approval",
         "never",
         "--sandbox",
         "workspace-write",
+        "exec",
         "--model",
         "gpt-5-codex",
         "edit",
@@ -332,8 +345,8 @@ def test_register_factory_constructs_adapter_with_default_model() -> None:
 
 
 @pytest.mark.skipif(
-    shutil.which("codex") is None,
-    reason="codex CLI not on PATH; live smoke test skipped",
+    shutil.which("codex") is None or os.environ.get("ORCHESTRA_LIVE_CODEX") != "1",
+    reason="live Codex test requires codex on PATH and ORCHESTRA_LIVE_CODEX=1",
 )
 def test_live_codex_agent_smoke(tmp_path: Path) -> None:
     """Live invocation: run Codex with sandbox=read-only on a trivial

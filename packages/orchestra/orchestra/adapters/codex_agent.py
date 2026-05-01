@@ -194,13 +194,16 @@ class CodexAgentAdapter:
     def _build_command(
         self, prompt: str, model: str | None, sandbox: str
     ) -> list[str]:
+        # The Codex CLI accepts ``--ask-for-approval`` and ``--sandbox``
+        # at the top level only. Both flags must appear before the
+        # ``exec`` subcommand or argument parsing rejects them.
         cmd: list[str] = [
             self._cli,
-            "exec",
             "--ask-for-approval",
             "never",
             "--sandbox",
             sandbox,
+            "exec",
         ]
         if model:
             cmd.extend(["--model", model])
