@@ -1,0 +1,5 @@
+{
+  "roles": {
+    "responder": { "adapter": "codex_text", "model": "gpt-5.5", "parameters": {} }
+  }
+}
