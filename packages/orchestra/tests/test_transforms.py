@@ -628,7 +628,6 @@ workflow fan_transform
   max_total_steps 30
   model m_parent
   model m_a
-  model m_join
   model m_abort
   artifact framing text
     initial null
@@ -639,8 +638,6 @@ workflow fan_transform
   role parent_role
     prompt template "templates/dummy.md"
   role lens
-    prompt template "templates/dummy.md"
-  role joiner
     prompt template "templates/dummy.md"
   role aborter
     prompt template "templates/dummy.md"
@@ -667,13 +664,11 @@ workflow fan_transform
     on complete => done
     on error => stop
   state join_state
-    actor model m_join
-    role joiner
+    actor transform combine
     reads a_out, transform_out
     writes joined text
     on complete => done
     on error => stop
-    on timeout => stop
   state abort_state
     actor model m_abort
     role aborter
@@ -701,12 +696,50 @@ workflow fan_transform
             )
         return {"transform_out": f"reframed:{framing}"}
 
+    join_calls: list[dict[str, Any]] = []
+
+    def combine(
+        inputs: dict[str, Any], ctx: TransformContext
+    ) -> dict[str, Any]:
+        # Round-3 fix: the join must actually consume both fan-out
+        # outputs. Raising here if either is missing or unexpected
+        # turns the read into observable behavior, so the test can
+        # prove the join consumed the values rather than just that
+        # ``read_latest`` would have returned them.
+        a_out = inputs.get("a_out")
+        transform_out = inputs.get("transform_out")
+        join_calls.append(
+            {"a_out": a_out, "transform_out": transform_out}
+        )
+        if not isinstance(a_out, str) or not a_out:
+            raise AssertionError(
+                f"join did not see advise_a's a_out via reads; "
+                f"got {a_out!r}"
+            )
+        if not isinstance(transform_out, str):
+            raise AssertionError(
+                f"join did not see transform_child's transform_out "
+                f"via reads; got {transform_out!r}"
+            )
+        if not transform_out.startswith("reframed:"):
+            raise AssertionError(
+                "transform_out is present but does not have the "
+                "reframed:<framing> shape the transform child wrote"
+            )
+        return {"joined": f"{a_out}|{transform_out}"}
+
     reg = with_core()
     reg.register_transform(
         "reframe",
         reframe,
         input_schema={"framing": str},
         output_schema={"transform_out": str},
+    )
+    reg.register_transform(
+        "combine",
+        combine,
+        input_schema={"a_out": str, "transform_out": str},
+        output_schema={"joined": str},
     )
     wf = load_workflow(src, reg)
     rid = "fan-transform-run"
@@ -769,6 +802,15 @@ workflow fan_transform
         "via the fan-out snapshot"
     )
 
+    # Round-3 fix: prove the join state actually consumed both
+    # fan-out outputs by inspecting what its body received. The
+    # join transform raises if either read is missing, so the
+    # workflow only reaches done if both reads were threaded
+    # through.
+    assert len(join_calls) == 1
+    join_seen = join_calls[0]
+    expected_transform_out = f"reframed:{framing_seen}"
+
     store_open = ArtifactStore(run_dir / "store.sqlite")
     try:
         v_a = store_open.read_latest("a_out")
@@ -778,14 +820,17 @@ workflow fan_transform
         )
         v_t = store_open.read_latest("transform_out")
         assert v_t is not None
-        assert v_t.value == f"reframed:{framing_seen}", (
-            "transform_out must equal the transform's deterministic "
-            "output computed from the framing artifact it read"
-        )
-        # Both children's invocations are visible (their state_exit
-        # was durable success), so the join state's reads succeed.
+        assert v_t.value == expected_transform_out
         v_join = store_open.read_latest("joined")
         assert v_join is not None
+        assert v_join.value == f"{v_a.value}|{expected_transform_out}", (
+            "joined must concatenate the exact a_out and "
+            "transform_out values; the join body's behavior is the "
+            "test surface, not just the visibility rule"
+        )
+        # The join saw exactly the values the children committed.
+        assert join_seen["a_out"] == v_a.value
+        assert join_seen["transform_out"] == expected_transform_out
     finally:
         store_open.close()
 

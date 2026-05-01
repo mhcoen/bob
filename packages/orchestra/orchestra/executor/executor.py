@@ -900,33 +900,12 @@ class Executor:
             target = self._run_fan_out_group(state, envelope, decl)
         else:
             target = decl.target
-
-        self._step_count += 1
-        if self._step_count >= self._wf.max_total_steps:
-            if target not in _TERMINAL_TARGETS:
-                self._log.write(
-                    "step_budget_exhausted",
-                    state_id=state.name,
-                    attempt=envelope.attempt,
-                    fields={"max_total_steps": self._wf.max_total_steps},
-                )
-                target = "stop"
-
-        self._log.write(
-            "transition",
+        return self._close_pending_transition(
             state_id=state.name,
             attempt=envelope.attempt,
-            fields={
-                "outcome": envelope.outcome,
-                "target": target,
-                "step_count": self._step_count,
-            },
+            outcome=envelope.outcome,
+            target=target,
         )
-
-        self._last_state = state.name
-        self._last_outcome = envelope.outcome
-        self._current_state = target
-        return target
 
     def _execute_transform_body(
         self,
