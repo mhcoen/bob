@@ -672,6 +672,18 @@ def _build_command(
             cmd.extend(["--model", model])
         return cmd
     elif cli == "codex":
+        # Flag-ordering constraint: --ask-for-approval and --sandbox are
+        # top-level codex flags. They must precede the exec subcommand.
+        # The correct shape is
+        #   codex --ask-for-approval <mode> --sandbox <mode> exec --model <m> <prompt>
+        # NOT
+        #   codex exec --ask-for-approval <mode> --sandbox <mode> ...
+        # codex 0.111.0 rejects the latter with
+        #   error: unexpected argument '--ask-for-approval' found
+        # --full-auto is accepted on the exec subcommand and is the only
+        # codex flag this branch currently emits, so this command shape
+        # is fine. Pinned by orchestra's
+        # tests/test_codex_agent_adapter.py::test_build_command_top_level_flags_precede_exec.
         cmd = [
             "codex",
             "exec",
