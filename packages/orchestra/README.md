@@ -34,14 +34,11 @@ moves into a library consumer unchanged.
 
 Orchestra does not call model APIs directly. It drives whichever
 CLI tools the user already has installed and pays for. The shipped
-adapter set today is Claude Code, which uses the user's Claude
-subscription (Pro or Max); calls through it do not consume API
-tokens. A Codex adapter using a ChatGPT subscription is a
-straightforward port of the same subprocess pattern McLoop already
-uses for its Codex backend, but the adapter file in
-`orchestra/adapters/` has not been written yet. Once it exists, any
-role in any workflow — a Council panelist, a draft-then-adjudicate
-drafter, anything — can bind to Codex by name.
+adapter set today is Claude Code (subscription billing, no API
+tokens). Codex adapters using a ChatGPT subscription are in
+progress; once they land, any role in any workflow — a Council
+panelist, a draft-then-adjudicate drafter, anything — binds to
+Codex by name, the same way it binds to Claude.
 
 Third-party models (DeepSeek, Moonshot/Kimi, GLM, Gemini, others) are
 reached by pointing Claude Code at an OpenRouter endpoint with
