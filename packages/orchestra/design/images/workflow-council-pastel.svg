@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4c566a"/>
+    </marker>
+    <marker id="arrow-faint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7b8394"/>
+    </marker>
+  </defs>
+
+  <text x="500" y="36" text-anchor="middle" font-size="18" font-weight="600" fill="#2e3440">Council</text>
+  <text x="500" y="58" text-anchor="middle" font-size="13" fill="#4c566a">five lenses, anonymized review, single verdict</text>
+
+  <g>
+    <rect x="430" y="90" width="140" height="60" rx="30" fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+    <text x="500" y="126" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Input</text>
+  </g>
+
+  <line x1="500" y1="150" x2="500" y2="180" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="400" y="185" width="200" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="500" y="213" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Framer</text>
+    <text x="500" y="235" text-anchor="middle" font-size="12" fill="#4c566a">restates the question</text>
+  </g>
+
+  <line x1="500" y1="251" x2="170" y2="290" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="251" x2="335" y2="290" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="251" x2="500" y2="290" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="251" x2="665" y2="290" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="251" x2="830" y2="290" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="80" y="295" width="180" height="66" rx="14" fill="#d8e3ee" stroke="#88a4c0" stroke-width="1.5"/>
+    <text x="170" y="322" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Contrarian</text>
+    <text x="170" y="345" text-anchor="middle" font-size="11" fill="#4c566a">challenges assumptions</text>
+  </g>
+  <g>
+    <rect x="265" y="295" width="180" height="66" rx="14" fill="#ecd9d6" stroke="#bf8e8e" stroke-width="1.5"/>
+    <text x="355" y="322" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">First Principles</text>
+    <text x="355" y="345" text-anchor="middle" font-size="11" fill="#4c566a">reasons from fundamentals</text>
+  </g>
+  <g>
+    <rect x="450" y="295" width="180" height="66" rx="14" fill="#d8e3ee" stroke="#88a4c0" stroke-width="1.5"/>
+    <text x="540" y="322" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Expansionist</text>
+    <text x="540" y="345" text-anchor="middle" font-size="11" fill="#4c566a">broadens the scope</text>
+  </g>
+  <g>
+    <rect x="635" y="295" width="180" height="66" rx="14" fill="#d8e3ee" stroke="#88a4c0" stroke-width="1.5"/>
+    <text x="725" y="322" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Outsider</text>
+    <text x="725" y="345" text-anchor="middle" font-size="11" fill="#4c566a">brings a new perspective</text>
+  </g>
+  <g>
+    <rect x="820" y="295" width="160" height="66" rx="14" fill="#ecd9d6" stroke="#bf8e8e" stroke-width="1.5"/>
+    <text x="900" y="322" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Executor</text>
+    <text x="900" y="345" text-anchor="middle" font-size="11" fill="#4c566a">focuses on what's actionable</text>
+  </g>
+
+  <line x1="170" y1="361" x2="475" y2="395" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="355" y1="361" x2="490" y2="395" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="540" y1="361" x2="510" y2="395" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="725" y1="361" x2="525" y2="395" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="900" y1="361" x2="535" y2="395" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+
+  <g>
+    <rect x="400" y="400" width="200" height="66" rx="14" fill="#e2d9e8" stroke="#a499b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="500" y="428" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Anonymize</text>
+    <text x="500" y="450" text-anchor="middle" font-size="12" fill="#4c566a">strips identities, relabels A–E</text>
+  </g>
+
+  <line x1="500" y1="466" x2="170" y2="505" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="466" x2="355" y2="505" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="466" x2="540" y2="505" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="466" x2="725" y2="505" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="500" y1="466" x2="900" y2="505" stroke="#4c566a" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="80" y="510" width="180" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="170" y="537" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Reviewer</text>
+    <text x="170" y="560" text-anchor="middle" font-size="11" fill="#4c566a">critiques A</text>
+  </g>
+  <g>
+    <rect x="265" y="510" width="180" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="355" y="537" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Reviewer</text>
+    <text x="355" y="560" text-anchor="middle" font-size="11" fill="#4c566a">critiques B</text>
+  </g>
+  <g>
+    <rect x="450" y="510" width="180" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="540" y="537" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Reviewer</text>
+    <text x="540" y="560" text-anchor="middle" font-size="11" fill="#4c566a">critiques C</text>
+  </g>
+  <g>
+    <rect x="635" y="510" width="180" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="725" y="537" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Reviewer</text>
+    <text x="725" y="560" text-anchor="middle" font-size="11" fill="#4c566a">critiques D</text>
+  </g>
+  <g>
+    <rect x="820" y="510" width="160" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="900" y="537" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Reviewer</text>
+    <text x="900" y="560" text-anchor="middle" font-size="11" fill="#4c566a">critiques E</text>
+  </g>
+
+  <line x1="170" y1="576" x2="475" y2="610" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="355" y1="576" x2="490" y2="610" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="540" y1="576" x2="510" y2="610" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="725" y1="576" x2="525" y2="610" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+  <line x1="900" y1="576" x2="535" y2="610" stroke="#7b8394" stroke-width="1.1" marker-end="url(#arrow-faint)"/>
+
+  <g>
+    <rect x="400" y="615" width="200" height="66" rx="14" fill="#ecd9d6" stroke="#bf8e8e" stroke-width="1.5"/>
+    <text x="500" y="643" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Chairman</text>
+    <text x="500" y="665" text-anchor="middle" font-size="12" fill="#4c566a">synthesizes the verdict</text>
+  </g>
+
+  <line x1="600" y1="648" x2="715" y2="648" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="720" y="615" width="140" height="66" rx="33" fill="#d8e3d4" stroke="#a3be8c" stroke-width="1.5"/>
+    <text x="790" y="654" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Answer</text>
+  </g>
+</svg>

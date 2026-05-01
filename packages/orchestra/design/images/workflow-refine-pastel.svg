@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4c566a"/>
+    </marker>
+  </defs>
+
+  <text x="600" y="38" text-anchor="middle" font-size="18" font-weight="600" fill="#2e3440">Propose, Critique, Synthesize</text>
+  <text x="600" y="60" text-anchor="middle" font-size="13" fill="#4c566a">a take, an opposing view, a reconciliation</text>
+
+  <g>
+    <rect x="20" y="120" width="140" height="66" rx="33" fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+    <text x="90" y="159" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Input</text>
+  </g>
+
+  <line x1="160" y1="153" x2="225" y2="153" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="230" y="120" width="200" height="66" rx="14" fill="#d8e3ee" stroke="#88a4c0" stroke-width="1.5"/>
+    <text x="330" y="148" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Proposer</text>
+    <text x="330" y="170" text-anchor="middle" font-size="12" fill="#4c566a">takes a position</text>
+  </g>
+
+  <line x1="430" y1="153" x2="495" y2="153" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="500" y="120" width="200" height="66" rx="14" fill="#f0e8d8" stroke="#c8b88c" stroke-width="1.5"/>
+    <text x="600" y="148" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Critic</text>
+    <text x="600" y="170" text-anchor="middle" font-size="12" fill="#4c566a">argues against it</text>
+  </g>
+
+  <line x1="700" y1="153" x2="765" y2="153" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="770" y="120" width="200" height="66" rx="14" fill="#ecd9d6" stroke="#bf8e8e" stroke-width="1.5"/>
+    <text x="870" y="148" text-anchor="middle" font-size="16" font-weight="600" fill="#2e3440">Synthesizer</text>
+    <text x="870" y="170" text-anchor="middle" font-size="12" fill="#4c566a">reconciles both sides</text>
+  </g>
+
+  <line x1="970" y1="153" x2="1035" y2="153" stroke="#4c566a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="1040" y="120" width="140" height="66" rx="33" fill="#d8e3d4" stroke="#a3be8c" stroke-width="1.5"/>
+    <text x="1110" y="159" text-anchor="middle" font-size="15" font-weight="600" fill="#2e3440">Answer</text>
+  </g>
+</svg>
