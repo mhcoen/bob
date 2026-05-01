@@ -1,8 +1,8 @@
-<svg viewBox="0 0 1260 370" xmlns="http://www.w3.org/2000/svg"
+<svg viewBox="0 0 1280 343" xmlns="http://www.w3.org/2000/svg"
      font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
 
   <!-- White background -->
-  <rect width="1260" height="370" fill="#ffffff"/>
+  <rect width="1280" height="343" fill="#ffffff"/>
 
   <defs>
     <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
@@ -20,13 +20,13 @@
   </defs>
 
   <!-- ===== INPUT PILL ===== -->
-  <rect x="15" y="143" width="70" height="30" rx="15"
+  <rect x="15" y="130" width="70" height="30" rx="15"
         fill="#88c0d0" stroke="#5e81ac" stroke-width="1.5"/>
-  <text x="50" y="163" text-anchor="middle"
+  <text x="50" y="150" text-anchor="middle"
         font-size="13" font-weight="bold" fill="#2e3440">Input</text>
 
   <!-- Arrow: Input to Responder -->
-  <line x1="85" y1="158" x2="118" y2="158"
+  <line x1="85" y1="145" x2="118" y2="145"
         stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
 
   <!-- ===== RESPONDER CONTAINER (dashed slot) ===== -->
@@ -117,34 +117,36 @@
         font-size="13" font-style="italic" fill="#4c566a">(or any other workflow)</text>
 
   <!-- ===== Arrow: Responder to Judge ===== -->
-  <line x1="810" y1="158" x2="848" y2="158"
+  <line x1="810" y1="145" x2="848" y2="145"
         stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
 
   <!-- ===== JUDGE CONTAINER (dashed slot) ===== -->
-  <rect x="850" y="43" width="240" height="207" rx="10"
+  <!-- Same y=25 and h=225 as Responder -->
+  <rect x="850" y="25" width="240" height="225" rx="10"
         fill="#f4f1ec" stroke="#5e81ac" stroke-width="2" stroke-dasharray="8 4"/>
-  <text x="970" y="70" text-anchor="middle"
+  <text x="970" y="52" text-anchor="middle"
         font-size="20" font-weight="bold" fill="#2e3440">Judge</text>
-  <text x="970" y="88" text-anchor="middle"
+  <text x="970" y="70" text-anchor="middle"
         font-size="14" font-style="italic" fill="#4c566a">good enough yet?</text>
 
   <!-- Judge interior note -->
   <text font-size="11.5" fill="#4c566a" font-style="italic">
-    <tspan x="970" y="120" text-anchor="middle">also any workflow can go here:</tspan>
-    <tspan x="970" dy="16" text-anchor="middle">a single model, a council,</tspan>
-    <tspan x="970" dy="16" text-anchor="middle">a draft-then-adjudicate, etc.</tspan>
+    <tspan x="970" y="100" text-anchor="middle">any workflow can go here:</tspan>
+    <tspan x="970" dy="18" text-anchor="middle">a single model, a council,</tspan>
+    <tspan x="970" dy="18" text-anchor="middle">a draft-then-adjudicate, etc.</tspan>
   </text>
 
   <!-- ===== ACCEPT ARROW: Judge to Answer ===== -->
-  <line x1="1090" y1="158" x2="1130" y2="158"
+  <!-- 75px gap between Judge right edge (1090) and Answer left edge (1165) -->
+  <line x1="1090" y1="145" x2="1163" y2="145"
         stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="1110" y="148" text-anchor="middle"
+  <text x="1127" y="135" text-anchor="middle"
         font-size="13" font-weight="bold" fill="#2e3440">accept</text>
 
   <!-- ===== ANSWER PILL ===== -->
-  <rect x="1132" y="143" width="85" height="30" rx="15"
+  <rect x="1165" y="130" width="85" height="30" rx="15"
         fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
-  <text x="1174" y="163" text-anchor="middle"
+  <text x="1207" y="150" text-anchor="middle"
         font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
 
   <!-- ===== REVISE LOOP ===== -->
@@ -162,7 +164,8 @@
         font-size="11" font-weight="bold" fill="#bf616a">max N rounds</text>
 
   <!-- ===== BOTTOM NOTE ===== -->
-  <text x="610" y="348" text-anchor="middle"
+  <!-- Centered between Responder frame bottom (y=250) and badge top (y=292): midpoint y=271, baseline y=275 -->
+  <text x="610" y="275" text-anchor="middle"
         font-size="12" font-style="italic" fill="#4c566a">at the cap, the most recent draft is returned</text>
 
 </svg>

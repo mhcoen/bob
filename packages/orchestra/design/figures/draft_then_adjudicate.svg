@@ -1,0 +1,46 @@
+<svg viewBox="0 0 580 90" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+
+  <rect width="580" height="90" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+  </defs>
+
+  <!-- Input pill -->
+  <rect x="25" y="30" width="80" height="30" rx="15"
+        fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="65" y="49" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <line x1="105" y1="45" x2="138" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Drafter box -->
+  <rect x="140" y="25" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="205" y="49" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Drafter</text>
+
+  <line x1="270" y1="45" x2="303" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Adjudicator box -->
+  <rect x="305" y="25" width="130" height="40" rx="10"
+        fill="#d8a48f" stroke="#b07060" stroke-width="2"/>
+  <text x="370" y="49" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Adjudicator</text>
+
+  <line x1="435" y1="45" x2="468" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Answer pill -->
+  <rect x="470" y="30" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="512" y="49" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+</svg>

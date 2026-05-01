@@ -1,0 +1,110 @@
+<svg viewBox="0 0 835 325" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+
+  <rect width="835" height="325" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+    <marker id="arr-faint" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="7" markerHeight="6" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#7b8394"/>
+    </marker>
+  </defs>
+
+  <!-- Spine x = 418 -->
+
+  <!-- Row 1: Input pill -->
+  <rect x="378" y="25" width="80" height="30" rx="15"
+        fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="418" y="44" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <line x1="418" y1="55" x2="418" y2="73"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 2: Framer box (130 wide, centered on spine) -->
+  <rect x="353" y="75" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="418" y="99" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Framer</text>
+
+  <!-- Fan-out: Framer bottom (418, 115) to panelist tops (y=138).
+       Panelist centers: 97.5, 257.5, 417.5, 577.5, 737.5 -->
+  <line x1="418" y1="115" x2="97.5" y2="138"
+        stroke="#2e3440" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="418" y1="115" x2="257.5" y2="138"
+        stroke="#2e3440" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="418" y1="115" x2="417.5" y2="138"
+        stroke="#2e3440" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="418" y1="115" x2="577.5" y2="138"
+        stroke="#2e3440" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="418" y1="115" x2="737.5" y2="138"
+        stroke="#2e3440" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <!-- Row 3: 5 panelist boxes (y=140..180, width 145, gap 15) -->
+  <rect x="25" y="140" width="145" height="40" rx="10"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="97.5" y="164" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Contrarian</text>
+
+  <rect x="185" y="140" width="145" height="40" rx="10"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="257.5" y="164" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">First Principles</text>
+
+  <rect x="345" y="140" width="145" height="40" rx="10"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="417.5" y="164" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Expansionist</text>
+
+  <rect x="505" y="140" width="145" height="40" rx="10"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="577.5" y="164" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Outsider</text>
+
+  <rect x="665" y="140" width="145" height="40" rx="10"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="737.5" y="164" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Executor</text>
+
+  <!-- Fan-in: panelist bottoms (y=180) to Anonymize top (418, 198) -->
+  <line x1="97.5" y1="180" x2="418" y2="198"
+        stroke="#7b8394" stroke-width="1.1" marker-end="url(#arr-faint)"/>
+  <line x1="257.5" y1="180" x2="418" y2="198"
+        stroke="#7b8394" stroke-width="1.1" marker-end="url(#arr-faint)"/>
+  <line x1="417.5" y1="180" x2="418" y2="198"
+        stroke="#7b8394" stroke-width="1.1" marker-end="url(#arr-faint)"/>
+  <line x1="577.5" y1="180" x2="418" y2="198"
+        stroke="#7b8394" stroke-width="1.1" marker-end="url(#arr-faint)"/>
+  <line x1="737.5" y1="180" x2="418" y2="198"
+        stroke="#7b8394" stroke-width="1.1" marker-end="url(#arr-faint)"/>
+
+  <!-- Row 4: Anonymize box (y=200..240) -->
+  <rect x="353" y="200" width="130" height="40" rx="10"
+        fill="#ebcb8b" stroke="#c0a060" stroke-width="2"
+        stroke-dasharray="6 3"/>
+  <text x="418" y="224" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Anonymize</text>
+
+  <line x1="418" y1="240" x2="418" y2="258"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 5: Chairman box (y=260..300) -->
+  <rect x="353" y="260" width="130" height="40" rx="10"
+        fill="#d8a48f" stroke="#b07060" stroke-width="2"/>
+  <text x="418" y="284" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Chairman</text>
+
+  <!-- Chairman -> Answer -->
+  <line x1="483" y1="280" x2="516" y2="280"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="518" y="265" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="560" y="284" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+</svg>
