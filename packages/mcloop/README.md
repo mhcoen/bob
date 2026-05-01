@@ -1075,7 +1075,9 @@ file is touched.
 A single bug-finding example on this codebase showed which models
 complement each other:
 
-![Bug-finding scorecard](https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="25%">
+</p>
 
 Kimi K2.6 produced the most independent coverage and Opus
 contributed complementary unique finds, which makes them a
