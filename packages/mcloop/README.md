@@ -1075,7 +1075,7 @@ file is touched.
 A single bug-finding example on this codebase showed which models
 complement each other:
 
-![Matrix from a single bug-finding example. Kimi K2.6: 10 bugs found, 6 unique, 0 false positives. Claude Opus: 4 found, 3 unique, 0 false positives. Codex GPT: 2 found, 1 unique, many false positives requiring manual filtering. DeepSeek V4 Pro: 4 found, 0 unique, 0 false positives.](https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png)
+![Bug-finding scorecard](https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png)
 
 Kimi K2.6 produced the most independent coverage and Opus
 contributed complementary unique finds, which makes them a
