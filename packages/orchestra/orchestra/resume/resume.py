@@ -21,10 +21,12 @@ tentatives left orphan by an interrupted attempt.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from orchestra.errors import ResumeError
 from orchestra.log import LogReader
+from orchestra.payloads import load_payload
 from orchestra.registry import ProfileRegistry
 from orchestra.spine import Envelope, ErrorRecord, Workflow
 from orchestra.visibility import VisibilityStatus
@@ -72,9 +74,18 @@ class ReplayState:
     state_exit_without_transition: bool = False
 
 
-def replay_log(log_path: str) -> ReplayState:
-    """Read a log and produce a ReplayState."""
-    reader = LogReader(log_path)
+def replay_log(log_path: str | Path) -> ReplayState:
+    """Read a log and produce a ReplayState.
+
+    The log path's parent is the run directory, which is also where
+    payload files live. Hydrating envelopes with their durable
+    payloads at replay time means resume's transition selector sees
+    the same ``state.payload.*`` view the live path saw, so guards
+    that read payload data select the same branch.
+    """
+    log_path_p = Path(log_path)
+    run_dir = log_path_p.parent
+    reader = LogReader(str(log_path_p))
     records = reader.read_all()
     state = ReplayState()
     if not records:
@@ -99,6 +110,14 @@ def replay_log(log_path: str) -> ReplayState:
                 )
             state.current_state = rec.state_id
             state.last_state_completed = False
+            # Round-2 fix: ``last_target`` is a per-state question
+            # ("does the state we just entered have a durable
+            # transition?"), so it is cleared on every state_enter.
+            # Without this, a transition written by an earlier state
+            # would make the most recent ``state_exit_without_transition``
+            # detection misfire and the just-completed state would be
+            # re-entered and re-executed by the executor's resume path.
+            state.last_target = None
             # Slice A: track invocation status from the log so the
             # resume path can rebuild VisibilityIndex.
             inv_id = rec.fields.get("invocation_id")
@@ -140,6 +159,16 @@ def replay_log(log_path: str) -> ReplayState:
                     message=err_field.get("message", ""),
                     detail=err_field.get("detail"),
                 )
+            # Round-2 fix: hydrate the payload from its durable file
+            # so ``_select_transition_decl`` can evaluate guards that
+            # read ``state.payload.*`` on resume the same way they
+            # would on the live path. A missing payload_ref (cancelled
+            # state, transform with no payload) keeps the envelope's
+            # payload empty.
+            payload_ref = rec.fields.get("payload_ref")
+            payload: dict[str, Any] = {}
+            if isinstance(payload_ref, str) and payload_ref:
+                payload = load_payload(run_dir, payload_ref)
             envelope = Envelope(
                 state_id=rec.state_id,
                 attempt=rec.attempt,
@@ -151,7 +180,7 @@ def replay_log(log_path: str) -> ReplayState:
                 duration_ms=int(rec.fields.get("duration_ms", 0) or 0),
                 inputs_read=list(rec.fields.get("inputs_read", []) or []),
                 artifacts_written=list(rec.fields.get("artifacts_written", []) or []),
-                payload={},  # payload is in payload_ref, not loaded by replay
+                payload=payload,
                 error=err,
             )
             state.envelopes[rec.state_id] = envelope
@@ -168,17 +197,29 @@ def replay_log(log_path: str) -> ReplayState:
         if state.current_state in _TERMINAL_TARGETS:
             state.is_terminal = True
     elif state.last_state_completed and state.last_target is None:
-        # A ``state_exit`` was logged but no ``transition`` followed
-        # (crash in the small window between the two). The state is
-        # complete: its actor body must NOT run again. Resume's job is
-        # to re-select the transition from the reconstructed envelope
-        # and write the missing record, then continue from the chosen
-        # target. ``last_state_completed`` stays True (the state IS
-        # done), and the special-case flag tells the caller this is
-        # the no-transition-yet recovery path. ``current_state``
-        # stays at the just-exited state so the caller can locate the
-        # envelope to feed the transition selector.
-        state.state_exit_without_transition = True
+        if state.open_fan_out is not None:
+            # An open fan-out group dominates the routing decision.
+            # ``cmd_resume`` dispatches to ``resume_fan_out`` which
+            # drains the children, writes ``fan_out_end``, and writes
+            # the parent's missing transition. Setting
+            # ``state_exit_without_transition`` here would cause the
+            # caller to also try to re-run the fan-out via
+            # ``resume_pending_transition``, which is wrong.
+            pass
+        else:
+            # A ``state_exit`` was logged but no ``transition``
+            # followed (crash in the small window between the two).
+            # The state is complete: its actor body must NOT run
+            # again. Resume's job is to re-select the transition
+            # from the reconstructed envelope and write the missing
+            # record, then continue from the chosen target.
+            # ``last_state_completed`` stays True (the state IS
+            # done), and the special-case flag tells the caller
+            # this is the no-transition-yet recovery path.
+            # ``current_state`` stays at the just-exited state so
+            # the caller can locate the envelope to feed the
+            # transition selector.
+            state.state_exit_without_transition = True
     else:
         # case 2: state_enter without state_exit. current_state stays
         # at the entered state.

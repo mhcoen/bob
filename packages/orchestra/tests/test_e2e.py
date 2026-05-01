@@ -515,3 +515,657 @@ def test_resume_after_state_exit_without_transition_does_not_reexecute(
     assert respond_transitions[0].fields["target"] == "confirm"
 
     MockHumanAdapter.clear_shared_script()
+
+
+# ====================================================================
+# Round-2 regressions: state_exit_without_transition must not misfire
+# across multi-state workflows, and resume must hydrate envelope
+# payloads so guards evaluate correctly.
+# ====================================================================
+
+
+def _write_dummy_template(tmp_path: Path) -> None:
+    tdir = tmp_path / "templates"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "dummy.md").write_text("dummy\n")
+
+
+class _DenylistAdapter:
+    """Wraps MockModelAdapter; raises if any state in ``denied`` is
+    asked to prepare or invoke. Used to prove resume does not
+    re-invoke a state's body when its ``state_exit`` is durable.
+    """
+
+    def __init__(self, denied: set[str]) -> None:
+        from orchestra.adapters.mock_model import MockModelAdapter
+
+        self._inner = MockModelAdapter()
+        self.denied = set(denied)
+        self.invocations: list[str] = []
+
+    def prepare(self, request: Any) -> Any:
+        if request.state_id in self.denied:
+            raise AssertionError(
+                f"state {request.state_id!r} must not be re-invoked "
+                "on resume; the state_exit was durable before the crash"
+            )
+        self.invocations.append(f"prepare:{request.state_id}")
+        return self._inner.prepare(request)
+
+    def invoke(self, prepared: Any) -> Any:
+        sid = prepared.request.state_id
+        if sid in self.denied:
+            raise AssertionError(
+                f"state {sid!r} must not be re-invoked on resume"
+            )
+        self.invocations.append(f"invoke:{sid}")
+        return self._inner.invoke(prepared)
+
+    def cancel(self, prepared: Any) -> None:
+        return None
+
+    def describe(self) -> dict[str, Any]:
+        return self._inner.describe()
+
+
+def _registry_with_model_adapter(
+    adapter_factory: Any,
+) -> ProfileRegistry:
+    """Build a registry whose ``model`` backing returns the given
+    instance every time. Other backings remain the slice-1 mocks so
+    existing fixtures keep working.
+    """
+    reg = ProfileRegistry()
+    for type_name in ("text", "json", "messages", "prompt", "schema", "document"):
+        reg.register_artifact_type(type_name)
+    from orchestra.adapters.mock_human import MockHumanAdapter as _Human
+    from orchestra.adapters.mock_shell import MockShellAdapter as _Shell
+    from orchestra.executor.parsers import identity_text_parser
+
+    reg.register_actor_backing("model", adapter_factory)
+    reg.register_actor_backing("human", _Human)
+    reg.register_actor_backing("shell", _Shell)
+    reg.register_result_parser(identity_text_parser)
+    return reg
+
+
+def _truncate_log_after_state_exit(
+    log_path: Path, state_id: str
+) -> None:
+    """Truncate ``log_path`` to drop everything from the named
+    state's ``state_exit`` record onward EXCEPT the ``state_exit``
+    itself. The result mimics a crash in the small window between
+    the state_exit fsync and the following transition write."""
+    records = LogReader(log_path).read_all()
+    truncate_at: int | None = None
+    seen_state_exit = False
+    for r in records:
+        if r.event == "state_exit" and r.state_id == state_id:
+            seen_state_exit = True
+            continue
+        if seen_state_exit and r.event == "transition":
+            truncate_at = r.seq
+            break
+    assert truncate_at is not None, (
+        f"expected a transition record after {state_id!r}'s state_exit"
+    )
+    keep = [r for r in records if r.seq < truncate_at]
+    with open(log_path, "w", encoding="utf-8") as fh:
+        for r in keep:
+            fh.write(r.to_json() + "\n")
+
+
+def _resume_run(
+    *,
+    run_dir: Path,
+    workflow_path: Path,
+    registry: ProfileRegistry,
+    external_inputs: dict[str, Any],
+) -> str:
+    """Mirror cmd_resume's wiring: replay, hydrate, dispatch
+    state_exit_without_transition / open_fan_out, run to terminal."""
+    from orchestra.resume import replay_log, run_resume_hooks
+    from orchestra.visibility import VisibilityIndex
+
+    log_path = run_dir / "log.jsonl"
+    replay = replay_log(str(log_path))
+    workflow = load_workflow(workflow_path, registry)
+    store = ArtifactStore(run_dir / "store.sqlite")
+    log = LogWriter(
+        log_path, replay.last_run_id, start_seq=replay.next_seq
+    )
+    run_resume_hooks(workflow, registry, replay, log)
+    vi = VisibilityIndex(persist_path=run_dir / "visibility.json")
+    vi.replace_from(replay.visibility_statuses)
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=replay.last_run_id,
+        external_inputs=external_inputs,
+        attempts=replay.attempts,
+        retries=replay.retries,
+        envelopes=replay.envelopes,
+        current_state=replay.current_state,
+        step_count=replay.step_count,
+        visibility_index=vi,
+    )
+    try:
+        if (
+            replay.state_exit_without_transition
+            and replay.current_state is not None
+            and replay.current_state not in {"done", "stop"}
+        ):
+            executor.resume_pending_transition(replay.current_state)
+        if replay.open_fan_out is not None:
+            of = replay.open_fan_out
+            children_field = of.get("children") or []
+            if not isinstance(children_field, list):
+                children_field = []
+            children_list = [str(c) for c in children_field]
+            completed = {
+                name: env
+                for name, env in replay.envelopes.items()
+                if (
+                    name in children_list
+                    and env.attempt == replay.attempts.get(name)
+                )
+            }
+            executor.resume_fan_out(
+                parent_state_name=str(of.get("parent_state", "")),
+                children=children_list,
+                join_target=str(of.get("join_target", "")),
+                error_target=str(of.get("error_target", "")),
+                completed_children=completed,
+            )
+        terminal = executor.run_to_completion()
+    finally:
+        log.close()
+        store.close()
+    return terminal
+
+
+def _build_two_state_fixture(tmp_path: Path) -> Path:
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "ab.orc"
+    src.write_text(
+        """spec 0.1
+workflow ab_test
+  external_input topic text
+  max_total_steps 10
+  model m_a
+  model m_b
+  artifact a_out text
+  artifact b_out text
+  role rA
+    prompt template "templates/dummy.md" with topic
+  role rB
+    prompt template "templates/dummy.md" with topic
+  state s_a
+    actor model m_a
+    role rA
+    reads topic
+    writes a_out text
+    on complete => s_b
+    on error => stop
+    on timeout => stop
+  state s_b
+    actor model m_b
+    role rB
+    reads a_out
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    return src
+
+
+def test_resume_two_state_crash_window_does_not_reexecute_second_state(
+    tmp_path: Path,
+) -> None:
+    """A->B workflow crashed between B.state_exit and B.transition.
+    The round-1 detection looked at last_target which was set by
+    A.transition and never cleared, so state_exit_without_transition
+    misfired and B was re-entered. With last_target cleared on
+    state_enter, B is correctly recognized as the unfinished
+    transition and resume_pending_transition handles it without
+    re-running B's actor.
+    """
+    src = _build_two_state_fixture(tmp_path)
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hi"},
+    )
+    executor.step()  # s_a runs to completion incl. transition.
+    executor.step()  # s_b runs to completion incl. transition.
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    deny = _DenylistAdapter(denied={"s_b"})
+    reg2 = _registry_with_model_adapter(lambda: deny)
+
+    terminal = _resume_run(
+        run_dir=run_dir,
+        workflow_path=src,
+        registry=reg2,
+        external_inputs={"topic": "hi"},
+    )
+    assert terminal == "done"
+    assert deny.invocations == [], (
+        "no model state should run on resume; both s_a and s_b "
+        "completed before the crash"
+    )
+
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    s_b_enters = [
+        r for r in records if r.event == "state_enter" and r.state_id == "s_b"
+    ]
+    s_b_exits = [
+        r for r in records if r.event == "state_exit" and r.state_id == "s_b"
+    ]
+    s_b_transitions = [
+        r for r in records if r.event == "transition" and r.state_id == "s_b"
+    ]
+    assert len(s_b_enters) == 1
+    assert len(s_b_exits) == 1
+    assert len(s_b_transitions) == 1
+    assert s_b_transitions[0].fields["target"] == "done"
+
+
+def _build_three_state_fixture(tmp_path: Path) -> Path:
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "abc.orc"
+    src.write_text(
+        """spec 0.1
+workflow abc_test
+  external_input topic text
+  max_total_steps 10
+  model m_a
+  model m_b
+  model m_c
+  artifact a_out text
+  artifact b_out text
+  artifact c_out text
+  role rX
+    prompt template "templates/dummy.md" with topic
+  state s_a
+    actor model m_a
+    role rX
+    reads topic
+    writes a_out text
+    on complete => s_b
+    on error => stop
+    on timeout => stop
+  state s_b
+    actor model m_b
+    role rX
+    reads a_out
+    writes b_out text
+    on complete => s_c
+    on error => stop
+    on timeout => stop
+  state s_c
+    actor model m_c
+    role rX
+    reads b_out
+    writes c_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    return src
+
+
+def test_resume_three_state_crash_window_does_not_reexecute_last_state(
+    tmp_path: Path,
+) -> None:
+    """A->B->C with crash between C.state_exit and C.transition.
+    Earlier states have durable transitions so any "did anything
+    transition?" heuristic would mis-detect; only per-state
+    tracking via last_target-cleared-on-state_enter is correct."""
+    src = _build_three_state_fixture(tmp_path)
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hi"},
+    )
+    executor.step()  # s_a
+    executor.step()  # s_b
+    executor.step()  # s_c
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_c")
+
+    deny = _DenylistAdapter(denied={"s_a", "s_b", "s_c"})
+    reg2 = _registry_with_model_adapter(lambda: deny)
+
+    terminal = _resume_run(
+        run_dir=run_dir,
+        workflow_path=src,
+        registry=reg2,
+        external_inputs={"topic": "hi"},
+    )
+    assert terminal == "done"
+    assert deny.invocations == []
+
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    for sid in ("s_a", "s_b", "s_c"):
+        enters = [
+            r
+            for r in records
+            if r.event == "state_enter" and r.state_id == sid
+        ]
+        exits = [
+            r
+            for r in records
+            if r.event == "state_exit" and r.state_id == sid
+        ]
+        assert len(enters) == 1, sid
+        assert len(exits) == 1, sid
+    s_c_transitions = [
+        r for r in records if r.event == "transition" and r.state_id == "s_c"
+    ]
+    assert len(s_c_transitions) == 1
+    assert s_c_transitions[0].fields["target"] == "done"
+
+
+def _build_fan_out_parent_fixture(tmp_path: Path) -> Path:
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan_parent.orc"
+    src.write_text(
+        """spec 0.1
+workflow fan_parent_test
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_join
+  model m_abort
+  artifact framing text
+  artifact a_out text
+  artifact b_out text
+  artifact joined text
+  artifact aborted text
+  role rX
+    prompt template "templates/dummy.md" with topic
+  state launch
+    actor model m_parent
+    role rX
+    reads topic
+    writes framing text
+    on complete fan_out [child_a, child_b] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state child_a
+    actor model m_a
+    role rX
+    reads topic
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state child_b
+    actor model m_b
+    role rX
+    reads topic
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role rX
+    reads a_out, b_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role rX
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    return src
+
+
+def test_resume_fan_out_parent_crash_window_does_not_reexecute_parent(
+    tmp_path: Path,
+) -> None:
+    """Fan-out parent's state_exit is durable but neither
+    fan_out_start nor the parent's transition was written. Resume
+    must not re-run the parent's actor body. resume_pending_transition
+    re-selects the fan-out transition and dispatches the fan-out
+    group from scratch.
+    """
+    src = _build_fan_out_parent_fixture(tmp_path)
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hi"},
+    )
+    # Run launch's per-state body but not its fan-out execution.
+    # We do this by writing only launch's records up through
+    # state_exit, then truncating the log so neither fan_out_start
+    # nor launch's transition is durable. The cleanest way is to
+    # let executor.step() run the linear path which will normally
+    # invoke fan-out, but we instead rebuild the log carefully.
+    # Approach: run step() (which runs the full launch state
+    # including fan-out). Then truncate the log so only launch's
+    # state_enter through state_exit survive.
+    executor.step()
+    log.close()
+    store.close()
+
+    # Truncate everything from launch's state_exit onward except
+    # the state_exit itself.
+    log_path = run_dir / "log.jsonl"
+    records = LogReader(log_path).read_all()
+    truncate_at: int | None = None
+    seen_state_exit = False
+    for r in records:
+        if r.event == "state_exit" and r.state_id == "launch":
+            seen_state_exit = True
+            continue
+        if seen_state_exit:
+            truncate_at = r.seq
+            break
+    assert truncate_at is not None
+    keep = [r for r in records if r.seq < truncate_at]
+    with open(log_path, "w", encoding="utf-8") as fh:
+        for r in keep:
+            fh.write(r.to_json() + "\n")
+
+    deny = _DenylistAdapter(denied={"launch"})
+    reg2 = _registry_with_model_adapter(lambda: deny)
+
+    terminal = _resume_run(
+        run_dir=run_dir,
+        workflow_path=src,
+        registry=reg2,
+        external_inputs={"topic": "hi"},
+    )
+    assert terminal == "done"
+
+    records2 = LogReader(log_path).read_all()
+    launch_enters = [
+        r for r in records2 if r.event == "state_enter" and r.state_id == "launch"
+    ]
+    launch_exits = [
+        r for r in records2 if r.event == "state_exit" and r.state_id == "launch"
+    ]
+    assert len(launch_enters) == 1, "launch must not be re-entered"
+    assert len(launch_exits) == 1, "only the original state_exit"
+    fan_starts = [r for r in records2 if r.event == "fan_out_start"]
+    fan_ends = [r for r in records2 if r.event == "fan_out_end"]
+    assert len(fan_starts) == 1
+    assert len(fan_ends) == 1
+    assert fan_ends[0].fields["aggregate"] == "success"
+
+
+def _build_payload_guard_fixture(tmp_path: Path) -> Path:
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "payload_guard.orc"
+    src.write_text(
+        """spec 0.1
+workflow payload_guard_test
+  external_input topic text
+  max_total_steps 10
+  model m_a
+  model m_high
+  model m_low
+  artifact a_out text
+  artifact high_out text
+  artifact low_out text
+  role rX
+    prompt template "templates/dummy.md" with topic
+  state s_a
+    actor model m_a
+    role rX
+    reads topic
+    writes a_out text
+    on complete when s_a.payload.tokens_out > 5 => s_high
+    on complete => s_low
+    on error => stop
+    on timeout => stop
+  state s_high
+    actor model m_high
+    role rX
+    reads a_out
+    writes high_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state s_low
+    actor model m_low
+    role rX
+    reads a_out
+    writes low_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    return src
+
+
+def test_resume_with_payload_guard_picks_correct_branch(
+    tmp_path: Path,
+) -> None:
+    """A guard reads ``s_a.payload.tokens_out``. The mock model
+    returns tokens_out > 5, so the live path routes to ``s_high``.
+    Resume must hydrate the envelope's payload from its durable
+    file so the guard evaluates True and picks the same branch.
+
+    Without payload hydration the guard walks an empty payload dict,
+    raises KeyError, and resume_pending_transition propagates the
+    failure: this regression test fails under the unfixed code.
+    """
+    src = _build_payload_guard_fixture(tmp_path)
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hi"},
+    )
+    executor.step()  # s_a
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_a")
+
+    deny = _DenylistAdapter(denied={"s_a", "s_low"})
+    reg2 = _registry_with_model_adapter(lambda: deny)
+
+    terminal = _resume_run(
+        run_dir=run_dir,
+        workflow_path=src,
+        registry=reg2,
+        external_inputs={"topic": "hi"},
+    )
+    assert terminal == "done"
+
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    s_a_transitions = [
+        r for r in records if r.event == "transition" and r.state_id == "s_a"
+    ]
+    assert len(s_a_transitions) == 1
+    assert s_a_transitions[0].fields["target"] == "s_high", (
+        "the guard reads s_a.payload.tokens_out; the live path picks "
+        "s_high because tokens_out > 5. Resume must select the same "
+        "branch, which requires hydrating the envelope's payload from "
+        "its durable file."
+    )
+    s_high_exits = [
+        r for r in records if r.event == "state_exit" and r.state_id == "s_high"
+    ]
+    assert len(s_high_exits) == 1
+    s_low_enters = [
+        r for r in records if r.event == "state_enter" and r.state_id == "s_low"
+    ]
+    assert len(s_low_enters) == 0, "s_low must not have been entered"

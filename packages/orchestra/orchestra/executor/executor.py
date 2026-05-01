@@ -47,7 +47,6 @@ that replay can correctly classify:
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
@@ -63,6 +62,8 @@ from orchestra.errors import ExecutorError
 from orchestra.executor import guards
 from orchestra.executor.guards import GuardContext
 from orchestra.log import LogWriter
+from orchestra.payloads import strip_internal as _strip_internal
+from orchestra.payloads import write_payload
 from orchestra.registry import ProfileRegistry
 from orchestra.spine import (
     Envelope,
@@ -568,17 +569,13 @@ class Executor:
         Caller treats this as a durability boundary: the payload file
         exists on disk by the time this returns. The log record that
         references it is written after, ensuring no log record points
-        at a missing payload.
+        at a missing payload. The on-disk encoding is shared with the
+        replay-side loader in ``orchestra.payloads`` so resume's
+        envelope-hydration path consumes the same format.
         """
-        import os as _os
-
-        payload_path = self._payloads_dir / f"{self._run_id}-{seq}.json"
-        with open(payload_path, "w", encoding="utf-8") as fh:
-            json.dump(_strip_internal(payload), fh, sort_keys=True, ensure_ascii=False)
-            fh.write("\n")
-            fh.flush()
-            _os.fsync(fh.fileno())
-        return f"payloads/{self._run_id}-{seq}.json"
+        return write_payload(
+            self._payloads_dir, self._run_id, seq, payload
+        )
 
     def _derive_outcome(
         self, state: StateDecl, payload: dict[str, Any], status: str
@@ -1837,11 +1834,6 @@ def _error_to_dict(err: ErrorRecord | None) -> dict[str, Any] | None:
     if err is None:
         return None
     return {"kind": err.kind, "message": err.message, "detail": err.detail}
-
-
-def _strip_internal(payload: dict[str, Any]) -> dict[str, Any]:
-    """Remove keys whose names start with '_' (parser-side-channel)."""
-    return {k: v for k, v in payload.items() if not k.startswith("_")}
 
 
 def new_run_id() -> str:
