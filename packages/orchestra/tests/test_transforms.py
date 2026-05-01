@@ -13,6 +13,9 @@ each test exercises a different shape.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -605,10 +608,16 @@ def test_replay_does_not_reexecute_completed_transform(
 
 
 def test_transform_state_runs_as_fan_out_child(tmp_path: Path) -> None:
-    """A transform state can be fanned out alongside model children
-    and produces its declared outputs. Slice B fix: the fan-out
-    child worker no longer eagerly looks up an adapter for the
-    transform backing.
+    """A transform state runs alongside a model child in a fan-out
+    group, reads a parent-produced artifact via the snapshot, and
+    commits its declared output.
+
+    Slice B fix: the fan-out child worker no longer eagerly looks
+    up an adapter for the transform backing. Round-2 fix tightens
+    the test so it actually exercises the snapshot-read path
+    (parent writes an artifact, transform child reads that
+    artifact) and asserts both the model child's and the
+    transform child's outputs landed.
     """
     _write_dummy_template(tmp_path)
     src = tmp_path / "fan_transform.orc"
@@ -624,8 +633,6 @@ workflow fan_transform
   artifact framing text
     initial null
   artifact a_out text
-  artifact static_in text
-    initial "static-input"
   artifact transform_out text
   artifact joined text
   artifact aborted text
@@ -654,8 +661,8 @@ workflow fan_transform
     on error => stop
     on timeout => stop
   state transform_child
-    actor transform passthrough
-    reads static_in
+    actor transform reframe
+    reads framing
     writes transform_out text
     on complete => done
     on error => stop
@@ -678,16 +685,27 @@ workflow fan_transform
 """
     )
 
-    def passthrough(
+    transform_calls: list[dict[str, Any]] = []
+
+    def reframe(
         inputs: dict[str, Any], ctx: TransformContext
     ) -> dict[str, Any]:
-        return {"transform_out": str(inputs["static_in"])}
+        # The snapshot must already contain the parent's framing
+        # artifact when the transform runs as a fan-out child.
+        framing = inputs.get("framing")
+        transform_calls.append({"framing": framing})
+        if not isinstance(framing, str):
+            raise AssertionError(
+                f"transform child must read the parent's framing "
+                f"artifact from the snapshot; got {framing!r}"
+            )
+        return {"transform_out": f"reframed:{framing}"}
 
     reg = with_core()
     reg.register_transform(
-        "passthrough",
-        passthrough,
-        input_schema={"static_in": str},
+        "reframe",
+        reframe,
+        input_schema={"framing": str},
         output_schema={"transform_out": str},
     )
     wf = load_workflow(src, reg)
@@ -715,21 +733,59 @@ workflow fan_transform
     records = LogReader(run_dir / "log.jsonl").read_all()
     fan_starts = [r for r in records if r.event == "fan_out_start"]
     assert len(fan_starts) == 1
-    assert "transform_child" in fan_starts[0].fields["children"]
+    assert sorted(fan_starts[0].fields["children"]) == [
+        "advise_a",
+        "transform_child",
+    ]
+
     transform_exit = next(
         r
         for r in records
         if r.event == "state_exit" and r.state_id == "transform_child"
     )
+    advise_exit = next(
+        r
+        for r in records
+        if r.event == "state_exit" and r.state_id == "advise_a"
+    )
     assert transform_exit.fields["status"] == "ok"
+    assert advise_exit.fields["status"] == "ok"
+
     fan_end = next(r for r in records if r.event == "fan_out_end")
-    assert fan_end.fields["per_child_outcome"]["transform_child"] == "success"
+    assert fan_end.fields["aggregate"] == "success"
+    assert (
+        fan_end.fields["per_child_outcome"]["transform_child"] == "success"
+    )
+    assert (
+        fan_end.fields["per_child_outcome"]["advise_a"] == "success"
+    )
+
+    # The transform was invoked exactly once, with the parent's
+    # framing artifact provided by the snapshot.
+    assert len(transform_calls) == 1
+    framing_seen = transform_calls[0]["framing"]
+    assert isinstance(framing_seen, str) and framing_seen, (
+        "transform child must observe the parent's framing artifact "
+        "via the fan-out snapshot"
+    )
 
     store_open = ArtifactStore(run_dir / "store.sqlite")
     try:
-        v = store_open.read_latest("transform_out")
-        assert v is not None
-        assert v.value == "static-input"
+        v_a = store_open.read_latest("a_out")
+        assert v_a is not None
+        assert isinstance(v_a.value, str) and v_a.value, (
+            "advise_a must commit a non-empty model output"
+        )
+        v_t = store_open.read_latest("transform_out")
+        assert v_t is not None
+        assert v_t.value == f"reframed:{framing_seen}", (
+            "transform_out must equal the transform's deterministic "
+            "output computed from the framing artifact it read"
+        )
+        # Both children's invocations are visible (their state_exit
+        # was durable success), so the join state's reads succeed.
+        v_join = store_open.read_latest("joined")
+        assert v_join is not None
     finally:
         store_open.close()
 
@@ -758,51 +814,76 @@ def test_register_transform_rejects_bytes(tmp_path: Path) -> None:
         )
 
 
-def test_anonymize_seed_deterministic_with_non_ascii(
+def test_anonymize_seed_pins_default_json_encoding(
     tmp_path: Path,
 ) -> None:
-    """Slice B fix: the seed uses ``json.dumps`` with default args.
-    Non-ASCII characters in run_id, state_name, or input keys must
-    not produce a different mapping across calls. The encoder must
-    NOT use ``ensure_ascii=False`` because raw UTF-8 emit and the
-    default ``\\uXXXX`` escape produce different hash inputs.
+    """Slice B round-2 fix: the seed encoder must be the literal
+    default ``json.dumps([run_id, state_name, sorted_input_keys])``.
+    The earlier fix passed ``ensure_ascii=False`` which emits raw
+    UTF-8 for non-ASCII characters; the default escapes them to
+    ``\\uXXXX``. The two encodings hash to different SHA-256 values,
+    so the seed contract was non-deterministic across encoders.
 
-    Calling ``anonymize_outputs`` directly with a TransformContext
-    whose ``state_name`` and input keys contain a non-ASCII
-    codepoint pins the encoding contract independently of the
-    grammar (whose identifier rules are tested elsewhere).
+    The earlier round-1 test only checked equality across two
+    calls of the same encoder, which any deterministic encoder
+    satisfies and so did not pin the fix. This test computes the
+    expected ``anon_map`` against the default encoding and the
+    ``ensure_ascii=False`` encoding using the same RNG construction
+    the implementation uses, then asserts the implementation matches
+    the default and not the alternative.
     """
     inputs = {
-        "café_a": "value-a",
-        "café_b": "value-b",
-        "café_c": "value-c",
+        f"café_{c}": f"value-{c}" for c in ("a", "b", "c", "d", "e")
     }
-    ctx_factory = lambda: TransformContext(  # noqa: E731
-        run_id="run-é",
-        state_name="anonymïze",
-        sorted_input_keys=sorted(inputs.keys()),
+    run_id = "run-é"
+    state_name = "anonymïze"
+    sorted_keys = sorted(inputs.keys())
+
+    def expected_anon_map(default: bool) -> dict[str, str]:
+        if default:
+            seed_material = json.dumps(
+                [run_id, state_name, sorted_keys]
+            )
+        else:
+            seed_material = json.dumps(
+                [run_id, state_name, sorted_keys], ensure_ascii=False
+            )
+        seed_hash = hashlib.sha256(
+            seed_material.encode("utf-8")
+        ).hexdigest()
+        rng = random.Random(int(seed_hash, 16))
+        shuffled = list(sorted_keys)
+        rng.shuffle(shuffled)
+        return {
+            chr(ord("A") + i): inputs[k]
+            for i, k in enumerate(shuffled)
+        }
+
+    expected_default = expected_anon_map(default=True)
+    expected_alt = expected_anon_map(default=False)
+    # Sanity: this set of inputs must produce different mappings
+    # under the two encoders, otherwise the test would not pin
+    # the contract for either side.
+    assert expected_default != expected_alt, (
+        "the inputs do not distinguish the two encoders; pick "
+        "different ones for the regression test"
     )
-    out_first = anonymize_outputs(inputs, ctx_factory())
-    out_second = anonymize_outputs(inputs, ctx_factory())
-    assert out_first == out_second, (
-        "non-ASCII state name or input keys must not change the "
-        "mapping across calls; the seed encoder must use the "
-        "default json.dumps options"
+
+    ctx = TransformContext(
+        run_id=run_id,
+        state_name=state_name,
+        sorted_input_keys=list(sorted_keys),
     )
-    # Also confirm the default encoder is what is being used: a
-    # state name with the SAME bytes under default escaping but a
-    # different pre-escape codepoint must produce a different
-    # mapping iff the codepoint changes the escaped representation.
-    # We check that two distinct state names produce different
-    # mappings to confirm the seed actually depends on state_name
-    # (sanity ward against accidentally seeding from run_id alone).
-    other_ctx = TransformContext(
-        run_id="run-é",
-        state_name="différent",
-        sorted_input_keys=sorted(inputs.keys()),
+    actual = anonymize_outputs(inputs, ctx)["anon_map"]
+    assert actual == expected_default, (
+        "anonymize_outputs must seed with the default json.dumps "
+        "encoder; the produced mapping does not match the default "
+        "encoding's mapping"
     )
-    out_other = anonymize_outputs(inputs, other_ctx)
-    assert out_other != out_first
+    assert actual != expected_alt, (
+        "the implementation matches the ensure_ascii=False mapping; "
+        "this is the regression the round-2 fix closes"
+    )
 
 
 def test_transform_python_exception_produces_error_state_exit_no_retry(
