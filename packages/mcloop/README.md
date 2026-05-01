@@ -1076,7 +1076,7 @@ A single bug-finding example on this codebase showed which models
 complement each other:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="25%">
+  <img src="https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="75%">
 </p>
 
 Kimi K2.6 produced the most independent coverage and Opus
