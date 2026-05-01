@@ -62,6 +62,8 @@ from typing import Any
 
 from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
+from orchestra.adapters.codex_agent import CodexAgentAdapter
+from orchestra.adapters.codex_text import CodexTextAdapter
 from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
 from orchestra.errors import OrchestraError
 from orchestra.executor.executor import Executor, new_run_id
@@ -94,11 +96,15 @@ from orchestra.transforms import anonymize_outputs
 _ADAPTER_TO_KIND: dict[str, str] = {
     "claude_code_text": "model",
     "claude_code_agent": "agent",
+    "codex_text": "model",
+    "codex_agent": "agent",
 }
 
 _ADAPTER_CLASSES: dict[str, type] = {
     "claude_code_text": ClaudeCodeTextAdapter,
     "claude_code_agent": ClaudeCodeAgentAdapter,
+    "codex_text": CodexTextAdapter,
+    "codex_agent": CodexAgentAdapter,
 }
 
 FINAL_PROMPT_INPUT: str = "final_prompt"
@@ -310,6 +316,8 @@ def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
             params.setdefault("default_allowed_tools", binding.tools)
         elif adapter_name == "claude_code_text":
             params.setdefault("allowed_tools", binding.tools)
+        elif adapter_name == "codex_agent":
+            params.setdefault("default_sandbox", binding.tools)
     return cls(**params), kind
 
 

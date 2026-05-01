@@ -30,23 +30,70 @@ understand what the models do — not to ship something. Configuration
 is shared with the library surface, so a binding tested at the CLI
 moves into a library consumer unchanged.
 
+## Why Orchestra exists
+
+LLMs make mistakes. They confidently produce wrong answers, miss
+edge cases, fixate on bad approaches, and hallucinate facts that
+look plausible. Every current model does this, including the
+strongest ones. A single-model loop has no mechanism for catching
+these mistakes before they propagate, and the result is exactly the
+buggy unmaintainable junk that gives AI-generated code its
+reputation.
+
+Multi-model architectures are not an optimization. They are a
+requirement for getting usable output from these tools. A drafter
+writes; an adjudicator reads the draft with fresh eyes and the
+original problem statement, and rewrites what is wrong. A proposer
+takes a position; a critic argues against it; a synthesizer
+reconciles. A council surfaces independent perspectives before any
+of them are anonymized for review. An iterative loop refines a
+draft until it meets a standard. Each of these adds a checkpoint
+that catches a class of mistake the prior step would otherwise
+ship.
+
+This structure is not novel. Careful human teams already work this
+way. A senior engineer reviews a junior's pull request. A design
+document goes through multiple readers before being committed to.
+A bug report is investigated by one person and verified by another
+before code changes. The mistake-catching is the whole point.
+Orchestra applies the same structure to LLM workflows because the
+alternative — trusting a single model's first output on real coding,
+design, and debugging tasks — does not produce maintainable code.
+
+Orchestra exists because this is the difference between LLM tools
+you can ship with and LLM tools you cannot.
+
 ## Models and providers
 
-Orchestra does not call model APIs directly. It drives whichever
-CLI tools the user already has installed and pays for. The shipped
-adapter set today is Claude Code (subscription billing, no API
-tokens). Codex adapters using a ChatGPT subscription are in
-progress; once they land, any role in any workflow — a Council
+Orchestra does not necessarily call model APIs directly. It can
+drive CLI tools the user already has installed and pays for. The
+shipped adapter set today is Claude Code (subscription billing, no
+API tokens). Codex adapters using a ChatGPT subscription are being
+added; once present, any role in any workflow — a Council
 panelist, a draft-then-adjudicate drafter, anything — binds to
 Codex by name, the same way it binds to Claude.
 
 Third-party models (DeepSeek, Moonshot/Kimi, GLM, Gemini, others) are
 reached by pointing Claude Code at an OpenRouter endpoint with
 `OPENROUTER_API_KEY`. Those calls are billed per token by OpenRouter
-at the underlying provider's rate. Some providers offer free tiers;
-most do not. The role binding mechanism is the same regardless of
-billing — the model name in the binding determines the provider, and
-environment variables determine the endpoint.
+at the underlying provider's rate. The role binding mechanism is the
+same regardless of billing — the model name in the binding determines
+the provider, and environment variables determine the endpoint.
+
+Some providers offer free access. Hugging Face's Inference API has a
+free tier covering many open-weight models. Google's Gemini has a
+free tier with rate limits. Local servers like Ollama are free at the
+cost of running the model on your own hardware. Any of these can be
+plugged in by pointing the adapter's base URL at the appropriate
+endpoint.
+
+DeepSeek and Kimi (Moonshot) deserve a specific mention. Both are
+orders of magnitude cheaper per token than Claude Opus or Sonnet,
+and on the [bug-finding example](#choosing-model-bindings) below
+Kimi found more unique bugs than Opus did. One observation does not
+generalize, but the price difference is enough that they are worth
+trying for any role where you would otherwise default to a premium
+model.
 
 Models currently in development use:
 
