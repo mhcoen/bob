@@ -30,6 +30,37 @@ understand what the models do — not to ship something. Configuration
 is shared with the library surface, so a binding tested at the CLI
 moves into a library consumer unchanged.
 
+## Models and providers
+
+Orchestra does not call model APIs directly. Today's adapters route
+through Claude Code, which uses the user's Claude subscription (Pro or
+Max). Calls through Claude Code do not consume API tokens — the user
+pays nothing extra per Orchestra call beyond what they already pay for
+the subscription. A Codex adapter (using a ChatGPT subscription) is on
+the roadmap; it is not shipped yet.
+
+Third-party models (DeepSeek, Moonshot/Kimi, GLM, Gemini, others) are
+reached by pointing Claude Code at an OpenRouter endpoint with
+`OPENROUTER_API_KEY`. Those calls are billed per token by OpenRouter
+at the underlying provider's rate. Some providers offer free tiers;
+most do not. The role binding mechanism is the same regardless of
+billing — the model name in the binding determines the provider, and
+environment variables determine the endpoint.
+
+Models currently in development use:
+
+- **Claude Opus** and **Claude Sonnet** (Anthropic, via subscription).
+  Used for synthesis-shaped roles where the goal is reconciling or
+  judging.
+- **Kimi K2.6** (Moonshot, via OpenRouter). Used for divergent-thinking
+  roles — drafter, proposer, contrarian.
+- **DeepSeek V4 Pro** (DeepSeek, via OpenRouter). Used as a third
+  opinion when confirmation matters more than novelty.
+
+This is a snapshot of what works on this codebase today, not a
+recommendation. Model versions change. Providers add and remove
+endpoints. Re-evaluate before relying on any specific binding.
+
 ## The architectures
 
 These are the patterns that ship today, plus two designs currently
