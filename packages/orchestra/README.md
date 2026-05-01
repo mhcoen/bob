@@ -144,42 +144,43 @@ That's the whole CLI surface for ad-hoc questions.
 
 ## Choosing model bindings
 
-The role-to-model bindings in the quick-start config above are not
+The role-to-model bindings in the quick-start config are not
 arbitrary, but they are not benchmarks either. They reflect a single
-bug-finding example on the McLoop codebase, where four models were
-each asked to find bugs in the same code independently. The matrix:
+bug-finding example on the McLoop codebase, where four models each
+looked for bugs independently:
 
-![Matrix from a single bug-finding example. Kimi K2.6: 10 bugs found, 6 unique, 0 false positives. Claude Opus: 4 found, 3 unique, 0 false positives. Codex GPT: 2 found, 1 unique, many false positives requiring manual filtering. DeepSeek V4 Pro: 4 found, 0 unique, 0 false positives.](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-matrix.png)
+![Bug-finding scorecard](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-matrix.png)
 
-The headline observations from this one example: Kimi K2.6 produced
-the most independent coverage (six unique finds, zero false
-positives), Opus contributed complementary unique finds, DeepSeek
-confirmed findings other models had already surfaced (zero unique),
-and Codex required manual filtering to be usable. The per-bug
-detail:
+Kimi K2.6 produced the most independent coverage (six unique finds,
+zero false positives). Opus contributed three complementary unique
+finds. DeepSeek confirmed findings other models had already surfaced
+(zero unique). Codex required manual filtering to be usable.
 
-![Per-bug coverage detail from the same example, showing which of Kimi K2.6, DeepSeek, Claude, and Codex flagged each bug and at what severity.](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-detail.png)
+The per-bug breakdown:
 
-This is one example on one codebase. The rankings may differ on
-architecture critique, code generation, or non-coding consultation;
-model versions update; new candidate models will arrive. Re-evaluate
+![Per-bug coverage](https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-detail.png)
+
+This is one example on one codebase. Rankings may differ on other
+tasks; model versions update; new candidates arrive. Re-evaluate
 before making large binding changes.
 
-The practical implications for the bindings above: Kimi K2.6 is a
-reasonable default for divergent-thinking roles (`drafter`,
-`proposer`, `contrarian`, `outsider`), Opus for synthesis-shaped
-roles (`adjudicator`, `synthesizer`, `first_principles`,
-`executor_lens`, `chairman`), and Sonnet for cheap-but-capable
-roles (`framer`, `critic`, `expansionist`, `reviewer`). DeepSeek
-fits as a confirming third opinion when you want a sanity check on
-an already-flagged finding. Codex stays out of automated paths
-because its triage cost compounds across many invocations.
+From this example, reasonable defaults for the bindings shown above:
+
+- Kimi K2.6 for divergent-thinking roles: `drafter`, `proposer`,
+  `contrarian`, `outsider`.
+- Opus for synthesis-shaped roles: `adjudicator`, `synthesizer`,
+  `first_principles`, `executor_lens`, `chairman`.
+- Sonnet for cheap-but-capable roles: `framer`, `critic`,
+  `expansionist`, `reviewer`.
+- DeepSeek as a confirming third opinion when wanted, not as a
+  primary advisor.
+- Codex out of automated paths because triage cost compounds.
 
 For consumers like McLoop that integrate orchestra at the
-edit-attempt level, the `draft_then_adjudicate` pattern with Kimi
-as drafter and Opus as adjudicator is the natural starting point
-from this example. See [the McLoop README](https://github.com/mhcoen/mcloop)
-for the integration mechanics.
+edit-attempt level, `draft_then_adjudicate` with Kimi as drafter and
+Opus as adjudicator is the natural starting point. See
+[the McLoop README](https://github.com/mhcoen/mcloop) for the
+integration mechanics.
 
 ## Workflow patterns
 
