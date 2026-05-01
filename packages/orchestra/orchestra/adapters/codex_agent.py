@@ -197,6 +197,11 @@ class CodexAgentAdapter:
         # The Codex CLI accepts ``--ask-for-approval`` and ``--sandbox``
         # at the top level only. Both flags must appear before the
         # ``exec`` subcommand or argument parsing rejects them.
+        # ``--skip-git-repo-check`` is an ``exec`` subcommand flag in
+        # codex 0.128 (verified via ``codex exec --help``); it must
+        # follow ``exec``. Without it, codex refuses to run in any
+        # directory it does not consider a trusted git repository
+        # and exits with status 1 before contacting the model.
         cmd: list[str] = [
             self._cli,
             "--ask-for-approval",
@@ -204,6 +209,7 @@ class CodexAgentAdapter:
             "--sandbox",
             sandbox,
             "exec",
+            "--skip-git-repo-check",
         ]
         if model:
             cmd.extend(["--model", model])

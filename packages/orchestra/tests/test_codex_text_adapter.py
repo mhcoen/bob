@@ -58,7 +58,7 @@ def _request(
 def test_build_command_minimal_no_model_no_prompt() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="", model=None)
-    assert cmd == ["codex", "exec", "--full-auto"]
+    assert cmd == ["codex", "exec", "--skip-git-repo-check", "--full-auto"]
 
 
 def test_build_command_with_model_and_prompt() -> None:
@@ -67,6 +67,7 @@ def test_build_command_with_model_and_prompt() -> None:
     assert cmd == [
         "codex",
         "exec",
+        "--skip-git-repo-check",
         "--full-auto",
         "--model",
         "gpt-5-codex",
@@ -80,6 +81,7 @@ def test_build_command_model_only() -> None:
     assert cmd == [
         "codex",
         "exec",
+        "--skip-git-repo-check",
         "--full-auto",
         "--model",
         "gpt-5-codex",
@@ -89,7 +91,35 @@ def test_build_command_model_only() -> None:
 def test_build_command_prompt_only() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="hi", model=None)
-    assert cmd == ["codex", "exec", "--full-auto", "hi"]
+    assert cmd == [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--full-auto",
+        "hi",
+    ]
+
+
+def test_build_command_skip_git_repo_check_follows_exec() -> None:
+    """``--skip-git-repo-check`` is an ``exec`` subcommand flag in
+    codex 0.128. It must appear after ``exec`` and before any
+    positional prompt. Without it, codex refuses to run in untrusted
+    directories (any directory that is not an authorized git repo)
+    and exits with status 1 before contacting the model. This test
+    pins both the presence and the relative position of the flag."""
+    adapter = CodexTextAdapter()
+    cmd = adapter._build_command(prompt="hi", model="gpt-5-codex")
+    assert "--skip-git-repo-check" in cmd, (
+        "codex_text command must include --skip-git-repo-check"
+    )
+    exec_idx = cmd.index("exec")
+    skip_idx = cmd.index("--skip-git-repo-check")
+    assert skip_idx > exec_idx, (
+        "--skip-git-repo-check must follow the exec subcommand"
+    )
+    # The prompt is the trailing positional, after every flag.
+    assert cmd[-1] == "hi"
+    assert skip_idx < len(cmd) - 1
 
 
 # --------------------------------------------------------------------
@@ -117,6 +147,7 @@ def test_prepare_summary_carries_kind_adapter_cli_command(
     assert prepared.summary["command"] == [
         "codex",
         "exec",
+        "--skip-git-repo-check",
         "--full-auto",
         "--model",
         "gpt-5-codex-mini",

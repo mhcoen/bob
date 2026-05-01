@@ -173,7 +173,18 @@ class CodexTextAdapter:
     # ----- internals --------------------------------------------------
 
     def _build_command(self, prompt: str, model: str | None) -> list[str]:
-        cmd: list[str] = [self._cli, "exec", "--full-auto"]
+        # ``--skip-git-repo-check`` is an ``exec`` subcommand flag in
+        # codex 0.128 (verified via ``codex exec --help``). Without it,
+        # codex refuses to run in any directory it does not consider
+        # a trusted git repository and exits with status 1 before
+        # contacting the model. The adapter runs against arbitrary
+        # working directories, so the flag is mandatory.
+        cmd: list[str] = [
+            self._cli,
+            "exec",
+            "--skip-git-repo-check",
+            "--full-auto",
+        ]
         if model:
             cmd.extend(["--model", model])
         if prompt:

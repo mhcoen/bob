@@ -64,6 +64,7 @@ def test_build_command_default_sandbox_no_model_no_prompt() -> None:
         "--sandbox",
         "workspace-write",
         "exec",
+        "--skip-git-repo-check",
     ]
 
 
@@ -79,6 +80,7 @@ def test_build_command_with_model_and_prompt() -> None:
         "--sandbox",
         "workspace-write",
         "exec",
+        "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
         "edit foo.py",
@@ -104,6 +106,26 @@ def test_build_command_top_level_flags_precede_exec() -> None:
     sandbox_idx = cmd.index("--sandbox")
     assert approval_idx < exec_idx
     assert sandbox_idx < exec_idx
+
+
+def test_build_command_skip_git_repo_check_follows_exec() -> None:
+    """``--skip-git-repo-check`` is an ``exec`` subcommand flag in
+    codex 0.128 (verified via ``codex exec --help``). Without it,
+    codex refuses to run in untrusted directories and exits with
+    status 1 before contacting the model. The flag must follow the
+    ``exec`` subcommand and precede the trailing prompt."""
+    adapter = CodexAgentAdapter()
+    cmd = adapter._build_command(
+        prompt="hi", model="gpt-5-codex", sandbox="workspace-write"
+    )
+    assert "--skip-git-repo-check" in cmd
+    exec_idx = cmd.index("exec")
+    skip_idx = cmd.index("--skip-git-repo-check")
+    assert skip_idx > exec_idx, (
+        "--skip-git-repo-check must follow the exec subcommand"
+    )
+    assert cmd[-1] == "hi"
+    assert skip_idx < len(cmd) - 1
 
 
 # --------------------------------------------------------------------
@@ -134,6 +156,7 @@ def test_prepare_summary_kind_agent_and_full_command(tmp_path: Path) -> None:
         "--sandbox",
         "workspace-write",
         "exec",
+        "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
         "edit",
