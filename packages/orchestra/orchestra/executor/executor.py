@@ -433,37 +433,13 @@ class Executor:
         else:
             target = decl.target
 
-        # Step 10: check step budget.
-        self._step_count += 1
-        if self._step_count >= self._wf.max_total_steps:
-            if target not in _TERMINAL_TARGETS:
-                self._log.write(
-                    "step_budget_exhausted",
-                    state_id=state.name,
-                    attempt=attempt,
-                    fields={"max_total_steps": self._wf.max_total_steps},
-                )
-                target = "stop"
-
-        self._log.write(
-            "transition",
+        # Steps 10 + 11: step-budget guard, transition write, route.
+        return self._close_pending_transition(
             state_id=state.name,
             attempt=attempt,
-            fields={
-                "outcome": envelope.outcome,
-                "target": target,
-                "step_count": self._step_count,
-            },
+            outcome=envelope.outcome,
+            target=target,
         )
-
-        # Step 11: route.
-        self._last_state = state.name
-        self._last_outcome = envelope.outcome
-        if target in _TERMINAL_TARGETS:
-            self._current_state = target
-            return target
-        self._current_state = target
-        return target
 
     # ----- helpers ------------------------------------------------
 
@@ -599,6 +575,82 @@ class Executor:
                 return "fail"
             return "pass"
         return "complete"
+
+    def _close_pending_transition(
+        self,
+        *,
+        state_id: str,
+        attempt: int,
+        outcome: str,
+        target: str,
+    ) -> str:
+        """Increment ``_step_count``, apply the step budget, write the
+        ``transition`` log record, advance ``_current_state`` to the
+        chosen target, and return the (possibly budget-overridden)
+        target.
+
+        Round-3 factoring: the live linear path, the live transform
+        linear path, ``resume_pending_transition``, ``resume_fan_out``,
+        and ``close_fan_out_pending_transition`` all close their
+        per-step accounting and durable transition write through this
+        single helper so the on-disk format and the budget guard
+        remain identical. ``state_id``/``attempt``/``outcome`` are
+        named arguments so callers cannot silently swap them.
+        """
+        self._step_count += 1
+        if self._step_count >= self._wf.max_total_steps:
+            if target not in _TERMINAL_TARGETS:
+                self._log.write(
+                    "step_budget_exhausted",
+                    state_id=state_id,
+                    attempt=attempt,
+                    fields={"max_total_steps": self._wf.max_total_steps},
+                )
+                target = "stop"
+        self._log.write(
+            "transition",
+            state_id=state_id,
+            attempt=attempt,
+            fields={
+                "outcome": outcome,
+                "target": target,
+                "step_count": self._step_count,
+            },
+        )
+        self._last_state = state_id
+        self._last_outcome = outcome
+        self._current_state = target
+        return target
+
+    def close_fan_out_pending_transition(
+        self,
+        *,
+        parent_state_name: str,
+        parent_attempt: int,
+        target: str,
+    ) -> str:
+        """Replay rule for a crash between ``fan_out_end`` and the
+        parent ``transition``: the routing decision is durable in the
+        ``fan_out_end`` record but the transition log entry was
+        never written. Resume must close the missing transition
+        without re-running the fan-out group. The parent envelope
+        is consulted only for ``outcome``; everything else comes
+        from the durable ``fan_out_end`` plus ``parent_attempt``
+        threaded from the matching ``fan_out_start``.
+        """
+        with self._envelope_lock:
+            envelope = self._envelopes.get(parent_state_name)
+        if envelope is None:
+            raise ExecutorError(
+                "close_fan_out_pending_transition: no envelope "
+                f"reconstructed for parent {parent_state_name!r}"
+            )
+        return self._close_pending_transition(
+            state_id=parent_state_name,
+            attempt=parent_attempt,
+            outcome=envelope.outcome,
+            target=target,
+        )
 
     def _dispatch_parsers(
         self,
@@ -1022,33 +1074,12 @@ class Executor:
             target = state_name
         else:
             target = decl.target
-
-        self._step_count += 1
-        if self._step_count >= self._wf.max_total_steps:
-            if target not in _TERMINAL_TARGETS:
-                self._log.write(
-                    "step_budget_exhausted",
-                    state_id=state_name,
-                    attempt=envelope.attempt,
-                    fields={"max_total_steps": self._wf.max_total_steps},
-                )
-                target = "stop"
-
-        self._log.write(
-            "transition",
+        return self._close_pending_transition(
             state_id=state_name,
             attempt=envelope.attempt,
-            fields={
-                "outcome": envelope.outcome,
-                "target": target,
-                "step_count": self._step_count,
-            },
+            outcome=envelope.outcome,
+            target=target,
         )
-
-        self._last_state = state_name
-        self._last_outcome = envelope.outcome
-        self._current_state = target
-        return target
 
     def resume_fan_out(
         self,
@@ -1183,8 +1214,9 @@ class Executor:
                     "purged_versions": purged,
                 },
             )
-            self._current_state = str(target)
-            return str(target)
+            return self._close_resumed_fan_out_transition(
+                parent_state.name, parent_attempt, target
+            )
 
         registry = _CancellationRegistry()
         for child_name in pending_children:
@@ -1276,8 +1308,37 @@ class Executor:
                 "purged_versions": purged,
             },
         )
-        self._current_state = str(target)
-        return str(target)
+        return self._close_resumed_fan_out_transition(
+            parent_state.name, parent_attempt, target
+        )
+
+    def _close_resumed_fan_out_transition(
+        self,
+        parent_state_name: str,
+        parent_attempt: int | None,
+        target: str,
+    ) -> str:
+        """Round-3 fix: ``resume_fan_out`` ends with the parent's
+        durable ``transition`` record so the resumed log mirrors the
+        live path's record sequence and step-count tracking. Falls
+        back gracefully when ``parent_attempt`` is missing (older
+        log fixtures may have been produced before parent_attempt
+        threading landed)."""
+        if parent_attempt is None:
+            # Defensive: shouldn't occur once parent_attempt threading
+            # is in place, but keep current_state advancement so the
+            # caller can continue without a transition record.
+            self._current_state = target
+            return target
+        with self._envelope_lock:
+            parent_env = self._envelopes.get(parent_state_name)
+        outcome = parent_env.outcome if parent_env is not None else "complete"
+        return self._close_pending_transition(
+            state_id=parent_state_name,
+            attempt=parent_attempt,
+            outcome=outcome,
+            target=target,
+        )
 
     def _fan_out_child_worker(
         self,

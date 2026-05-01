@@ -58,6 +58,13 @@ class ReplayState:
     # is set when a durable fan_out_end was observed; the executor
     # uses it to skip re-running the group.
     open_fan_out: dict[str, Any] | None = None
+    open_fan_out_attempt: int | None = None
+    """Round-3 fix: parent's ``attempt`` from ``fan_out_start``. Lost
+    by the previous code path because only ``rec.fields`` was
+    captured into ``open_fan_out``. ``cmd_resume`` threads this
+    through ``resume_fan_out`` so resumed ``fan_out_resume``,
+    ``fan_out_end``, and the closing parent ``transition`` records
+    carry the same attempt the live path would have written."""
     last_fan_out_target: str | None = None
     # invocation_id -> "pending" | "success" | "error" rebuilt from
     # state_enter and state_exit records; the resume helper feeds
@@ -72,6 +79,14 @@ class ReplayState:
     # so the caller can locate the envelope; the caller is expected
     # to advance ``current_state`` after writing the transition.
     state_exit_without_transition: bool = False
+    pending_fan_out_transition: dict[str, Any] | None = None
+    """Round-3 fix: when a durable ``fan_out_end`` is the latest
+    routing-relevant record and the parent's ``transition`` write
+    never made it durable, this dict carries
+    ``{parent_state, attempt, target}`` so ``cmd_resume`` can close
+    the missing transition without re-running the fan-out group.
+    Cleared when a matching parent transition is observed in the
+    log."""
 
 
 def replay_log(log_path: str | Path) -> ReplayState:
@@ -125,14 +140,25 @@ def replay_log(log_path: str | Path) -> ReplayState:
                 state.visibility_statuses[inv_id] = "pending"
         elif rec.event == "fan_out_start":
             state.open_fan_out = dict(rec.fields)
+            state.open_fan_out_attempt = rec.attempt
         elif rec.event == "fan_out_end":
             state.open_fan_out = None
+            state.open_fan_out_attempt = None
             target = rec.fields.get("target")
             if isinstance(target, str):
                 state.last_fan_out_target = target
                 state.last_target = target
                 state.last_state_completed = True
                 state.current_state = target
+                # Round-3 fix: track that the parent's transition is
+                # still pending. Cleared when the matching parent
+                # transition record is observed in the same replay.
+                if rec.state_id is not None and rec.attempt is not None:
+                    state.pending_fan_out_transition = {
+                        "parent_state": rec.state_id,
+                        "attempt": rec.attempt,
+                        "target": target,
+                    }
                 if target in _TERMINAL_TARGETS:
                     state.is_terminal = True
         elif rec.event == "state_exit":
@@ -190,6 +216,17 @@ def replay_log(log_path: str | Path) -> ReplayState:
             sc = rec.fields.get("step_count")
             if isinstance(sc, int):
                 state.step_count = sc
+            # Round-3 fix: clear the pending fan-out transition when
+            # this transition record closes the same parent that
+            # ``fan_out_end`` opened. A transition for a different
+            # state (or attempt) does not close it.
+            pft = state.pending_fan_out_transition
+            if (
+                pft is not None
+                and rec.state_id == pft.get("parent_state")
+                and rec.attempt == pft.get("attempt")
+            ):
+                state.pending_fan_out_transition = None
 
     # Final routing decision.
     if state.last_state_completed and state.last_target is not None:

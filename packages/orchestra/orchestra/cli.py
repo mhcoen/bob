@@ -256,6 +256,21 @@ def cmd_resume(args: argparse.Namespace) -> int:
             and replay.current_state not in _TERMINAL_TARGETS
         ):
             executor.resume_pending_transition(replay.current_state)
+        # Round-3 fix: a crash between ``fan_out_end`` and the
+        # parent's ``transition`` leaves the routing decision
+        # durable in ``fan_out_end`` but the transition record
+        # unwritten. Close the missing transition without
+        # re-dispatching the fan-out children.
+        if (
+            replay.pending_fan_out_transition is not None
+            and replay.open_fan_out is None
+        ):
+            pft = replay.pending_fan_out_transition
+            executor.close_fan_out_pending_transition(
+                parent_state_name=str(pft["parent_state"]),
+                parent_attempt=int(pft["attempt"]),
+                target=str(pft["target"]),
+            )
         # Slice A: if a fan_out group is open (fan_out_start without
         # a matching fan_out_end), dispatch to resume_fan_out before
         # the linear loop takes over. The method advances
@@ -290,6 +305,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
                 join_target=str(of.get("join_target", "")),
                 error_target=str(of.get("error_target", "")),
                 completed_children=completed,
+                parent_attempt=replay.open_fan_out_attempt,
             )
         terminal = executor.run_to_completion()
     finally:

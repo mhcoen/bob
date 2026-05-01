@@ -2522,6 +2522,7 @@ def _resume_open_fan_out(
         join_target=str(of["join_target"]),
         error_target=str(of["error_target"]),
         completed_children=completed,
+        parent_attempt=replay.open_fan_out_attempt,
     )
 
     terminal = executor.run_to_completion()
@@ -3234,3 +3235,361 @@ def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
 
     log.close()
     store.close()
+
+
+# ====================================================================
+# Round-3 regressions: resume writes parent transition after
+# fan_out_end, and parent_attempt is preserved through resume.
+# ====================================================================
+
+
+class _DenyChildrenAdapter:
+    """Wraps MockModelAdapter; raises if any state in ``denied`` is
+    asked to prepare or invoke. Used to prove resume does not
+    re-dispatch fan-out children when the parent transition is the
+    only thing missing."""
+
+    def __init__(self, denied: set[str]) -> None:
+        from orchestra.adapters.mock_model import MockModelAdapter
+
+        self._inner = MockModelAdapter()
+        self.denied = set(denied)
+        self.invocations: list[str] = []
+
+    def prepare(self, request: Any) -> Any:
+        if request.state_id in self.denied:
+            raise AssertionError(
+                f"state {request.state_id!r} must not be re-invoked "
+                "on resume"
+            )
+        self.invocations.append(f"prepare:{request.state_id}")
+        return self._inner.prepare(request)
+
+    def invoke(self, prepared: Any) -> Any:
+        sid = prepared.request.state_id
+        if sid in self.denied:
+            raise AssertionError(
+                f"state {sid!r} must not be re-invoked on resume"
+            )
+        self.invocations.append(f"invoke:{sid}")
+        return self._inner.invoke(prepared)
+
+    def cancel(self, prepared: Any) -> None:
+        return None
+
+    def describe(self) -> dict[str, Any]:
+        return self._inner.describe()
+
+
+def _registry_with_deny(deny: _DenyChildrenAdapter) -> Any:
+    from orchestra.adapters.mock_human import MockHumanAdapter as _Human
+    from orchestra.adapters.mock_shell import MockShellAdapter as _Shell
+    from orchestra.executor.parsers import identity_text_parser
+    from orchestra.registry.registry import ProfileRegistry
+
+    reg = ProfileRegistry()
+    for type_name in (
+        "text", "json", "messages", "prompt", "schema", "document"
+    ):
+        reg.register_artifact_type(type_name)
+    reg.register_actor_backing("model", lambda: deny)
+    reg.register_actor_backing("human", _Human)
+    reg.register_actor_backing("shell", _Shell)
+    reg.register_result_parser(identity_text_parser)
+    return reg
+
+
+def _resume_with_registry(
+    run_dir: Path,
+    workflow_path: Path,
+    registry: Any,
+    external_inputs: dict[str, Any],
+) -> str:
+    """Mirror cmd_resume's full machinery using the supplied registry
+    and the new ``pending_fan_out_transition`` plus ``parent_attempt``
+    threading."""
+    from orchestra.resume import replay_log, run_resume_hooks
+    from orchestra.visibility import VisibilityIndex
+
+    log_path = run_dir / "log.jsonl"
+    replay = replay_log(str(log_path))
+    workflow = load_workflow(workflow_path, registry)
+    store = ArtifactStore(run_dir / "store.sqlite")
+    log = LogWriter(
+        log_path, replay.last_run_id, start_seq=replay.next_seq
+    )
+    run_resume_hooks(workflow, registry, replay, log)
+    vi = VisibilityIndex(persist_path=run_dir / "visibility.json")
+    vi.replace_from(replay.visibility_statuses)
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=replay.last_run_id,
+        external_inputs=external_inputs,
+        attempts=replay.attempts,
+        retries=replay.retries,
+        envelopes=replay.envelopes,
+        current_state=replay.current_state,
+        step_count=replay.step_count,
+        visibility_index=vi,
+    )
+    try:
+        if (
+            replay.state_exit_without_transition
+            and replay.current_state is not None
+            and replay.current_state not in {"done", "stop"}
+        ):
+            executor.resume_pending_transition(replay.current_state)
+        if (
+            replay.pending_fan_out_transition is not None
+            and replay.open_fan_out is None
+        ):
+            pft = replay.pending_fan_out_transition
+            executor.close_fan_out_pending_transition(
+                parent_state_name=str(pft["parent_state"]),
+                parent_attempt=int(pft["attempt"]),
+                target=str(pft["target"]),
+            )
+        if replay.open_fan_out is not None:
+            of = replay.open_fan_out
+            children_field = of.get("children") or []
+            if not isinstance(children_field, list):
+                children_field = []
+            children_list = [str(c) for c in children_field]
+            completed = {
+                name: env
+                for name, env in replay.envelopes.items()
+                if (
+                    name in children_list
+                    and env.attempt == replay.attempts.get(name)
+                )
+            }
+            executor.resume_fan_out(
+                parent_state_name=str(of.get("parent_state", "")),
+                children=children_list,
+                join_target=str(of.get("join_target", "")),
+                error_target=str(of.get("error_target", "")),
+                completed_children=completed,
+                parent_attempt=replay.open_fan_out_attempt,
+            )
+        terminal = executor.run_to_completion()
+    finally:
+        log.close()
+        store.close()
+    return terminal
+
+
+def test_resume_after_fan_out_end_writes_missing_parent_transition(
+    tmp_path: Path,
+) -> None:
+    """Crash window between live ``fan_out_end`` and the parent
+    ``transition``: resume must close the missing transition record
+    without re-dispatching the fan-out children. The durable
+    routing decision is in ``fan_out_end``; resume just needs to
+    write the matching transition.
+    """
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+
+    # Truncate everything from the parent's transition onward. We
+    # keep run_start, all fan-out and child records, and fan_out_end.
+    records = _read_records(run_dir)
+    cutoff: int | None = None
+    seen_fan_out_end = False
+    for i, r in enumerate(records):
+        if r.event == "fan_out_end":
+            seen_fan_out_end = True
+            continue
+        if seen_fan_out_end and r.event == "transition" and r.state_id == "launch":
+            cutoff = i
+            break
+    assert cutoff is not None, (
+        "the fixture must emit a parent transition after fan_out_end"
+    )
+    truncated = records[:cutoff]
+    log_path.write_text(
+        "\n".join(r.to_json() for r in truncated) + "\n",
+        encoding="utf-8",
+    )
+
+    from orchestra.resume import replay_log
+
+    replay = replay_log(str(log_path))
+    assert replay.pending_fan_out_transition is not None
+    pft = replay.pending_fan_out_transition
+    assert pft["parent_state"] == "launch"
+    assert pft["target"] == "join_state"
+    assert isinstance(pft["attempt"], int) and pft["attempt"] >= 1
+
+    deny = _DenyChildrenAdapter(
+        denied={"launch", "advise_a", "advise_b", "advise_c"}
+    )
+    reg2 = _registry_with_deny(deny)
+    workflow_path = run_dir.parent / "fan.orc"
+    terminal = _resume_with_registry(
+        run_dir,
+        workflow_path,
+        reg2,
+        {"topic": "hello world"},
+    )
+    assert terminal == "done"
+    # No fan-out child or parent invocation should have run.
+    assert all(
+        not s.startswith("prepare:advise_") for s in deny.invocations
+    )
+    assert all(
+        not s.startswith("invoke:advise_") for s in deny.invocations
+    )
+    assert "prepare:launch" not in deny.invocations
+
+    records2 = _read_records(run_dir)
+    launch_transitions = [
+        r
+        for r in records2
+        if r.event == "transition" and r.state_id == "launch"
+    ]
+    assert len(launch_transitions) == 1, (
+        "resume must write exactly one parent transition record"
+    )
+    assert launch_transitions[0].fields["target"] == "join_state"
+    # The closure transition's attempt matches fan_out_end's attempt.
+    fan_out_end = next(r for r in records2 if r.event == "fan_out_end")
+    assert launch_transitions[0].attempt == fan_out_end.attempt
+
+
+def test_resume_open_fan_out_writes_parent_transition_with_correct_attempt(
+    tmp_path: Path,
+) -> None:
+    """Resume of an open fan-out group ends with the parent's
+    ``transition`` record carrying the same attempt as the original
+    ``fan_out_start``. Round-3 fix: the previous code lost
+    ``parent_attempt`` so resumed ``fan_out_end`` and (now-added)
+    transition records carried ``attempt=None``. The expected log
+    sequence is fan_out_start, fan_out_resume, child events,
+    fan_out_end, transition.
+    """
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+
+    # Truncate the log so fan_out_start is durable but no children
+    # have completed (drop everything after fan_out_start).
+    records = _read_records(run_dir)
+    cutoff = next(
+        i for i, r in enumerate(records) if r.event == "fan_out_start"
+    )
+    truncated = records[: cutoff + 1]
+    fan_out_start_attempt = records[cutoff].attempt
+    assert isinstance(fan_out_start_attempt, int)
+    log_path.write_text(
+        "\n".join(r.to_json() for r in truncated) + "\n",
+        encoding="utf-8",
+    )
+
+    workflow_path = run_dir.parent / "fan.orc"
+    registry = with_core()
+    terminal = _resume_with_registry(
+        run_dir,
+        workflow_path,
+        registry,
+        {"topic": "hello world"},
+    )
+    assert terminal == "done"
+
+    records2 = _read_records(run_dir)
+
+    # The expected sequence around the resumed fan-out group:
+    # fan_out_start, fan_out_resume, child events..., fan_out_end,
+    # transition (parent).
+    fan_starts = [r for r in records2 if r.event == "fan_out_start"]
+    fan_resumes = [r for r in records2 if r.event == "fan_out_resume"]
+    fan_ends = [r for r in records2 if r.event == "fan_out_end"]
+    parent_transitions = [
+        r
+        for r in records2
+        if r.event == "transition" and r.state_id == "launch"
+    ]
+    assert len(fan_starts) == 1
+    assert len(fan_resumes) == 1
+    assert len(fan_ends) == 1
+    assert len(parent_transitions) == 1
+
+    # All four records carry the same parent attempt.
+    assert fan_starts[0].attempt == fan_out_start_attempt
+    assert fan_resumes[0].attempt == fan_out_start_attempt
+    assert fan_ends[0].attempt == fan_out_start_attempt
+    assert parent_transitions[0].attempt == fan_out_start_attempt
+
+    # Order: fan_out_start < fan_out_resume < fan_out_end < transition.
+    assert fan_starts[0].seq < fan_resumes[0].seq
+    assert fan_resumes[0].seq < fan_ends[0].seq
+    assert fan_ends[0].seq < parent_transitions[0].seq
+
+
+def test_resume_after_fan_out_end_does_not_double_count_parent_step(
+    tmp_path: Path,
+) -> None:
+    """The parent's transition closes the same step the original
+    execution would have closed, not a new step. After resume, the
+    final ``transition.step_count`` must match what the live path
+    would have written (2 for the standard fixture: launch is step 1,
+    join_state is step 2).
+    """
+    run_dir = _run(tmp_path)
+    log_path = run_dir / "log.jsonl"
+
+    # First record the live-path step counts as the contract.
+    live_records = _read_records(run_dir)
+    live_transitions = [
+        r for r in live_records if r.event == "transition"
+    ]
+    live_step_counts = [
+        int(r.fields["step_count"]) for r in live_transitions
+    ]
+    assert live_step_counts == sorted(live_step_counts), (
+        "the live path's step_counts must be monotonically increasing"
+    )
+    assert live_step_counts[0] >= 1
+
+    # Truncate after fan_out_end (drop launch's transition and
+    # everything after).
+    cutoff: int | None = None
+    seen_end = False
+    for i, r in enumerate(live_records):
+        if r.event == "fan_out_end":
+            seen_end = True
+            continue
+        if seen_end and r.event == "transition" and r.state_id == "launch":
+            cutoff = i
+            break
+    assert cutoff is not None
+    log_path.write_text(
+        "\n".join(r.to_json() for r in live_records[:cutoff]) + "\n",
+        encoding="utf-8",
+    )
+
+    workflow_path = run_dir.parent / "fan.orc"
+    registry = with_core()
+    terminal = _resume_with_registry(
+        run_dir,
+        workflow_path,
+        registry,
+        {"topic": "hello world"},
+    )
+    assert terminal == "done"
+
+    resumed_records = _read_records(run_dir)
+    resumed_transitions = [
+        r for r in resumed_records if r.event == "transition"
+    ]
+    resumed_step_counts = [
+        int(r.fields["step_count"]) for r in resumed_transitions
+    ]
+    # The launch transition that resume wrote must close the same
+    # step the live launch transition closed: step_counts identical.
+    assert resumed_step_counts == live_step_counts, (
+        f"step counts diverged: live={live_step_counts}, "
+        f"resumed={resumed_step_counts}; resume must not double-count"
+    )
