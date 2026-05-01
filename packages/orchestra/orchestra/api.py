@@ -85,6 +85,7 @@ from orchestra.spine import (
     Workflow,
 )
 from orchestra.store import ArtifactStore
+from orchestra.transforms import anonymize_outputs
 
 # Maps a configured adapter name to the workflow actor kind it serves.
 # Slice 1 grammar limits the kind vocabulary to {model, agent, shell,
@@ -220,6 +221,41 @@ class _PerRoleDispatcher:
 # --------------------------------------------------------------------
 
 
+_ASK_COUNCIL_ANONYMIZE_INPUT_SCHEMA: dict[str, Any] = {
+    "contrarian_output": str,
+    "first_principles_output": str,
+    "expansionist_output": str,
+    "outsider_output": str,
+    "executor_lens_output": str,
+}
+"""Input schema the ``ask_council`` workflow's ``anonymize`` state
+expects. Keys are the five named advisor output artifacts; values are
+the advisor texts. ``anonymize_outputs`` shuffles the keys
+deterministically per ``(run_id, state_name, sorted_input_keys)`` and
+returns ``anon_map`` keyed A through E with the texts as values."""
+
+
+def _register_builtin_transforms(reg: ProfileRegistry) -> None:
+    """Register Slice B builtins with their canonical Slice C schemas.
+
+    ``anonymize_outputs`` is registered with the five-advisor input
+    schema the ``ask_council`` workflow declares. The chairman state
+    reads named advisor outputs directly from the artifact store, so
+    no de-anonymization step is needed and ``anon_map`` is the only
+    output. Registering with the council shape unconditionally is
+    harmless: workflows that do not reference ``anonymize_outputs``
+    never trigger the validator's transform-record check, and tests
+    that need a different input shape build their own registry.
+    """
+    if "anonymize_outputs" not in reg.transforms:
+        reg.register_transform(
+            "anonymize_outputs",
+            anonymize_outputs,
+            input_schema=dict(_ASK_COUNCIL_ANONYMIZE_INPUT_SCHEMA),
+            output_schema={"anon_map": dict[str, str]},
+        )
+
+
 def _pre_load_registry() -> ProfileRegistry:
     """Return a registry the loader can validate any workflow against.
 
@@ -231,6 +267,10 @@ def _pre_load_registry() -> ProfileRegistry:
     identity-text result parser bound to ``agent``. The placeholder
     factory is replaced by the real per-role dispatcher in
     ``_build_registry`` before the executor runs.
+
+    Slice B builtin transforms are registered here too so the loader's
+    phase-5 validator finds the registered shape for every transform
+    state in any packaged workflow.
     """
     reg = with_core()
     if "agent" not in reg.actor_backings:
@@ -243,6 +283,7 @@ def _pre_load_registry() -> ProfileRegistry:
                 fn=_identity_text_parse_fn,
             )
         )
+    _register_builtin_transforms(reg)
     return reg
 
 
@@ -284,6 +325,7 @@ def _build_registry(
     models and adapter parameter sets without collapsing them.
     """
     reg = with_core()
+    _register_builtin_transforms(reg)
 
     by_kind: dict[str, dict[str, Any]] = {}
     for role_name, binding in role_bindings.items():
