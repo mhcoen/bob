@@ -1057,6 +1057,16 @@ Three patterns ship out of the box:
   text-role critiques, a text-role synthesizes, then one edit-agent
   performs the edit. Four model calls per edit attempt.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/draft_then_adjudicate.png" alt="Draft then Adjudicate architecture" width="75%">
+</p>
+
+Draft then Adjudicate, illustrated above, is the natural default for
+McLoop. The drafter writes a candidate edit; the adjudicator reads
+the drafter's output with the original problem statement in hand and
+revises before any file is touched. The edit-agent at the end is the
+only invocation that mutates the workspace.
+
 For every pattern, exactly one invocation per attempt mutates the
 workspace; the earlier roles produce text-only advice that the
 final edit-agent receives in its prompt. This avoids needing
@@ -1072,19 +1082,16 @@ separate adjudicator reading the draft with the original problem
 statement in hand catches a class of these mistakes before any
 file is touched.
 
-A single bug-finding example on this codebase showed which models
-complement each other:
+A small example illustrates the idea:
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="75%">
 </p>
 
-Kimi K2.6 produced the most independent coverage and Opus
-contributed complementary unique finds, which makes them a
-reasonable starting pair for `draft_then_adjudicate`: Kimi as
-drafter, Opus as adjudicator. This is one example on one codebase
-and should be re-evaluated when model versions change. The orchestra
-README has the longer discussion at
+In this one example, Kimi and Opus surfaced different bugs, which is the kind of
+complementarity `draft_then_adjudicate` is meant to exploit. One run on one
+codebase is not evidence that any particular pairing generalizes; rerun before
+relying on it. The orchestra README has the longer discussion at
 [Choosing model bindings](https://github.com/mhcoen/orchestra#choosing-model-bindings).
 
 ### Enabling Orchestra for a project
@@ -1202,6 +1209,40 @@ clock by the number of roles. `draft_then_adjudicate` is roughly
 pattern to pay off. Run on a representative task batch and
 compare the run summaries before deciding which pattern to keep
 on for production work.
+
+### Beyond the per-edit patterns
+
+McLoop only uses the three per-edit patterns above, but Orchestra is
+a general workflow runner. The same machinery expresses much more
+elaborate architectures. Two examples — neither currently wired into
+McLoop, but available as part of Orchestra's library — show what the
+shape can do.
+
+**Council.** A framer reformulates the question. Five lens advisors
+(contrarian, first principles, expansionist, outsider, executor)
+answer in parallel. Their outputs are anonymized to letters A through
+E. Five reviewers critique the anonymized panel. A chairman
+synthesizes a verdict. Twelve model calls per invocation.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/council.png" alt="Council architecture" width="85%">
+</p>
+
+**Iterate Until Acceptable** *(under development)*. A responder
+writes a draft. A judge decides whether it is good enough. If not,
+the judge sends it back with feedback for another round, capped at N
+rounds. The responder and judge slots are themselves workflows — a
+council can play the responder, a draft-then-adjudicate pair can play
+the judge. The substitutability is the point.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
+</p>
+
+These exist to illustrate that the per-edit patterns McLoop uses
+today are the simple end of what Orchestra can express. Whether any
+of these architectures are worth the cost for a given coding task is
+an empirical question — measure before relying on one.
 
 ## Syncing PLAN.md
 
@@ -1635,11 +1676,10 @@ over time. Check [OpenRouter](https://openrouter.ai) for current
 rates.
 
 The table above lists generic SWE-bench-derived suitability. For a
-local observation about how these models behave on this codebase,
-see the bug-finding example in [Multi-model coding patterns via
-Orchestra](#multi-model-coding-patterns-via-orchestra), where Kimi
-K2.6 had the highest unique-find rate with zero false positives on
-a single bug-finding pass over McLoop's source.
+local observation about how these models behaved on this codebase
+on one occasion, see the bug-finding example in [Multi-model coding
+patterns via Orchestra](#multi-model-coding-patterns-via-orchestra).
+It is one data point, not a benchmark.
 
 ## License
 
