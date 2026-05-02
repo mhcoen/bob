@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 # Roles supported by the role-based ~/.mcloop/config.json schema.
@@ -23,7 +24,7 @@ _DEFAULT_REVIEWER_BACKEND = "rest"
 _USER_CONFIG_PATH = Path.home() / ".mcloop" / "config.json"
 
 
-def _read_user_config() -> dict:
+def _read_user_config() -> dict[str, Any]:
     """Return the parsed contents of ~/.mcloop/config.json or {}."""
     if not _USER_CONFIG_PATH.exists():
         return {}
@@ -36,7 +37,9 @@ def _read_user_config() -> dict:
     return data
 
 
-def load_role_config(role: str, source: dict | None = None) -> dict | None:
+def load_role_config(
+    role: str, source: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """Return the per-role config block from ~/.mcloop/config.json.
 
     *role* must be one of "executor", "sync", or "reviewer".  When the
@@ -56,7 +59,7 @@ def load_role_config(role: str, source: dict | None = None) -> dict | None:
 def load_reviewer_config(
     project_dir: str,
     force: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Load reviewer config from .mcloop/config.json in the project directory.
 
     Returns the reviewer dict if the config file has a "reviewer" section
@@ -98,7 +101,7 @@ def load_reviewer_config(
     return result
 
 
-def format_reviewer_status(config: dict | None) -> str:
+def format_reviewer_status(config: dict[str, Any] | None) -> str:
     """Format a human-readable status string for the reviewer config.
 
     Returns:

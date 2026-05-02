@@ -9,6 +9,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 # Ruff codes we consider safely salvageable by appending `# noqa: CODE`
 # to the offending line. These are purely stylistic or cosmetic checks
@@ -37,15 +38,18 @@ class CheckResult:
     command: str
 
 
-def _load_config(project_dir: Path) -> dict:
+def _load_config(project_dir: Path) -> dict[str, Any]:
     """Return parsed mcloop.json if present, else empty dict."""
     config = project_dir / "mcloop.json"
     if not config.exists():
         return {}
     try:
-        return json.loads(config.read_text())
+        loaded = json.loads(config.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
 
 
 def _normalize_pytest(cmd: str) -> str:
@@ -336,7 +340,7 @@ def run_checks(
 
 def _detect_commands(
     project_dir: Path,
-    config: dict,
+    config: dict[str, Any],
 ) -> list[str]:
     """Detect checks from built-in rules and mcloop.json detect rules."""
     commands: list[str] = []

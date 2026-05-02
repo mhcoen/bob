@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from mcloop.config import format_reviewer_status
 
@@ -253,14 +254,17 @@ def _setup_telegram(*, dry_run: bool = False) -> tuple[str, str]:
 _MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
 
 
-def _load_mcloop_config() -> dict:
+def _load_mcloop_config() -> dict[str, Any]:
     """Load ~/.mcloop/config.json, returning {} if missing or invalid."""
     if not _MCLOOP_CONFIG.exists():
         return {}
     try:
-        return _json.loads(_MCLOOP_CONFIG.read_text())
+        loaded = _json.loads(_MCLOOP_CONFIG.read_text())
     except (_json.JSONDecodeError, OSError):
         return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
 
 
 def _setup_env_security() -> tuple[str, str]:
@@ -293,7 +297,7 @@ def _setup_sandbox(*, dry_run: bool = False) -> tuple[str, str]:
     settings_path = _CLAUDE_SETTINGS
 
     original_content = ""
-    settings: dict = {}
+    settings: dict[str, Any] = {}
     if settings_path.exists():
         original_content = settings_path.read_text()
         try:
