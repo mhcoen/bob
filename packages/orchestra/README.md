@@ -45,11 +45,11 @@ requirement for getting usable output from these tools. A drafter
 writes; an adjudicator reads the draft with fresh eyes and the
 original problem statement, and rewrites what is wrong. A proposer
 takes a position; a critic argues against it; a synthesizer
-reconciles. A council surfaces independent perspectives before any
-of them are anonymized for review. An iterative loop refines a
-draft until it meets a standard. Each of these adds a checkpoint
-that catches a class of mistake the prior step would otherwise
-ship.
+reconciles. A council surfaces a structured set of named
+perspectives and a chairman synthesizes them. An iterative loop
+refines a draft until it meets a standard. Each of these adds a
+checkpoint that catches a class of mistake the prior step would
+otherwise ship.
 
 This structure is not novel. Careful human teams already work this
 way. A senior engineer reviews a junior's pull request. A design
@@ -159,14 +159,27 @@ agreement. Four model calls.
 
 A framer reformulates the question. Five lens advisors (contrarian,
 first principles, expansionist, outsider, executor) answer in
-parallel. Their outputs are anonymized to letters A through E. Five
-reviewers critique the anonymized panel. A chairman synthesizes a
-verdict. Twelve model calls. Useful for high-leverage decisions
-where a single perspective is not enough and the structured
-disagreement matters.
+parallel. A chairman receives the panel outputs with their roles
+known and synthesizes a verdict. Seven model calls. Useful for
+high-leverage decisions where the value comes from a structured
+set of named perspectives.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/council.png" alt="Council architecture" width="85%">
+</p>
+
+### Anonymous Reviewers
+
+A framer reformulates the question. Five panelists (typically
+different models, or the same model under different prompts) answer
+in parallel. Their outputs are anonymized to letters A through E.
+Five reviewers critique the anonymized panel. A synthesizer
+reconciles the reviews into a verdict. Twelve model calls. Useful
+when the goal is to evaluate the substance of competing answers
+without knowing which model or which role produced each one.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
 </p>
 
 ### Iterate Until Acceptable *(under development)*
@@ -242,7 +255,6 @@ Create `~/.orchestra/config.json`:
     "expansionist":   { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "outsider":       { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "executor_lens":  { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "reviewer":       { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "chairman":       { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
   },
   "workflows": {
@@ -267,11 +279,11 @@ log lands at `~/.orchestra/runs/<run_id>/log.jsonl` if you want to see
 the intermediate steps.
 
 The role bindings for `ask_council` (framer, the five lens roles,
-reviewer, chairman) are eight separate bindings. The validator
-rejects an `ask_council` invocation that does not bind all eight.
-The other conversational verbs need fewer: `ask` only `responder`;
-`refine` only `proposer`, `critic`, `synthesizer`; `pair` only
-`drafter` and `adjudicator`. Drop the bindings you do not use.
+chairman) are seven separate bindings. The validator rejects an
+`ask_council` invocation that does not bind all seven. The other
+conversational verbs need fewer: `ask` only `responder`; `refine`
+only `proposer`, `critic`, `synthesizer`; `pair` only `drafter` and
+`adjudicator`. Drop the bindings you do not use.
 
 ## CLI surface
 
