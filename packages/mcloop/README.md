@@ -55,9 +55,11 @@ between sessions:
   PLAN.md tasks. Unlike the files above, McLoop never reads or modifies
   IDEAS.md during runs — it is purely human-owned state. Use
   `mcloop idea "some text"` to append a timestamped entry from the
-  command line, or edit the file directly. When an idea matures, use
-  [Duplo](https://github.com/mhcoen/duplo) to turn it into an
-  implementable PLAN.md, or move it into PLAN.md as a task by hand.
+  command line, or edit the file directly. When an idea matures, pipe
+  it into [Duplo](https://github.com/mhcoen/duplo) to generate an
+  implementable PLAN.md
+  (`echo "idea text" | duplo init --from-description -`,
+  then `duplo`), or move it into PLAN.md as a task by hand.
 - **MAINTAIN.md**: A list of invariants — statements of desired state
   that should always hold. Unlike PLAN.md, which is a feature backlog
   of tasks to execute once, MAINTAIN.md is a set of ongoing constraints
@@ -1244,12 +1246,25 @@ shape can do.
 
 **Council.** A framer reformulates the question. Five lens advisors
 (contrarian, first principles, expansionist, outsider, executor)
-answer in parallel. Their outputs are anonymized to letters A through
-E. Five reviewers critique the anonymized panel. A chairman
-synthesizes a verdict. Twelve model calls per invocation.
+answer in parallel. A chairman receives the panel outputs with their
+roles known and synthesizes a verdict. Seven model calls per
+invocation.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/council.png" alt="Council architecture" width="85%">
+</p>
+
+**Anonymous Reviewers.** A framer reformulates the question. Five
+panelists (typically different models, or the same model under
+different prompts) answer in parallel. Their outputs are anonymized
+to letters A through E. Five reviewers critique the anonymized
+panel. A synthesizer reconciles the reviews into a verdict. Twelve
+model calls per invocation. Useful when the goal is to evaluate the
+substance of competing answers without knowing which model or which
+role produced each one.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
 </p>
 
 **Iterate Until Acceptable** *(under development)*. A responder
