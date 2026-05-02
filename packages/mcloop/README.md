@@ -1,4 +1,4 @@
-# McLoop: https://github.com/mhcoen/mcloop
+# McLoop:
 
 McLoop lets you run AI coding agents for hours at a time without babysitting them. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone. McLoop supports Claude Code and OpenAI Codex as backends.
 
