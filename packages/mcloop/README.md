@@ -984,10 +984,24 @@ To instrument a project that was NOT built by McLoop, use
 
 McLoop can run a second AI model as a reviewer on every commit. After
 each successful commit, McLoop spawns a background process that sends
-the diff to an OpenAI-compatible API for review. The reviewer checks
-for bugs, logic errors, unhandled exceptions, resource leaks, and
-missing edge cases. This never blocks the main loop — the review runs
-in a detached subprocess while McLoop continues to the next task.
+the diff out for review. The reviewer checks for bugs, logic errors,
+unhandled exceptions, resource leaks, and missing edge cases. This
+never blocks the main loop. The review runs in a detached subprocess
+while McLoop continues to the next task.
+
+Three review backends ship today, selected by the `backend` field in
+the reviewer config:
+
+- `rest` (the default): hits any OpenAI-compatible HTTP endpoint
+  (OpenRouter, a direct provider API, Ollama). Requires `base_url`
+  in the config and `OPENROUTER_API_KEY` in the environment. Bills
+  per token through whichever endpoint you point it at.
+- `claude_code`: routes the same prompt through the user's existing
+  Claude Code subscription via the orchestra ClaudeCodeTextAdapter.
+  No API token in the environment, no per-token billing for review.
+- `codex`: routes through the user's ChatGPT subscription via the
+  orchestra CodexTextAdapter. Same subscription billing story as
+  claude_code.
 
 Findings are written to `.mcloop/reviews/` as JSON. At the start of
 each loop iteration, McLoop collects any completed reviews. Low- and
@@ -1005,8 +1019,9 @@ without sending entire files.
 
 The reviewer is disabled by default. To enable it, add a `reviewer`
 section to `.mcloop/config.json` in your project directory with
-`"enabled": true`, and set the `OPENROUTER_API_KEY` environment
-variable:
+`"enabled": true`. The required fields depend on the backend.
+
+Rest backend (the default when `backend` is omitted):
 
 ```json
 {
@@ -1022,21 +1037,52 @@ variable:
 export OPENROUTER_API_KEY=your-key-here
 ```
 
-Alternatively, pass `--reviewer` on the command line to enable the
-reviewer without setting `"enabled": true` in the config. The config
-file must still contain the `model` and `base_url` fields.
+Claude Code subscription backend:
 
-Any OpenAI-compatible endpoint works: [OpenRouter](https://openrouter.ai),
-a direct provider API, or a local server like
-[Ollama](https://ollama.com) (set `base_url` to
+```json
+{
+  "reviewer": {
+    "enabled": true,
+    "backend": "claude_code",
+    "model": "claude-opus-4-7"
+  }
+}
+```
+
+Codex (ChatGPT subscription) backend:
+
+```json
+{
+  "reviewer": {
+    "enabled": true,
+    "backend": "codex",
+    "model": "gpt-5.5"
+  }
+}
+```
+
+The two subscription backends do not consume API tokens. They reuse
+the auth your `claude` or `codex` CLI already holds, so you pay once
+through the subscription rather than per-review. The `base_url` and
+`OPENROUTER_API_KEY` fields are ignored for these backends.
+
+Alternatively, pass `--reviewer` on the command line to enable the
+reviewer without setting `"enabled": true` in the config.
+
+For the rest backend, any OpenAI-compatible endpoint works:
+[OpenRouter](https://openrouter.ai), a direct provider API, or a
+local server like [Ollama](https://ollama.com) (set `base_url` to
 `http://localhost:11434/v1` and `OPENROUTER_API_KEY` to any non-empty
 string). The model is your choice. A fast, cheap model works well
 since it only reviews diffs and surrounding functions, not full
 codebases.
 
-McLoop prints the reviewer status at startup when configured (e.g.,
-`Reviewer: deepseek/deepseek-v3.2 via openrouter.ai (API key set)`).
-Stale review files older than 24 hours are cleaned up automatically.
+McLoop prints the reviewer status at startup when configured. The
+status format depends on the backend: `Reviewer: deepseek/deepseek-v3.2
+via openrouter.ai (API key set)` for rest, `Reviewer: gpt-5.5 via
+Codex (subscription)` for codex, `Reviewer: claude-opus-4-7 via Claude
+Code (subscription)` for claude_code. Stale review files older than 24
+hours are cleaned up automatically.
 
 ## Multi-model coding patterns via Orchestra
 

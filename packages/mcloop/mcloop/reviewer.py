@@ -1,4 +1,13 @@
-"""AI-powered diff reviewer using OpenAI-compatible API."""
+"""AI-powered diff reviewer.
+
+Three dispatch backends, selected by the reviewer config's ``backend``
+field. ``rest`` (the default) hits an OpenAI-compatible endpoint via
+urllib. ``claude_code`` and ``codex`` route the same prompt through the
+matching orchestra adapter so the call authenticates against the user's
+existing CLI subscription instead of paying per-token. The orchestra
+adapters are imported lazily so a user on the rest path does not need
+the orchestra package installed.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +18,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from mcloop.formatting import strip_code_fences
 
@@ -16,6 +26,11 @@ _MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
 
 _SEVERITIES = frozenset({"error", "warning", "info"})
 _CONFIDENCES = frozenset({"high", "medium", "low"})
+
+_ADAPTER_TIMEOUT_S = 120
+"""Wall-clock cap for adapter dispatch. Matches the urllib timeout
+used by the rest path so the three backends are visibly comparable
+when one stalls."""
 
 _SYSTEM_PROMPT = """\
 You are a code reviewer. You will receive a git diff along with the
@@ -105,10 +120,55 @@ def _parse_findings(raw: list) -> list[ReviewFinding]:
     return findings
 
 
+def _build_user_message(request: ReviewRequest) -> str:
+    """Compose the user-role message body shared by every backend."""
+    user_msg = f"## Task\n{request.task_label}: {request.task_text}\n\n"
+    user_msg += f"## Project\n{request.project_description}\n\n"
+    user_msg += f"## Diff (commit {request.commit_hash})\n"
+    user_msg += f"```diff\n{request.diff_text}\n```"
+    if request.file_contents:
+        user_msg += "\n\n## Changed file contents\n"
+        for path, content in request.file_contents.items():
+            user_msg += f"\n### {path}\n```\n{content}\n```\n"
+    return user_msg
+
+
+def _findings_from_text(text: str) -> list[ReviewFinding]:
+    """Parse a model response (raw text) into ReviewFinding objects."""
+    text = strip_code_fences(text)
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return _parse_findings(raw)
+
+
 def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
+    """Dispatch a diff review through the configured backend.
+
+    Branches on ``config["backend"]`` (default ``"rest"``):
+    ``"rest"`` posts to an OpenAI-compatible endpoint via urllib;
+    ``"claude_code"`` and ``"codex"`` invoke the matching orchestra
+    adapter. All three backends parse the model response with
+    ``_findings_from_text`` so the existing JSON-array contract is
+    backend-agnostic.
+    """
+    backend = config.get("backend", "rest")
+    if backend == "claude_code":
+        return _run_review_via_adapter(request, config, "claude_code")
+    if backend == "codex":
+        return _run_review_via_adapter(request, config, "codex")
+    return _run_review_via_rest(request, config)
+
+
+def _run_review_via_rest(
+    request: ReviewRequest, config: dict
+) -> list[ReviewFinding]:
     """Send diff to an OpenAI-compatible endpoint for review.
 
-    Config keys (from load_reviewer_config):
+    Config keys (from load_reviewer_config with backend="rest"):
         model: model name (required)
         base_url: API base URL (required)
         api_key: API key (required, from OPENROUTER_API_KEY env var)
@@ -122,14 +182,7 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
         return []
     model = config.get("model", "")
 
-    user_msg = f"## Task\n{request.task_label}: {request.task_text}\n\n"
-    user_msg += f"## Project\n{request.project_description}\n\n"
-    user_msg += f"## Diff (commit {request.commit_hash})\n"
-    user_msg += f"```diff\n{request.diff_text}\n```"
-    if request.file_contents:
-        user_msg += "\n\n## Changed file contents\n"
-        for path, content in request.file_contents.items():
-            user_msg += f"\n### {path}\n```\n{content}\n```\n"
+    user_msg = _build_user_message(request)
 
     payload = {
         "model": model,
@@ -171,16 +224,81 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     if not isinstance(content, str):
         return []
 
-    content = strip_code_fences(content)
+    return _findings_from_text(content)
+
+
+def _build_adapter(backend: str, model: str) -> Any:
+    """Return an instantiated orchestra adapter for ``backend``.
+
+    Imports happen here so the rest-only path does not require the
+    orchestra package to be installed.
+    """
+    if backend == "claude_code":
+        from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
+
+        return ClaudeCodeTextAdapter(default_model=model or None)
+    if backend == "codex":
+        from orchestra.adapters.codex_text import CodexTextAdapter
+
+        return CodexTextAdapter(default_model=model or None)
+    raise ValueError(f"unsupported adapter backend: {backend!r}")
+
+
+def _run_review_via_adapter(
+    request: ReviewRequest, config: dict, backend: str
+) -> list[ReviewFinding]:
+    """Dispatch a diff review through an orchestra subscription adapter.
+
+    Concatenates the same system + user prompt the rest path sends into
+    a single string for the adapter, runs prepare/invoke per the
+    orchestra adapter contract, and parses the captured stdout. Returns
+    an empty list on any adapter failure so the reviewer subprocess
+    exits cleanly (mirroring the rest path's swallow-and-log behavior).
+    """
+    model = str(config.get("model", "") or "")
+    project_dir = Path(config.get("project_dir") or Path.cwd())
+    log_dir = Path(
+        config.get("log_dir") or project_dir / ".mcloop" / "logs"
+    )
+
+    user_msg = _build_user_message(request)
+    prompt = f"{_SYSTEM_PROMPT}\n\n---\n\n{user_msg}"
+
     try:
-        raw = json.loads(content)
-    except json.JSONDecodeError:
+        adapter = _build_adapter(backend, model)
+    except (ImportError, ValueError):
         return []
 
-    if not isinstance(raw, list):
+    from orchestra.spine import InvocationRequest
+
+    timeout_ms = _ADAPTER_TIMEOUT_S * 1000
+    invocation = InvocationRequest(
+        state_id="reviewer",
+        attempt=1,
+        actor_binding={"kind": "model"},
+        reads={},
+        external_inputs={
+            "project_dir": str(project_dir),
+            "log_dir": str(log_dir),
+            "task_label": "review",
+        },
+        prompt_artifact=prompt,
+        schema=None,
+        backing_options={},
+        timeout_ms=timeout_ms,
+    )
+
+    try:
+        prepared = adapter.prepare(invocation)
+        payload = adapter.invoke(prepared)
+    except Exception:
         return []
 
-    return _parse_findings(raw)
+    output = payload.get("output", "") if isinstance(payload, dict) else ""
+    if not isinstance(output, str) or not output:
+        return []
+
+    return _findings_from_text(output)
 
 
 def _parse_diff_line_ranges(diff_text: str) -> dict[str, list[tuple[int, int]]]:
@@ -351,6 +469,11 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
     config = load_reviewer_config(project_dir, force=True)
     if config is None:
         return
+    # The adapter dispatch paths need a working directory and a log
+    # directory. Inject them once here so run_review does not need to
+    # re-derive them. The rest path ignores both keys.
+    config.setdefault("project_dir", str(proj))
+    config.setdefault("log_dir", str(proj / ".mcloop" / "logs"))
 
     # Get diff
     result = subprocess.run(
