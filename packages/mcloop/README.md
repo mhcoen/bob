@@ -1686,11 +1686,18 @@ you have.
 
 ## Suggested reviewer models
 
-Any OpenAI-compatible API works as a reviewer. The model does not
-need to generate code, only read diffs and identify problems, so
-strong reasoning matters more than code generation benchmarks.
-Cheaper models are practical because the reviewer runs in the
-background on every commit.
+The continuous reviewer described above sends diffs to an
+OpenAI-compatible REST endpoint. That covers OpenRouter, direct
+provider APIs, and local servers like Ollama. It does not cover
+Claude Code or Codex used through their subscriptions, because
+those are CLI-driven, not REST endpoints. Wiring subscription-based
+Claude Code or Codex into the reviewer is on McLoop's roadmap via
+the Orchestra adapters, but is not yet shipped.
+
+The reviewer model does not need to generate code, only read diffs
+and identify problems, so strong reasoning matters more than code
+generation benchmarks. Cheaper models are practical because the
+reviewer runs in the background on every commit.
 
 | Model | Provider | Input /1M | Output /1M | SWE-bench | Context | Notes |
 |-------|----------|-----------|------------|-----------|---------|-------|
@@ -1699,10 +1706,13 @@ background on every commit.
 | Kimi K2.6 | OpenRouter | $0.50 | $2.80 | 76.8% | 256K | Highest open-source SWE-bench. Strong at debugging. See note below. |
 | Gemini 2.5 Flash | Google | $0.30 | $2.50 | N/A | 1M | Fast, cheap, very large context window. |
 | Gemini 2.5 Pro | Google | $1.25 | $10.00 | 63.8% | 1M | Strong reasoning, 1M context. Free tier available. |
+| GPT-5.5 | OpenAI | $5.00 | $30.00 | 88.7% | 1M | Frontier OpenAI model. Highest published SWE-bench Verified. |
 | Claude Sonnet 4.6 | Anthropic | $3.00 | $15.00 | 79.6% | 200K | For comparison. McLoop's default task executor. |
-| Claude Opus 4.6 | Anthropic | $5.00 | $25.00 | 80.8% | 200K | For comparison. Strongest overall but 60x DeepSeek output cost. |
+| Claude Opus 4.6 | Anthropic | $5.00 | $25.00 | 80.8% | 200K | For comparison. Strong but superseded by Opus 4.7. |
+| Claude Opus 4.7 | Anthropic | $5.00 | $25.00 | 87.6% | 1M | Current Anthropic frontier. Same input price as 4.6, larger context. |
 
-To use any of these, set the model string in `.mcloop/config.json`:
+To use any of these as the reviewer, set the model string in
+`.mcloop/config.json`:
 
 ```json
 {"reviewer": {"enabled": true, "model": "z-ai/glm-5", "base_url": "https://openrouter.ai/api/v1"}}
@@ -1710,12 +1720,16 @@ To use any of these, set the model string in `.mcloop/config.json`:
 
 OpenRouter model strings: `deepseek/deepseek-v3.2`, `z-ai/glm-5`,
 `moonshotai/kimi-k2.6`, `google/gemini-2.5-flash`,
-`google/gemini-2.5-pro`. Pricing may vary by provider and change
-over time. Check [OpenRouter](https://openrouter.ai) for current
-rates.
+`google/gemini-2.5-pro`, `openai/gpt-5.5`,
+`anthropic/claude-opus-4-7`. Pricing may vary by provider and
+change over time. Check [OpenRouter](https://openrouter.ai) for
+current rates.
 
-The table above lists generic SWE-bench-derived suitability. For a
-local observation about how these models behaved on this codebase
+Numbers in the table above come from each provider's published
+SWE-bench Verified scores (or, in some cases, the closest available
+variant); independent third-party benchmarks differ. Treat them as
+order-of-magnitude guides, not as an apples-to-apples ranking. For
+a local observation about how these models behaved on this codebase
 on one occasion, see the bug-finding example in [Multi-model coding
 patterns via Orchestra](#multi-model-coding-patterns-via-orchestra).
 It is one data point, not a benchmark.
