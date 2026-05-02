@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass, field
+from typing import Any
 
 
 def is_playwright_available() -> bool:
@@ -15,7 +16,7 @@ def is_playwright_available() -> bool:
         return False
 
 
-def _require_playwright():
+def _require_playwright() -> Any:
     """Import and return the playwright sync_api module.
 
     Raises RuntimeError if Playwright is not installed.
@@ -31,11 +32,17 @@ def _require_playwright():
 
 @dataclass
 class Browser:
-    """Wrapper around a Playwright browser instance."""
+    """Wrapper around a Playwright browser instance.
 
-    _playwright: object = field(repr=False)
-    _browser: object = field(repr=False)
-    _page: object = field(repr=False)
+    The three private fields hold playwright objects whose concrete
+    types are not importable at module load time (the dependency is
+    optional). Annotating as ``Any`` keeps method bodies typeable
+    without forcing every consumer of mcloop to install playwright.
+    """
+
+    _playwright: Any = field(repr=False)
+    _browser: Any = field(repr=False)
+    _page: Any = field(repr=False)
 
     def navigate(self, url: str, timeout: float = 30000) -> None:
         """Navigate to a URL.
@@ -57,14 +64,14 @@ class Browser:
 
     def content(self) -> str:
         """Read the current page content as HTML."""
-        return self._page.content()
+        return str(self._page.content())
 
     def text(self) -> str:
         """Read the visible text content of the page body."""
         body = self._page.query_selector("body")
         if body is None:
             return ""
-        return body.inner_text()
+        return str(body.inner_text())
 
     def screenshot(self, path: str, full_page: bool = False) -> None:
         """Take a screenshot of the current page.
@@ -86,12 +93,11 @@ class Browser:
         except Exception:
             pass
 
-    def __enter__(self):
+    def __enter__(self) -> Browser:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
-        return False
 
 
 def launch_browser(headless: bool = True) -> Browser:

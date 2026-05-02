@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from mcloop import formatting
 from mcloop.checklist import CHECKBOX_RE
@@ -184,7 +185,7 @@ def _write_maintain_log(
     log_dir.mkdir(exist_ok=True)
     log_path = log_dir / "maintain-log.json"
 
-    existing: list[dict] = []
+    existing: list[dict[str, Any]] = []
     if log_path.exists():
         try:
             existing = json.loads(log_path.read_text())
@@ -192,12 +193,12 @@ def _write_maintain_log(
             existing = []
 
     timestamp = datetime.now(timezone.utc).isoformat()
-    run_entry = {
+    run_entry: dict[str, Any] = {
         "timestamp": timestamp,
         "results": [],
     }
     for r in results:
-        entry: dict = {
+        entry: dict[str, Any] = {
             "invariant": r.text,
             "outcome": r.outcome,
         }

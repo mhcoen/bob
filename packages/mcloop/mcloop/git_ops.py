@@ -18,7 +18,7 @@ def _git(
     *,
     label: str = "",
     silent: bool = False,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run a git command and report errors.
 
     Every git failure is printed to the terminal and sent via

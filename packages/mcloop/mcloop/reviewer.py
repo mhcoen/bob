@@ -83,14 +83,17 @@ class ReviewRequest:
     file_contents: dict[str, str] | None = None  # path -> content
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     """Load ~/.mcloop/config.json, returning {} if missing or invalid."""
     if not _MCLOOP_CONFIG.exists():
         return {}
     try:
-        return json.loads(_MCLOOP_CONFIG.read_text())
+        loaded = json.loads(_MCLOOP_CONFIG.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
 
 
 def _parse_findings(raw: list) -> list[ReviewFinding]:

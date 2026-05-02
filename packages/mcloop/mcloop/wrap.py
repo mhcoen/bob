@@ -846,11 +846,13 @@ def save_canonical_wrappers(project_dir: Path, language: str) -> None:
         (wrap_dir / "python_wrapper.py").write_text(resolved)
 
 
-def wrap_project(project_dir: Path) -> tuple[str, Path | None]:
+def wrap_project(project_dir: Path) -> tuple[str, Path]:
     """Instrument the project's entry point with error-catching hooks.
 
     Returns (language, entry_point) or raises ValueError if language
-    cannot be detected or entry point cannot be found.
+    cannot be detected or entry point cannot be found. Both paths
+    that would otherwise return ``None`` raise instead, so the
+    return type is always a fully populated tuple.
     """
     language = detect_language(project_dir)
     if language is None:

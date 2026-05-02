@@ -632,11 +632,12 @@ def run_loop(
     if retry:
         cleared_current = clear_failed_markers(current_plan_path)
         cleared_bugs = clear_failed_markers(bugs_path)
-        total = cleared_current + cleared_bugs
-        if total:
+        cleared_total = cleared_current + cleared_bugs
+        if cleared_total:
             print(
                 formatting.system_msg(
-                    f"--retry: reset {total} failed task marker{'s' if total != 1 else ''}"
+                    f"--retry: reset {cleared_total} failed task marker"
+                    f"{'s' if cleared_total != 1 else ''}"
                 ),
                 flush=True,
             )

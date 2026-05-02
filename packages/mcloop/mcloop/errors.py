@@ -147,14 +147,14 @@ def _check_errors_json(
     # Gather git log for diagnostic context
     git_log = ""
     try:
-        result = subprocess.run(
+        git_log_proc = subprocess.run(
             ["git", "log", "--oneline", "-20"],
             cwd=project_dir,
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0:
-            git_log = result.stdout.strip()
+        if git_log_proc.returncode == 0:
+            git_log = git_log_proc.stdout.strip()
     except Exception:
         pass
 

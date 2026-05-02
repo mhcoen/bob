@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -62,7 +63,7 @@ def _confirm_sync_changes(
     original: str,
     proposed: str,
     *,
-    _input=input,
+    _input: Callable[[str], str] = input,
 ) -> bool:
     """Show a diff of proposed PLAN.md changes and prompt the user to confirm.
 

@@ -203,35 +203,39 @@ def _launch_app_verification(wt_path: Path) -> str | None:
             process_monitor.kill(pid)
         return failure
     elif app_type == "cli":
-        result = process_monitor.run_cli(
+        cli_result = process_monitor.run_cli(
             run_cmd,
             cwd=str(wt_path),
             timeout_seconds=15,
             hang_seconds=10,
         )
-        if result.hung:
+        if cli_result.hung:
             print(
                 formatting.error_msg("Verification: app HUNG"),
                 flush=True,
             )
             return "App hung during CLI verification"
-        elif result.exit_code != 0:
+        elif cli_result.exit_code != 0:
             print(
-                formatting.error_msg(f"Verification: app exited with code {result.exit_code}"),
+                formatting.error_msg(
+                    f"Verification: app exited with code {cli_result.exit_code}"
+                ),
                 flush=True,
             )
             output_tail = ""
-            if result.output:
-                tail = result.output.strip().splitlines()[-10:]
+            if cli_result.output:
+                tail = cli_result.output.strip().splitlines()[-10:]
                 for line in tail:
                     print(f"  {line}", file=sys.stderr)
                 output_tail = "\n".join(tail)
-            return f"App exited with code {result.exit_code}." + (
+            return f"App exited with code {cli_result.exit_code}." + (
                 f" Output:\n{output_tail}" if output_tail else ""
             )
         else:
             print(
-                formatting.system_msg(f"Verification: app exited OK ({result.duration:.1f}s)"),
+                formatting.system_msg(
+                    f"Verification: app exited OK ({cli_result.duration:.1f}s)"
+                ),
                 flush=True,
             )
             # Replay reproduction steps (e.g. re-run with specific args).
