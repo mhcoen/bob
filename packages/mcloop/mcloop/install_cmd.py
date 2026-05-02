@@ -86,6 +86,10 @@ def _cmd_install(project_dir: Path, *, dry_run: bool = False) -> None:
     if reviewer_status:
         summary.append(reviewer_status)
 
+    override_status = _check_orchestra_override(project_dir, dry_run=dry_run)
+    if override_status:
+        summary.append(override_status)
+
     _print_install_summary(summary, dry_run=dry_run)
 
 
@@ -116,6 +120,47 @@ def _check_rtk() -> tuple[str, str] | None:
         )
         return ("RTK", "detected — configure manually via rtk init")
     return None
+
+
+def _check_orchestra_override(
+    project_dir: Path, *, dry_run: bool = False
+) -> tuple[str, str] | None:
+    """Surface a project-local Orchestra config override at install time.
+
+    When ``<project_dir>/.orchestra/config.json`` exists, print the
+    override banner and return a summary entry so the install summary
+    table reflects the detection. Skips emission when the user has
+    already acknowledged the current local config bytes (the ack
+    fingerprint matches), so a repeat install on a deliberately-acked
+    project does not nag.
+
+    The install flow does not auto-delete the override file or
+    auto-write an ack file. Both actions belong to the user. The
+    banner directs them to ``mcloop ack-orchestra-override``. In
+    ``dry_run`` mode this helper prints the banner the same way so the
+    user sees what install would surface, but takes no action either
+    way.
+    """
+    from mcloop.orchestra_override import (
+        banner_lines,
+        is_acknowledged,
+        project_orchestra_config_path,
+    )
+
+    config_path = project_orchestra_config_path(project_dir)
+    if not config_path.is_file():
+        return None
+    if is_acknowledged(project_dir, config_path):
+        return ("Orchestra override", "acknowledged")
+    print()
+    for line in banner_lines(config_path):
+        print(line)
+    print()
+    suffix = " (dry run)" if dry_run else ""
+    return (
+        "Orchestra override",
+        f"detected — run mcloop ack-orchestra-override to silence{suffix}",
+    )
 
 
 def _check_reviewer(project_dir: Path) -> tuple[str, str] | None:

@@ -18,9 +18,10 @@ set to a pattern other than ``direct``. The direct backend applies
 when the workflow is missing from the merged config or its pattern is
 ``direct``. Any exception during selection falls back to direct so a
 misconfigured environment does not lose the working default. When a
-project-local override file is present, mcloop emits a one-time
-note to stderr so the user knows their project is overriding the
-global config.
+project-local override file is present and not yet acknowledged via
+``mcloop ack-orchestra-override``, mcloop emits a multi-line banner
+to stderr so the user notices their project is overriding the global
+config. See ``mcloop.orchestra_override`` for the ack mechanism.
 """
 
 from __future__ import annotations
@@ -32,9 +33,14 @@ from pathlib import Path
 from typing import Any
 
 from mcloop import runner as _runner
+from mcloop.orchestra_override import (
+    banner_lines,
+    is_acknowledged,
+    project_orchestra_config_path,
+)
 from mcloop.runner import DEFAULT_TASK_TIMEOUT
 
-# Module-level latch so the project-local override warning fires at
+# Module-level latch so the project-local override banner fires at
 # most once per mcloop process, no matter how many edit attempts the
 # outer loop makes.
 _PROJECT_OVERRIDE_NOTE_EMITTED = False
@@ -51,31 +57,34 @@ def _orchestra_warn(msg: str) -> None:
 
 
 def _maybe_emit_project_override_note(project_dir: Path) -> None:
-    """If ``project_dir/.orchestra/config.json`` exists, emit a one-time
-    note to stderr that the project-local file overrides the global one.
+    """If ``project_dir/.orchestra/config.json`` exists and the user has
+    not acknowledged it, emit the multi-line override banner to stderr.
 
     Fires regardless of whether orchestra ends up dispatched. The user
     is informed that their project is shadowing the global config in
     case they did not intend to. Latched at module scope so the message
     appears once per mcloop process even when the outer loop calls
     ``_select_backend`` repeatedly.
+
+    The banner is suppressed when ``<project>/.mcloop/orchestra-override-ack``
+    holds the sha256 fingerprint of the current local config bytes. An
+    edit to the local config invalidates the ack and the banner returns
+    until the user re-runs ``mcloop ack-orchestra-override``.
     """
     global _PROJECT_OVERRIDE_NOTE_EMITTED
     if _PROJECT_OVERRIDE_NOTE_EMITTED:
         return
-    try:
-        from orchestra.config import project_config_path
-    except ImportError:
+    config_path = project_orchestra_config_path(project_dir)
+    if not config_path.is_file():
         return
-    path = project_config_path(project_dir)
-    if not path.is_file():
+    if is_acknowledged(project_dir, config_path):
+        # User explicitly acknowledged this exact override. Latch
+        # anyway so a later edit-then-recheck path still hits the
+        # ack-aware logic only once per process.
+        _PROJECT_OVERRIDE_NOTE_EMITTED = True
         return
-    print(
-        f"[orchestra] note: project-local .orchestra/config.json detected at "
-        f"{path}. This overrides ~/.orchestra/config.json. If you didn't "
-        "intend this, delete the local file.",
-        file=sys.stderr,
-    )
+    for line in banner_lines(config_path):
+        print(line, file=sys.stderr)
     _PROJECT_OVERRIDE_NOTE_EMITTED = True
 
 

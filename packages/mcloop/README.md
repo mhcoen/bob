@@ -1157,9 +1157,20 @@ misconfigured environment still makes progress.
 A project-local `<project>/.orchestra/config.json` is supported as an
 advanced override for individual projects that genuinely need
 different bindings, but most setups should not use one. When McLoop
-sees a project-local file, it prints a one-time stderr note pointing
-at the file and reminding the user that the project is shadowing the
-global config. Delete the local file if the override was unintended.
+sees a project-local file at the start of a run, it prints a
+multi-line banner to stderr that names the file and reminds the user
+that the project is shadowing the global config. Delete the local
+file if the override was unintended. `mcloop install` performs the
+same check at install time and surfaces the banner there too, so an
+accidental override does not slip past install.
+
+If you created the local file deliberately, run
+`mcloop ack-orchestra-override` from the project directory to
+acknowledge it. The command writes a sha256 fingerprint of the
+local config bytes to `<project>/.mcloop/orchestra-override-ack`
+and silences the per-run banner from then on. Edits to the local
+config change the fingerprint, invalidate the ack, and the banner
+returns on the next run until you re-acknowledge.
 
 Prerequisites:
 

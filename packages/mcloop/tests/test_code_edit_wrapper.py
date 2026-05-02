@@ -360,12 +360,13 @@ def test_select_backend_emits_project_override_note_to_stderr(
             {"workflows": {"code_edit": {"pattern": "direct"}}}
         )
     )
-    # Even when the override forces direct, the note still fires.
+    # Even when the override forces direct, the banner still fires.
     assert _select_backend(project_dir) == "direct"
     err = capsys.readouterr().err
-    assert "[orchestra] note: project-local .orchestra/config.json detected" in err
-    assert str(config_dir / "config.json") in err
+    assert "[orchestra] PROJECT-LOCAL OVERRIDE DETECTED" in err
+    assert str((config_dir / "config.json").resolve()) in err
     assert "overrides ~/.orchestra/config.json" in err
+    assert "mcloop ack-orchestra-override" in err
 
 
 def test_select_backend_project_override_note_fires_only_once(
@@ -389,9 +390,9 @@ def test_select_backend_project_override_note_fires_only_once(
     _select_backend(project_dir)
     later = capsys.readouterr().err
 
-    # The note appears in the first call's stderr but not the later ones.
-    assert "[orchestra] note: project-local" in first
-    assert "[orchestra] note: project-local" not in later
+    # The banner appears in the first call's stderr but not the later ones.
+    assert "[orchestra] PROJECT-LOCAL OVERRIDE DETECTED" in first
+    assert "[orchestra] PROJECT-LOCAL OVERRIDE DETECTED" not in later
 
 
 def test_select_backend_global_with_local_override_to_direct(
@@ -433,9 +434,9 @@ def test_select_backend_global_with_local_override_to_direct(
     # The merged config has code_edit.pattern == "direct" (project-local
     # overrides global per the merge rule), so the result is direct.
     assert _select_backend(project_dir) == "direct"
-    # And the override note fires because the local file is present.
+    # And the override banner fires because the local file is present.
     err = capsys.readouterr().err
-    assert "[orchestra] note: project-local" in err
+    assert "[orchestra] PROJECT-LOCAL OVERRIDE DETECTED" in err
 
 
 def test_bug_verify_direct_routes_third_party_provider_env(

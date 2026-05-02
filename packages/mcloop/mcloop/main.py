@@ -227,6 +227,10 @@ def _main() -> None:
         _cmd_idea(checklist_path.parent, args.text)
         return
 
+    if args.command == "ack-orchestra-override":
+        _cmd_ack_orchestra_override(checklist_path.parent)
+        return
+
     if args.command == "maintain":
         _cmd_maintain(
             checklist_path.parent,
@@ -1849,7 +1853,50 @@ def _parse_args() -> argparse.Namespace:
     idea_parser = subparsers.add_parser("idea", help="Append an idea to IDEAS.md")
     idea_parser.add_argument("text", help="The idea text to record")
     subparsers.add_parser("maintain", help="Check and enforce invariants from MAINTAIN.md")
+    subparsers.add_parser(
+        "ack-orchestra-override",
+        help=(
+            "Acknowledge the project-local .orchestra/config.json so the "
+            "override banner is silenced until the file changes"
+        ),
+    )
     return parser.parse_args()
+
+
+def _cmd_ack_orchestra_override(project_dir: Path) -> None:
+    """Acknowledge the project-local Orchestra config override.
+
+    Computes the sha256 fingerprint of
+    ``<project_dir>/.orchestra/config.json`` and writes it to
+    ``<project_dir>/.mcloop/orchestra-override-ack``. Subsequent mcloop
+    runs suppress the override banner as long as the local config
+    bytes match the recorded fingerprint. An edit to the local config
+    invalidates the ack and the banner returns until the user re-runs
+    this subcommand.
+
+    Exits non-zero if the project does not have a local override file
+    (there is nothing to acknowledge).
+    """
+    from mcloop.orchestra_override import (
+        fingerprint,
+        project_orchestra_config_path,
+        write_ack,
+    )
+
+    config_path = project_orchestra_config_path(project_dir)
+    if not config_path.is_file():
+        print(
+            "ack-orchestra-override: no project-local "
+            ".orchestra/config.json found; nothing to acknowledge",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    digest = fingerprint(config_path)
+    written = write_ack(project_dir, digest)
+    print(
+        f"Acknowledged {config_path}. Banner silenced until the file "
+        f"changes. Ack file: {written}"
+    )
 
 
 def _cmd_wrap(project_dir: Path) -> None:
