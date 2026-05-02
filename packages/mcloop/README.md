@@ -1147,6 +1147,29 @@ the `claude_code_agent` adapter for the `editor` role mutates the
 workspace. This is the workflow contract: text roles advise, the
 agent role acts.
 
+Orchestra also ships `codex_text` and `codex_agent` adapters that
+run OpenAI Codex through a ChatGPT subscription, with no API
+tokens consumed. They follow the same contract — `codex_text` is
+read-only, `codex_agent` mutates the workspace under
+`--sandbox workspace-write`. Any role in any pattern can be bound
+to Codex by swapping the adapter name. For example, a Codex-driven
+drafter with a Claude adjudicator:
+
+```json
+{
+  "roles": {
+    "drafter":     { "adapter": "codex_text",        "model": "gpt-5.5",  "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text",  "model": "opus",     "parameters": {} },
+    "editor":      { "adapter": "claude_code_agent", "model": "opus",     "tools": "default", "parameters": {} }
+  }
+}
+```
+
+This is the cross-vendor feedback loop multi-model architectures are
+designed for: the drafter and adjudicator come from different model
+families, with different training data and different failure modes,
+so each catches mistakes the other misses.
+
 To run the same pattern on a different model mix without editing
 the global config, use `role_overrides` in the project config:
 
