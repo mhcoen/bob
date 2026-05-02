@@ -1,4 +1,4 @@
-You are framing a question for an LLM Council. Five advisors will independently analyze the question, then five peer reviewers will critique anonymized versions of those responses, and a chairman will synthesize the result.
+You are framing a question for an LLM Council. Five lens advisors (contrarian, first principles, expansionist, outsider, executor) will independently analyze the question, and a chairman will synthesize the result with each advisor's identity in clear.
 
 Your job is to produce a clear, neutral framed question that gives every advisor enough context to give a specific, grounded answer instead of generic advice.
 

@@ -237,10 +237,11 @@ Create `~/.orchestra/config.json`:
 ```json
 {
   "verbs": {
-    "ask":     { "workflow": "ask_single" },
-    "refine":  { "workflow": "ask_propose_critique_synthesize" },
-    "council": { "workflow": "ask_council" },
-    "pair":    { "workflow": "ask_draft_then_adjudicate" }
+    "ask":       { "workflow": "ask_single" },
+    "refine":    { "workflow": "ask_propose_critique_synthesize" },
+    "council":   { "workflow": "ask_council" },
+    "anonymous": { "workflow": "ask_anonymous_reviewers" },
+    "pair":      { "workflow": "ask_draft_then_adjudicate" }
   },
   "roles": {
     "responder":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
@@ -249,18 +250,25 @@ Create `~/.orchestra/config.json`:
     "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "framer":         { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "contrarian":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "framer":          { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "contrarian":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "first_principles":{ "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "expansionist":   { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "outsider":       { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "executor_lens":  { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "chairman":       { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
+    "expansionist":    { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "outsider":        { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "executor_lens":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "chairman":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "panelist_1":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "panelist_2":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "panelist_3":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
+    "panelist_4":      { "adapter": "claude_code_text", "model": "deepseek-v4-pro", "parameters": {} },
+    "panelist_5":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "reviewer":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
   },
   "workflows": {
     "ask_single":                       { "pattern": "ask_single" },
     "ask_propose_critique_synthesize":  { "pattern": "ask_propose_critique_synthesize" },
     "ask_council":                      { "pattern": "ask_council" },
+    "ask_anonymous_reviewers":          { "pattern": "ask_anonymous_reviewers" },
     "ask_draft_then_adjudicate":        { "pattern": "ask_draft_then_adjudicate" }
   }
 }
@@ -272,18 +280,21 @@ Then:
 orchestra ask what is the capital of france
 orchestra pair explain liskov substitution to someone who knows oop basics
 orchestra council should I rewrite this service in rust or stay in go
+orchestra anonymous which of these three architectures is most defensible
 ```
 
 The model's response is the only thing printed. The full multi-model
 log lands at `~/.orchestra/runs/<run_id>/log.jsonl` if you want to see
 the intermediate steps.
 
-The role bindings for `ask_council` (framer, the five lens roles,
-chairman) are seven separate bindings. The validator rejects an
-`ask_council` invocation that does not bind all seven. The other
-conversational verbs need fewer: `ask` only `responder`; `refine`
-only `proposer`, `critic`, `synthesizer`; `pair` only `drafter` and
-`adjudicator`. Drop the bindings you do not use.
+Each verb has its own required role bindings. `ask_council` needs
+seven (framer, the five lens roles, chairman). `ask_anonymous_reviewers`
+needs eight (framer, panelist_1 through panelist_5, reviewer,
+synthesizer). The validator rejects an invocation that does not bind
+every required role for the chosen workflow. The other conversational
+verbs need fewer: `ask` only `responder`; `refine` only `proposer`,
+`critic`, `synthesizer`; `pair` only `drafter` and `adjudicator`.
+Drop the bindings you do not use.
 
 ## CLI surface
 

@@ -227,37 +227,44 @@ class _PerRoleDispatcher:
 # --------------------------------------------------------------------
 
 
-_ASK_COUNCIL_ANONYMIZE_INPUT_SCHEMA: dict[str, Any] = {
-    "contrarian_output": str,
-    "first_principles_output": str,
-    "expansionist_output": str,
-    "outsider_output": str,
-    "executor_lens_output": str,
+_ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA: dict[str, Any] = {
+    "panelist_1_output": str,
+    "panelist_2_output": str,
+    "panelist_3_output": str,
+    "panelist_4_output": str,
+    "panelist_5_output": str,
 }
-"""Input schema the ``ask_council`` workflow's ``anonymize`` state
-expects. Keys are the five named advisor output artifacts; values are
-the advisor texts. ``anonymize_outputs`` shuffles the keys
-deterministically per ``(run_id, state_name, sorted_input_keys)`` and
-returns ``anon_map`` keyed A through E with the texts as values."""
+"""Input schema the ``ask_anonymous_reviewers`` workflow's
+``anonymize`` state expects. Keys are the five panelist output
+artifacts; values are the panelist texts. ``anonymize_outputs``
+shuffles the keys deterministically per
+``(run_id, state_name, sorted_input_keys)`` and returns ``anon_map``
+keyed A through E with the texts as values. The corrected
+``ask_council`` workflow does NOT use this transform: its chairman
+state reads the five named lens-advisor outputs directly with their
+identities in clear."""
 
 
 def _register_builtin_transforms(reg: ProfileRegistry) -> None:
     """Register Slice B builtins with their canonical Slice C schemas.
 
-    ``anonymize_outputs`` is registered with the five-advisor input
-    schema the ``ask_council`` workflow declares. The chairman state
-    reads named advisor outputs directly from the artifact store, so
-    no de-anonymization step is needed and ``anon_map`` is the only
-    output. Registering with the council shape unconditionally is
-    harmless: workflows that do not reference ``anonymize_outputs``
-    never trigger the validator's transform-record check, and tests
-    that need a different input shape build their own registry.
+    ``anonymize_outputs`` is registered with the five-panelist input
+    schema the ``ask_anonymous_reviewers`` workflow declares. That
+    workflow's synthesizer state reads the anonymized panel through
+    ``anon_map`` plus the five anonymous reviews; no de-anonymization
+    is needed and ``anon_map`` is the only output. Registering with
+    the panelist shape unconditionally is harmless: workflows that do
+    not reference ``anonymize_outputs`` never trigger the validator's
+    transform-record check, and tests that need a different input
+    shape build their own registry.
     """
     if "anonymize_outputs" not in reg.transforms:
         reg.register_transform(
             "anonymize_outputs",
             anonymize_outputs,
-            input_schema=dict(_ASK_COUNCIL_ANONYMIZE_INPUT_SCHEMA),
+            input_schema=dict(
+                _ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA
+            ),
             output_schema={"anon_map": dict[str, str]},
         )
 
