@@ -9,17 +9,22 @@ either the direct backend (the body lifted from ``runner.run_task``)
 or the orchestra backend (a call to ``orchestra.run_workflow`` with
 the configured pattern).
 
-Backend selection reads ``<project_dir>/.orchestra/config.json``. If
-the file is absent, malformed, references an unknown workflow, or if
-``workflows.code_edit.pattern == "direct"``, the direct backend
-applies. Otherwise orchestra runs. Any exception during selection
-falls back to direct so a misconfigured project does not lose the
-working default.
+Backend selection reads the merged orchestra config returned by
+``orchestra.config.load_config(project_dir)``. The merged view is
+``~/.orchestra/config.json`` (the canonical source) overlaid with an
+optional ``<project_dir>/.orchestra/config.json``. The orchestra
+backend dispatches whenever the merged config has the named workflow
+set to a pattern other than ``direct``. The direct backend applies
+when the workflow is missing from the merged config or its pattern is
+``direct``. Any exception during selection falls back to direct so a
+misconfigured environment does not lose the working default. When a
+project-local override file is present, mcloop emits a one-time
+note to stderr so the user knows their project is overriding the
+global config.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,6 +33,11 @@ from typing import Any
 
 from mcloop import runner as _runner
 from mcloop.runner import DEFAULT_TASK_TIMEOUT
+
+# Module-level latch so the project-local override warning fires at
+# most once per mcloop process, no matter how many edit attempts the
+# outer loop makes.
+_PROJECT_OVERRIDE_NOTE_EMITTED = False
 
 
 def _orchestra_warn(msg: str) -> None:
@@ -38,6 +48,35 @@ def _orchestra_warn(msg: str) -> None:
     bypass warning so a user grepping logs sees both in one place.
     """
     print(f"[orchestra] falling back to direct backend due to error: {msg}", file=sys.stderr)
+
+
+def _maybe_emit_project_override_note(project_dir: Path) -> None:
+    """If ``project_dir/.orchestra/config.json`` exists, emit a one-time
+    note to stderr that the project-local file overrides the global one.
+
+    Fires regardless of whether orchestra ends up dispatched. The user
+    is informed that their project is shadowing the global config in
+    case they did not intend to. Latched at module scope so the message
+    appears once per mcloop process even when the outer loop calls
+    ``_select_backend`` repeatedly.
+    """
+    global _PROJECT_OVERRIDE_NOTE_EMITTED
+    if _PROJECT_OVERRIDE_NOTE_EMITTED:
+        return
+    try:
+        from orchestra.config import project_config_path
+    except ImportError:
+        return
+    path = project_config_path(project_dir)
+    if not path.is_file():
+        return
+    print(
+        f"[orchestra] note: project-local .orchestra/config.json detected at "
+        f"{path}. This overrides ~/.orchestra/config.json. If you didn't "
+        "intend this, delete the local file.",
+        file=sys.stderr,
+    )
+    _PROJECT_OVERRIDE_NOTE_EMITTED = True
 
 
 @dataclass
@@ -59,38 +98,57 @@ class CodeEditResult:
 
 
 def _select_backend(project_dir: Path) -> str:
-    """Return ``"direct"`` or ``"orchestra"`` per the project config.
+    """Return ``"direct"`` or ``"orchestra"`` per the merged orchestra
+    config.
+
+    The selection reads the merged view of ``~/.orchestra/config.json``
+    plus an optional ``<project_dir>/.orchestra/config.json``. The
+    global config is the canonical source; the project-local file is an
+    advanced override that knowledgeable users add deliberately.
 
     Silent fallbacks (legitimate opt-outs):
-    - ``.orchestra/config.json`` is missing
-    - the JSON does not parse (the user may be mid-edit, or have a stub)
-    - the ``code_edit`` workflow entry is absent
+    - the merged config does not declare a ``code_edit`` workflow
     - ``workflows.code_edit.pattern == "direct"`` (sentinel)
 
     Loud fallbacks (warn to stderr, then still fall back so production
     keeps working): orchestra import error after the user opted in,
-    role binding errors, and any other exception loading the config.
+    role binding errors, and any other exception loading the merged
+    config.
+
+    Side effect: when a project-local file is present, emit a one-time
+    note that the project is overriding the global config.
     """
     return _select_backend_for(project_dir, "code_edit")
 
 
 def _select_backend_for(project_dir: Path, workflow_name: str) -> str:
-    config_path = project_dir / ".orchestra" / "config.json"
-    if not config_path.exists():
-        return "direct"
+    _maybe_emit_project_override_note(project_dir)
     try:
-        json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return "direct"
-    try:
-        from orchestra.config import load_config
+        from orchestra.config import (
+            global_config_path,
+            load_config,
+            project_config_path,
+        )
     except ImportError as exc:
         _orchestra_warn(f"orchestra not importable: {exc}")
+        return "direct"
+    # Distinguish "user has not set up orchestra at all" from "user has
+    # configured orchestra but did not declare this workflow". orchestra
+    # load_config falls back to default_config() when neither file is
+    # present, and default_config() declares a code_edit workflow with
+    # pattern == "single". Without this guard, every project on a
+    # machine that has never created an orchestra config would silently
+    # route through orchestra. The user's stated design is that the
+    # global config is the single canonical surface; absence of any
+    # config file means orchestra is not configured, so direct applies.
+    if not global_config_path().is_file() and not project_config_path(
+        project_dir
+    ).is_file():
         return "direct"
     try:
         cfg = load_config(project_dir)
     except Exception as exc:
-        _orchestra_warn(f"failed to load .orchestra/config.json: {exc}")
+        _orchestra_warn(f"failed to load orchestra config: {exc}")
         return "direct"
     if workflow_name not in cfg.workflows:
         return "direct"

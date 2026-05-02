@@ -1143,14 +1143,23 @@ codebase is not evidence that any particular pairing generalizes; rerun before
 relying on it. The orchestra README has the longer discussion at
 [Choosing model bindings](https://github.com/mhcoen/orchestra#choosing-model-bindings).
 
-### Enabling Orchestra for a project
+### Enabling Orchestra
 
-Orchestra is opt-in per project. McLoop selects the backend by
-looking for `<project>/.orchestra/config.json`. If absent,
-malformed, or set to `"pattern": "direct"`, the original direct
-backend runs. Otherwise the configured pattern runs. Errors during
-config load fall back to the direct backend with a stderr warning,
-so a misconfigured project still makes progress.
+Orchestra is enabled by configuring it once at `~/.orchestra/config.json`.
+McLoop reads that global config to decide whether to dispatch the inner
+edit through orchestra. The selection rules are simple. If the global
+config declares a `code_edit` workflow with a pattern other than
+`direct`, McLoop dispatches through orchestra. If the workflow is
+absent or set to `direct`, McLoop uses the direct backend. Any error
+loading the config falls back to direct with a stderr warning so a
+misconfigured environment still makes progress.
+
+A project-local `<project>/.orchestra/config.json` is supported as an
+advanced override for individual projects that genuinely need
+different bindings, but most setups should not use one. When McLoop
+sees a project-local file, it prints a one-time stderr note pointing
+at the file and reminding the user that the project is shadowing the
+global config. Delete the local file if the override was unintended.
 
 Prerequisites:
 
@@ -1159,26 +1168,11 @@ Prerequisites:
   appropriate). McLoop imports orchestra directly via
   `from orchestra import run_workflow`. There is no subprocess
   boundary; orchestra has to be importable.
-- A populated `~/.orchestra/config.json` with role bindings (see
-  orchestra's README for the schema). McLoop reads the merged
-  view of the global config plus the project config.
+- A populated `~/.orchestra/config.json` with role bindings and the
+  workflow pattern you want.
 
-Once orchestra is installed, create `<project>/.orchestra/config.json`
-in the project mcloop will run against. The minimal example wires
-the `code_edit` workflow to the `draft_then_adjudicate` pattern and
-overrides only the bindings you want to differ from the global:
-
-```json
-{
-  "workflows": {
-    "code_edit": { "pattern": "draft_then_adjudicate" }
-  }
-}
-```
-
-The role bindings (`drafter`, `adjudicator`, `editor`) come from
-`~/.orchestra/config.json`. Add them there if they do not already
-exist:
+Minimal global config that wires `code_edit` to the
+`draft_then_adjudicate` pattern with sensible defaults:
 
 ```json
 {
@@ -1186,9 +1180,15 @@ exist:
     "drafter":     { "adapter": "claude_code_text",  "model": "kimi-k2.6", "parameters": {} },
     "adjudicator": { "adapter": "claude_code_text",  "model": "opus",     "parameters": {} },
     "editor":      { "adapter": "claude_code_agent", "model": "opus",     "tools": "default", "parameters": {} }
+  },
+  "workflows": {
+    "code_edit": { "pattern": "draft_then_adjudicate" }
   }
 }
 ```
+
+Save that to `~/.orchestra/config.json` and every project mcloop runs
+against will pick it up. No per-project setup is required.
 
 The `claude_code_text` adapter runs Claude Code in a constrained,
 read-only configuration (no Edit, Write, Bash, or web tools). Only

@@ -32,6 +32,40 @@ import pytest
 from mcloop.code_edit import CodeEditResult, _select_backend, invoke_code_edit
 
 # --------------------------------------------------------------------
+# Global-config isolation
+# --------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_orchestra_global_config(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Point ``orchestra.config.global_config_path`` at an empty tmp
+    directory so the developer's real ``~/.orchestra/config.json`` does
+    not influence test outcomes.
+
+    Tests that want a global config write into the returned path.
+    Without this fixture, every assertion that depends on
+    ``_select_backend`` returning ``"direct"`` would be flaky on a
+    developer machine where ``~/.orchestra/config.json`` happens to
+    declare a ``code_edit`` workflow.
+    """
+    isolated_global = (
+        tmp_path_factory.mktemp("isolated-orchestra") / "config.json"
+    )
+    monkeypatch.setattr(
+        "orchestra.config.global_config_path", lambda: isolated_global
+    )
+    # Reset the project-override warning latch so each test starts
+    # with the same notification state.
+    monkeypatch.setattr(
+        "mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False
+    )
+    return isolated_global
+
+
+# --------------------------------------------------------------------
 # Fixture inputs
 # --------------------------------------------------------------------
 
@@ -155,22 +189,22 @@ def test_orchestra_backend_returns_code_edit_result(
     project_dir.mkdir()
     config_dir = project_dir / ".orchestra"
     config_dir.mkdir()
+    # Current orchestra schema: top-level roles table plus a
+    # workflows.<name>.pattern that does not carry per-workflow roles.
     (config_dir / "config.json").write_text(
         json.dumps(
             {
-                "workflows": {
-                    "code_edit": {
-                        "pattern": "single",
-                        "roles": {
-                            "editor": {
-                                "adapter": "claude_code_agent",
-                                "model": "opus",
-                                "tools": "default",
-                                "parameters": {},
-                            }
-                        },
+                "roles": {
+                    "editor": {
+                        "adapter": "claude_code_agent",
+                        "model": "opus",
+                        "tools": "default",
+                        "parameters": {},
                     }
-                }
+                },
+                "workflows": {
+                    "code_edit": {"pattern": "single"},
+                },
             }
         )
     )
@@ -246,10 +280,7 @@ def test_orchestra_backend_falls_back_when_pattern_is_direct(
         json.dumps(
             {
                 "workflows": {
-                    "code_edit": {
-                        "pattern": "direct",
-                        "roles": {},
-                    }
+                    "code_edit": {"pattern": "direct"},
                 }
             }
         )
@@ -257,14 +288,154 @@ def test_orchestra_backend_falls_back_when_pattern_is_direct(
     assert _select_backend(project_dir) == "direct"
 
 
-def test_select_backend_handles_malformed_config(tmp_path: Path) -> None:
-    """A malformed config falls back to direct without raising."""
+def test_select_backend_handles_malformed_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A malformed merged-config load is a loud fallback to direct."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     config_dir = project_dir / ".orchestra"
     config_dir.mkdir()
     (config_dir / "config.json").write_text("not json {{")
     assert _select_backend(project_dir) == "direct"
+    err = capsys.readouterr().err
+    # Malformed config trips the loud fallback path.
+    assert "[orchestra] falling back to direct backend due to error" in err
+
+
+# --------------------------------------------------------------------
+# New behavior: global config is sufficient; project-local override
+# emits a one-time note.
+# --------------------------------------------------------------------
+
+
+def test_select_backend_uses_global_config_when_no_project_file(
+    tmp_path: Path,
+    _isolate_orchestra_global_config: Path,
+) -> None:
+    """Global config alone with code_edit -> draft_then_adjudicate must
+    select orchestra without any project-local file present."""
+    _isolate_orchestra_global_config.parent.mkdir(parents=True, exist_ok=True)
+    _isolate_orchestra_global_config.write_text(
+        json.dumps(
+            {
+                "roles": {
+                    "drafter": {"adapter": "claude_code_text", "model": "opus"},
+                    "adjudicator": {
+                        "adapter": "claude_code_text",
+                        "model": "opus",
+                    },
+                    "editor": {
+                        "adapter": "claude_code_agent",
+                        "model": "opus",
+                    },
+                },
+                "workflows": {
+                    "code_edit": {"pattern": "draft_then_adjudicate"},
+                },
+            }
+        )
+    )
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    # No project-local file. Selection must read the global config and
+    # return "orchestra".
+    assert _select_backend(project_dir) == "orchestra"
+
+
+def test_select_backend_emits_project_override_note_to_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A project-local .orchestra/config.json triggers a one-time note
+    that the project is overriding the global config. The note must
+    appear on stderr regardless of whether orchestra ends up
+    dispatched."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    config_dir = project_dir / ".orchestra"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {"workflows": {"code_edit": {"pattern": "direct"}}}
+        )
+    )
+    # Even when the override forces direct, the note still fires.
+    assert _select_backend(project_dir) == "direct"
+    err = capsys.readouterr().err
+    assert "[orchestra] note: project-local .orchestra/config.json detected" in err
+    assert str(config_dir / "config.json") in err
+    assert "overrides ~/.orchestra/config.json" in err
+
+
+def test_select_backend_project_override_note_fires_only_once(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeated calls to _select_backend in a single process must not
+    re-emit the override note. The outer mcloop loop calls this once
+    per task; the message would be noise on every iteration."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    config_dir = project_dir / ".orchestra"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"workflows": {"code_edit": {"pattern": "direct"}}})
+    )
+
+    _select_backend(project_dir)
+    first = capsys.readouterr().err
+    _select_backend(project_dir)
+    _select_backend(project_dir)
+    later = capsys.readouterr().err
+
+    # The note appears in the first call's stderr but not the later ones.
+    assert "[orchestra] note: project-local" in first
+    assert "[orchestra] note: project-local" not in later
+
+
+def test_select_backend_global_with_local_override_to_direct(
+    tmp_path: Path,
+    _isolate_orchestra_global_config: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Global config selects orchestra; project-local override forces
+    direct. Result must be direct, and the override note fires."""
+    _isolate_orchestra_global_config.parent.mkdir(parents=True, exist_ok=True)
+    _isolate_orchestra_global_config.write_text(
+        json.dumps(
+            {
+                "roles": {
+                    "drafter": {"adapter": "claude_code_text", "model": "opus"},
+                    "adjudicator": {
+                        "adapter": "claude_code_text",
+                        "model": "opus",
+                    },
+                    "editor": {
+                        "adapter": "claude_code_agent",
+                        "model": "opus",
+                    },
+                },
+                "workflows": {
+                    "code_edit": {"pattern": "draft_then_adjudicate"},
+                },
+            }
+        )
+    )
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    config_dir = project_dir / ".orchestra"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"workflows": {"code_edit": {"pattern": "direct"}}})
+    )
+
+    # The merged config has code_edit.pattern == "direct" (project-local
+    # overrides global per the merge rule), so the result is direct.
+    assert _select_backend(project_dir) == "direct"
+    # And the override note fires because the local file is present.
+    err = capsys.readouterr().err
+    assert "[orchestra] note: project-local" in err
 
 
 def test_bug_verify_direct_routes_third_party_provider_env(
