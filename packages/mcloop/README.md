@@ -55,8 +55,9 @@ between sessions:
   PLAN.md tasks. Unlike the files above, McLoop never reads or modifies
   IDEAS.md during runs — it is purely human-owned state. Use
   `mcloop idea "some text"` to append a timestamped entry from the
-  command line, or edit the file directly. When an idea matures, move
-  it into PLAN.md as a task.
+  command line, or edit the file directly. When an idea matures, use
+  [Duplo](https://github.com/mhcoen/duplo) to turn it into an
+  implementable PLAN.md, or move it into PLAN.md as a task by hand.
 - **MAINTAIN.md**: A list of invariants — statements of desired state
   that should always hold. Unlike PLAN.md, which is a feature backlog
   of tasks to execute once, MAINTAIN.md is a set of ongoing constraints
