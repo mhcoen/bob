@@ -413,16 +413,37 @@ McLoop integrates through this surface. See
 
 ## Configuration
 
-Orchestra reads up to two config files and merges them:
+Orchestra is configured through `~/.orchestra/config.json`. This is
+the canonical config surface and the only file most users need. It
+holds your roles, verbs, and workflows, and every project mcloop or
+any other consumer runs against picks up the same bindings.
 
-1. `~/.orchestra/config.json` — global. Roles, verbs, and workflows
-   shared across all projects.
-2. `<project>/.orchestra/config.json` — project, optional. Overrides
-   specific entries.
+```json
+{
+  "roles": {
+    "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
+    "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
+  },
+  "workflows": {
+    "code_edit": { "pattern": "draft_then_adjudicate" }
+  }
+}
+```
+
+### Project-local overrides (advanced)
+
+A second file at `<project>/.orchestra/config.json` is supported as
+an advanced override for individual projects that genuinely need
+different bindings (an experiment, a one-off model pin, a workflow
+the global config does not declare). Most projects should not have
+this file. McLoop prints a one-time stderr note when it detects a
+project-local override, so an accidentally-checked-in file does not
+silently shadow the global config.
 
 The merge rule is replace, not nest: a role, verb, or workflow
 defined in the project config replaces the global entry of the same
-name in full. Entries the project does not redefine are inherited.
+name in full. Entries the project does not redefine are inherited
+from the global config.
 
 A project that wants to override only the editor model:
 
@@ -440,9 +461,7 @@ A project that wants to override only the editor model:
 ```
 
 That project keeps every other role from the global config and just
-swaps the editor's binding for itself. The CLI and any library
-consumer (McLoop, Duplo, your own tool) both pick up the merged view,
-so the override applies consistently.
+swaps the editor's binding for itself.
 
 ### Verbs
 
