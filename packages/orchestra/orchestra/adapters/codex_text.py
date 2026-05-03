@@ -148,6 +148,8 @@ class CodexTextAdapter:
             inner["cmd"],
             output,
             exit_code,
+            state_id=prepared.request.state_id,
+            attempt=prepared.request.attempt,
         )
         # Codex emits the final assistant text on stdout (not
         # stream-json), so the captured output is the answer. Pass it

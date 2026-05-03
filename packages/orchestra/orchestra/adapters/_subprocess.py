@@ -402,16 +402,36 @@ def write_log(
     cmd: list[str],
     output: str,
     exit_code: int,
+    *,
+    state_id: str | None = None,
+    attempt: int | None = None,
 ) -> Path:
     """Persist a captured session to ``log_dir`` and return the path.
 
     Format mirrors mcloop's ``_write_log`` so existing tooling reads
     both. The slug is bounded to 50 characters to keep filenames sane.
+
+    Filenames include ``state_id`` and ``attempt`` when supplied so
+    concurrent fan-out children sharing a task_label (and therefore a
+    slug) and finishing in the same wall-clock second do not collide
+    on the same path. The (state_id, attempt) pair is unique per
+    invocation within a run, and the timestamp prefix discriminates
+    across runs. A monotonic nanosecond suffix is appended as a final
+    tiebreaker for the rare case where two distinct adapters land on
+    the same (timestamp, state_id, attempt) tuple (e.g., manual
+    write_log calls in tests, or two different adapters writing for
+    the same state).
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = _slugify(task_text)
-    log_path = log_dir / f"{timestamp}_{slug}.log"
+    parts: list[str] = [timestamp, slug]
+    if state_id is not None:
+        parts.append(_slugify(state_id, max_length=40))
+    if attempt is not None:
+        parts.append(f"a{int(attempt)}")
+    parts.append(str(time.monotonic_ns()))
+    log_path = log_dir / ("_".join(parts) + ".log")
     log_path.write_text(
         f"Task: {task_text}\n"
         f"Command: {' '.join(cmd)}\n"
@@ -439,9 +459,9 @@ def _assemble(
     return "".join(head_lines) + marker + "".join(tail_lines)
 
 
-def _slugify(text: str) -> str:
+def _slugify(text: str, *, max_length: int = 50) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
-    return slug.strip("-")[:50]
+    return slug.strip("-")[:max_length]
 
 
 # --------------------------------------------------------------------

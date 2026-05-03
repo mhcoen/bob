@@ -141,6 +141,8 @@ class ClaudeCodeTextAdapter:
             inner["cmd"],
             output,
             exit_code,
+            state_id=prepared.request.state_id,
+            attempt=prepared.request.attempt,
         )
         # The CLI emits stream-json. Extract the final assistant text
         # so callers see the answer, not the entire transcript. The

@@ -220,7 +220,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     monkeypatch.setattr(
         codex_agent_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     monkeypatch.setattr(
         codex_agent_mod, "_detect_changed_files", lambda project_dir: []
@@ -244,7 +244,7 @@ def test_invoke_surfaces_changed_files_in_fields(
     monkeypatch.setattr(
         codex_agent_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     monkeypatch.setattr(
         codex_agent_mod,
@@ -265,7 +265,7 @@ def test_invoke_verdict_mapping(
     monkeypatch.setattr(
         codex_agent_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     monkeypatch.setattr(
         codex_agent_mod, "_detect_changed_files", lambda project_dir: []

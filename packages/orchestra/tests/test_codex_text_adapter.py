@@ -288,7 +288,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(
@@ -310,7 +310,7 @@ def test_invoke_returns_complete_verdict_on_zero_exit(
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
@@ -332,7 +332,7 @@ def test_invoke_returns_timeout_verdict_on_minus_two(
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
@@ -352,7 +352,7 @@ def test_invoke_returns_error_verdict_on_other_nonzero(
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",
-        lambda log_dir, task_label, cmd, output, exit_code: tmp_path / "log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))

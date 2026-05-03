@@ -155,6 +155,8 @@ class CodexAgentAdapter:
             inner["cmd"],
             output,
             exit_code,
+            state_id=prepared.request.state_id,
+            attempt=prepared.request.attempt,
         )
         changed = _detect_changed_files(inner["project_dir"])
         # Codex emits the final assistant text on stdout (not
