@@ -55,49 +55,85 @@ def _request(
 # --------------------------------------------------------------------
 
 
+_BASE_PREFIX = [
+    "codex",
+    "--ask-for-approval",
+    "never",
+    "--sandbox",
+    "read-only",
+    "exec",
+    "--skip-git-repo-check",
+]
+
+
 def test_build_command_minimal_no_model_no_prompt() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="", model=None)
-    assert cmd == ["codex", "exec", "--skip-git-repo-check", "--full-auto"]
+    assert cmd == _BASE_PREFIX
 
 
 def test_build_command_with_model_and_prompt() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="hello", model="gpt-5-codex")
-    assert cmd == [
-        "codex",
-        "exec",
-        "--skip-git-repo-check",
-        "--full-auto",
-        "--model",
-        "gpt-5-codex",
-        "hello",
-    ]
+    assert cmd == _BASE_PREFIX + ["--model", "gpt-5-codex", "hello"]
 
 
 def test_build_command_model_only() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="", model="gpt-5-codex")
-    assert cmd == [
-        "codex",
-        "exec",
-        "--skip-git-repo-check",
-        "--full-auto",
-        "--model",
-        "gpt-5-codex",
-    ]
+    assert cmd == _BASE_PREFIX + ["--model", "gpt-5-codex"]
 
 
 def test_build_command_prompt_only() -> None:
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(prompt="hi", model=None)
-    assert cmd == [
-        "codex",
-        "exec",
-        "--skip-git-repo-check",
-        "--full-auto",
-        "hi",
-    ]
+    assert cmd == _BASE_PREFIX + ["hi"]
+
+
+def test_build_command_does_not_use_deprecated_full_auto() -> None:
+    """codex 0.128 deprecated ``--full-auto`` in favor of explicit
+    ``--sandbox`` / ``--ask-for-approval`` flags. The adapter must not
+    emit the deprecated flag because future codex releases may remove
+    it entirely and because its sandbox semantics (workspace-write)
+    are wider than the read-only contract this adapter enforces."""
+    adapter = CodexTextAdapter()
+    cmd = adapter._build_command(prompt="hi", model="gpt-5-codex")
+    assert "--full-auto" not in cmd
+
+
+def test_build_command_enforces_read_only_sandbox() -> None:
+    """The README documents ``*_text`` adapters as read-only. Pin the
+    sandbox-mode value the adapter passes so a future change cannot
+    silently widen permissions to ``workspace-write`` or
+    ``danger-full-access``."""
+    adapter = CodexTextAdapter()
+    cmd = adapter._build_command(prompt="hi", model=None)
+    sandbox_idx = cmd.index("--sandbox")
+    assert cmd[sandbox_idx + 1] == "read-only"
+
+
+def test_build_command_approval_policy_is_never() -> None:
+    """Non-interactive runs cannot answer an approval prompt. ``never``
+    returns the would-be-prompted execution failure to the model
+    instead. Pin the value so the adapter cannot regress to a policy
+    that blocks a fan-out child waiting on a prompt."""
+    adapter = CodexTextAdapter()
+    cmd = adapter._build_command(prompt="hi", model=None)
+    approval_idx = cmd.index("--ask-for-approval")
+    assert cmd[approval_idx + 1] == "never"
+
+
+def test_build_command_safety_flags_precede_exec() -> None:
+    """``--sandbox`` and ``--ask-for-approval`` are top-level codex
+    options in 0.128 and are rejected when placed after the ``exec``
+    subcommand. Pin their relative position so a future refactor that
+    moved the flags inside ``exec`` would fail this test before
+    reaching the runtime."""
+    adapter = CodexTextAdapter()
+    cmd = adapter._build_command(prompt="hi", model=None)
+    exec_idx = cmd.index("exec")
+    assert cmd.index("--sandbox") < exec_idx
+    assert cmd.index("--ask-for-approval") < exec_idx
 
 
 def test_build_command_skip_git_repo_check_follows_exec() -> None:
@@ -144,11 +180,7 @@ def test_prepare_summary_carries_kind_adapter_cli_command(
     assert prepared.summary["adapter"] == "codex_text"
     assert prepared.summary["cli"] == "codex"
     assert prepared.summary["model"] == "gpt-5-codex-mini"
-    assert prepared.summary["command"] == [
-        "codex",
-        "exec",
-        "--skip-git-repo-check",
-        "--full-auto",
+    assert prepared.summary["command"] == _BASE_PREFIX + [
         "--model",
         "gpt-5-codex-mini",
         "say hi",

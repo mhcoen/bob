@@ -5,10 +5,19 @@ user has bound a role to Codex. Mirrors ``ClaudeCodeTextAdapter`` in
 shape (constructor, prepare/invoke/cancel/describe contract,
 manages_own_timeout flag) so the api layer's per-role dispatcher and
 the executor's outcome-derivation treat it identically. The differences
-are the command line (``codex exec --full-auto``) and the output
-handling: Codex emits final assistant text on stdout rather than the
-stream-json transcript Claude Code emits, so the captured output is
-returned as the model payload's ``output`` field unchanged.
+are the command line and the output handling: Codex emits final
+assistant text on stdout rather than the stream-json transcript Claude
+Code emits, so the captured output is returned as the model payload's
+``output`` field unchanged.
+
+Read-only enforcement: ``*_text`` adapters are documented as read-only
+in the project README. Claude Code text enforces that with an explicit
+``--allowedTools Read,Glob,Grep`` allowlist. Codex text enforces it via
+the top-level ``--sandbox read-only`` flag plus ``--ask-for-approval
+never`` so a non-interactive run never escalates a denied write to a
+prompt the user is not there to answer. Codex 0.128 deprecated the
+``--full-auto`` shortcut in favor of explicit sandbox/approval flags,
+so the adapter no longer uses it.
 
 Subprocess invocation patterns (env passthrough including the
 ``OPENAI_API_KEY`` mapping for ``cli="codex"`` billing, stream capture,
@@ -173,17 +182,23 @@ class CodexTextAdapter:
     # ----- internals --------------------------------------------------
 
     def _build_command(self, prompt: str, model: str | None) -> list[str]:
-        # ``--skip-git-repo-check`` is an ``exec`` subcommand flag in
-        # codex 0.128 (verified via ``codex exec --help``). Without it,
-        # codex refuses to run in any directory it does not consider
-        # a trusted git repository and exits with status 1 before
-        # contacting the model. The adapter runs against arbitrary
-        # working directories, so the flag is mandatory.
+        # Sandbox and approval flags must precede the ``exec`` subcommand
+        # (verified empirically against codex 0.128: ``--ask-for-approval``
+        # is a top-level option and is rejected when placed after
+        # ``exec``). ``read-only`` denies disk writes; ``never`` ensures
+        # a denied write is returned to the model rather than escalated
+        # to an interactive approval prompt that a non-interactive run
+        # cannot answer. ``--skip-git-repo-check`` is an ``exec``
+        # subcommand flag (codex refuses to run in untrusted directories
+        # without it).
         cmd: list[str] = [
             self._cli,
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "read-only",
             "exec",
             "--skip-git-repo-check",
-            "--full-auto",
         ]
         if model:
             cmd.extend(["--model", model])
