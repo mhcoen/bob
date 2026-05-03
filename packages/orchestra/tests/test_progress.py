@@ -464,7 +464,8 @@ def test_cli_quiet_flag_installs_silent_reporter(
     received_callback: list[Any] = []
 
     def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None
+        verb: str, query: str, config: Any, *, progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         received_callback.append(progress_callback)
         return "answer"
@@ -513,7 +514,8 @@ def test_cli_default_installs_stderr_reporter(
     received_callback: list[Any] = []
 
     def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None
+        verb: str, query: str, config: Any, *, progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         received_callback.append(progress_callback)
         # Drive an event through the callback so capsys can see the
@@ -560,7 +562,8 @@ def test_cli_short_quiet_flag_also_works(
     received_callback: list[Any] = []
 
     def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None
+        verb: str, query: str, config: Any, *, progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         received_callback.append(progress_callback)
         return "answer"

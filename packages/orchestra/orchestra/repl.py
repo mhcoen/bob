@@ -66,6 +66,10 @@ class ReplState:
     current_verb: str
     turns: list[Turn] = field(default_factory=list)
     progress_callback: ProgressCallback | None = None
+    # Threaded into run_verb so a project-local
+    # ``.orchestra/workflows/<name>.orc`` overrides the packaged
+    # workflow when the REPL is launched from a project directory.
+    project_dir: Path | None = None
 
 
 def _default_verb(config: OrchestraConfig) -> str | None:
@@ -290,6 +294,7 @@ def handle_query(state: ReplState, line: str) -> None:
             state.config,
             history=history,
             progress_callback=state.progress_callback,
+            project_dir=state.project_dir,
         )
     except OrchestraError as exc:
         print(str(exc), file=sys.stderr)
@@ -322,6 +327,7 @@ def run_repl(
     *,
     session: Any | None = None,
     progress_callback: ProgressCallback | None = None,
+    project_dir: Path | None = None,
 ) -> int:
     """Run the interactive REPL. Returns the process exit code.
 
@@ -329,6 +335,10 @@ def run_repl(
     sees per-state progress while a multi-role verb runs. Pass
     ``progress_callback=None`` (or invoke the CLI with ``--quiet``)
     to suppress.
+
+    ``project_dir`` defaults to the current working directory so a
+    project-local override at ``<cwd>/.orchestra/workflows/<name>.orc``
+    is honoured by every verb run from this REPL session.
     """
     default = _default_verb(config)
     if default is None:
@@ -341,10 +351,13 @@ def run_repl(
         return 1
     if progress_callback is None:
         progress_callback = stderr_reporter()
+    if project_dir is None:
+        project_dir = Path.cwd()
     state = ReplState(
         config=config,
         current_verb=default,
         progress_callback=progress_callback,
+        project_dir=project_dir,
     )
     if session is None:
         session = _build_session()

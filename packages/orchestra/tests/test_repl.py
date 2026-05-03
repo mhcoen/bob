@@ -262,6 +262,7 @@ def test_handle_query_routes_through_run_verb(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         captured["verb"] = verb
         captured["query"] = query
@@ -294,6 +295,7 @@ def test_handle_query_error_keeps_state_unchanged(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         raise OrchestraError("blew up")
 
@@ -322,6 +324,7 @@ def test_handle_query_first_word_verb_routes_per_turn(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         captured["verb"] = verb
         captured["query"] = query
@@ -374,6 +377,7 @@ def test_handle_query_unknown_first_word_falls_back_to_current_verb(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         captured["verb"] = verb
         captured["query"] = query
@@ -428,6 +432,7 @@ def test_run_repl_dispatches_query_and_appends_turn(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         captured.setdefault("calls", []).append((verb, query, history))
         return f"answer-to-{query}"
@@ -525,6 +530,7 @@ def test_run_repl_verb_error_does_not_break_loop(
         *,
         history: str,
         progress_callback: Any = None,
+        **_kwargs: Any,
     ) -> str:
         calls["n"] += 1
         if calls["n"] == 1:

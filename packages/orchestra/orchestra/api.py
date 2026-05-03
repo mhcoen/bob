@@ -998,6 +998,7 @@ def run_verb(
     history: str = "",
     progress_callback: ProgressCallback | None = None,
     quiet: bool = False,
+    project_dir: Path | str | None = None,
 ) -> str:
     """Run the workflow named by ``verb_name`` and return the answer text.
 
@@ -1010,6 +1011,13 @@ def run_verb(
 
     ``progress_callback`` (optional) is forwarded to ``run_workflow``
     so the CLI and REPL can stream per-state progress to stderr.
+
+    ``project_dir`` is threaded into both the introspection load and
+    the run so a project-local override at
+    ``<project_dir>/.orchestra/workflows/<name>.orc`` is honoured by
+    both phases. ``resolve_workflow_path`` documents that precedence;
+    pre-fix the verb path resolved with ``project_dir=None`` and ran
+    the packaged workflow even when an override existed.
 
     Returns the final state's text payload, which the CLI prints to
     stdout. Raises ``WorkflowApiError`` if the verb is unknown, the
@@ -1026,7 +1034,9 @@ def run_verb(
     # history threads through only when the workflow asks for it.
     # The pre-load registry is enough to introspect declared inputs;
     # run_workflow does the real load again with the runtime registry.
-    workflow_path = resolve_workflow_path(workflow_name, project_dir=None)
+    workflow_path = resolve_workflow_path(
+        workflow_name, project_dir=project_dir
+    )
     workflow = load_workflow(workflow_path, _pre_load_registry())
     declared = {ext.name for ext in workflow.external_inputs}
     if "history" in declared:
@@ -1037,6 +1047,7 @@ def run_verb(
         config,
         progress_callback=progress_callback,
         quiet=quiet,
+        project_dir=project_dir,
     )
     if result.terminal != "done":
         raise WorkflowApiError(

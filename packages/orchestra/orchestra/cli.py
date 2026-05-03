@@ -562,7 +562,11 @@ def _dispatch_verb(
     query = " ".join(query_words)
     try:
         answer = run_verb(
-            verb_name, query, config, progress_callback=progress_callback
+            verb_name,
+            query,
+            config,
+            progress_callback=progress_callback,
+            project_dir=project_dir,
         )
     except OrchestraError as exc:
         print(str(exc), file=sys.stderr)

@@ -456,3 +456,112 @@ def test_cmd_run_rejects_agent_workflow_before_validation(
     assert called["load"] is False
     err = capsys.readouterr().err
     assert "agent or transform" in err
+
+
+# --------------------------------------------------------------------
+# Pass-2 fix #5: project_dir threading for verb dispatch
+# --------------------------------------------------------------------
+
+
+def test_verb_dispatch_passes_project_dir_to_run_verb(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_dispatch_verb`` must pass ``project_dir`` to ``run_verb`` so a
+    project-local override at
+    ``<project_dir>/.orchestra/workflows/<name>.orc`` is honoured.
+    Pre-fix the verb path called ``run_verb`` without project_dir and
+    ``run_verb`` resolved with project_dir=None, ignoring the override."""
+    _write_global_config(isolated_home, _ask_config_body())
+    captured: dict[str, object] = {}
+
+    def _stub_run_verb(verb_name, query, config, **kwargs):
+        captured["project_dir"] = kwargs.get("project_dir")
+        return "ok\n"
+
+    monkeypatch.setattr(cli, "run_verb", _stub_run_verb)
+    rc = cli.main(["ask", "hello"])
+    assert rc == 0
+    project_dir = captured.get("project_dir")
+    assert project_dir is not None, (
+        "_dispatch_verb must thread project_dir through to run_verb"
+    )
+    # The CLI uses Path.cwd() at dispatch time.
+    assert Path(project_dir) == Path.cwd()
+
+
+def test_run_verb_uses_project_local_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end through run_verb: a workflow file dropped in
+    ``<project_dir>/.orchestra/workflows/<name>.orc`` overrides the
+    packaged copy when ``project_dir`` is passed. Stub run_workflow
+    so the test does not require a model adapter; assert the path
+    resolution picked the override."""
+    from orchestra import api as api_mod
+    from orchestra.api import run_verb
+    from orchestra.config import OrchestraConfig
+
+    overrides_dir = tmp_path / ".orchestra" / "workflows"
+    overrides_dir.mkdir(parents=True)
+    template_dir = overrides_dir / "templates"
+    template_dir.mkdir()
+    (template_dir / "stub.md").write_text("hi {{ query }}\n")
+    # A minimal valid .orc file with the same name as a packaged
+    # workflow. The override must win at lookup time.
+    (overrides_dir / "ask_single.orc").write_text(
+        """spec 0.1
+workflow ask_single
+  external_input query text
+  max_total_steps 5
+  model m
+  artifact response text
+  role responder
+    prompt template "templates/stub.md" with query
+  state respond
+    actor model m
+    role responder
+    reads query
+    writes response text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    config = OrchestraConfig.from_dict(
+        {
+            "verbs": {"ask": {"workflow": "ask_single"}},
+            "roles": {
+                "responder": {
+                    "adapter": "claude_code_text",
+                    "model": "opus",
+                }
+            },
+            "workflows": {"ask_single": {"pattern": "ask_single"}},
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    class _Fake:
+        terminal = "done"
+        summary = {"output": "answer"}
+        log_path = tmp_path / "fake-log"
+
+    def _fake_run_workflow(name, inputs, cfg, **kwargs):
+        captured["project_dir"] = kwargs.get("project_dir")
+        return _Fake()
+
+    monkeypatch.setattr(api_mod, "run_workflow", _fake_run_workflow)
+
+    answer = run_verb(
+        "ask",
+        "what",
+        config,
+        project_dir=tmp_path,
+    )
+    assert answer == "answer"
+    # The fake run_workflow received the project_dir we passed.
+    assert captured["project_dir"] == tmp_path
