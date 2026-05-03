@@ -1366,6 +1366,147 @@ workflow x
     assert "succ" in msg
 
 
+def test_fan_out_child_with_plain_self_target_rejected(tmp_path):
+    """Pass-4 #1 regression test: a fan-out child whose ``on complete``
+    routes to its own name is NOT local retry. Local retry is encoded
+    by ``retry max N then <terminal>``; a plain ``=> self`` transition
+    is entered exactly once, then the parent fan-out joins and the
+    self-loop never fires. The pass-3 validator's name-match exemption
+    admitted this shape; the pass-4 fix replaces it with a
+    retry-policy-aware rule."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_p
+  model m_a
+  model m_j
+  model m_abort
+  artifact p_out text
+  artifact a_out text
+  artifact j_out text
+  artifact aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_p
+    role r
+    reads topic
+    writes p_out text
+    on complete fan_out [a] join j on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role r
+    reads topic
+    writes a_out text
+    on complete => a
+    on error => stop
+    on timeout => stop
+  state j
+    actor model m_j
+    role r
+    reads topic
+    writes j_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "non-terminal" in msg
+    # The error must mention that retry is via retry_max so authors
+    # know the right way to express a loop.
+    assert "retry max" in msg
+
+
+def test_fan_out_child_retry_then_non_terminal_rejected(tmp_path):
+    """A retry transition whose post-exhaustion target re-enters the
+    workflow graph is silently skipped at run time. Reject."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_p
+  model m_a
+  model m_after
+  model m_j
+  model m_abort
+  artifact p_out text
+  artifact a_out text
+  artifact after_out text
+  artifact j_out text
+  artifact aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_p
+    role r
+    reads topic
+    writes p_out text
+    on complete fan_out [a] join j on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role r
+    reads topic
+    writes a_out text
+    on complete => done
+    on error retry max 1 then after
+    on timeout => stop
+  state after
+    actor model m_after
+    role r
+    reads topic
+    writes after_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state j
+    actor model m_j
+    role r
+    reads topic
+    writes j_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "retry" in msg
+    assert "after" in msg
+
+
 def test_fan_out_child_with_local_retry_loads(tmp_path):
     """A fan-out child with `on error retry max N then stop` is OK.
     The retry path stays inside the child; the terminal target after

@@ -274,21 +274,37 @@ def _phase5_state_validation(
                                 "the same artifact are not permitted"
                             )
                         seen_writes[w.name] = child_decl.name
-                # Pass-3 fix #1: a fan-out child's transition graph is
-                # not dispatched by the executor. The child worker
-                # runs the child's body plus local retry handling and
-                # returns; the controller then routes the PARENT to
-                # the join target on success or to the error_target on
-                # failure. Two child-shape categories are silently
-                # discarded if a workflow declares them:
-                #   - nested fan_out on a child (the child cannot run
-                #     its own fan_out group),
-                #   - any child transition whose target is neither
-                #     ``done``, ``stop``, nor the child itself (local
-                #     retry routes back to self).
-                # Both are rejected here with a clear message so
-                # workflow authors see the rule at load time instead of
-                # discovering missing states after a run.
+                # Pass-3 fix #1 + pass-4 fix #1: a fan-out child's
+                # transition graph is not dispatched by the executor.
+                # The child worker runs the child's body plus local
+                # retry handling and returns; the controller then
+                # routes the PARENT to the join target on success or
+                # to the error_target on failure.
+                #
+                # Allowed child shapes:
+                #   - plain transition to ``done`` or ``stop`` (the
+                #     terminal targets the controller treats as
+                #     "child is done"),
+                #   - bounded retry (``retry_max`` set) whose
+                #     post-exhaustion target is also terminal: the
+                #     executor handles the retry loop, then routes to
+                #     the post-exhaustion target.
+                #
+                # Rejected child shapes:
+                #   - nested ``fan_out`` (the inner group is silently
+                #     skipped at run time),
+                #   - any non-retry transition whose target is not
+                #     terminal, INCLUDING a plain self-target (the
+                #     pass-3 attempt admitted this on the assumption
+                #     that ``target == name`` meant local retry; it
+                #     does not — local retry is encoded by retry_max,
+                #     not by the target name; a plain self-target is
+                #     entered exactly once and then the parent
+                #     fan-out joins, so the loop is silently lost),
+                #   - retry transitions whose post-exhaustion target
+                #     is not terminal (the exhaustion path re-enters
+                #     the graph and is silently skipped the same way
+                #     a plain non-terminal target would be).
                 _TERMINAL_CHILD_TARGETS = {"done", "stop"}
                 for child_decl in child_decls:
                     for child_t in child_decl.transitions:
@@ -304,24 +320,43 @@ def _phase5_state_validation(
                                 "workflow so each fan-out runs at the "
                                 "top level."
                             )
-                        if child_t.target == child_decl.name:
-                            # Local retry: child routes back to itself
-                            # until retries exhaust. The executor
-                            # handles this branch.
-                            continue
                         if child_t.target in _TERMINAL_CHILD_TARGETS:
+                            # Both plain ``=> done|stop`` and
+                            # ``retry max N then done|stop`` are fine
+                            # because the post-retry target is
+                            # terminal and the retry loop is the
+                            # executor's responsibility.
                             continue
+                        if child_t.retry_max is not None:
+                            raise ValidationError(
+                                f"state {child_decl.name!r}: fan_out "
+                                f"child retry transition 'on "
+                                f"{child_t.outcome} retry max "
+                                f"{child_t.retry_max} then "
+                                f"{child_t.target}' lands on a "
+                                "non-terminal post-retry target. "
+                                "Once the retry budget is exhausted "
+                                "the child must route to 'done' or "
+                                "'stop' so the parent fan-out can "
+                                "close the group; routing back into "
+                                "the workflow graph is silently "
+                                "skipped at run time."
+                            )
                         raise ValidationError(
                             f"state {child_decl.name!r}: fan_out "
                             f"child transition 'on {child_t.outcome} "
                             f"=> {child_t.target}' targets a "
                             "non-terminal state. The executor only "
                             "dispatches the child's body and local "
-                            "retry; routing through the child's "
-                            "transition graph is silently skipped. "
-                            "Use 'done' or 'stop' as the target, or "
-                            "fold the downstream state into the "
-                            "fan-out parent's join graph."
+                            "retry (retry_max); routing through the "
+                            "child's transition graph is silently "
+                            "skipped. Use 'done' or 'stop' as the "
+                            "target, or fold the downstream state "
+                            "into the fan-out parent's join graph. "
+                            "Note: a plain self-target like "
+                            f"'=> {child_decl.name}' is NOT local "
+                            "retry; local retry is expressed via "
+                            "'retry max N then <terminal>'."
                         )
 
         # Per design rule 9 plus the success-outcome rule: every
