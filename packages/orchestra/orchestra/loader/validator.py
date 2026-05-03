@@ -524,8 +524,7 @@ def _collect_refs(expr: GuardExpr) -> list[Reference]:
 
 def _phase6_dataflow(workflow: Workflow) -> None:
     """Every artifact a state reads must have an initialized
-    declaration or a writer that runs before the read site on every
-    relevant path.
+    declaration or a writer that dominates the read site.
 
     Two checks:
 
@@ -534,14 +533,18 @@ def _phase6_dataflow(workflow: Workflow) -> None:
        somewhere in the workflow. External inputs are admissible
        reads independently of this check.
 
-    2. Start-state reads: the start state has no predecessors, so any
-       artifact it reads MUST have ``initial`` (or be an external
-       input). Without that, the executor substitutes None and feeds
-       wrong data into the start state's prompt or transform. This is
-       the audit's "at minimum" version of the dominator check; a
-       full reaches-on-all-paths analysis is deferred so this commit
-       can land without churning fan-out test fixtures that exercise
-       sibling reads through the executor's snapshot-isolation path.
+    2. Reachability/dominance: an artifact a state reads must be
+       guaranteed-written on every entry-path from the start state to
+       the reading state, otherwise the executor substitutes None at
+       run time and silently feeds wrong data into prompts or
+       transforms. Implemented as a forward must-reach analysis with
+       intersection over entry-paths and union over fan-out children
+       at the join site (the executor only enters the join when every
+       child has completed, so all children's writes are guaranteed
+       there; sibling-write collisions are already rejected, so each
+       artifact a child writes has a unique writer in the group).
+       External inputs and ``initial`` artifacts trivially satisfy
+       the rule.
     """
     artifact_decls = {a.name: a for a in workflow.artifacts}
     external_names = {e.name for e in workflow.external_inputs}
@@ -567,23 +570,110 @@ def _phase6_dataflow(workflow: Workflow) -> None:
 
     if not workflow.states:
         return
-    start = workflow.states[0]
-    for r in start.reads:
-        if r in external_names:
-            continue
-        if r not in artifact_decls:
-            continue
-        decl = artifact_decls[r]
-        if decl.initial is not NO_INITIAL:
-            continue
-        raise ValidationError(
-            f"state {start.name!r} (start state): reads artifact "
-            f"{r!r} which has no 'initial' qualifier and no source. "
-            "The start state has no predecessors, so the executor "
-            "would substitute None at run time. Declare the artifact "
-            "with 'initial' (any value, including null) or read it "
-            "from a state that follows a writer."
-        )
+    state_decls = {s.name: s for s in workflow.states}
+    state_names = list(state_decls.keys())
+    start = state_names[0]
+
+    # An entry-path describes how control reaches the state. A normal
+    # entry-path names a single parent state (its writes contribute).
+    # A fan-out join entry-path names the fan-out parent plus all
+    # children; the executor only enters the join target when every
+    # child has completed, so children's writes are guaranteed at the
+    # join site (sibling collisions are rejected upstream, so each
+    # written artifact has exactly one producer in the group).
+    entry_paths: dict[str, list[tuple[str, tuple[str, ...]]]] = {
+        n: [] for n in state_names
+    }
+    for s in workflow.states:
+        for t in s.transitions:
+            if t.is_fan_out():
+                for child in t.fan_out:
+                    if child in entry_paths:
+                        entry_paths[child].append((s.name, ()))
+                if t.target in entry_paths:
+                    entry_paths[t.target].append((s.name, t.fan_out))
+                if (
+                    t.error_target is not None
+                    and t.error_target in entry_paths
+                ):
+                    entry_paths[t.error_target].append((s.name, ()))
+            else:
+                if t.target in entry_paths:
+                    entry_paths[t.target].append((s.name, ()))
+
+    initial_artifacts = {
+        a.name for a in workflow.artifacts if a.initial is not NO_INITIAL
+    }
+    universe = (
+        set(written_by_some_state)
+        | initial_artifacts
+        | external_names
+    )
+    base_set = set(initial_artifacts) | set(external_names)
+
+    reaching: dict[str, set[str]] = {start: set(base_set)}
+    for n in state_names:
+        if n != start:
+            reaching[n] = set(universe)
+
+    def _contribution(parent: str, children: tuple[str, ...]) -> set[str]:
+        out = reaching[parent] | {w.name for w in state_decls[parent].writes}
+        for c in children:
+            out = out | {w.name for w in state_decls[c].writes}
+        return out
+
+    changed = True
+    iterations = 0
+    max_iterations = len(state_names) * (len(universe) + 1) + 1
+    while changed:
+        changed = False
+        iterations += 1
+        if iterations > max_iterations:
+            raise ValidationError(
+                "dataflow analysis did not converge; workflow graph "
+                "may have an unexpected shape"
+            )
+        for n in state_names:
+            if n == start:
+                continue
+            paths = entry_paths[n]
+            new_set: set[str] | None
+            if not paths:
+                # Unreachable from start. Reads must rely on
+                # initial/external; pin reaching to that base.
+                new_set = set(base_set)
+            else:
+                new_set = None
+                for parent, children in paths:
+                    contrib = _contribution(parent, children)
+                    if new_set is None:
+                        new_set = set(contrib)
+                    else:
+                        new_set &= contrib
+                assert new_set is not None
+            if new_set != reaching[n]:
+                reaching[n] = new_set
+                changed = True
+
+    for s in workflow.states:
+        for r in s.reads:
+            if r in external_names:
+                continue
+            if r not in artifact_decls:
+                continue
+            decl = artifact_decls[r]
+            if decl.initial is not NO_INITIAL:
+                continue
+            if r in reaching[s.name]:
+                continue
+            raise ValidationError(
+                f"state {s.name!r}: reads artifact {r!r} that is not "
+                "guaranteed to have been written on every path from "
+                "the start state. Mark the artifact with 'initial' "
+                "(any value, including null), or restructure the "
+                "workflow so a writer of this artifact dominates the "
+                "read site."
+            )
 
 
 # --------------------------------------------------------------------

@@ -855,3 +855,229 @@ workflow x
     )
     wf = load_workflow(src, with_core())
     assert wf.name == "x"
+
+
+def test_dominator_check_rejects_sibling_read_under_fan_out(tmp_path):
+    """A fan-out child that reads a sibling-written artifact has no
+    writer that dominates the read site. The executor tolerates such
+    reads via snapshot isolation (the read returns the captured
+    pre-fan-out value), but a workflow author who writes this is
+    almost certainly making a mistake. The validator rejects it so
+    the mistake surfaces at load time instead of running through the
+    executor and silently returning None."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_a
+  model m_b
+  model m_join
+  model m_abort
+  artifact frame_out text
+  artifact a_out text
+  artifact b_out text
+  artifact joined text
+  artifact aborted text
+  role parent_role
+    prompt template "templates/dummy.md"
+  role lens
+    prompt template "templates/dummy.md"
+  role joiner
+    prompt template "templates/dummy.md"
+  role aborter
+    prompt template "templates/dummy.md"
+  state frame
+    actor model m_parent
+    role parent_role
+    reads topic
+    writes frame_out text
+    on complete fan_out [a, b] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role lens
+    reads frame_out
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role lens
+    reads frame_out, a_out
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role joiner
+    reads a_out, b_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role aborter
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "'b'" in msg
+    assert "'a_out'" in msg
+
+
+def test_dominator_check_accepts_council_shape(tmp_path):
+    """Pin the Council fan-out shape as a passing case so a future
+    regression in the must-reach analysis would surface as a real
+    workflow load failure, not a synthetic test failure.
+
+    The shape: parent ``frame`` writes ``framed_question``; five
+    advisor children fan out, each reads ``framed_question`` (parent
+    dominates) and writes its own ``<advisor>_output``; ``chairman``
+    is the join and reads all five children's outputs (the join
+    contribution is the union of children's writes by the executor's
+    fan-out semantics)."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow council_shape
+  external_input query text
+  max_total_steps 30
+  model m_framer
+  model m_a
+  model m_b
+  model m_c
+  model m_d
+  model m_e
+  model m_chair
+  artifact framed_question text
+  artifact a_out text
+  artifact b_out text
+  artifact c_out text
+  artifact d_out text
+  artifact e_out text
+  artifact chairman_output text
+  role framer
+    prompt template "templates/dummy.md"
+  role advisor
+    prompt template "templates/dummy.md"
+  role chairman
+    prompt template "templates/dummy.md"
+  state frame
+    actor model m_framer
+    role framer
+    reads query
+    writes framed_question text
+    on complete fan_out [a, b, c, d, e] join chair on error stop
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role advisor
+    reads framed_question
+    writes a_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state b
+    actor model m_b
+    role advisor
+    reads framed_question
+    writes b_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state c
+    actor model m_c
+    role advisor
+    reads framed_question
+    writes c_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state d
+    actor model m_d
+    role advisor
+    reads framed_question
+    writes d_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state e
+    actor model m_e
+    role advisor
+    reads framed_question
+    writes e_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state chair
+    actor model m_chair
+    role chairman
+    reads framed_question, a_out, b_out, c_out, d_out, e_out
+    writes chairman_output text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "council_shape"
+
+
+def test_dominator_check_accepts_real_council_workflow():
+    """Load the actual ask_council.orc shipped with orchestra to
+    catch any divergence between the synthetic council shape above
+    and the real one. If this regresses, a real verb workflow has
+    started failing the loader."""
+    council = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "ask_council.orc"
+    )
+    assert council.exists(), council
+    wf = load_workflow(council, with_core())
+    assert wf.name == "ask_council"
+
+
+def test_dominator_check_accepts_anonymous_reviewers_workflow():
+    """Same regression guard for ask_anonymous_reviewers, which has
+    a more elaborate fan-out plus transform shape than council. The
+    transform's writes are recorded on the transform state, so its
+    children-of-fan-out and join contributions still flow through
+    the must-reach analysis correctly."""
+    wf_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "ask_anonymous_reviewers.orc"
+    )
+    assert wf_path.exists(), wf_path
+    # ask_anonymous_reviewers uses the anonymize_outputs transform,
+    # which is not in with_core; the API layer registers it via
+    # _register_builtin_transforms. Construct the registry with the
+    # same builtin set the verb dispatcher would build, sans the
+    # role-binding-driven per-role dispatchers (we only need the
+    # workflow to validate, not to run).
+    from orchestra.api import _register_builtin_transforms
+    reg = with_core()
+    _register_builtin_transforms(reg)
+    wf = load_workflow(wf_path, reg)
+    assert wf.name == "ask_anonymous_reviewers"

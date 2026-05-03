@@ -17,10 +17,29 @@ from typing import Any
 
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
+from orchestra.loader.parser import parse_workflow
 from orchestra.log import LogReader, LogWriter
 from orchestra.registry.registry import with_core
 from orchestra.spine import NO_INITIAL, Workflow
 from orchestra.store import ArtifactStore
+
+
+def _parse_only(src: Path) -> Workflow:
+    """Parse a workflow file without running validate().
+
+    Used by tests that exercise executor robustness on workflow
+    shapes the validator now rejects (specifically: a fan-out child
+    declaring ``reads`` on a sibling-written artifact, which the
+    forward must-reach analysis flags because no writer dominates
+    the read site). The executor's snapshot-isolation contract still
+    handles such reads correctly (returns the snapshot value, which
+    is None when the artifact has no initial), and the tests below
+    assert exactly that. Parsing without validating is the smallest
+    way to keep those executor-level guarantees pinned without
+    adding a spurious ``initial null`` to the .orc text just to
+    placate the loader.
+    """
+    return parse_workflow(src.read_text(encoding="utf-8"), src.resolve())
 
 
 def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
@@ -610,7 +629,14 @@ workflow sib
     )
 
     registry = with_core()
-    workflow = load_workflow(src, registry)
+    # ``slow`` reads ``fast_out`` (a sibling-written artifact) which
+    # the validator's dominator analysis rejects because no writer of
+    # ``fast_out`` dominates ``slow``. The executor still tolerates
+    # this via snapshot isolation (the read returns the captured
+    # pre-fan-out value, which is None for an unset artifact), and
+    # this test asserts exactly that. Parse without validating to
+    # keep that executor-level guarantee pinned.
+    workflow = _parse_only(src)
 
     # The adapter records every prepared invocation's reads dict so
     # the test can inspect what each child actually saw.
@@ -2812,7 +2838,13 @@ workflow sib_resume
     # exists with both fast and slow's commits. We will then
     # truncate to simulate a crash with fast complete and slow not.
     registry = with_core()
-    workflow = load_workflow(src, registry)
+    # Same sibling-read shape as test_fan_out_sibling_reads_use_snapshot_not_live_store:
+    # ``slow`` reads ``fast_out`` and the dominator check rejects it.
+    # The executor still tolerates the read via snapshot isolation,
+    # which is what this test verifies on the resume path; parse
+    # without validating to bypass the dominator rule while keeping
+    # the executor-level invariant pinned.
+    workflow = _parse_only(src)
 
     run_id = new_run_id()
     run_dir = tmp_path / "run"
@@ -2860,7 +2892,9 @@ workflow sib_resume
     # resume invocation the worker NEVER hits the live store for
     # fast_out (which would otherwise be visible because fast's
     # invocation_id is success in the rebuilt index).
-    workflow_resume = load_workflow(src, with_core())  # fresh registry
+    # Same sibling-read shape; bypass validate as in the live-path
+    # load above.
+    workflow_resume = _parse_only(src)
     resume_registry = with_core()
     resume_registry.actor_backings["model"] = lambda: _Recording()
     resume_registry._adapter_cache.pop("model", None)
