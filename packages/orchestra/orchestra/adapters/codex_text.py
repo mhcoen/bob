@@ -31,6 +31,7 @@ backing per the project config.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -104,11 +105,15 @@ class CodexTextAdapter:
             else self._default_timeout_s
         )
 
-        cmd = self._build_command(prompt, model)
+        cmd = self._build_command(model)
         env = build_session_env(
             task_label=task_label, cli=self._cli, model=model
         )
 
+        prompt_bytes = prompt.encode("utf-8") if prompt else b""
+        prompt_sha256 = (
+            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
+        )
         return PreparedInvocation(
             request=request,
             summary={
@@ -121,7 +126,7 @@ class CodexTextAdapter:
                 "log_dir": str(log_dir),
                 "timeout_s": timeout_s,
                 "prompt_chars": len(prompt),
-                "prompt_preview": prompt[:160],
+                "prompt_sha256": prompt_sha256,
             },
             inner={
                 "cmd": cmd,
@@ -130,17 +135,25 @@ class CodexTextAdapter:
                 "log_dir": log_dir,
                 "timeout_s": timeout_s,
                 "task_label": task_label or self.backing,
+                "prompt_bytes": prompt_bytes,
             },
         )
 
     def invoke(self, prepared: PreparedInvocation) -> dict[str, Any]:
         inner = prepared.inner
+        prompt_bytes_raw = inner.get("prompt_bytes")
+        stdin_arg: bytes | None
+        if isinstance(prompt_bytes_raw, bytes) and prompt_bytes_raw:
+            stdin_arg = prompt_bytes_raw
+        else:
+            stdin_arg = None
         output, exit_code = run_session(
             inner["cmd"],
             inner["cwd"],
             env=inner["env"],
             timeout=int(inner["timeout_s"]),
             silent=True,
+            stdin_bytes=stdin_arg,
         )
         log_path = write_log(
             inner["log_dir"],
@@ -183,7 +196,13 @@ class CodexTextAdapter:
 
     # ----- internals --------------------------------------------------
 
-    def _build_command(self, prompt: str, model: str | None) -> list[str]:
+    def _build_command(self, model: str | None) -> list[str]:
+        # Pass-7 fix: prompt no longer in argv; the inner CLI reads
+        # it from stdin (``codex exec`` prints "Reading prompt from
+        # stdin..." when the prompt argument is omitted). Removes
+        # leakage through ps output, the .mcloop/active-pid file,
+        # transcript logs, and the prepare() summary.
+        #
         # Sandbox and approval flags must precede the ``exec`` subcommand
         # (verified empirically against codex 0.128: ``--ask-for-approval``
         # is a top-level option and is rejected when placed after
@@ -204,8 +223,6 @@ class CodexTextAdapter:
         ]
         if model:
             cmd.extend(["--model", model])
-        if prompt:
-            cmd.append(prompt)
         return cmd
 
 

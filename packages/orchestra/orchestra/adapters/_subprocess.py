@@ -599,6 +599,7 @@ def run_session(
     timeout: int = DEFAULT_TIMEOUT_S,
     *,
     silent: bool = False,
+    stdin_bytes: bytes | None = None,
 ) -> tuple[str, int]:
     """Run ``cmd`` in ``cwd``, stream output, return ``(output, exit_code)``.
 
@@ -620,6 +621,15 @@ def run_session(
     is unchanged. Adapters consumed by structured callers (the
     orchestra REPL, McLoop's invoke_code_edit) pass ``silent=True``
     so progress noise does not bleed into captured output.
+
+    ``stdin_bytes`` (when provided) is written to the subprocess's
+    stdin and the pipe is closed. Adapters use this to feed the
+    rendered prompt to the inner CLI without putting the prompt text
+    in argv, where it would otherwise leak into ``ps`` output, the
+    .mcloop/active-pid file, transcript logs, and the prepare()
+    summary. Callers that have no prompt (mock adapters, codex
+    smoke probes) can leave it ``None`` and the stdin pipe falls
+    back to /dev/null.
     """
     session = SessionState()
     previous = _current_session()
@@ -627,13 +637,32 @@ def run_session(
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
-        stdin=subprocess.DEVNULL,
+        stdin=(
+            subprocess.PIPE
+            if stdin_bytes is not None
+            else subprocess.DEVNULL
+        ),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         env=env,
         start_new_session=True,
     )
+    if stdin_bytes is not None and process.stdin is not None:
+        try:
+            process.stdin.write(stdin_bytes.decode("utf-8"))
+            process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            # The CLI may close stdin early after consuming the
+            # prompt header. That is not an error condition; drop
+            # the remainder and let the regular timeout/output path
+            # finish.
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
     register_active_process(process, session=session)
     _last_output_lines.clear()
     try:

@@ -52,11 +52,9 @@ def _request(
 # --------------------------------------------------------------------
 
 
-def test_build_command_default_sandbox_no_model_no_prompt() -> None:
+def test_build_command_default_sandbox_no_model() -> None:
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(
-        prompt="", model=None, sandbox=DEFAULT_SANDBOX
-    )
+    cmd = adapter._build_command(model=None, sandbox=DEFAULT_SANDBOX)
     assert cmd == [
         "codex",
         "--ask-for-approval",
@@ -68,10 +66,10 @@ def test_build_command_default_sandbox_no_model_no_prompt() -> None:
     ]
 
 
-def test_build_command_with_model_and_prompt() -> None:
+def test_build_command_with_model() -> None:
     adapter = CodexAgentAdapter()
     cmd = adapter._build_command(
-        prompt="edit foo.py", model="gpt-5-codex", sandbox="workspace-write"
+        model="gpt-5-codex", sandbox="workspace-write"
     )
     assert cmd == [
         "codex",
@@ -83,15 +81,25 @@ def test_build_command_with_model_and_prompt() -> None:
         "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
-        "edit foo.py",
     ]
+
+
+def test_build_command_does_not_include_prompt_in_argv() -> None:
+    """Pass-7 fix: prompts pass via stdin, not argv. The command
+    shape contains no positional prompt — leakage through ps output,
+    the .mcloop/active-pid file, transcript logs, and the prepare()
+    summary's command field is impossible by construction."""
+    adapter = CodexAgentAdapter()
+    cmd = adapter._build_command(
+        model="gpt-5-codex", sandbox="workspace-write"
+    )
+    assert "SECRET_TOKEN_123" not in " ".join(cmd)
+    assert cmd[-1] == "gpt-5-codex"
 
 
 def test_build_command_sandbox_override() -> None:
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(
-        prompt="x", model=None, sandbox="read-only"
-    )
+    cmd = adapter._build_command(model=None, sandbox="read-only")
     assert "--sandbox" in cmd
     assert cmd[cmd.index("--sandbox") + 1] == "read-only"
 
@@ -100,7 +108,7 @@ def test_build_command_top_level_flags_precede_exec() -> None:
     """The Codex CLI rejects ``--ask-for-approval`` and ``--sandbox``
     when they appear after the ``exec`` subcommand. Pin the ordering."""
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(prompt="x", model="m", sandbox="workspace-write")
+    cmd = adapter._build_command(model="m", sandbox="workspace-write")
     exec_idx = cmd.index("exec")
     approval_idx = cmd.index("--ask-for-approval")
     sandbox_idx = cmd.index("--sandbox")
@@ -112,11 +120,10 @@ def test_build_command_skip_git_repo_check_follows_exec() -> None:
     """``--skip-git-repo-check`` is an ``exec`` subcommand flag in
     codex 0.128 (verified via ``codex exec --help``). Without it,
     codex refuses to run in untrusted directories and exits with
-    status 1 before contacting the model. The flag must follow the
-    ``exec`` subcommand and precede the trailing prompt."""
+    status 1 before contacting the model."""
     adapter = CodexAgentAdapter()
     cmd = adapter._build_command(
-        prompt="hi", model="gpt-5-codex", sandbox="workspace-write"
+        model="gpt-5-codex", sandbox="workspace-write"
     )
     assert "--skip-git-repo-check" in cmd
     exec_idx = cmd.index("exec")
@@ -124,8 +131,6 @@ def test_build_command_skip_git_repo_check_follows_exec() -> None:
     assert skip_idx > exec_idx, (
         "--skip-git-repo-check must follow the exec subcommand"
     )
-    assert cmd[-1] == "hi"
-    assert skip_idx < len(cmd) - 1
 
 
 # --------------------------------------------------------------------
@@ -159,10 +164,14 @@ def test_prepare_summary_kind_agent_and_full_command(tmp_path: Path) -> None:
         "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
-        "edit",
     ]
     assert prepared.summary["cwd"] == str(tmp_path)
     assert prepared.summary["log_dir"] == str(tmp_path / "logs")
+    # Pass-7 fix: prompt content not in summary; sha256 only.
+    import hashlib as _hashlib
+    expected_digest = _hashlib.sha256(b"edit").hexdigest()
+    assert prepared.summary["prompt_sha256"] == expected_digest
+    assert "prompt_preview" not in prepared.summary
 
 
 def test_prepare_inner_carries_project_dir_for_changed_files(
@@ -215,7 +224,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     monkeypatch.setattr(
         codex_agent_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: (fake_stdout, 0),
+        lambda cmd, cwd, env, timeout, silent, **kw: (fake_stdout, 0),
     )
     monkeypatch.setattr(
         codex_agent_mod,
@@ -239,7 +248,7 @@ def test_invoke_surfaces_changed_files_in_fields(
     monkeypatch.setattr(
         codex_agent_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: ("ok", 0),
+        lambda cmd, cwd, env, timeout, silent, **kw: ("ok", 0),
     )
     monkeypatch.setattr(
         codex_agent_mod,
@@ -278,7 +287,7 @@ def test_invoke_verdict_mapping(
         monkeypatch.setattr(
             codex_agent_mod,
             "run_session",
-            lambda cmd, cwd, env, timeout, silent, ec=exit_code: ("o", ec),
+            lambda cmd, cwd, env, timeout, silent, ec=exit_code, **kw: ("o", ec),
         )
         payload = adapter.invoke(prepared)
         assert payload["verdict"] == expected

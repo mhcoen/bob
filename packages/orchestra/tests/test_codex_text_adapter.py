@@ -66,28 +66,28 @@ _BASE_PREFIX = [
 ]
 
 
-def test_build_command_minimal_no_model_no_prompt() -> None:
+def test_build_command_minimal_no_model() -> None:
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="", model=None)
+    cmd = adapter._build_command(model=None)
     assert cmd == _BASE_PREFIX
 
 
-def test_build_command_with_model_and_prompt() -> None:
+def test_build_command_with_model() -> None:
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hello", model="gpt-5-codex")
-    assert cmd == _BASE_PREFIX + ["--model", "gpt-5-codex", "hello"]
-
-
-def test_build_command_model_only() -> None:
-    adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="", model="gpt-5-codex")
+    cmd = adapter._build_command(model="gpt-5-codex")
     assert cmd == _BASE_PREFIX + ["--model", "gpt-5-codex"]
 
 
-def test_build_command_prompt_only() -> None:
+def test_build_command_does_not_include_prompt_in_argv() -> None:
+    """Pass-7 fix: prompts pass via stdin, not argv. The command shape
+    contains no positional prompt — leakage through ps output, the
+    .mcloop/active-pid file, transcript logs, and the prepare()
+    summary's command field is impossible by construction."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model=None)
-    assert cmd == _BASE_PREFIX + ["hi"]
+    cmd = adapter._build_command(model="gpt-5-codex")
+    assert "SECRET_TOKEN_123" not in " ".join(cmd)
+    # The last token is the model id, not a prompt.
+    assert cmd[-1] == "gpt-5-codex"
 
 
 def test_build_command_does_not_use_deprecated_full_auto() -> None:
@@ -97,7 +97,7 @@ def test_build_command_does_not_use_deprecated_full_auto() -> None:
     it entirely and because its sandbox semantics (workspace-write)
     are wider than the read-only contract this adapter enforces."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model="gpt-5-codex")
+    cmd = adapter._build_command(model="gpt-5-codex")
     assert "--full-auto" not in cmd
 
 
@@ -107,7 +107,7 @@ def test_build_command_enforces_read_only_sandbox() -> None:
     silently widen permissions to ``workspace-write`` or
     ``danger-full-access``."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model=None)
+    cmd = adapter._build_command(model=None)
     sandbox_idx = cmd.index("--sandbox")
     assert cmd[sandbox_idx + 1] == "read-only"
 
@@ -118,7 +118,7 @@ def test_build_command_approval_policy_is_never() -> None:
     instead. Pin the value so the adapter cannot regress to a policy
     that blocks a fan-out child waiting on a prompt."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model=None)
+    cmd = adapter._build_command(model=None)
     approval_idx = cmd.index("--ask-for-approval")
     assert cmd[approval_idx + 1] == "never"
 
@@ -130,7 +130,7 @@ def test_build_command_safety_flags_precede_exec() -> None:
     moved the flags inside ``exec`` would fail this test before
     reaching the runtime."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model=None)
+    cmd = adapter._build_command(model=None)
     exec_idx = cmd.index("exec")
     assert cmd.index("--sandbox") < exec_idx
     assert cmd.index("--ask-for-approval") < exec_idx
@@ -138,13 +138,12 @@ def test_build_command_safety_flags_precede_exec() -> None:
 
 def test_build_command_skip_git_repo_check_follows_exec() -> None:
     """``--skip-git-repo-check`` is an ``exec`` subcommand flag in
-    codex 0.128. It must appear after ``exec`` and before any
-    positional prompt. Without it, codex refuses to run in untrusted
-    directories (any directory that is not an authorized git repo)
-    and exits with status 1 before contacting the model. This test
-    pins both the presence and the relative position of the flag."""
+    codex 0.128. It must appear after ``exec``. Without it, codex
+    refuses to run in untrusted directories (any directory that is
+    not an authorized git repo) and exits with status 1 before
+    contacting the model."""
     adapter = CodexTextAdapter()
-    cmd = adapter._build_command(prompt="hi", model="gpt-5-codex")
+    cmd = adapter._build_command(model="gpt-5-codex")
     assert "--skip-git-repo-check" in cmd, (
         "codex_text command must include --skip-git-repo-check"
     )
@@ -153,9 +152,6 @@ def test_build_command_skip_git_repo_check_follows_exec() -> None:
     assert skip_idx > exec_idx, (
         "--skip-git-repo-check must follow the exec subcommand"
     )
-    # The prompt is the trailing positional, after every flag.
-    assert cmd[-1] == "hi"
-    assert skip_idx < len(cmd) - 1
 
 
 # --------------------------------------------------------------------
@@ -183,12 +179,18 @@ def test_prepare_summary_carries_kind_adapter_cli_command(
     assert prepared.summary["command"] == _BASE_PREFIX + [
         "--model",
         "gpt-5-codex-mini",
-        "say hi",
     ]
     assert prepared.summary["cwd"] == str(tmp_path)
     assert prepared.summary["log_dir"] == str(tmp_path / "logs")
     assert prepared.summary["prompt_chars"] == len("say hi")
-    assert prepared.summary["prompt_preview"] == "say hi"
+    # Pass-7 fix: prompt content is NOT in the summary. A sha256 of
+    # the prompt bytes serves the legitimate use case (verifying
+    # snapshot integrity, confirming two runs got the same input)
+    # without retaining content.
+    import hashlib as _hashlib
+    expected_digest = _hashlib.sha256(b"say hi").hexdigest()
+    assert prepared.summary["prompt_sha256"] == expected_digest
+    assert "prompt_preview" not in prepared.summary
 
 
 def test_prepare_inner_carries_cmd_env_cwd_log_dir(tmp_path: Path) -> None:
@@ -283,7 +285,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: (fake_stdout, 0),
+        lambda cmd, cwd, env, timeout, silent, **kw: (fake_stdout, 0),
     )
     monkeypatch.setattr(
         codex_text_mod,
@@ -305,7 +307,7 @@ def test_invoke_returns_complete_verdict_on_zero_exit(
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: ("done.", 0),
+        lambda cmd, cwd, env, timeout, silent, **kw: ("done.", 0),
     )
     monkeypatch.setattr(
         codex_text_mod,
@@ -327,7 +329,7 @@ def test_invoke_returns_timeout_verdict_on_minus_two(
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: ("partial", -2),
+        lambda cmd, cwd, env, timeout, silent, **kw: ("partial", -2),
     )
     monkeypatch.setattr(
         codex_text_mod,
@@ -347,7 +349,7 @@ def test_invoke_returns_error_verdict_on_other_nonzero(
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent: ("oops", 7),
+        lambda cmd, cwd, env, timeout, silent, **kw: ("oops", 7),
     )
     monkeypatch.setattr(
         codex_text_mod,

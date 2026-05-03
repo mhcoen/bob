@@ -235,12 +235,37 @@ _TRANSCRIPT_LINES = [
 ]
 
 
+class _CapturingStringIO(io.StringIO):
+    """A StringIO that snapshots its contents on close().
+
+    run_session writes the prompt into the subprocess's stdin and
+    then closes it; the fake needs the captured value to remain
+    readable after close so the parity test can assert prompt
+    equivalence between the direct and orchestra paths.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.captured: str = ""
+
+    def close(self) -> None:
+        try:
+            self.captured = self.getvalue()
+        finally:
+            super().close()
+
+
 @dataclass
 class _PopenCall:
     cmd: list[str]
     cwd: Any
     env: dict[str, str] | None
     is_watchdog: bool
+    stdin_buffer: _CapturingStringIO | None = None
+    """Pass-7 fix: orchestra adapters pipe the prompt via stdin
+    instead of putting it in argv. The fake captures the stdin sink
+    so the parity test can assert the prompt actually reached the
+    inner CLI on the orchestra side."""
 
 
 _popen_calls: list[_PopenCall] = []
@@ -250,7 +275,8 @@ class _FakePopen:
     """A subprocess.Popen replacement that yields a canned transcript.
 
     Records each call into ``_popen_calls`` so the test can compare
-    the cmd, cwd, and env between the direct and orchestra paths.
+    the cmd, cwd, env, and (for orchestra adapters) the stdin payload
+    between the direct and orchestra paths.
     """
 
     return_code_default: int = 0
@@ -276,8 +302,15 @@ class _FakePopen:
             self.stdout = io.StringIO("".join(_TRANSCRIPT_LINES))
         else:
             self.stdout = None
+        self.stdin = _CapturingStringIO()
         _popen_calls.append(
-            _PopenCall(cmd=list(cmd), cwd=cwd, env=env, is_watchdog=is_watchdog)
+            _PopenCall(
+                cmd=list(cmd),
+                cwd=cwd,
+                env=env,
+                is_watchdog=is_watchdog,
+                stdin_buffer=self.stdin,
+            )
         )
 
     def wait(self, timeout: float | None = None) -> int:
@@ -427,10 +460,25 @@ def test_parity_code_edit_single(
     direct_call = direct_calls[0]
     orch_call = orchestra_calls[0]
 
-    # Same command shape on both sides. The prompt is positional and
-    # the same in both because both build it from the same inputs via
-    # the same prompt builder.
-    assert direct_call.cmd == orch_call.cmd
+    # Pass-7 fix: orchestra adapters pipe the prompt via stdin
+    # instead of placing it in argv. The mcloop direct path still
+    # places the prompt as a positional argument (claude -p
+    # <prompt>). Equivalence now means: the two paths feed the same
+    # prompt bytes to the inner CLI, and their command shapes match
+    # apart from the prompt position.
+    direct_prompt = direct_call.cmd[2]
+    assert orch_call.stdin_buffer is not None
+    orch_prompt = orch_call.stdin_buffer.captured
+    assert direct_prompt == orch_prompt, (
+        "both paths must build the same prompt from the same inputs"
+    )
+    direct_cmd_no_prompt = (
+        direct_call.cmd[:2] + direct_call.cmd[3:]
+    )
+    assert direct_cmd_no_prompt == orch_call.cmd, (
+        "command shape must match apart from the prompt position; "
+        "the orchestra path now feeds the prompt via stdin"
+    )
     assert direct_call.cwd == orch_call.cwd
 
     # The model override threaded through invocation_options must
@@ -647,6 +695,8 @@ def test_parity_code_edit_bug_task_branches_prompt(
     orch_call = _inner_cli_calls()[0]
 
     direct_prompt = direct_call.cmd[2]
-    orch_prompt = orch_call.cmd[2]
+    # Pass-7 fix: orchestra adapter pipes prompt via stdin, not argv.
+    assert orch_call.stdin_buffer is not None
+    orch_prompt = orch_call.stdin_buffer.captured
     assert direct_prompt == orch_prompt
     assert "BUG FIX (MANDATORY CODE CHANGE)" in direct_prompt
