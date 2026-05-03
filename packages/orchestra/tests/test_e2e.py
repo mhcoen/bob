@@ -1357,6 +1357,140 @@ workflow ag
     assert rc == 2
 
 
+def test_cmd_resume_uses_snapshot_when_template_edited_after_run_start(
+    tmp_path: Path,
+) -> None:
+    """Pass-5 redesign: editing a prompt template between crash and
+    resume no longer reaches the actor. The snapshot captured at
+    run_start is what the resumed workflow opens, not the live
+    declared path. The pass-4 manifest gate would have refused with
+    exit 2; the pass-5 snapshot accepts the resume because the
+    original bytes are still pinned in the run directory."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    template = tmp_path / "templates" / "dummy.md"
+    assert template.is_file()
+
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+
+    from orchestra.prompt_snapshot import snapshot_prompt_sources
+    workflow, snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
+
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src.resolve()),
+            "workflow_digest": cli._workflow_digest(src),
+            "prompt_snapshot_manifest": snapshot_manifest,
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # Edit the LIVE template. The snapshot in run_dir is unchanged.
+    template.write_text(template.read_text(encoding="utf-8") + "\nedited\n")
+
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    # Resume completes successfully because it reads the snapshot,
+    # not the edited live file. The pass-4 gate would have returned 2.
+    assert rc == 0
+
+
+def test_cmd_resume_refuses_when_snapshot_file_mutated(tmp_path: Path) -> None:
+    """Mid-run mutation of a snapshot file is a hard refusal. The
+    snapshot is the run's read-only input set; if its bytes change,
+    the original input is no longer recoverable and the resumed
+    actor would see different data than the original run."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+
+    from orchestra.prompt_snapshot import snapshot_prompt_sources
+    workflow, snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
+
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src.resolve()),
+            "workflow_digest": cli._workflow_digest(src),
+            "prompt_snapshot_manifest": snapshot_manifest,
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # Mutate the snapshot file directly. This is the "buggy adapter
+    # wrote outside its sandbox" or "user manually edited" case;
+    # resume must refuse because the original bytes are gone.
+    snap_path = Path(snapshot_manifest[0]["snapshot_path"])
+    snap_path.write_text("MUTATED MID-RUN\n")
+
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    assert rc == 2
+
+
 def test_cmd_resume_refuses_when_workflow_file_changed(tmp_path: Path) -> None:
     """Pass-3 fix #3: a .orc file modified between the original run
     and resume can route the next transition to a target the original

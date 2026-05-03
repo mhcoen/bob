@@ -218,13 +218,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
-    from orchestra.manifest import compute_prompt_manifest
+    from orchestra.prompt_snapshot import snapshot_prompt_sources
+    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(
+        workflow, run_dir
+    )
     log.write(
         "run_start",
         fields={
-            "workflow_path": str(args.workflow),
+            "workflow_path": str(Path(args.workflow).resolve()),
             "workflow_digest": _workflow_digest(Path(args.workflow)),
-            "prompt_manifest": compute_prompt_manifest(workflow),
+            "prompt_snapshot_manifest": prompt_snapshot_manifest,
             "workflow_name": workflow.name,
             "spec_version": workflow.spec_version,
             "profiles": list(workflow.profiles),
@@ -339,17 +342,24 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print("nothing to resume; the log named no state", file=sys.stderr)
         return 2
 
-    # Pass-4 fix #2: extend the workflow digest gate to a manifest of
-    # every file-backed prompt source. The .orc digest catches edits
-    # to the workflow file itself but file-backed prompts
-    # (templates/*.md and config-supplied instruction templates) are
-    # read at invocation time, so editing one between crash and
-    # resume changes the actor input while the workflow digest
-    # matches. The check runs BEFORE load_workflow because a missing
-    # prompt file would otherwise raise ValidationError mid-load
-    # without naming the resume-integrity reason.
+    # Pass-4 fix #2: legacy prompt_manifest gate (sha256 of every
+    # file-backed prompt source). Pass-5 found two distinct bypasses
+    # of this gate (symlink retargeting, relative workflow paths),
+    # both of which boil down to "the path the manifest recorded" and
+    # "the path the executor opens" can drift. Pass-5 redesign
+    # replaces the gate with prompt-source snapshotting (see below).
+    # This branch handles backward-compatible resume of OLD runs that
+    # were created with prompt_manifest but no
+    # prompt_snapshot_manifest. New runs skip this gate entirely
+    # because the snapshot path is the source of truth.
+    recorded_snapshot_manifest = run_start.fields.get(
+        "prompt_snapshot_manifest"
+    )
     recorded_manifest = run_start.fields.get("prompt_manifest")
-    if isinstance(recorded_manifest, dict):
+    if (
+        recorded_snapshot_manifest is None
+        and isinstance(recorded_manifest, dict)
+    ):
         diffs: list[str] = []
         recorded_clean: dict[str, str] = {
             str(k): str(v) for k, v in recorded_manifest.items()
@@ -386,6 +396,41 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     registry = with_core()
     workflow = load_workflow(workflow_path, registry)
+
+    # Pass-5 redesign: rewrite the workflow's file-backed prompt
+    # sources to point at the snapshot files captured at run_start.
+    # Resume reads the bytes the original run pinned, not the live
+    # filesystem, so symlink retargeting, source_dir ambiguity, and
+    # template edits between crash and resume cannot reach the actor.
+    # Snapshot integrity is verified inside restore_prompt_snapshots:
+    # a deleted or mutated snapshot file is a hard refusal because
+    # the original bytes are no longer recoverable.
+    if isinstance(recorded_snapshot_manifest, list):
+        from orchestra.prompt_snapshot import (
+            SnapshotIntegrityError,
+            restore_prompt_snapshots,
+        )
+        try:
+            workflow = restore_prompt_snapshots(
+                workflow, recorded_snapshot_manifest
+            )
+        except SnapshotIntegrityError as exc:
+            print(
+                "refusing to resume: prompt snapshot integrity "
+                "check failed.",
+                file=sys.stderr,
+            )
+            print(f"  {exc}", file=sys.stderr)
+            print(
+                "Snapshots in the run directory are read-only inputs "
+                "for resume. A missing or mutated snapshot means the "
+                "original prompt bytes are no longer available; roll "
+                "the run back rather than resuming against drifted "
+                "input.",
+                file=sys.stderr,
+            )
+            return 2
+
     store = ArtifactStore(run_dir / "store.sqlite")
 
     # Pass-2 fix #1 + pass-3 fix #2: refuse to resume into a state
