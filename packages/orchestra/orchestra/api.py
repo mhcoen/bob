@@ -911,6 +911,9 @@ def run_workflow(
         "run_start",
         fields={
             "workflow_path": str(workflow_path),
+            "workflow_digest": hashlib.sha256(
+                Path(workflow_path).read_bytes()
+            ).hexdigest(),
             "workflow_name": workflow.name,
             "config_name": name,
             "pattern": workflow_cfg.pattern,

@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from orchestra import cli
 from orchestra.adapters.mock_human import MockHumanAdapter
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
@@ -1354,6 +1355,122 @@ workflow ag
     from orchestra import cli
     rc = cli.cmd_resume(args)
     assert rc == 2
+
+
+def test_cmd_resume_refuses_when_workflow_file_changed(tmp_path: Path) -> None:
+    """Pass-3 fix #3: a .orc file modified between the original run
+    and resume can route the next transition to a target the original
+    workflow never named. cmd_resume now records a sha256 of the
+    workflow bytes at run_start and refuses on mismatch."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src),
+            "workflow_digest": cli._workflow_digest(src),
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()  # s_a runs to completion incl. transition.
+    executor.step()  # s_b runs to completion incl. transition.
+    log.close()
+    store.close()
+
+    # Truncate after s_b's state_exit so resume would otherwise need
+    # to re-select the missing transition.
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # Modify the workflow file so its digest changes. The semantic
+    # change matters but the digest catches any byte change.
+    src.write_text(src.read_text(encoding="utf-8") + "\n# drifted\n")
+
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    assert rc == 2
+
+
+def test_cmd_resume_accepts_unchanged_workflow_after_run_start_digest(
+    tmp_path: Path,
+) -> None:
+    """Pin the happy path: a recorded digest that matches the current
+    file's digest must not block resume."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src),
+            "workflow_digest": cli._workflow_digest(src),
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # File unchanged. Resume must NOT refuse because of digest.
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    # Resume should reach terminal "done" via the resume path; rc 0
+    # means successful end. (A non-zero rc here would indicate digest
+    # blocked resumption when it should not have.)
+    assert rc == 0
 
 
 # --------------------------------------------------------------------

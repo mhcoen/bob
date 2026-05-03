@@ -17,6 +17,7 @@ Two surfaces:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -58,6 +59,19 @@ _TERMINAL_TARGETS = {"done", "stop"}
 
 def _data_root() -> Path:
     return Path.home() / ".orchestra" / "runs"
+
+
+def _workflow_digest(path: Path) -> str:
+    """Return the sha256 hex digest of a workflow file's bytes.
+
+    Resume integrity: ``cmd_run`` records the digest in the run_start
+    record so ``cmd_resume`` can refuse to replay against a workflow
+    file whose semantics drifted between the original run and the
+    resume invocation. A pure byte digest is the smallest signal that
+    closes the silent-divergence path; full source snapshotting is
+    out of scope for this commit.
+    """
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _initialize_store(workflow: Workflow, db_path: Path) -> ArtifactStore:
@@ -208,6 +222,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "run_start",
         fields={
             "workflow_path": str(args.workflow),
+            "workflow_digest": _workflow_digest(Path(args.workflow)),
             "workflow_name": workflow.name,
             "spec_version": workflow.spec_version,
             "profiles": list(workflow.profiles),
@@ -262,6 +277,52 @@ def cmd_resume(args: argparse.Namespace) -> int:
     rejection = _reject_unsupported_direct_workflow(Path(workflow_path))
     if rejection is not None:
         return rejection
+    # Pass-3 fix #3: refuse to resume against a .orc file whose
+    # contents drifted from the workflow that produced the durable
+    # log. The original run recorded a sha256 of the workflow bytes
+    # at run_start; resume recomputes against the file currently on
+    # disk and refuses on mismatch. Without this, a transition the
+    # log promised to make can resolve to a target the original
+    # workflow never named, and the executor will run the new
+    # transition's body silently.
+    recorded_digest = run_start.fields.get("workflow_digest")
+    if isinstance(recorded_digest, str) and recorded_digest:
+        try:
+            current_digest = _workflow_digest(Path(workflow_path))
+        except OSError as exc:
+            print(
+                f"refusing to resume: cannot read workflow file "
+                f"{workflow_path}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        if current_digest != recorded_digest:
+            print(
+                "refusing to resume: workflow file has changed since "
+                "the original run.",
+                file=sys.stderr,
+            )
+            print(
+                f"  path: {workflow_path}",
+                file=sys.stderr,
+            )
+            print(
+                f"  recorded digest: {recorded_digest}",
+                file=sys.stderr,
+            )
+            print(
+                f"  current digest:  {current_digest}",
+                file=sys.stderr,
+            )
+            print(
+                "Resume against a modified workflow can route the "
+                "next transition to a target the original workflow "
+                "never named, or run an actor with semantics the "
+                "durable log does not describe. Restore the original "
+                "file or roll the run back.",
+                file=sys.stderr,
+            )
+            return 2
     external_inputs = run_start.fields.get("external_inputs") or {}
 
     if replay.is_terminal or replay.current_state in _TERMINAL_TARGETS:
