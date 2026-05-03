@@ -309,19 +309,34 @@ of the line is the question. Verbs are user-defined in
 `~/.orchestra/config.json` — rename, add, remove freely.
 
 While a verb runs, orchestra prints one line to stderr per role as
-each state starts and finishes:
+each sequential state starts and finishes:
 
 ```
 $ orchestra council should I rewrite this service in rust
 [1/7] framer (claude_code_text:opus) ... starting
 [1/7] framer (claude_code_text:opus) ... done in 2.4s
-[2/7] contrarian (claude_code_text:kimi-k2.6) ... starting
-[2/7] contrarian (claude_code_text:kimi-k2.6) ... done in 4.8s
-...
+[2-6/7] 5 framer children starting in parallel:
+   contrarian (claude_code_text:kimi-k2.6)
+   first_principles (claude_code_text:opus)
+   expansionist (claude_code_text:sonnet)
+   outsider (claude_code_text:kimi-k2.6)
+   executor_lens (claude_code_text:opus)
+[2-6/7] contrarian done in 4.1s
+[2-6/7] expansionist done in 4.8s
+[2-6/7] outsider done in 5.2s
+[2-6/7] first_principles done in 6.0s
+[2-6/7] executor_lens done in 6.3s
+[2-6/7] all 5 done, parallel wall-clock 6.3s
 [7/7] chairman (claude_code_text:opus) ... starting
 [7/7] chairman (claude_code_text:opus) ... done in 5.1s
 [final answer prints here on stdout]
 ```
+
+Parallel groups (fan-out) get a header listing every child binding
+up front, individual completion lines as each finishes (in completion
+order, not start order), and a closing summary whose elapsed value is
+the longest individual child duration (parallel wall-clock), not the
+sum.
 
 Stdout still carries only the final answer so piping
 `orchestra ask "..." | something` keeps working. Pass `--quiet` (or
@@ -444,6 +459,38 @@ consumers like McLoop work out of the box without configuration.
 
 McLoop integrates through this surface. See
 `design/orchestra-mcloop-integration-plan.md` for the contract.
+
+### Progress reporting (default-on)
+
+`run_workflow` prints per-state progress to stderr by default, in the
+same format the CLI uses (sequential `[N/M] role (adapter:model) ...
+starting / done in Xs` lines plus parallel-block headers and
+per-completion lines for fan-out groups). This makes library calls
+visible during integration and active testing.
+
+To suppress, pass `quiet=True`:
+
+```python
+result = run_workflow("code_edit", inputs, config, quiet=True)
+```
+
+To install a custom reporter (useful when embedding inside a TUI or a
+log forwarder), pass `progress_callback`:
+
+```python
+from orchestra.progress import ProgressEvent
+
+def my_reporter(event: ProgressEvent) -> None:
+    ...  # your handling
+
+result = run_workflow(
+    "code_edit", inputs, config, progress_callback=my_reporter
+)
+```
+
+`quiet=True` always wins over a passed `progress_callback`. The CLI
+installs its own callback up front so the CLI's `--quiet` flag and
+the library's `quiet=True` argument behave identically end-to-end.
 
 ## Configuration
 

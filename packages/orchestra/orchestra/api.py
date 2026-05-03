@@ -72,7 +72,13 @@ from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.log import LogWriter
-from orchestra.progress import ProgressCallback, ProgressEvent
+from orchestra.progress import (
+    ChildBinding,
+    ProgressCallback,
+    ProgressEvent,
+    silent_reporter,
+    stderr_reporter,
+)
 from orchestra.prompts import build_code_edit_prompt
 from orchestra.registry.registry import (
     ProfileRegistry,
@@ -250,16 +256,40 @@ identities in clear."""
 def _wrap_progress_callback(
     user_callback: ProgressCallback | None,
     role_bindings: dict[str, RoleBinding],
-) -> Callable[[str, str, str | None, int, int, float | None], None] | None:
+) -> Callable[
+    [
+        str,
+        str,
+        str | None,
+        int,
+        int,
+        float | None,
+        tuple[tuple[str, str | None], ...] | None,
+    ],
+    None,
+] | None:
     """Adapt the user-facing ``ProgressCallback`` to the executor's
     callback signature, enriching each event with the resolved adapter
     and model from the role binding.
+
+    For ``fan_out_start`` events the wrapper expands the executor's
+    ``children`` tuple of ``(state_name, role)`` pairs into a tuple of
+    fully populated ``ChildBinding`` records so the reporter does not
+    have to look up bindings a second time.
 
     Returns ``None`` when ``user_callback`` is ``None`` so the
     executor stays in its no-op fast path.
     """
     if user_callback is None:
         return None
+
+    def _resolve(role: str | None) -> tuple[str | None, str | None]:
+        if role is None:
+            return (None, None)
+        binding = role_bindings.get(role)
+        if binding is None:
+            return (None, None)
+        return (binding.adapter, binding.model)
 
     def _inner(
         kind: str,
@@ -268,14 +298,20 @@ def _wrap_progress_callback(
         index: int,
         total: int,
         elapsed_seconds: float | None,
+        children: tuple[tuple[str, str | None], ...] | None = None,
     ) -> None:
-        adapter: str | None = None
-        model: str | None = None
-        if role is not None:
-            binding = role_bindings.get(role)
-            if binding is not None:
-                adapter = binding.adapter
-                model = binding.model
+        adapter, model = _resolve(role)
+        enriched_children: tuple[ChildBinding, ...] | None = None
+        if children is not None:
+            enriched_children = tuple(
+                ChildBinding(
+                    state_name=child_state,
+                    role=child_role,
+                    adapter=_resolve(child_role)[0],
+                    model=_resolve(child_role)[1],
+                )
+                for child_state, child_role in children
+            )
         event = ProgressEvent(
             kind=kind,
             state_name=state_name,
@@ -285,6 +321,7 @@ def _wrap_progress_callback(
             index=index,
             total=total,
             elapsed_seconds=elapsed_seconds,
+            children=enriched_children,
         )
         try:
             user_callback(event)
@@ -294,6 +331,34 @@ def _wrap_progress_callback(
             pass
 
     return _inner
+
+
+def _resolve_progress_callback(
+    user_callback: ProgressCallback | None,
+    quiet: bool,
+) -> ProgressCallback | None:
+    """Apply the library's default-on rule for progress reporting.
+
+    Order of precedence:
+    1. ``quiet=True``: always suppress, even if a user callback was
+       passed. (Caller asked for silence; honor it.)
+    2. ``user_callback`` is not ``None``: use the user's callback.
+    3. Otherwise: install the default ``stderr_reporter()`` so library
+       calls are visible during integration and active testing.
+
+    The CLI installs its own callback up front (``stderr_reporter``
+    by default, ``silent_reporter`` for ``--quiet``) so the
+    ``user_callback is not None`` branch fires for every CLI dispatch.
+    Library callers that want suppression should pass ``quiet=True``;
+    the silent_reporter alternative still installs an event handler
+    that does nothing, which is functionally identical from the
+    reporter's perspective.
+    """
+    if quiet:
+        return silent_reporter()
+    if user_callback is not None:
+        return user_callback
+    return stderr_reporter()
 
 
 def _register_builtin_transforms(reg: ProfileRegistry) -> None:
@@ -778,6 +843,7 @@ def run_workflow(
     project_dir: Path | str | None = None,
     data_root: Path | str | None = None,
     progress_callback: ProgressCallback | None = None,
+    quiet: bool = False,
 ) -> WorkflowRunResult:
     """Execute a configured workflow by name.
 
@@ -788,12 +854,13 @@ def run_workflow(
     via ``backing_options`` and override the role's configured model
     on the actor binding.
 
-    ``progress_callback`` (optional) fires once per ``state_enter`` and
-    once per ``state_exit`` with a fully populated ``ProgressEvent``
-    that includes the resolved adapter and model from the role
-    bindings. The CLI installs a default reporter that prints to
-    stderr; library consumers can pass their own callback or omit the
-    argument to suppress progress.
+    Progress reporting is on by default. Library callers see one line
+    per ``state_enter`` and ``state_exit`` on stderr, plus a
+    parallel-block header and per-completion lines for fan-out groups.
+    Pass ``quiet=True`` to suppress, or pass an explicit
+    ``progress_callback`` to install a custom reporter. The CLI also
+    installs its own callback up front (``stderr_reporter`` by
+    default, ``silent_reporter`` for ``--quiet``).
     """
     if isinstance(config, dict):
         cfg = OrchestraConfig.from_dict(config)
@@ -854,7 +921,10 @@ def run_workflow(
         },
     )
 
-    executor_progress = _wrap_progress_callback(progress_callback, role_bindings)
+    resolved_progress = _resolve_progress_callback(progress_callback, quiet)
+    executor_progress = _wrap_progress_callback(
+        resolved_progress, role_bindings
+    )
     executor = Executor(
         workflow=workflow,
         registry=registry,
@@ -927,6 +997,7 @@ def run_verb(
     *,
     history: str = "",
     progress_callback: ProgressCallback | None = None,
+    quiet: bool = False,
 ) -> str:
     """Run the workflow named by ``verb_name`` and return the answer text.
 
@@ -961,7 +1032,11 @@ def run_verb(
     if "history" in declared:
         inputs["history"] = history
     result = run_workflow(
-        workflow_name, inputs, config, progress_callback=progress_callback
+        workflow_name,
+        inputs,
+        config,
+        progress_callback=progress_callback,
+        quiet=quiet,
     )
     if result.terminal != "done":
         raise WorkflowApiError(

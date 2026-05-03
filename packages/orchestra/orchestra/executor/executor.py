@@ -117,19 +117,34 @@ class Executor:
         # when omitted. The store consults the same instance through
         # set_visibility_index().
         visibility_index: VisibilityIndex | None = None,
-        # Optional per-state progress hook. Fires once per state_enter
-        # and once per state_exit. The callback receives
-        # ``(kind, state_name, role, index, total, elapsed_seconds)``
-        # where ``index`` is the 1-based ordinal of the state's first
-        # entry (retries reuse the same index), ``total`` is the count
-        # of declared states in the workflow, and ``elapsed_seconds``
-        # is ``None`` for ``state_enter`` and the wall-clock duration
-        # for ``state_exit``. The CLI installs a default reporter that
-        # prints to stderr; the api wraps the user-facing
-        # ``progress_callback`` to enrich with adapter and model from
-        # the resolved role bindings.
+        # Optional progress hook. Fires once per ``state_enter`` and
+        # once per ``state_exit`` for sequential states, plus once
+        # per ``fan_out_start`` and once per ``fan_out_end`` for
+        # parallel groups. The callback receives
+        # ``(kind, state_name, role, index, total, elapsed_seconds,
+        # children)`` where ``children`` is a tuple of
+        # ``(child_state_name, child_role)`` pairs on
+        # ``fan_out_start`` and ``None`` otherwise. ``index`` is the
+        # 1-based ordinal of the state's first entry (retries reuse
+        # the same index); for ``fan_out_start`` it is the index of
+        # the first child in the dispatch range. ``total`` is the
+        # count of declared states in the workflow.
+        # ``elapsed_seconds`` is ``None`` for the start events and a
+        # float duration for the exit events. The api wraps the
+        # user-facing ``progress_callback`` to enrich with adapter
+        # and model from the resolved role bindings; the executor
+        # itself only knows the role name.
         progress_callback: Callable[
-            [str, str, str | None, int, int, float | None], None
+            [
+                str,
+                str,
+                str | None,
+                int,
+                int,
+                float | None,
+                tuple[tuple[str, str | None], ...] | None,
+            ],
+            None,
         ] | None = None,
     ) -> None:
         self._wf = workflow
@@ -480,13 +495,17 @@ class Executor:
         kind: str,
         state: StateDecl,
         elapsed_seconds: float | None = None,
+        *,
+        children: tuple[tuple[str, str | None], ...] | None = None,
     ) -> None:
-        """Surface a state_enter or state_exit to the optional callback.
+        """Surface a progress event to the optional callback.
 
         Assigns a stable 1-based index per state name on first entry
-        so retries reuse the same index. Safe to call from worker
-        threads (the index map is guarded). If no callback is set,
-        this is a no-op.
+        so retries reuse the same index. For ``fan_out_start`` the
+        index reported is the next-available index, which the api
+        wrapper renders as the start of a [N-M/total] range. Safe to
+        call from worker threads (the index map is guarded). If no
+        callback is set, this is a no-op.
         """
         if self._progress_callback is None:
             return
@@ -495,6 +514,19 @@ class Executor:
             if index is None:
                 index = len(self._progress_state_indices) + 1
                 self._progress_state_indices[state.name] = index
+            # For a fan-out group, pre-assign indices to every child
+            # so subsequent child state_enter events reuse the same
+            # range and the parallel block stays coherent.
+            if kind == "fan_out_start" and children is not None:
+                next_index = max(self._progress_state_indices.values(), default=0) + 1
+                child_start = next_index
+                for child_name, _child_role in children:
+                    if child_name not in self._progress_state_indices:
+                        self._progress_state_indices[child_name] = next_index
+                        next_index += 1
+                # Report the child range start as the event index so
+                # the reporter can render [child_start-child_end/total].
+                index = child_start
         try:
             self._progress_callback(
                 kind,
@@ -503,6 +535,7 @@ class Executor:
                 index,
                 self._progress_total,
                 elapsed_seconds,
+                children,
             )
         except Exception:
             # The progress callback is for UX only. A misbehaving
@@ -1265,6 +1298,19 @@ class Executor:
                         "error_target": transition.error_target,
                     },
                 )
+        # Surface the parallel-group start to the progress reporter
+        # AFTER the durable log write but BEFORE worker dispatch so
+        # the user sees the parallel header before any per-child
+        # state_enter line. children carries each child's state name
+        # plus its declared role; the api wrapper enriches each pair
+        # with the resolved adapter and model.
+        children_with_roles: tuple[tuple[str, str | None], ...] = tuple(
+            (child_name, self._wf.state(child_name).role)
+            for child_name in transition.fan_out
+        )
+        self._emit_progress(
+            "fan_out_start", parent_state, children=children_with_roles
+        )
 
         registry = _CancellationRegistry()
         for child_name in transition.fan_out:
@@ -1364,6 +1410,11 @@ class Executor:
                 "purged_versions": purged,
             },
         )
+        # Close the parallel block in the progress reporter. The
+        # reporter computes parallel wall-clock from the maximum of
+        # the per-child state_exit elapsed_seconds it observed, so
+        # the executor does not need to compute it here.
+        self._emit_progress("fan_out_end", parent_state)
         return str(target)
 
     def resume_pending_transition(self, state_name: str) -> str:
