@@ -404,6 +404,16 @@ orchestra resume <run_id>
 Useful for custom `.orc` files not named in a verb binding, or for
 debugging.
 
+`orchestra run` and `orchestra resume` cover text, mock model, human,
+and shell states only. Workflows whose states call out to `actor
+agent` (Claude Code agent, Codex agent) or `actor transform` (any
+registered transform such as `anonymize_outputs`) must be invoked
+through the verb surface (`orchestra <verb>`) or through the library
+API (`orchestra.run_workflow`). The direct surface refuses such
+workflows up front with a targeted error naming the offending
+state and kind, so the failure mode is a clear refusal rather than
+an opaque "unknown actor backing" message mid-validation.
+
 ### Help
 
 ```

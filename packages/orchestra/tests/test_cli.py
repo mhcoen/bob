@@ -320,3 +320,139 @@ def test_run_subcommand_still_dispatches(
     rc = cli.main(["run", "single"])
     assert rc == 0
     assert captured["workflow"] == "single"
+
+
+# --------------------------------------------------------------------
+# Direct-execution surface restriction (orchestra run / resume)
+# --------------------------------------------------------------------
+
+
+_AGENT_FIXTURE = """spec 0.1
+workflow agent_only
+  external_input topic text
+  max_total_steps 5
+  agent ag1
+    model some-model
+    adapter claude_code_agent
+    context_policy fresh
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md"
+  state work
+    actor agent ag1
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+
+
+_TRANSFORM_FIXTURE = """spec 0.1
+workflow transform_only
+  external_input topic text
+  max_total_steps 5
+  artifact reply text
+  state work
+    actor transform anonymize_outputs
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+
+
+_TEXT_ONLY_FIXTURE = """spec 0.1
+workflow text_only
+  external_input topic text
+  max_total_steps 5
+  model m1
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md"
+  state work
+    actor model m1
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+
+
+def _write_workflow(tmp_path: Path, body: str) -> Path:
+    tdir = tmp_path / "templates"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "dummy.md").write_text("dummy\n")
+    src = tmp_path / "wf.orc"
+    src.write_text(body)
+    return src
+
+
+def test_reject_unsupported_direct_workflow_flags_agent_states(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = _write_workflow(tmp_path, _AGENT_FIXTURE)
+    rc = cli._reject_unsupported_direct_workflow(src)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "does not support agent or transform" in err
+    assert "work" in err
+    assert "agent" in err
+
+
+def test_reject_unsupported_direct_workflow_flags_transform_states(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src = _write_workflow(tmp_path, _TRANSFORM_FIXTURE)
+    rc = cli._reject_unsupported_direct_workflow(src)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "does not support agent or transform" in err
+    assert "work" in err
+    assert "transform" in err
+
+
+def test_reject_unsupported_direct_workflow_passes_text_only(
+    tmp_path: Path,
+) -> None:
+    src = _write_workflow(tmp_path, _TEXT_ONLY_FIXTURE)
+    assert cli._reject_unsupported_direct_workflow(src) is None
+
+
+def test_cmd_run_rejects_agent_workflow_before_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """End-to-end through cmd_run: an agent workflow must be rejected
+    with the targeted error before load_workflow runs and produces a
+    generic 'unknown actor backing' message."""
+    src = _write_workflow(tmp_path, _AGENT_FIXTURE)
+    called: dict[str, bool] = {"load": False}
+
+    def _trip(*args: object, **kwargs: object) -> object:
+        called["load"] = True
+        raise AssertionError("load_workflow must not be reached")
+
+    monkeypatch.setattr(cli, "load_workflow", _trip)
+
+    args = type(
+        "Args",
+        (),
+        {
+            "workflow": str(src),
+            "input": ["topic=hi"],
+            "data_root": str(tmp_path / "runs"),
+        },
+    )()
+    rc = cli.cmd_run(args)
+    assert rc == 2
+    assert called["load"] is False
+    err = capsys.readouterr().err
+    assert "agent or transform" in err

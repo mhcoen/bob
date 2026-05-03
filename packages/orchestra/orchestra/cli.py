@@ -33,12 +33,25 @@ from orchestra.errors import OrchestraError
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
+from orchestra.loader.parser import parse_workflow
 from orchestra.log import LogWriter
 from orchestra.progress import ProgressCallback, silent_reporter, stderr_reporter
 from orchestra.registry.registry import with_core
 from orchestra.resume import replay_log, run_resume_hooks
 from orchestra.spine import NO_INITIAL, ExternalInputDecl, Workflow
 from orchestra.store import ArtifactStore
+
+# Direct execution surface (``orchestra run`` / ``orchestra resume``)
+# uses ``with_core``, which only registers the mock model, mock human,
+# and mock shell backings plus the identity result parser. Workflows
+# whose states call out to ``actor agent`` (Claude Code agent, Codex
+# agent) or ``actor transform`` (e.g., the anonymize_outputs transform
+# anonymous reviewers depends on) cannot run through this path because
+# their backings and transform implementations are wired up in the
+# verb/library API path, not here. Direct execution is therefore
+# documented and enforced as a text/mock/shell-only surface; verb
+# workflows are how a user invokes agent or transform pipelines.
+_UNSUPPORTED_DIRECT_KINDS: frozenset[str] = frozenset({"agent", "transform"})
 
 _TERMINAL_TARGETS = {"done", "stop"}
 
@@ -106,7 +119,54 @@ def _parse_external_input(decl: ExternalInputDecl, raw: str) -> Any:
     return raw
 
 
+def _reject_unsupported_direct_workflow(
+    workflow_path: Path,
+) -> int | None:
+    """Refuse direct execution of workflows whose states require an
+    actor backing or transform that ``with_core`` does not register.
+
+    Parses the workflow up front (without running validation, which
+    would also fail but with a generic "unknown actor backing"
+    message) and surfaces a targeted error naming the offending state
+    and kind. Returns the exit code on rejection, ``None`` when the
+    workflow is supported and the caller should proceed with
+    ``load_workflow``.
+    """
+    try:
+        with open(workflow_path, encoding="utf-8") as fh:
+            source = fh.read()
+        workflow = parse_workflow(source, Path(workflow_path))
+    except OrchestraError as exc:
+        print(f"orchestra: {exc}", file=sys.stderr)
+        return 2
+    offenders = [
+        (state.name, state.actor.kind)
+        for state in workflow.states
+        if state.actor.kind in _UNSUPPORTED_DIRECT_KINDS
+    ]
+    if not offenders:
+        return None
+    print(
+        "orchestra run does not support agent or transform workflows.",
+        file=sys.stderr,
+    )
+    print(
+        "Direct execution covers text, mock model, human, and shell "
+        "states only. Use the verb/library surface (orchestra <verb> "
+        "or orchestra.run_workflow) for workflows that call out to "
+        "an agent or a registered transform.",
+        file=sys.stderr,
+    )
+    print("Unsupported states in this workflow:", file=sys.stderr)
+    for name, kind in offenders:
+        print(f"  - {name} (actor {kind})", file=sys.stderr)
+    return 2
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    rejection = _reject_unsupported_direct_workflow(Path(args.workflow))
+    if rejection is not None:
+        return rejection
     registry = with_core()
     workflow = load_workflow(args.workflow, registry)
 
@@ -199,6 +259,9 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if not isinstance(workflow_path, str):
         print("run_start record missing workflow_path", file=sys.stderr)
         return 2
+    rejection = _reject_unsupported_direct_workflow(Path(workflow_path))
+    if rejection is not None:
+        return rejection
     external_inputs = run_start.fields.get("external_inputs") or {}
 
     if replay.is_terminal or replay.current_state in _TERMINAL_TARGETS:
