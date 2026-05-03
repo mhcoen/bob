@@ -18,7 +18,12 @@ from typing import Any
 import pytest
 
 from orchestra.errors import ResumeError
-from orchestra.payloads import load_payload, strip_internal, write_payload
+from orchestra.payloads import (
+    load_payload,
+    payload_name_from_invocation,
+    strip_internal,
+    write_payload,
+)
 
 # --------------------------------------------------------------------
 # strip_internal
@@ -86,7 +91,7 @@ def test_strip_internal_returns_a_new_dict() -> None:
 
 def _round_trip(tmp_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     payloads_dir = tmp_path / "payloads"
-    ref = write_payload(payloads_dir, "test-run", 7, payload)
+    ref = write_payload(payloads_dir, "test-run__state__7", payload)
     return load_payload(tmp_path, ref)
 
 
@@ -126,7 +131,7 @@ def test_round_trip_non_ascii_strings(tmp_path: Path) -> None:
 def test_write_payload_strips_internal_keys_on_disk(tmp_path: Path) -> None:
     payloads_dir = tmp_path / "payloads"
     payload = {"output": "hi", "_declared_writes": [{"x": 1}]}
-    ref = write_payload(payloads_dir, "test-run", 3, payload)
+    ref = write_payload(payloads_dir, "test-run__state__3", payload)
     on_disk = json.loads((tmp_path / ref).read_text(encoding="utf-8"))
     assert on_disk == {"output": "hi"}
 
@@ -138,14 +143,14 @@ def test_write_payload_strips_internal_keys_on_disk(tmp_path: Path) -> None:
 
 def test_write_payload_returns_relative_ref(tmp_path: Path) -> None:
     payloads_dir = tmp_path / "payloads"
-    ref = write_payload(payloads_dir, "abc-run", 42, {"k": "v"})
-    assert ref == "payloads/abc-run-42.json"
+    ref = write_payload(payloads_dir, "abc-run__state__42", {"k": "v"})
+    assert ref == "payloads/abc-run__state__42.json"
 
 
 def test_write_payload_creates_payloads_dir_if_missing(tmp_path: Path) -> None:
     payloads_dir = tmp_path / "payloads"
     assert not payloads_dir.exists()
-    write_payload(payloads_dir, "run-1", 1, {"k": "v"})
+    write_payload(payloads_dir, "run-1__s__1", {"k": "v"})
     assert payloads_dir.is_dir()
 
 
@@ -156,7 +161,7 @@ def test_write_payload_uses_sort_keys_true(tmp_path: Path) -> None:
     stable across Python's dict ordering."""
     payloads_dir = tmp_path / "payloads"
     payload = {"zeta": 1, "alpha": 2, "mu": 3}
-    ref = write_payload(payloads_dir, "run-sort", 1, payload)
+    ref = write_payload(payloads_dir, "run-sort__s__1", payload)
     raw = (tmp_path / ref).read_text(encoding="utf-8")
     # Strip the trailing newline for the JSON-only comparison.
     assert raw.endswith("\n")
@@ -173,7 +178,7 @@ def test_write_payload_uses_ensure_ascii_false(tmp_path: Path) -> None:
     stays stable for tooling that grep the payload files by hand."""
     payloads_dir = tmp_path / "payloads"
     payload = {"output": "café"}
-    ref = write_payload(payloads_dir, "run-utf8", 1, payload)
+    ref = write_payload(payloads_dir, "run-utf8__s__1", payload)
     raw_bytes = (tmp_path / ref).read_bytes()
     # Raw UTF-8 emits the multi-byte sequence for é (0xC3 0xA9).
     assert b"caf\xc3\xa9" in raw_bytes
@@ -183,11 +188,27 @@ def test_write_payload_uses_ensure_ascii_false(tmp_path: Path) -> None:
 
 def test_write_payload_trailing_newline(tmp_path: Path) -> None:
     payloads_dir = tmp_path / "payloads"
-    write_payload(payloads_dir, "run-nl", 1, {"k": "v"})
-    raw = (payloads_dir / "run-nl-1.json").read_text(encoding="utf-8")
+    write_payload(payloads_dir, "run-nl__s__1", {"k": "v"})
+    raw = (payloads_dir / "run-nl__s__1.json").read_text(encoding="utf-8")
     assert raw.endswith("\n")
     # Exactly one trailing newline, not two or zero.
     assert not raw.endswith("\n\n")
+
+
+def test_payload_name_from_invocation_replaces_separator() -> None:
+    name = payload_name_from_invocation("abc::framer::1")
+    assert name == "abc__framer__1"
+
+
+def test_payload_name_from_invocation_is_one_to_one() -> None:
+    """Two distinct invocation_ids must produce two distinct payload
+    basenames. Without that, a fan-out group with two children
+    completing concurrently could overwrite each other's payload
+    file."""
+    a = payload_name_from_invocation("run-x::contrarian::1")
+    b = payload_name_from_invocation("run-x::first_principles::1")
+    c = payload_name_from_invocation("run-x::contrarian::2")
+    assert len({a, b, c}) == 3
 
 
 # --------------------------------------------------------------------

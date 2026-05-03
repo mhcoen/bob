@@ -62,8 +62,8 @@ from orchestra.errors import ExecutorError
 from orchestra.executor import guards
 from orchestra.executor.guards import GuardContext
 from orchestra.log import LogWriter
+from orchestra.payloads import payload_name_from_invocation, write_payload
 from orchestra.payloads import strip_internal as _strip_internal
-from orchestra.payloads import write_payload
 from orchestra.registry import ProfileRegistry
 from orchestra.spine import (
     Envelope,
@@ -355,7 +355,7 @@ class Executor:
         # follows. A crash between the two leaves a payload without a
         # log reference, which is acceptable. The reverse order would
         # leave a log reference with no payload, which is not.
-        payload_ref = self._write_payload(self._log.next_seq, payload)
+        payload_ref = self._write_payload(invocation_id, payload)
         self._log.write(
             "actor_invoke_end",
             state_id=state.name,
@@ -640,7 +640,7 @@ class Executor:
                 out[r] = {"value": None, "__version_id": ""}
         return out
 
-    def _write_payload(self, seq: int, payload: dict[str, Any]) -> str:
+    def _write_payload(self, invocation_id: str, payload: dict[str, Any]) -> str:
         """Persist a payload to disk with fsync.
 
         Caller treats this as a durability boundary: the payload file
@@ -649,9 +649,17 @@ class Executor:
         at a missing payload. The on-disk encoding is shared with the
         replay-side loader in ``orchestra.payloads`` so resume's
         envelope-hydration path consumes the same format.
+
+        The filename is derived from ``invocation_id`` rather than
+        from the log writer's mutable ``seq`` counter so two fan-out
+        children completing concurrently cannot collide on the same
+        payload file. Each invocation's invocation_id is unique within
+        a run.
         """
         return write_payload(
-            self._payloads_dir, self._run_id, seq, payload
+            self._payloads_dir,
+            payload_name_from_invocation(invocation_id),
+            payload,
         )
 
     def _derive_outcome(
@@ -2057,7 +2065,7 @@ class Executor:
         # invoke), we also do not write ``actor_invoke_end`` and skip
         # ``_write_payload``: there is no payload to record.
         if prepared is not None and not cancelled_post_register:
-            payload_ref = self._write_payload(self._log.next_seq, payload)
+            payload_ref = self._write_payload(invocation_id, payload)
             self._log.write(
                 "actor_invoke_end",
                 state_id=state.name,

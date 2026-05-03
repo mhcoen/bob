@@ -3602,3 +3602,123 @@ def test_resume_after_fan_out_end_does_not_double_count_parent_step(
         f"step counts diverged: live={live_step_counts}, "
         f"resumed={resumed_step_counts}; resume must not double-count"
     )
+
+
+def test_fan_out_payload_files_do_not_collide_under_barrier(
+    tmp_path: Path,
+) -> None:
+    """Three children released simultaneously must each land in a
+    distinct payload file, even when their actor invocations finish
+    at the same instant.
+
+    The pre-fix implementation derived the payload filename from
+    ``LogWriter.next_seq``. Two children that reached the
+    actor_invoke_end window concurrently could both read the same
+    seq value, both write ``<run_id>-<seq>.json``, and let the
+    later write clobber the earlier one. The two log records still
+    landed under the writer's lock with distinct seqs, so the log
+    looked clean while one child's payload had been overwritten.
+
+    This test forces the concurrency by holding all three children at
+    a barrier inside ``invoke()`` and releasing them as a group, so
+    the actor_invoke_end / payload_write window overlaps. The
+    assertions cover the durable artifacts a guard or replay would
+    consult: distinct filenames, distinct file contents, and three
+    state_exit records each pointing at a payload file that exists
+    and contains that child's payload.
+    """
+    import json
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    workflow_path = _fan_out_fixture_workflow(tmp_path)
+    registry = with_core()
+    workflow = load_workflow(workflow_path, registry)
+
+    barrier = threading.Barrier(3)
+    invoke_index = 0
+    invoke_index_lock = threading.Lock()
+
+    class _Barrier(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            nonlocal invoke_index
+            model_id = prepared.summary.get("model")
+            if model_id in {"m_a", "m_b", "m_c"}:
+                # Stamp a unique marker so we can prove which child
+                # owns which payload file after the run.
+                with invoke_index_lock:
+                    my_idx = invoke_index
+                    invoke_index += 1
+                # Block all three children at the barrier so their
+                # post-invoke write window opens at the same instant
+                # in three threads.
+                barrier.wait(timeout=10)
+                base = super().invoke(prepared)
+                base["_barrier_marker"] = f"{model_id}::{my_idx}"
+                # The marker key starts with ``_`` and is therefore
+                # stripped by ``write_payload`` before it lands on
+                # disk. Use a non-internal key for the durable check.
+                base["barrier_marker"] = f"{model_id}::{my_idx}"
+                return base
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Barrier()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(workflow_path)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello world"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+    assert terminal == "done"
+
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    child_exits = [
+        r for r in records
+        if r.event == "state_exit"
+        and r.state_id in {"advise_a", "advise_b", "advise_c"}
+    ]
+    assert len(child_exits) == 3, (
+        f"expected one state_exit per child, got "
+        f"{[(r.state_id, r.fields.get('outcome')) for r in child_exits]}"
+    )
+
+    payload_refs = {r.state_id: r.fields["payload_ref"] for r in child_exits}
+    assert len(set(payload_refs.values())) == 3, (
+        f"payload_refs collided across children: {payload_refs}"
+    )
+    for state_id, ref in payload_refs.items():
+        assert isinstance(ref, str) and ref
+        path = run_dir / ref
+        assert path.exists(), f"{state_id}: payload file missing at {path}"
+        body = json.loads(path.read_text(encoding="utf-8"))
+        marker = body.get("barrier_marker")
+        assert isinstance(marker, str)
+        # Marker prefix encodes the model_id; the model_id maps 1-to-1
+        # to a child name, so we can pin which payload belongs to
+        # which child.
+        expected_model = {
+            "advise_a": "m_a",
+            "advise_b": "m_b",
+            "advise_c": "m_c",
+        }[state_id]
+        assert marker.startswith(expected_model + "::"), (
+            f"{state_id}: payload at {ref} carries marker {marker!r}, "
+            f"expected one starting with {expected_model!r} "
+            f"(payload was overwritten by a concurrent sibling)"
+        )

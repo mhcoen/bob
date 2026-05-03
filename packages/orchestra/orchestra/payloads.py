@@ -26,24 +26,45 @@ def strip_internal(payload: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in payload.items() if not k.startswith("_")}
 
 
+def payload_name_from_invocation(invocation_id: str) -> str:
+    """Derive a filesystem-safe payload basename from an invocation_id.
+
+    ``invocation_id`` is ``run_id::state_name::attempt_seq``; the
+    ``::`` separator is replaced with ``__`` so the resulting basename
+    is safe on every filesystem the runner targets and the parts
+    remain visually delimited for diagnostic use. The mapping is
+    one-to-one for any well-formed invocation_id (run_id and
+    state_name reject ``::``), so two distinct invocations produce
+    two distinct payload files.
+    """
+    return invocation_id.replace("::", "__")
+
+
 def write_payload(
     payloads_dir: Path,
-    run_id: str,
-    seq: int,
+    payload_name: str,
     payload: dict[str, Any],
 ) -> str:
     """Persist the payload to disk with fsync. Returns the
     ``payload_ref`` (relative to the run directory) that the log
     record stores.
+
+    ``payload_name`` must uniquely identify the invocation that
+    produced ``payload``; callers in the executor pass
+    ``payload_name_from_invocation(invocation_id)``. Decoupling the
+    filename from the log writer's mutable ``seq`` counter eliminates
+    the fan-out race in which two children could read the same
+    ``next_seq`` and race-overwrite each other's payload file before
+    either had its log record written.
     """
     payloads_dir.mkdir(parents=True, exist_ok=True)
-    payload_path = payloads_dir / f"{run_id}-{seq}.json"
+    payload_path = payloads_dir / f"{payload_name}.json"
     with open(payload_path, "w", encoding="utf-8") as fh:
         json.dump(strip_internal(payload), fh, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
         fh.flush()
         os.fsync(fh.fileno())
-    return f"payloads/{run_id}-{seq}.json"
+    return f"payloads/{payload_name}.json"
 
 
 def load_payload(run_dir: Path, payload_ref: str) -> dict[str, Any]:
