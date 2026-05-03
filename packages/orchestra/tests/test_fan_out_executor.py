@@ -3758,6 +3758,170 @@ def test_fan_out_payload_files_do_not_collide_under_barrier(
         )
 
 
+def test_fan_out_child_guard_reads_attempts_from_snapshot_not_live(
+    tmp_path: Path,
+) -> None:
+    """Pass-6 fix: a fan-out child guard that references
+    ``attempts.<sibling>`` must read the snapshot value captured at
+    fan_out_start, not the live ``self._attempts`` dict that
+    sibling threads are mutating.
+
+    Pre-fix, _select_transition_decl used live self._attempts /
+    self._retries / self._envelopes for guard evaluation even when a
+    snapshot was supplied; only artifacts came from the snapshot. So
+    ``on error when attempts.slow > 0 => stop`` followed by
+    ``on error retry max 1 then stop`` would route or retry based
+    on whether the sibling thread had already entered ``slow`` and
+    incremented ``self._attempts['slow']``. Post-fix the snapshot
+    holds attempts/retries as well, and the current child's own
+    counters are layered on top so self-references still work.
+
+    Construct a synthetic FanOutSnapshot with attempts.slow == 0
+    while the live executor's _attempts['slow'] is 5; the guard
+    evaluation must see 0.
+    """
+    from orchestra.executor.executor import (
+        Executor,
+        FanOutSnapshot,
+        new_run_id,
+    )
+    from orchestra.spine import Envelope
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow guard_check
+  external_input topic text
+  max_total_steps 10
+  model m_parent
+  model m_fast
+  model m_slow
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact fast_out text
+  artifact slow_out text
+  artifact joined text
+  artifact aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role r
+    reads topic
+    writes parent_out text
+    on complete fan_out [fast, slow] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state fast
+    actor model m_fast
+    role r
+    reads topic
+    writes fast_out text
+    on complete => done
+    on error when attempts.slow > 0 => stop
+    on error retry max 1 then stop
+    on timeout => stop
+  state slow
+    actor model m_slow
+    role r
+    reads topic
+    writes slow_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role r
+    reads fast_out, slow_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+
+    # Simulate the live state a sibling thread might leave behind:
+    # slow has already been entered five times in the live counters.
+    executor._attempts["slow"] = 5
+    executor._retries["slow"] = 4
+    # The fast child has just run once and produced an error envelope.
+    executor._attempts["fast"] = 1
+
+    fast_state = workflow.state("fast")
+    fast_envelope = Envelope(
+        state_id="fast",
+        attempt=1,
+        actor_binding={},
+        status="error",
+        outcome="error",
+        started_at="",
+        ended_at="",
+        duration_ms=0,
+        inputs_read=[],
+        artifacts_written=[],
+        payload={},
+        error=None,
+    )
+
+    # The snapshot reflects pre-fan-out state: nobody has entered yet.
+    snapshot = FanOutSnapshot(
+        envelopes={},
+        artifacts={},
+        attempts={"fast": 0, "slow": 0},
+        retries={"fast": 0, "slow": 0},
+    )
+
+    selected = executor._select_transition_decl(
+        fast_state, fast_envelope, snapshot=snapshot
+    )
+    # Pre-fix: live attempts.slow == 5 satisfies ``> 0``, so the
+    # first transition (=> stop) wins and selected.target == "stop"
+    # with retry_max == None. The fast child does NOT retry.
+    # Post-fix: snapshot attempts.slow == 0 fails ``> 0``, so the
+    # guard skips that transition and the next match is the retry
+    # transition (retry_max == 1) with target == "stop". The fast
+    # child retries once.
+    assert selected is not None
+    assert selected.outcome == "error"
+    assert selected.retry_max == 1, (
+        "snapshot attempts.slow == 0 should fail the > 0 guard, "
+        "letting selection fall through to the retry transition. "
+        "Pre-fix selected would lack retry_max because the live "
+        "_attempts['slow']=5 satisfied the guard."
+    )
+
+    log.close()
+    store.close()
+
+
 def test_fan_out_child_retry_respects_first_match_transition(
     tmp_path: Path,
 ) -> None:

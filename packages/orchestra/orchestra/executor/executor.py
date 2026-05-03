@@ -960,36 +960,62 @@ class Executor:
         string.
 
         ``snapshot`` is supplied by the fan-out child path so the
-        guard context sees the same artifact values the child
-        evaluated against during invocation. Reading the live store
-        from a worker thread would break snapshot isolation; the
-        invariant is checked by
+        guard context sees the same view of pre-fan-out state every
+        sibling sees. Pass-6 fix: when a snapshot is supplied, every
+        sibling-visible field (artifacts, envelopes, attempts,
+        retries) comes from the snapshot, not from the live executor
+        state. The current child's own envelope is layered on top so
+        self-envelope guards still see the just-completed
+        invocation; the current child's own attempts/retries also
+        come from the live counters because the child has already
+        observed its own counter increment in
+        ``_execute_state_body``. Reading the live store or the live
+        counter dicts for siblings from a worker thread would break
+        the snapshot-isolation invariant pinned by
         ``tests/test_fan_out_executor::test_fan_out_sibling_reads_use_snapshot_not_live_store``.
         """
         artifact_values: dict[str, Any] = {}
+        attempts: dict[str, int]
+        retries: dict[str, int]
+        envelope_views: dict[str, dict[str, Any]]
         if snapshot is not None:
             for art in self._wf.artifacts:
                 if art.name in snapshot.artifacts:
                     artifact_values[art.name] = snapshot.artifacts[art.name]
                 else:
                     artifact_values[art.name] = None
+            attempts = dict(snapshot.attempts)
+            retries = dict(snapshot.retries)
+            with self._attempt_lock:
+                attempts[state.name] = self._attempts.get(state.name, 0)
+                retries[state.name] = self._retries.get(state.name, 0)
+            envelope_views = dict(snapshot.envelopes)
+            envelope_views[state.name] = {
+                "outcome": envelope.outcome,
+                "status": envelope.status,
+                "duration_ms": envelope.duration_ms,
+                "attempt": envelope.attempt,
+                "payload": envelope.payload,
+            }
         else:
             for art in self._wf.artifacts:
                 v = self._store.read_latest(art.name)
                 artifact_values[art.name] = v.value if v else None
-        envelope_views = {
-            name: {
-                "outcome": e.outcome,
-                "status": e.status,
-                "duration_ms": e.duration_ms,
-                "attempt": e.attempt,
-                "payload": e.payload,
+            attempts = self._attempts
+            retries = self._retries
+            envelope_views = {
+                name: {
+                    "outcome": e.outcome,
+                    "status": e.status,
+                    "duration_ms": e.duration_ms,
+                    "attempt": e.attempt,
+                    "payload": e.payload,
+                }
+                for name, e in self._envelopes.items()
             }
-            for name, e in self._envelopes.items()
-        }
         ctx = GuardContext(
-            attempts=self._attempts,
-            retries=self._retries,
+            attempts=attempts,
+            retries=retries,
             external_inputs=self._external,
             artifacts=artifact_values,
             envelopes=envelope_views,
@@ -1320,6 +1346,14 @@ class Executor:
                     v = self._store.read_latest(art.name)
                     if v is not None:
                         snapshot_artifacts[art.name] = v.value
+                # Pass-6 fix: capture attempts and retries at
+                # fan_out_start so child guards see deterministic
+                # sibling-counter values, not whatever the live
+                # _attempts/_retries dicts hold by the time a worker
+                # thread evaluates its transition.
+                with self._attempt_lock:
+                    snapshot_attempts = dict(self._attempts)
+                    snapshot_retries = dict(self._retries)
                 self._log.write(
                     "fan_out_start",
                     state_id=parent_state.name,
@@ -1370,6 +1404,8 @@ class Executor:
                     registry,
                     snapshot_envelopes,
                     snapshot_artifacts,
+                    snapshot_attempts,
+                    snapshot_retries,
                 )
                 futures[child_name] = fut
 
@@ -1570,6 +1606,21 @@ class Executor:
                         # across resume.
                         continue
                     snapshot_artifacts[art.name] = v.value
+                # Pass-6 fix: same counter snapshot as the live path,
+                # excluding the completed siblings' counters so a
+                # pending child's guard cannot read sibling state via
+                # attempts.<sibling> or retries.<sibling>.
+                with self._attempt_lock:
+                    snapshot_attempts = {
+                        n: v
+                        for n, v in self._attempts.items()
+                        if n not in excluded_sibling_names
+                    }
+                    snapshot_retries = {
+                        n: v
+                        for n, v in self._retries.items()
+                        if n not in excluded_sibling_names
+                    }
             self._log.write(
                 "fan_out_resume",
                 state_id=parent_state.name,
@@ -1666,6 +1717,8 @@ class Executor:
                         registry,
                         snapshot_envelopes,
                         snapshot_artifacts,
+                        snapshot_attempts,
+                        snapshot_retries,
                     )
                     futures[child_name] = fut
 
@@ -1765,6 +1818,8 @@ class Executor:
         registry: _CancellationRegistry,
         snapshot_envelopes: dict[str, dict[str, Any]],
         snapshot_artifacts: dict[str, Any],
+        snapshot_attempts: dict[str, int],
+        snapshot_retries: dict[str, int],
     ) -> Envelope:
         """Run one fan-out child to a durable ``state_exit``.
 
@@ -1796,6 +1851,8 @@ class Executor:
         snapshot = FanOutSnapshot(
             envelopes=dict(snapshot_envelopes),
             artifacts=dict(snapshot_artifacts),
+            attempts=dict(snapshot_attempts),
+            retries=dict(snapshot_retries),
         )
         state = self._wf.state(child_name)
         if state.actor.kind == "transform":
@@ -2371,12 +2428,24 @@ class FanOutSnapshot:
     """Immutable read-only view a fan-out child sees of pre-fan-out
     state. Captured atomically under the LogWriter-then-store
     lock-ordering rule. Children consume the snapshot for prompt
-    resolution and ``reads`` clauses; live ``read_latest`` calls
-    against the store from inside a fan-out child are forbidden so
-    siblings cannot leak each other's writes."""
+    resolution, ``reads`` clauses, and transition guard evaluation;
+    live ``read_latest`` calls against the store from inside a
+    fan-out child are forbidden so siblings cannot leak each other's
+    writes.
+
+    ``attempts`` and ``retries`` are the per-state counter dicts as
+    they stood at fan_out_start. The audit's pass-6 finding showed
+    that without them, a fan-out child guard like
+    ``on error when attempts.<sibling> > 0 => stop`` reads
+    ``self._attempts`` directly and the routing becomes dependent on
+    sibling thread scheduling. Snapshotting the counter dicts at
+    fan_out_start makes the read deterministic.
+    """
 
     envelopes: dict[str, dict[str, Any]]
     artifacts: dict[str, Any]
+    attempts: dict[str, int]
+    retries: dict[str, int]
 
 
 @dataclass

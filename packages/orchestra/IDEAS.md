@@ -47,3 +47,38 @@ resume is unsupported, and provide `retry` as the supported path for
 Status: backlog. The pass-2 audit shipped a conservative refuse-resume
 for agent states with stranded commits (commit c55650e). This idea
 extends the framing to the broader resume-vs-retry distinction.
+
+
+## Fan-out child guard scope: snapshot-fully vs forbid-in-grammar
+
+The pass-6 audit identified that fan-out child transition guards can
+reference sibling and other-state counters (`attempts.<state>`,
+`retries.<state>`) and other-state envelopes. The pass-6 fix makes
+those references read from a snapshot captured at fan_out_start, so
+the routing decision is deterministic regardless of sibling thread
+scheduling.
+
+Open grammar question: should fan-out child guards be allowed to
+reference sibling state at all? Two paths:
+
+1. **Snapshot-fully (current).** The guard sees a frozen view of
+   pre-fan-out counters and envelopes. Deterministic, matches the
+   existing snapshot pattern for artifact reads, requires no grammar
+   change. The shipped fix.
+
+2. **Forbid-in-grammar.** The validator rejects fan-out child guards
+   that reference any state other than self/counters. Structurally
+   cleaner because it prevents authors from writing routing that
+   _looks_ like it depends on sibling progress (it never can, given
+   snapshot semantics). May break workflows that already use these
+   refs deliberately — though the codebase ships no such workflow
+   today.
+
+Recommendation pending decision: keep the snapshot-fully behavior,
+revisit if a real workflow surfaces that wants the cross-state
+reference and the snapshot semantics are too surprising. If grammar
+restriction wins later, the validator change is small (extend the
+existing fan-out child rule in `_phase5_state_validation`).
+
+Status: backlog. Pass-6 fix landed snapshot-fully via commit
+extending FanOutSnapshot with attempts and retries.
