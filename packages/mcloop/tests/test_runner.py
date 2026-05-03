@@ -687,6 +687,7 @@ def test_run_task_prompt_includes_accessibility_instruction(tmp_path):
             cli="claude",
             project_dir=tmp_path,
             log_dir=log_dir,
+            allowed_tools="Read,Edit,Write",
         )
 
     prompt = captured_prompt["prompt"]
@@ -723,6 +724,7 @@ def test_run_task_prompt_notes_three_sections(tmp_path):
             cli="claude",
             project_dir=tmp_path,
             log_dir=log_dir,
+            allowed_tools="Read,Edit,Write",
         )
 
     prompt = captured_prompt["prompt"]
@@ -755,6 +757,7 @@ def test_run_task_prompt_includes_wrap_marker_instruction(tmp_path):
             cli="claude",
             project_dir=tmp_path,
             log_dir=log_dir,
+            allowed_tools="Read,Edit,Write",
         )
 
     prompt = captured_prompt["prompt"]
@@ -785,6 +788,7 @@ def test_run_task_accessibility_instruction_present_for_non_ui_task(tmp_path):
             cli="claude",
             project_dir=tmp_path,
             log_dir=log_dir,
+            allowed_tools="Read,Edit,Write",
         )
 
     prompt = captured_prompt["prompt"]
@@ -911,7 +915,14 @@ def test_run_task_passes_allowed_tools(tmp_path):
 
 
 def test_run_task_default_tools_not_passed(tmp_path):
-    """run_task does not pass allowed_tools when not specified."""
+    """run_task does not pass allowed_tools when not specified.
+
+    Pins the legacy path's default-tools contract. Force the
+    code_edit wrapper to the direct backend so the legacy
+    ``_build_command`` call site is reached; without the patch the
+    wrapper would route through orchestra (which uses its own
+    command builder) and the legacy contract would not fire here.
+    """
     log_dir = tmp_path / "logs"
     captured_kwargs = {}
 
@@ -920,6 +931,7 @@ def test_run_task_default_tools_not_passed(tmp_path):
         return ["echo", "done"]
 
     with (
+        patch("mcloop.code_edit._select_backend", return_value="direct"),
         patch("mcloop.runner._build_command", side_effect=fake_build_command),
         patch("mcloop.runner._run_session", return_value=("", 0)),
         patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
@@ -1418,6 +1430,7 @@ def test_run_task_eliminated_appends_ruled_out_block(tmp_path):
             project_dir,
             log_dir,
             eliminated=eliminated,
+            allowed_tools="Read,Edit,Write",
         )
         # The prompt passed to _build_command -> _run_session should
         # contain the ruled-out block
@@ -1441,6 +1454,7 @@ def test_run_task_no_eliminated_no_block(tmp_path):
             "claude",
             project_dir,
             log_dir,
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1463,6 +1477,7 @@ def test_run_task_uses_normal_prompt_without_prior_errors(tmp_path):
             "claude",
             project_dir,
             log_dir,
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1492,6 +1507,7 @@ def test_run_task_uses_bug_prompt_with_prior_errors(tmp_path):
             project_dir,
             log_dir,
             prior_errors="TypeError: 'NoneType' is not subscriptable",
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1521,6 +1537,7 @@ def test_normal_prompt_includes_only_run_check_commands(tmp_path):
             "claude",
             project_dir,
             log_dir,
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1544,6 +1561,7 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
             project_dir,
             log_dir,
             prior_errors="test failure",
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1559,6 +1577,7 @@ def test_bug_prompt_excludes_only_run_check_commands(tmp_path):
             log_dir,
             prior_errors="test failure",
             check_commands=["pytest"],
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1583,6 +1602,7 @@ def test_bug_prompt_errors_before_task(tmp_path):
             project_dir,
             log_dir,
             prior_errors="ruff check failed",
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1606,6 +1626,7 @@ def test_bug_prompt_includes_shared_instructions(tmp_path):
             log_dir,
             prior_errors="test failure",
             check_commands=["ruff check .", "pytest"],
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
@@ -1635,6 +1656,7 @@ def test_check_commands_included_when_provided(tmp_path):
             project_dir,
             log_dir,
             check_commands=cmds,
+            allowed_tools="Read,Edit,Write",
         )
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
@@ -1651,6 +1673,7 @@ def test_check_commands_included_when_provided(tmp_path):
             log_dir,
             check_commands=cmds,
             is_bug_task=True,
+            allowed_tools="Read,Edit,Write",
         )
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
@@ -1666,6 +1689,7 @@ def test_check_commands_included_when_provided(tmp_path):
             log_dir,
             prior_errors="AssertionError",
             check_commands=cmds,
+            allowed_tools="Read,Edit,Write",
         )
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
@@ -1685,6 +1709,7 @@ def test_check_commands_omitted_when_not_provided(tmp_path):
             "claude",
             project_dir,
             log_dir,
+            allowed_tools="Read,Edit,Write",
         )
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS" not in prompt
@@ -1697,6 +1722,7 @@ def test_check_commands_omitted_when_not_provided(tmp_path):
             project_dir,
             log_dir,
             check_commands=[],
+            allowed_tools="Read,Edit,Write",
         )
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS" not in prompt
@@ -1717,6 +1743,7 @@ def test_bug_prompt_with_eliminated(tmp_path):
             log_dir,
             prior_errors="test failure",
             eliminated=["[RULEDOUT] tried restart"],
+            allowed_tools="Read,Edit,Write",
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
