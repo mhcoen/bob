@@ -1200,6 +1200,232 @@ workflow x
     assert wf.name == "x"
 
 
+def test_nested_fan_out_rejected(tmp_path):
+    """A fan-out child cannot itself declare a fan_out. The executor
+    only dispatches a child's body and local retry; a nested fan_out
+    on a child would be silently skipped, never running the inner
+    group."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_p
+  model m_a
+  model m_g
+  model m_j
+  model m_abort
+  model m_inner_abort
+  artifact p_out text
+  artifact a_out text
+  artifact g_out text
+  artifact j_out text
+  artifact aborted text
+  artifact inner_aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_p
+    role r
+    reads topic
+    writes p_out text
+    on complete fan_out [a] join j on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role r
+    reads topic
+    writes a_out text
+    on complete fan_out [grand] join inner_join on error inner_abort
+    on error => stop
+    on timeout => stop
+  state grand
+    actor model m_g
+    role r
+    reads topic
+    writes g_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state inner_join
+    actor model m_g
+    role r
+    reads topic
+    writes g_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state inner_abort
+    actor model m_inner_abort
+    role r
+    reads topic
+    writes inner_aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+  state j
+    actor model m_j
+    role r
+    reads topic
+    writes j_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "fan_out" in msg
+    assert "'a'" in msg or "a:" in msg.lower() or "a " in msg
+
+
+def test_fan_out_child_with_non_terminal_target_rejected(tmp_path):
+    """A fan-out child whose ``on complete`` routes to another
+    declared state (not done, stop, or itself) would have its
+    transition silently skipped by the executor. The validator
+    rejects so the would-be-skipped state surfaces at load time."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_p
+  model m_a
+  model m_succ
+  model m_j
+  model m_abort
+  artifact p_out text
+  artifact a_out text
+  artifact succ_out text
+  artifact j_out text
+  artifact aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_p
+    role r
+    reads topic
+    writes p_out text
+    on complete fan_out [a] join j on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role r
+    reads topic
+    writes a_out text
+    on complete => succ
+    on error => stop
+    on timeout => stop
+  state succ
+    actor model m_succ
+    role r
+    reads topic
+    writes succ_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state j
+    actor model m_j
+    role r
+    reads topic
+    writes j_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "non-terminal" in msg
+    assert "succ" in msg
+
+
+def test_fan_out_child_with_local_retry_loads(tmp_path):
+    """A fan-out child with `on error retry max N then stop` is OK.
+    The retry path stays inside the child; the terminal target after
+    retries exhaust is `stop`. Both are within the rule."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 30
+  model m_p
+  model m_a
+  model m_j
+  model m_abort
+  artifact p_out text
+  artifact a_out text
+  artifact j_out text
+  artifact aborted text
+  role r
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_p
+    role r
+    reads topic
+    writes p_out text
+    on complete fan_out [a] join j on error abort_state
+    on error => stop
+    on timeout => stop
+  state a
+    actor model m_a
+    role r
+    reads topic
+    writes a_out text
+    on complete => done
+    on error retry max 2 then stop
+    on timeout => stop
+  state j
+    actor model m_j
+    role r
+    reads topic
+    writes j_out text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role r
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
 def test_dominator_check_accepts_anonymous_reviewers_workflow():
     """Same regression guard for ask_anonymous_reviewers, which has
     a more elaborate fan-out plus transform shape than council. The

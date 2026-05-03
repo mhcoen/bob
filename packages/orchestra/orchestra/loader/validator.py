@@ -274,6 +274,55 @@ def _phase5_state_validation(
                                 "the same artifact are not permitted"
                             )
                         seen_writes[w.name] = child_decl.name
+                # Pass-3 fix #1: a fan-out child's transition graph is
+                # not dispatched by the executor. The child worker
+                # runs the child's body plus local retry handling and
+                # returns; the controller then routes the PARENT to
+                # the join target on success or to the error_target on
+                # failure. Two child-shape categories are silently
+                # discarded if a workflow declares them:
+                #   - nested fan_out on a child (the child cannot run
+                #     its own fan_out group),
+                #   - any child transition whose target is neither
+                #     ``done``, ``stop``, nor the child itself (local
+                #     retry routes back to self).
+                # Both are rejected here with a clear message so
+                # workflow authors see the rule at load time instead of
+                # discovering missing states after a run.
+                _TERMINAL_CHILD_TARGETS = {"done", "stop"}
+                for child_decl in child_decls:
+                    for child_t in child_decl.transitions:
+                        if child_t.is_fan_out():
+                            raise ValidationError(
+                                f"state {child_decl.name!r}: fan_out "
+                                "child cannot itself declare a "
+                                "'fan_out' transition. Nested fan-out "
+                                "violates the rule that a state cannot "
+                                "appear inside its own execution "
+                                "scope. The executor would silently "
+                                "skip the inner group; restructure the "
+                                "workflow so each fan-out runs at the "
+                                "top level."
+                            )
+                        if child_t.target == child_decl.name:
+                            # Local retry: child routes back to itself
+                            # until retries exhaust. The executor
+                            # handles this branch.
+                            continue
+                        if child_t.target in _TERMINAL_CHILD_TARGETS:
+                            continue
+                        raise ValidationError(
+                            f"state {child_decl.name!r}: fan_out "
+                            f"child transition 'on {child_t.outcome} "
+                            f"=> {child_t.target}' targets a "
+                            "non-terminal state. The executor only "
+                            "dispatches the child's body and local "
+                            "retry; routing through the child's "
+                            "transition graph is silently skipped. "
+                            "Use 'done' or 'stop' as the target, or "
+                            "fold the downstream state into the "
+                            "fan-out parent's join graph."
+                        )
 
         # Per design rule 9 plus the success-outcome rule: every
         # outcome the executor could derive must have a matching
