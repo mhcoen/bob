@@ -63,6 +63,23 @@ def _phase3_declaration_resolution(
             raise ValidationError(
                 f"artifact {art.name!r}: unknown type {art.type!r}"
             )
+        if art.source_kind is not None:
+            # ``source file`` and ``source path`` qualifiers parse and
+            # are exposed on ArtifactDecl, but the store's declare()
+            # only materializes ``initial``; nothing reads the source
+            # at run start, so a state reading a source-backed
+            # artifact gets None silently. Reject the qualifier here
+            # until the store-side initialization lands so workflows
+            # cannot be loaded under the impression that the source
+            # data will be present.
+            raise ValidationError(
+                f"artifact {art.name!r}: 'source {art.source_kind}' "
+                "qualifier is not implemented; the store materializes "
+                "only 'initial' values today, so any state reading "
+                "this artifact would receive None at run time. Use "
+                "'initial' or remove the source clause until source "
+                "loading lands."
+            )
     source_dir = Path(workflow.source_dir)
     for state in workflow.states:
         if state.prompt is None:
@@ -258,22 +275,53 @@ def _phase5_state_validation(
                             )
                         seen_writes[w.name] = child_decl.name
 
-        # Per design rule 9: model and shell backings need both
-        # 'on error' and 'on timeout'; human (choice gate) backings
-        # only need 'on timeout'. Transform states are synchronous
-        # pure functions and cannot time out, so they require only
-        # 'on error'.
+        # Per design rule 9 plus the success-outcome rule: every
+        # outcome the executor could derive must have a matching
+        # transition, otherwise the state would invoke its actor,
+        # write payloads and artifacts, emit state_exit, and only then
+        # crash with "no transition matched outcome" with side effects
+        # already on disk.
+        #
+        # Failure outcomes (executor's _derive_outcome can return
+        # these for any actor backing other than the special-case
+        # branches): error and timeout. Human gates cannot fail with
+        # 'error' because the choice gate can only return a chosen
+        # option, 'cancelled', or 'timeout'; transforms cannot 'time
+        # out' because they are synchronous pure functions.
         required_outcomes: tuple[str, ...]
         if state.actor.kind == "human":
             required_outcomes = ("timeout",)
         elif state.actor.kind == "transform":
-            required_outcomes = ("error",)
+            required_outcomes = ("complete", "error")
+        elif state.actor.kind == "shell":
+            required_outcomes = ("error", "timeout", "pass", "fail")
         else:
             required_outcomes = ("error", "timeout")
         for required in required_outcomes:
             if required not in seen_outcomes:
                 raise ValidationError(
                     f"state {state.name!r}: missing 'on {required}' transition"
+                )
+
+        # Model and agent states must also handle the success path.
+        # The executor's _derive_outcome returns the payload's verdict
+        # when present, otherwise 'complete'. A state that declares no
+        # outcome other than error/timeout/cancelled has no branch for
+        # any success path the executor can derive, so a successful
+        # invocation would crash on "no transition matched outcome"
+        # after the actor had already run. Require at least one
+        # transition whose outcome is not a failure outcome; that
+        # branch covers either 'complete' (default) or a verdict-based
+        # outcome (schema-backed states).
+        if state.actor.kind in ("model", "agent"):
+            failure_outcomes = {"error", "timeout", "cancelled"}
+            non_failure = seen_outcomes - failure_outcomes
+            if not non_failure:
+                raise ValidationError(
+                    f"state {state.name!r}: missing a success transition; "
+                    f"{state.actor.kind} states must declare 'on complete' "
+                    "or a verdict-based outcome so the executor can route "
+                    "after a successful invocation"
                 )
 
         if state.actor.kind == "human":
@@ -475,30 +523,67 @@ def _collect_refs(expr: GuardExpr) -> list[Reference]:
 
 
 def _phase6_dataflow(workflow: Workflow) -> None:
-    """Every artifact a state reads must be writable by some path:
-    declared with `initial` (any value, including null) or `source`,
-    or written by some state.
+    """Every artifact a state reads must have an initialized
+    declaration or a writer that runs before the read site on every
+    relevant path.
+
+    Two checks:
+
+    1. Existence: an artifact a state reads must either be declared
+       with ``initial`` (any value, including null) or written
+       somewhere in the workflow. External inputs are admissible
+       reads independently of this check.
+
+    2. Start-state reads: the start state has no predecessors, so any
+       artifact it reads MUST have ``initial`` (or be an external
+       input). Without that, the executor substitutes None and feeds
+       wrong data into the start state's prompt or transform. This is
+       the audit's "at minimum" version of the dominator check; a
+       full reaches-on-all-paths analysis is deferred so this commit
+       can land without churning fan-out test fixtures that exercise
+       sibling reads through the executor's snapshot-isolation path.
     """
     artifact_decls = {a.name: a for a in workflow.artifacts}
+    external_names = {e.name for e in workflow.external_inputs}
     written_by_some_state: set[str] = set()
     for s in workflow.states:
         for w in s.writes:
             written_by_some_state.add(w.name)
+
     for s in workflow.states:
         for r in s.reads:
             if r not in artifact_decls:
                 continue
             decl = artifact_decls[r]
             has_initial = decl.initial is not NO_INITIAL
-            has_source = decl.source_kind is not None
             if (
                 not has_initial
-                and not has_source
                 and r not in written_by_some_state
             ):
                 raise ValidationError(
-                    f"state {s.name!r}: reads artifact {r!r} that is never initialized or written"
+                    f"state {s.name!r}: reads artifact {r!r} that is "
+                    "never initialized or written"
                 )
+
+    if not workflow.states:
+        return
+    start = workflow.states[0]
+    for r in start.reads:
+        if r in external_names:
+            continue
+        if r not in artifact_decls:
+            continue
+        decl = artifact_decls[r]
+        if decl.initial is not NO_INITIAL:
+            continue
+        raise ValidationError(
+            f"state {start.name!r} (start state): reads artifact "
+            f"{r!r} which has no 'initial' qualifier and no source. "
+            "The start state has no predecessors, so the executor "
+            "would substitute None at run time. Declare the artifact "
+            "with 'initial' (any value, including null) or read it "
+            "from a state that follows a writer."
+        )
 
 
 # --------------------------------------------------------------------

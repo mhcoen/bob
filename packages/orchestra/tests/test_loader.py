@@ -511,3 +511,347 @@ workflow x
     with pytest.raises(ParseError) as exc:
         load_workflow(src, with_core())
     assert "fan_out is legal only on 'complete'" in str(exc.value)
+
+
+# --------------------------------------------------------------------
+# Source qualifier rejection (audit finding #4)
+# --------------------------------------------------------------------
+
+
+def test_artifact_source_file_rejected_until_implemented(tmp_path):
+    """The store's declare() materializes only 'initial' values; a
+    'source file' qualifier parses but is never read at run start, so
+    a state reading the artifact would silently see None. The
+    validator rejects the qualifier up front so workflows are not
+    loaded under the impression that the source data will be
+    present."""
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact a text
+    source file "data.json"
+  state s
+    actor model m
+    reads a
+    writes a text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "source file" in msg
+    assert "not implemented" in msg
+
+
+def test_artifact_source_path_rejected_until_implemented(tmp_path):
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input p text
+  max_total_steps 5
+  model m
+  artifact a text
+    source path p
+  state s
+    actor model m
+    reads a
+    writes a text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "source path" in str(exc.value)
+
+
+# --------------------------------------------------------------------
+# Required success transition (audit finding #7)
+# --------------------------------------------------------------------
+
+
+def test_model_state_without_success_outcome_rejected(tmp_path):
+    """A model state declaring only 'on error' and 'on timeout' would
+    crash mid-state on the first successful invocation: the actor
+    runs, payloads are written, state_exit is emitted, then the
+    transition selector fails with 'no transition matched outcome'.
+    The validator must reject this up front."""
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact a text
+    initial null
+  role r
+    prompt template "templates/dummy.md"
+  state s
+    actor model m
+    role r
+    reads topic
+    writes a text
+    on error => stop
+    on timeout => stop
+"""
+    )
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "missing a success transition" in str(exc.value)
+
+
+def test_agent_state_without_success_outcome_rejected(tmp_path):
+    """Same as the model variant; agents derive 'complete' or a
+    verdict the same way models do."""
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    reg = with_core()
+    # Register a stand-in agent backing so the workflow loads past the
+    # actor-backing check and reaches the success-transition rule.
+    reg.register_actor_backing("agent", MockModelAdapter)
+
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  agent ag
+    model m
+    adapter claude_code_agent
+    context_policy fresh
+  artifact a text
+    initial null
+  role r
+    prompt template "templates/dummy.md"
+  state s
+    actor agent ag
+    role r
+    reads topic
+    writes a text
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, reg)
+    assert "missing a success transition" in str(exc.value)
+
+
+def test_model_state_with_verdict_outcomes_loads(tmp_path):
+    """A schema-backed model state can route by verdict instead of
+    'complete'. Any outcome that is not error/timeout/cancelled
+    counts as a success branch, so a verdict-based state is
+    accepted."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact a text
+    initial null
+  role r
+    prompt template "templates/dummy.md"
+  state s
+    actor model m
+    role r
+    reads topic
+    writes a text
+    on approve => done
+    on reject => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
+def test_transform_state_without_complete_rejected(tmp_path):
+    """Transforms emit either 'complete' or 'error'. A workflow that
+    only handles 'error' would crash on any successful transform."""
+    from typing import Any
+
+    from orchestra.transforms import TransformContext
+
+    def _id(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
+        return {"out": inputs.get("inp", "")}
+
+    reg = with_core()
+    reg.register_transform(
+        "passthrough",
+        _id,
+        input_schema={"inp": str},
+        output_schema={"out": str},
+    )
+
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  artifact inp text
+    initial "x"
+  artifact out text
+  state s
+    actor transform passthrough
+    reads inp
+    writes out text
+    on error => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, reg)
+    assert "missing 'on complete'" in str(exc.value)
+
+
+def test_shell_state_requires_pass_and_fail(tmp_path):
+    """Shell backings produce 'pass' or 'fail' outcomes. A workflow
+    that handles only error/timeout misses both of those, leaving the
+    transition selector with no match on every successful run and on
+    every test failure."""
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  artifact a text
+    initial null
+  state s
+    actor shell
+    command "true"
+    reads topic
+    writes a text
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "missing 'on pass'" in msg or "missing 'on fail'" in msg
+
+
+# --------------------------------------------------------------------
+# Start-state read reachability (audit finding #8 minimum)
+# --------------------------------------------------------------------
+
+
+def test_start_state_reads_uninitialized_artifact_rejected(tmp_path):
+    """The start state has no predecessors. An artifact it reads must
+    have an 'initial' qualifier (or be an external input); otherwise
+    the executor substitutes None on the very first prompt."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact a text
+  artifact b text
+  role r
+    prompt template "templates/dummy.md"
+  state s1
+    actor model m
+    role r
+    reads topic, a
+    writes b text
+    on complete => s2
+    on error => stop
+    on timeout => stop
+  state s2
+    actor model m
+    role r
+    reads topic
+    writes a text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "start state" in msg
+    assert "'a'" in msg
+
+
+def test_start_state_reads_external_input_loads(tmp_path):
+    """External inputs are admissible reads for the start state."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact b text
+  role r
+    prompt template "templates/dummy.md"
+  state s1
+    actor model m
+    role r
+    reads topic
+    writes b text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
+def test_start_state_reads_initial_artifact_loads(tmp_path):
+    """An artifact declared with 'initial' is satisfied at start."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact a text
+    initial null
+  artifact b text
+  role r
+    prompt template "templates/dummy.md"
+  state s1
+    actor model m
+    role r
+    reads topic, a
+    writes b text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
