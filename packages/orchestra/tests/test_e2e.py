@@ -1245,8 +1245,108 @@ workflow ag
         for r in records:
             fh.write(_json.dumps(r, sort_keys=True) + "\n")
 
-    # The store is also empty for this synthetic test; cmd_resume
-    # refuses BEFORE opening the store, so no SQLite is needed.
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli
+    rc = cli.cmd_resume(args)
+    assert rc == 2
+
+
+def test_cmd_resume_refuses_agent_state_with_store_commit_no_log_entry(
+    tmp_path: Path,
+) -> None:
+    """Pass-3 fix #2: a crash in the window between commit_tentative
+    and the first artifact_write log call leaves the store with a
+    durable version tagged with the invocation_id while the log
+    shows no artifact_write at all. The pass-2 refusal logic only
+    consulted the log, so this window slipped past the gate. The
+    pass-3 refusal queries the store keyed by invocation_id; finding
+    a committed version there is sufficient to refuse, regardless of
+    whether the log mentions it."""
+    import argparse
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "agent.orc"
+    src.write_text(
+        """spec 0.1
+workflow ag
+  external_input topic text
+  max_total_steps 5
+  model m_help
+  agent worker
+    model m_help
+    adapter claude_code_agent
+    context_policy fresh
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md"
+  state edit
+    actor agent worker
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    # Log shows state_enter but NO artifact_write. The crash landed
+    # between commit_tentative and the artifact_write log call.
+    log_path = run_dir / "log.jsonl"
+    with open(log_path, "w", encoding="utf-8") as fh:
+        records = [
+            {"ts": "2026-05-03T00:00:00.000Z", "run_id": run_id, "seq": 0,
+             "event": "run_start", "state_id": None, "attempt": None,
+             "workflow_path": str(src), "external_inputs": {"topic": "x"}},
+            {"ts": "2026-05-03T00:00:01.000Z", "run_id": run_id, "seq": 1,
+             "event": "state_enter", "state_id": "edit", "attempt": 1,
+             "attempts": {"edit": 1}, "retries": {"edit": 0},
+             "invocation_id": f"{run_id}::edit::1"},
+            {"ts": "2026-05-03T00:00:02.000Z", "run_id": run_id, "seq": 2,
+             "event": "actor_prepare", "state_id": "edit", "attempt": 1},
+            {"ts": "2026-05-03T00:00:03.000Z", "run_id": run_id, "seq": 3,
+             "event": "actor_invoke_start", "state_id": "edit", "attempt": 1},
+            {"ts": "2026-05-03T00:00:04.000Z", "run_id": run_id, "seq": 4,
+             "event": "actor_invoke_end", "state_id": "edit", "attempt": 1,
+             "payload_ref": None, "duration_ms": 0, "summary": {}},
+        ]
+        import json as _json
+        for r in records:
+            fh.write(_json.dumps(r, sort_keys=True) + "\n")
+
+    # Store has a durable committed version tagged with the
+    # invocation_id (the commit_tentative ran but the log-write that
+    # references it never landed). Construct one with the same
+    # tentative-write/commit dance the executor uses.
+    invocation_id = f"{run_id}::edit::1"
+    store = ArtifactStore(run_dir / "store.sqlite")
+    store.declare("reply", "text")
+    handle = store.tentative_write(
+        "reply", "draft body", written_by="edit#1",
+        invocation_id=invocation_id,
+    )
+    store.commit_tentative([handle])
+    # Sanity: the store reports the version under the invocation id.
+    orphans = store.list_committed_by_invocation(invocation_id)
+    assert len(orphans) == 1
+    assert orphans[0].name == "reply"
+    store.close()
+
+    # Confirm replay observed no artifact_write (the pre-fix signal).
+    rep = replay_log(str(log_path))
+    assert rep.committed_without_exit == set(), (
+        "synthetic log has no artifact_write records, so the pass-2 "
+        "log-only refusal would have missed this window"
+    )
+
+    # cmd_resume must refuse via the store-side query.
     args = argparse.Namespace(
         run_id=run_id,
         data_root=str(data_root),

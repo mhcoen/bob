@@ -278,49 +278,87 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     registry = with_core()
     workflow = load_workflow(workflow_path, registry)
+    store = ArtifactStore(run_dir / "store.sqlite")
 
-    # Pass-2 fix #1: refuse to resume into a state that committed
-    # artifact versions before crashing without writing state_exit.
-    # The committed work is durable in the store, but replay would
-    # see only state_enter and re-enter the state to run the actor a
-    # second time. For agent states that mutate the workspace, the
-    # second run re-mutates and corrupts the workspace. The
-    # conservative path is to refuse and let the user decide; a
-    # log-repair path that synthesizes the missing state_exit can land
-    # separately.
+    # Pass-2 fix #1 + pass-3 fix #2: refuse to resume into a state
+    # that committed artifact versions before crashing without
+    # writing state_exit. The committed work is durable in the store
+    # but the log shows only state_enter, so a naive resume would
+    # re-enter the state and run the actor a second time. For agent
+    # states that mutate the workspace, the second run re-mutates and
+    # corrupts the workspace.
+    #
+    # Two signals point at the same window. The artifact_write log
+    # records (pass-2) catch the state when the crash lands AFTER the
+    # log writes; the store-side query (pass-3) catches the earlier
+    # window between commit_tentative and the first artifact_write,
+    # where the committed row is durable but no log record names it.
+    # Querying the store keyed by invocation_id is authoritative for
+    # that earlier window.
     if (
         replay.current_state is not None
         and not replay.last_state_completed
     ):
-        for orphan_state, orphan_attempt in sorted(replay.committed_without_exit):
-            if orphan_state == replay.current_state:
-                state_decl = next(
-                    (s for s in workflow.states if s.name == orphan_state),
-                    None,
+        target_state = replay.current_state
+        state_decl = next(
+            (s for s in workflow.states if s.name == target_state),
+            None,
+        )
+        if state_decl is not None and state_decl.actor.kind == "agent":
+            target_attempt = replay.attempts.get(target_state)
+            store_orphans: list[Any] = []
+            if target_attempt is not None and replay.last_run_id:
+                from orchestra.visibility import make_invocation_id
+                target_inv = make_invocation_id(
+                    replay.last_run_id, target_state, target_attempt
                 )
-                if state_decl is None:
-                    continue
-                if state_decl.actor.kind != "agent":
-                    continue
+                store_orphans = store.list_committed_by_invocation(target_inv)
+            log_orphan_attempts = sorted(
+                a for s, a in replay.committed_without_exit
+                if s == target_state
+            )
+            if store_orphans or log_orphan_attempts:
+                refusal_reason: str
+                if store_orphans:
+                    arts = sorted({v.name for v in store_orphans})
+                    refusal_reason = (
+                        f"the store holds committed artifact versions "
+                        f"({', '.join(repr(a) for a in arts)}) tagged "
+                        f"with this invocation but no state_exit was "
+                        "written. The crash window between commit and "
+                        "log-write makes the artifact_write trail "
+                        "absent, so the store is the authoritative "
+                        "signal."
+                    )
+                else:
+                    refusal_reason = (
+                        "the log shows artifact_write records for this "
+                        "state with no matching state_exit"
+                    )
                 print(
-                    f"refusing to resume: state {orphan_state!r} "
-                    f"(attempt {orphan_attempt}) committed artifact "
-                    "versions to the store before crashing without a "
-                    "matching state_exit. Re-entering would run the "
-                    "agent a second time and re-mutate the workspace.",
+                    f"refusing to resume: state {target_state!r} "
+                    f"(attempt {target_attempt}) committed work to the "
+                    "store before crashing without a matching "
+                    "state_exit. Re-entering would run the agent a "
+                    "second time and re-mutate the workspace.",
+                    file=sys.stderr,
+                )
+                print(
+                    f"Reason: {refusal_reason}",
                     file=sys.stderr,
                 )
                 print(
                     "Inspect the run directory and either repair the "
-                    "log manually with the recorded artifact_write "
-                    "records or roll the run back. The conservative "
-                    "default is refusal because agents are not assumed "
-                    "to be idempotent.",
+                    "log manually with a synthesized state_exit "
+                    "matching the durable artifact versions or roll "
+                    "the run back. The conservative default is refusal "
+                    "because agents are not assumed to be idempotent.",
                     file=sys.stderr,
                 )
+                store.close()
                 return 2
 
-    store = ArtifactStore(run_dir / "store.sqlite")
+
     log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
 
     run_resume_hooks(workflow, registry, replay, log)

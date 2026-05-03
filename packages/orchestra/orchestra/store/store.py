@@ -479,6 +479,42 @@ class ArtifactStore:
             for row in rows
         ]
 
+    def list_committed_by_invocation(
+        self, invocation_id: str
+    ) -> list[VersionRecord]:
+        """Return committed (non-tentative) versions tagged with the
+        given ``invocation_id``.
+
+        Resume uses this to detect the pre-artifact_write crash window:
+        ``commit_tentative`` writes the row to the store before the
+        executor logs ``artifact_write``, so a crash between the two
+        leaves the store with a committed version the log does not
+        mention. The pass-2 refusal logic only consulted the log; this
+        method gives resume a store-side authoritative answer.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT artifact, version_id, written_at, written_by,
+                       producer_kind, invocation_id
+                FROM versions
+                WHERE invocation_id = ? AND is_tentative = 0
+                ORDER BY seq ASC
+                """,
+                (invocation_id,),
+            ).fetchall()
+        return [
+            VersionRecord(
+                name=str(row[0]),
+                version_id=str(row[1]),
+                written_at=str(row[2]),
+                written_by=str(row[3]),
+                producer_kind=row[4] or "legacy",
+                invocation_id=row[5],
+            )
+            for row in rows
+        ]
+
     # ----- tentative writes ---------------------------------------
 
     def tentative_write(

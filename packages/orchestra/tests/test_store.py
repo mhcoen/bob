@@ -500,3 +500,56 @@ def test_tentative_write_atomic_under_concurrent_pressure(tmp_path):
     handle_rows = cur.execute("SELECT handle FROM tentative_handles").fetchall()
     assert handle_rows == []
     fresh.close()
+
+
+def test_list_committed_by_invocation_returns_only_matching_versions(
+    tmp_path,
+):
+    """The pass-3 stranded-commit refusal queries the store keyed by
+    invocation_id. The method must return committed (non-tentative)
+    versions tagged with the given invocation_id and nothing else."""
+    store = ArtifactStore(tmp_path / "store.sqlite")
+    store.declare("a", "text")
+    store.declare("b", "text")
+
+    h1 = store.tentative_write(
+        "a", "v-from-i1", written_by="edit#1",
+        invocation_id="run::edit::1",
+    )
+    h2 = store.tentative_write(
+        "b", "v-from-i1", written_by="edit#1",
+        invocation_id="run::edit::1",
+    )
+    h3 = store.tentative_write(
+        "a", "v-from-i2", written_by="other#1",
+        invocation_id="run::other::1",
+    )
+    store.commit_tentative([h1, h2, h3])
+
+    inv1 = store.list_committed_by_invocation("run::edit::1")
+    assert sorted(v.name for v in inv1) == ["a", "b"]
+    assert all(v.invocation_id == "run::edit::1" for v in inv1)
+
+    inv2 = store.list_committed_by_invocation("run::other::1")
+    assert [v.name for v in inv2] == ["a"]
+
+    none = store.list_committed_by_invocation("run::missing::1")
+    assert none == []
+
+    store.close()
+
+
+def test_list_committed_by_invocation_excludes_tentative_versions(tmp_path):
+    """Only committed rows count for the refusal logic. A tentative
+    write that was never committed is rolled back on resume; it
+    must not trip the stranded-commit refusal."""
+    store = ArtifactStore(tmp_path / "store.sqlite")
+    store.declare("a", "text")
+    handle = store.tentative_write(
+        "a", "tentative-only", written_by="edit#1",
+        invocation_id="run::edit::1",
+    )
+    # Do NOT commit. Tentative row exists; should not show up.
+    assert store.list_committed_by_invocation("run::edit::1") == []
+    store.discard_tentative([handle])
+    store.close()
