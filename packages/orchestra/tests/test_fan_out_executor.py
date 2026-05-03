@@ -3756,3 +3756,145 @@ def test_fan_out_payload_files_do_not_collide_under_barrier(
             f"expected one starting with {expected_model!r} "
             f"(payload was overwritten by a concurrent sibling)"
         )
+
+
+def test_fan_out_child_retry_respects_first_match_transition(
+    tmp_path: Path,
+) -> None:
+    """Pass-5 fix #3: a fan-out child with ``on error => stop`` declared
+    BEFORE ``on error retry max 1 then stop`` must select the first
+    matching transition and route the child to stop without retrying.
+
+    Pre-fix the executor scanned every transition for one with the
+    matching outcome AND retry_max set, ignoring declaration order.
+    Post-fix the executor uses the same first-match-then-check-retry
+    semantics the linear path uses; declaration order is honored and
+    a non-retry transition that comes first wins.
+    """
+    import threading
+
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "fan.orc"
+    src.write_text(
+        """spec 0.1
+workflow retry_order
+  external_input topic text
+  max_total_steps 30
+  model m_parent
+  model m_flaky
+  model m_join
+  model m_abort
+  artifact parent_out text
+  artifact flaky_out text
+  artifact joined text
+  artifact aborted text
+  role pr
+    prompt template "templates/dummy.md"
+  role fr
+    prompt template "templates/dummy.md"
+  role jr
+    prompt template "templates/dummy.md"
+  role ar
+    prompt template "templates/dummy.md"
+  state launch
+    actor model m_parent
+    role pr
+    reads topic
+    writes parent_out text
+    on complete fan_out [flaky] join join_state on error abort_state
+    on error => stop
+    on timeout => stop
+  state flaky
+    actor model m_flaky
+    role fr
+    reads topic
+    writes flaky_out text
+    on complete => done
+    on error => stop
+    on error retry max 1 then stop
+    on timeout => stop
+  state join_state
+    actor model m_join
+    role jr
+    reads flaky_out
+    writes joined text
+    on complete => done
+    on error => stop
+    on timeout => stop
+  state abort_state
+    actor model m_abort
+    role ar
+    reads topic
+    writes aborted text
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+
+    registry = with_core()
+    workflow = load_workflow(src, registry)
+
+    flaky_calls = {"n": 0}
+    inv_lock = threading.Lock()
+
+    class _Flaky(MockModelAdapter):
+        def invoke(self, prepared: Any) -> dict[str, Any]:
+            model_id = prepared.summary.get("model")
+            if model_id == "m_flaky":
+                with inv_lock:
+                    flaky_calls["n"] += 1
+                # Fail every time. Pre-fix the second transition's
+                # retry would mask the failure on attempt 1; post-fix
+                # the first transition (=> stop) wins and the child
+                # routes to error, which the parent's fan_out
+                # error_target handles.
+                raise RuntimeError("synthetic always-fail")
+            return super().invoke(prepared)
+
+    registry.actor_backings["model"] = lambda: _Flaky()
+    registry._adapter_cache.pop("model", None)
+
+    run_id = new_run_id()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=registry,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "hello"},
+    )
+    terminal = executor.run_to_completion()
+    log.write("run_end", fields={"terminal": terminal})
+    log.close()
+    store.close()
+
+    # First-match selection picks `on error => stop`, so the child
+    # invokes exactly once. Pre-fix the scan-for-retry would have
+    # tripped the retry-shaped transition and called invoke twice.
+    assert flaky_calls["n"] == 1, (
+        f"first-match selection should not retry; got "
+        f"flaky_calls={flaky_calls['n']}"
+    )
+
+    # Aggregate result of the fan_out group: error (the child errored
+    # on its only invocation). Routing goes through abort_state.
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    abort_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "abort_state"
+    ]
+    join_enters = [
+        r for r in records
+        if r.event == "state_enter" and r.state_id == "join_state"
+    ]
+    assert len(abort_enters) == 1, "abort_state must run on child error"
+    assert join_enters == [], "join_state must not run on child error"

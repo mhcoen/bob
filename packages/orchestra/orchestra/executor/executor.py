@@ -949,18 +949,34 @@ class Executor:
         return str(decl.target)
 
     def _select_transition_decl(
-        self, state: StateDecl, envelope: Envelope
+        self, state: StateDecl, envelope: Envelope,
+        *,
+        snapshot: FanOutSnapshot | None = None,
     ) -> Any:
         """Return the matched ``Transition`` declaration or None.
 
         Used by the run loop to dispatch on fan_out vs linear. Linear
         callers can use ``_select_transition`` for the resolved target
         string.
+
+        ``snapshot`` is supplied by the fan-out child path so the
+        guard context sees the same artifact values the child
+        evaluated against during invocation. Reading the live store
+        from a worker thread would break snapshot isolation; the
+        invariant is checked by
+        ``tests/test_fan_out_executor::test_fan_out_sibling_reads_use_snapshot_not_live_store``.
         """
         artifact_values: dict[str, Any] = {}
-        for art in self._wf.artifacts:
-            v = self._store.read_latest(art.name)
-            artifact_values[art.name] = v.value if v else None
+        if snapshot is not None:
+            for art in self._wf.artifacts:
+                if art.name in snapshot.artifacts:
+                    artifact_values[art.name] = snapshot.artifacts[art.name]
+                else:
+                    artifact_values[art.name] = None
+        else:
+            for art in self._wf.artifacts:
+                v = self._store.read_latest(art.name)
+                artifact_values[art.name] = v.value if v else None
         envelope_views = {
             name: {
                 "outcome": e.outcome,
@@ -1826,17 +1842,27 @@ class Executor:
                 on_prepared=_on_prepared,
                 is_cancelled_after_register=_is_cancelled_after_register,
             )
+            # Pass-5 fix #3: route the child outcome through the same
+            # first-match selection the linear path uses, then retry
+            # only if the selected transition is itself a retry
+            # transition with budget remaining. The pre-fix code
+            # scanned every transition for one with the right outcome
+            # AND retry_max set, ignoring declaration order and
+            # picking up a retry transition declared AFTER a non-retry
+            # transition for the same outcome (e.g. `on error => stop`
+            # followed by `on error retry max 1 then stop`). That
+            # routes the child to retry when the workflow author
+            # explicitly chose `=> stop` first.
+            selected = self._select_transition_decl(
+                state, envelope, snapshot=snapshot
+            )
             should_retry = False
-            outcome = envelope.outcome
-            for t in state.transitions:
-                if t.outcome != outcome or t.retry_max is None:
-                    continue
+            if selected is not None and selected.retry_max is not None:
                 with self._attempt_lock:
                     used = self._retries.get(child_name, 0)
-                    if used < t.retry_max:
+                    if used < selected.retry_max:
                         self._retries[child_name] = used + 1
                         should_retry = True
-                break
             if not should_retry:
                 registry.mark_done(child_name)
                 return envelope
