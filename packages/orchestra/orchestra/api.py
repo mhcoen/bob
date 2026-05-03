@@ -907,6 +907,7 @@ def run_workflow(
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log_path = run_dir / "log.jsonl"
     log = LogWriter(log_path, run_id)
+    from orchestra.manifest import compute_prompt_manifest
     log.write(
         "run_start",
         fields={
@@ -914,6 +915,7 @@ def run_workflow(
             "workflow_digest": hashlib.sha256(
                 Path(workflow_path).read_bytes()
             ).hexdigest(),
+            "prompt_manifest": compute_prompt_manifest(workflow),
             "workflow_name": workflow.name,
             "config_name": name,
             "pattern": workflow_cfg.pattern,

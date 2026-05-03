@@ -1416,6 +1416,125 @@ def test_cmd_resume_refuses_when_workflow_file_changed(tmp_path: Path) -> None:
     assert rc == 2
 
 
+def test_cmd_resume_refuses_when_prompt_template_changed(tmp_path: Path) -> None:
+    """Pass-4 fix #2: editing a file-backed prompt template between
+    crash and resume changes what the actor sees while the .orc file
+    digest still matches. cmd_resume must consult the prompt manifest
+    and refuse on mismatch."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    template = tmp_path / "templates" / "dummy.md"
+    assert template.is_file()
+
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    from orchestra.manifest import compute_prompt_manifest
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src),
+            "workflow_digest": cli._workflow_digest(src),
+            "prompt_manifest": compute_prompt_manifest(workflow),
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # The .orc itself is unchanged, but the prompt template the role
+    # reads is edited. Pre-fix the workflow_digest gate would not
+    # catch this; the manifest gate must.
+    template.write_text(template.read_text(encoding="utf-8") + "\nedited\n")
+
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    assert rc == 2
+
+
+def test_cmd_resume_refuses_when_prompt_template_removed(tmp_path: Path) -> None:
+    """Removing a file-backed prompt template altogether is the same
+    class of failure as editing it. The manifest entry would mismatch
+    on `<missing>` and resume must refuse."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    template = tmp_path / "templates" / "dummy.md"
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    from orchestra.manifest import compute_prompt_manifest
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src),
+            "workflow_digest": cli._workflow_digest(src),
+            "prompt_manifest": compute_prompt_manifest(workflow),
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+    template.unlink()
+
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli as cli_mod
+    rc = cli_mod.cmd_resume(args)
+    assert rc == 2
+
+
 def test_cmd_resume_accepts_unchanged_workflow_after_run_start_digest(
     tmp_path: Path,
 ) -> None:

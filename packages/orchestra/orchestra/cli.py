@@ -218,11 +218,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
+    from orchestra.manifest import compute_prompt_manifest
     log.write(
         "run_start",
         fields={
             "workflow_path": str(args.workflow),
             "workflow_digest": _workflow_digest(Path(args.workflow)),
+            "prompt_manifest": compute_prompt_manifest(workflow),
             "workflow_name": workflow.name,
             "spec_version": workflow.spec_version,
             "profiles": list(workflow.profiles),
@@ -336,6 +338,51 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if replay.current_state is None:
         print("nothing to resume; the log named no state", file=sys.stderr)
         return 2
+
+    # Pass-4 fix #2: extend the workflow digest gate to a manifest of
+    # every file-backed prompt source. The .orc digest catches edits
+    # to the workflow file itself but file-backed prompts
+    # (templates/*.md and config-supplied instruction templates) are
+    # read at invocation time, so editing one between crash and
+    # resume changes the actor input while the workflow digest
+    # matches. The check runs BEFORE load_workflow because a missing
+    # prompt file would otherwise raise ValidationError mid-load
+    # without naming the resume-integrity reason.
+    recorded_manifest = run_start.fields.get("prompt_manifest")
+    if isinstance(recorded_manifest, dict):
+        diffs: list[str] = []
+        recorded_clean: dict[str, str] = {
+            str(k): str(v) for k, v in recorded_manifest.items()
+        }
+        for path_str, recorded_digest_v in sorted(recorded_clean.items()):
+            path_obj = Path(path_str)
+            if not path_obj.is_file():
+                diffs.append(f"  removed: {path_str}")
+                continue
+            current_digest_v = hashlib.sha256(
+                path_obj.read_bytes()
+            ).hexdigest()
+            if current_digest_v != recorded_digest_v:
+                diffs.append(
+                    f"  changed: {path_str} "
+                    f"(was {recorded_digest_v[:12]}..., "
+                    f"now {current_digest_v[:12]}...)"
+                )
+        if diffs:
+            print(
+                "refusing to resume: file-backed prompt sources have "
+                "changed since the original run.",
+                file=sys.stderr,
+            )
+            for line in diffs:
+                print(line, file=sys.stderr)
+            print(
+                "Resume against modified prompt files would run the "
+                "actor with input the original run never saw. Restore "
+                "the original files or roll the run back.",
+                file=sys.stderr,
+            )
+            return 2
 
     registry = with_core()
     workflow = load_workflow(workflow_path, registry)
