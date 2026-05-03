@@ -31,6 +31,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from orchestra.errors import ResumeError
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -154,32 +156,76 @@ class LogWriter:
 
 
 class LogReader:
-    """JSON Lines reader that tolerates a truncated last record.
+    """JSON Lines reader that distinguishes a truncated final record
+    from mid-log corruption.
 
-    ``read_all`` returns every fully-formed record; a partial line at
-    end-of-file is silently dropped. This matches the runner spec's
-    crash-recovery contract: a crash mid-record leaves an incomplete
-    last line, which resume must skip.
+    The runner's crash-recovery contract tolerates exactly one failure
+    mode: a crash between ``write`` and ``flush+fsync`` of the most
+    recent record, which leaves a partial final line with no trailing
+    newline. Anything else (a malformed non-final line, a sequence gap,
+    or a record that fails the ``Record.from_dict`` schema) is durable
+    corruption: replay must refuse to proceed rather than treat the
+    later, intact records as if they did not exist.
     """
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
 
     def read_all(self) -> list[Record]:
-        records: list[Record] = []
         if not self._path.exists():
-            return records
+            return []
         with open(self._path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    # Truncated final line. Per the runner spec, drop it.
+            text = fh.read()
+        if not text:
+            return []
+        # A correctly-terminated log ends with a newline. If it does
+        # not, the final line is a write that crashed before fsync.
+        unterminated_final = not text.endswith("\n")
+        parts = text.split("\n")
+        # When the file ends with a newline, ``split`` yields a
+        # trailing empty string. Drop it so it is not parsed.
+        if not unterminated_final:
+            parts.pop()
+        records: list[Record] = []
+        expected_seq: int | None = None
+        last_idx = len(parts) - 1
+        for idx, line in enumerate(parts):
+            line_no = idx + 1
+            is_final = idx == last_idx
+            if not line:
+                if is_final and unterminated_final:
                     break
-                records.append(Record.from_dict(data))
+                raise ResumeError(
+                    f"empty log line at {self._path}:{line_no}"
+                )
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError as exc:
+                if is_final and unterminated_final:
+                    break
+                raise ResumeError(
+                    f"corrupt log line at {self._path}:{line_no}: "
+                    f"{exc.msg}"
+                ) from exc
+            if not isinstance(data, dict):
+                raise ResumeError(
+                    f"log record at {self._path}:{line_no} is not a "
+                    f"JSON object"
+                )
+            try:
+                record = Record.from_dict(data)
+            except (KeyError, ValueError, TypeError) as exc:
+                raise ResumeError(
+                    f"malformed log record at {self._path}:{line_no}: "
+                    f"{exc}"
+                ) from exc
+            if expected_seq is not None and record.seq != expected_seq:
+                raise ResumeError(
+                    f"sequence gap at {self._path}:{line_no}: "
+                    f"expected seq {expected_seq}, saw {record.seq}"
+                )
+            expected_seq = record.seq + 1
+            records.append(record)
         return records
 
     def iter_records(self) -> Iterator[Record]:

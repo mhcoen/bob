@@ -15,6 +15,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from orchestra.errors import ResumeError
 from orchestra.payloads import load_payload, strip_internal, write_payload
 
 # --------------------------------------------------------------------
@@ -192,21 +195,55 @@ def test_write_payload_trailing_newline(tmp_path: Path) -> None:
 # --------------------------------------------------------------------
 
 
-def test_load_payload_missing_file_returns_empty_dict(tmp_path: Path) -> None:
-    """A cancelled invocation never wrote its payload, so the
-    referenced file does not exist. Replay must treat this as an
-    empty payload rather than crashing."""
-    assert load_payload(tmp_path, "payloads/does-not-exist.json") == {}
+def test_load_payload_missing_file_raises_resume_error(tmp_path: Path) -> None:
+    """A non-empty ``payload_ref`` whose file is absent is durable
+    corruption: a state_exit promised the payload existed and it
+    does not. Replay must refuse rather than substitute an empty
+    dict, which would silently feed the wrong data into guards
+    that read ``state.payload.*``."""
+    with pytest.raises(ResumeError) as excinfo:
+        load_payload(tmp_path, "payloads/does-not-exist.json")
+    assert "payload file missing" in str(excinfo.value)
+    assert "does-not-exist.json" in str(excinfo.value)
 
 
-def test_load_payload_non_dict_contents_returns_empty_dict(
+def test_load_payload_non_dict_contents_raises_resume_error(
     tmp_path: Path,
 ) -> None:
     """A corrupt payload file (e.g., a JSON list or a scalar at the
-    top level) is treated as empty. Hydration consumers expect
-    a dict shape; returning a non-dict would propagate a type
-    error far from the source."""
+    top level) is durable corruption. Resume must refuse rather than
+    silently substitute ``{}``."""
     payloads_dir = tmp_path / "payloads"
     payloads_dir.mkdir()
     (payloads_dir / "weird.json").write_text("[1, 2, 3]\n", encoding="utf-8")
-    assert load_payload(tmp_path, "payloads/weird.json") == {}
+    with pytest.raises(ResumeError) as excinfo:
+        load_payload(tmp_path, "payloads/weird.json")
+    assert "must be a JSON object" in str(excinfo.value)
+
+
+def test_load_payload_invalid_json_raises_resume_error(tmp_path: Path) -> None:
+    payloads_dir = tmp_path / "payloads"
+    payloads_dir.mkdir()
+    (payloads_dir / "bad.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(ResumeError) as excinfo:
+        load_payload(tmp_path, "payloads/bad.json")
+    assert "not valid JSON" in str(excinfo.value)
+
+
+def test_load_payload_empty_ref_raises_resume_error(tmp_path: Path) -> None:
+    """An empty payload_ref must never reach this helper; callers are
+    responsible for short-circuiting on absent payloads. The helper
+    fails loudly so the bug is found at the call site."""
+    with pytest.raises(ResumeError) as excinfo:
+        load_payload(tmp_path, "")
+    assert "non-empty payload_ref" in str(excinfo.value)
+
+
+def test_load_payload_path_escape_raises_resume_error(tmp_path: Path) -> None:
+    """A payload_ref that resolves outside the run directory is a
+    safety violation regardless of how it was produced."""
+    other = tmp_path.parent / "outside.json"
+    other.write_text('{"x": 1}\n', encoding="utf-8")
+    with pytest.raises(ResumeError) as excinfo:
+        load_payload(tmp_path, "../outside.json")
+    assert "outside run directory" in str(excinfo.value)

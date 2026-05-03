@@ -1595,9 +1595,12 @@ workflow race_test
     truncated_dir = tmp_path / "truncated"
     truncated_dir.mkdir()
     log_path = truncated_dir / "log.jsonl"
-    # Copy SQLite store too.
+    # Copy SQLite store and the payloads directory; resume hydrates
+    # envelopes from durable payload files referenced by state_exit
+    # records, so the truncated run directory must carry them.
     import shutil
     shutil.copy(run_dir / "store.sqlite", truncated_dir / "store.sqlite")
+    shutil.copytree(run_dir / "payloads", truncated_dir / "payloads")
     # Copy log without fan_out_end and everything after.
     keep = []
     for r in records:
@@ -2443,6 +2446,12 @@ def _filter_log_to_open_fan_out(
             if rec.event == "state_enter":
                 out.append(rec)
         # else: drop (other children, fan_out_end, post-fan-out states)
+    # Renumber the kept records contiguously. The strict log reader
+    # rejects sequence gaps as corruption; this synthetic fixture
+    # filters out middle records to simulate a crash mid-fan-out, so
+    # we collapse the seqs to keep the resulting log valid.
+    for new_seq, rec in enumerate(out):
+        rec.seq = new_seq
     log_path.write_text(
         "\n".join(r.to_json() for r in out) + "\n", encoding="utf-8"
     )

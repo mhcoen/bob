@@ -175,6 +175,9 @@ def test_replay_case_2_after_transition_to_unstarted_state(tmp_path: Path) -> No
                 attempts={"A": 1},
                 retries={"A": 0},
             ),
+            _common(2, "actor_prepare", state_id="A", attempt=1),
+            _common(3, "actor_invoke_start", state_id="A", attempt=1),
+            _common(4, "actor_invoke_end", state_id="A", attempt=1),
             _common(
                 5,
                 "state_exit",
