@@ -655,25 +655,163 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                 reaching[n] = new_set
                 changed = True
 
+    role_decls = {r.name: r for r in workflow.roles}
+
+    def _check_artifact_dominated(
+        site_state: str,
+        artifact: str,
+        kind: str,
+        available: set[str],
+    ) -> None:
+        if artifact in external_names:
+            return
+        if artifact not in artifact_decls:
+            return
+        decl = artifact_decls[artifact]
+        if decl.initial is not NO_INITIAL:
+            return
+        if artifact in available:
+            return
+        raise ValidationError(
+            f"state {site_state!r}: {kind} reference {artifact!r} is "
+            "not guaranteed to have been written on every path from "
+            "the start state. Mark the artifact with 'initial' "
+            "(any value, including null), or restructure the workflow "
+            "so a writer of this artifact dominates the site."
+        )
+
     for s in workflow.states:
+        # Pre-invocation reads (state.reads + prompt template vars)
+        # see reaching[s] only; the state's own writes have not
+        # happened yet.
+        pre_reads = reaching[s.name]
         for r in s.reads:
-            if r in external_names:
+            _check_artifact_dominated(s.name, r, "read", pre_reads)
+
+        # Prompt-template variable references are real data
+        # dependencies: the executor renders a template by reading
+        # each variable from external inputs or read_latest, so an
+        # unwritten artifact silently substitutes None. The prompt
+        # source is either declared on the state or inherited from the
+        # state's role default.
+        prompt = s.prompt
+        if prompt is None and s.role is not None:
+            role = role_decls.get(s.role)
+            if role is not None:
+                prompt = role.default_prompt
+        if prompt is not None and prompt.kind == "template":
+            for var in prompt.template_vars:
+                _check_artifact_dominated(
+                    s.name, var, "prompt template variable", pre_reads
+                )
+
+        # Guards run AFTER the state's actor body and AFTER its writes
+        # commit, so guard references see reaching[s] plus the state's
+        # own writes. State-envelope references must be either the
+        # current state itself (its just-completed envelope is
+        # guaranteed) or a state that dominates the current one
+        # (so its envelope is already in the executor's table). Counter
+        # references (attempts.<state>, retries.<state>) are always
+        # available because the executor's counter dicts cover every
+        # declared state.
+        guard_available = reaching[s.name] | {w.name for w in s.writes}
+        for t in s.transitions:
+            if t.guard is None:
                 continue
-            if r not in artifact_decls:
+            for ref in _collect_refs(t.guard):
+                head = ref.head()
+                if head in ("attempts", "retries"):
+                    continue
+                if head in artifact_decls or head in external_names:
+                    _check_artifact_dominated(
+                        s.name, head, "guard data", guard_available
+                    )
+                    continue
+                if head in state_decls:
+                    if head == s.name:
+                        # Self-envelope: the just-completed invocation
+                        # is always available to the state's own
+                        # guards.
+                        continue
+                    if not _state_dominates(
+                        head, s.name, entry_paths, state_decls
+                    ):
+                        raise ValidationError(
+                            f"state {s.name!r}: guard references "
+                            f"envelope {ref!s} but state {head!r} is "
+                            "not guaranteed to have completed before "
+                            f"the guard on {s.name!r} runs. Restructure "
+                            "the workflow so the referenced state "
+                            "dominates the guard site."
+                        )
+
+
+def _state_dominates(
+    candidate: str,
+    target: str,
+    entry_paths: dict[str, list[tuple[str, tuple[str, ...]]]],
+    state_decls: dict[str, StateDecl],
+) -> bool:
+    """Return True when ``candidate`` lies on every path from the
+    workflow's start state to ``target``.
+
+    Uses the same entry-path encoding as ``_phase6_dataflow``: a
+    fan-out join target's predecessors are the children for join
+    purposes, but for dominator analysis the relevant predecessor is
+    the fan-out parent (the children themselves do not dominate the
+    join because each child is one of several parallel paths). We
+    treat fan-out children as predecessors of the join when computing
+    "must lie on every path" because the executor only enters the
+    join when ALL children completed; a child therefore dominates the
+    join iff the child is the only entry-path or every fan-out join
+    entry-path includes that child as a sibling.
+
+    The simpler invariant we actually need: a state X dominates Y iff
+    every entry-path of Y has X as the parent or X dominates the
+    parent (and, for fan-out-join entry-paths, X dominates the
+    parent OR X is one of the children).
+    """
+    if candidate == target:
+        return True
+    state_names = list(state_decls.keys())
+    if not state_names:
+        return False
+    start = state_names[0]
+    # Compute dominators iteratively. dom[s] = set of states that
+    # dominate s, initialized to all states for non-start, {start}
+    # for start.
+    universe = set(state_names)
+    dom: dict[str, set[str]] = {start: {start}}
+    for n in state_names:
+        if n != start:
+            dom[n] = set(universe)
+    changed = True
+    while changed:
+        changed = False
+        for n in state_names:
+            if n == start:
                 continue
-            decl = artifact_decls[r]
-            if decl.initial is not NO_INITIAL:
-                continue
-            if r in reaching[s.name]:
-                continue
-            raise ValidationError(
-                f"state {s.name!r}: reads artifact {r!r} that is not "
-                "guaranteed to have been written on every path from "
-                "the start state. Mark the artifact with 'initial' "
-                "(any value, including null), or restructure the "
-                "workflow so a writer of this artifact dominates the "
-                "read site."
-            )
+            paths = entry_paths.get(n, [])
+            new_set: set[str] | None
+            if not paths:
+                new_set = {n}
+            else:
+                new_set = None
+                for parent, children in paths:
+                    contrib = dom[parent] | {parent}
+                    if children:
+                        for c in children:
+                            contrib = contrib | {c}
+                    if new_set is None:
+                        new_set = set(contrib)
+                    else:
+                        new_set &= contrib
+                assert new_set is not None
+                new_set = new_set | {n}
+            if new_set != dom[n]:
+                dom[n] = new_set
+                changed = True
+    return candidate in dom.get(target, set())
 
 
 # --------------------------------------------------------------------

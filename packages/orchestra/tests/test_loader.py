@@ -1057,6 +1057,149 @@ def test_dominator_check_accepts_real_council_workflow():
     assert wf.name == "ask_council"
 
 
+def test_dominator_check_rejects_prompt_template_var_not_dominated(tmp_path):
+    """Prompt template variables are real data dependencies: the
+    executor renders the template by reading each var from external
+    inputs or read_latest. An unwritten artifact silently substitutes
+    None into the prompt. The validator must reject this."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("hi {{ ghost }}\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact ghost text
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md" with ghost
+  state s1
+    actor model m
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "prompt template" in msg
+    assert "'ghost'" in msg
+
+
+def test_dominator_check_accepts_prompt_template_var_when_initial(tmp_path):
+    """An artifact with 'initial' satisfies the prompt-template
+    dependency even though no state writes it."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("hi {{ ghost }}\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact ghost text
+    initial null
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md" with ghost
+  state s1
+    actor model m
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
+def test_dominator_check_rejects_guard_envelope_ref_to_non_dominator(tmp_path):
+    """A guard that references the envelope of a state that does not
+    dominate the guard site would crash the executor (envelope
+    missing from the table) after the actor's side effects had
+    landed. Validator rejects the workflow."""
+    src = tmp_path / "bad.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 10
+  model m
+  artifact a text
+    initial null
+  artifact b text
+    initial null
+  role r
+    prompt template "templates/dummy.md"
+  state s1
+    actor model m
+    role r
+    reads topic
+    writes a text
+    on complete when s2.outcome == "approve" => done
+    on complete => stop
+    on error => stop
+    on timeout => stop
+  state s2
+    actor model m
+    role r
+    reads topic
+    writes b text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "envelope" in msg
+    assert "s2" in msg
+
+
+def test_dominator_check_accepts_guard_self_envelope_ref(tmp_path):
+    """A guard referencing the current state's own just-completed
+    envelope is always allowed."""
+    src = tmp_path / "ok.orc"
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "dummy.md").write_text("dummy\n")
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact a text
+    initial null
+  role r
+    prompt template "templates/dummy.md"
+  state s1
+    actor model m
+    role r
+    reads topic
+    writes a text
+    on complete when s1.outcome == "complete" => done
+    on complete => stop
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
 def test_dominator_check_accepts_anonymous_reviewers_workflow():
     """Same regression guard for ask_anonymous_reviewers, which has
     a more elaborate fan-out plus transform shape than council. The
