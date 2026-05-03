@@ -43,6 +43,7 @@ from prompt_toolkit.history import FileHistory
 from orchestra.api import run_verb
 from orchestra.config import OrchestraConfig
 from orchestra.errors import OrchestraError
+from orchestra.progress import ProgressCallback, stderr_reporter
 
 _HISTORY_PATH: Path = Path.home() / ".orchestra" / "history"
 _DOUBLE_CTRL_C_WINDOW: float = 1.0
@@ -64,6 +65,7 @@ class ReplState:
     config: OrchestraConfig
     current_verb: str
     turns: list[Turn] = field(default_factory=list)
+    progress_callback: ProgressCallback | None = None
 
 
 def _default_verb(config: OrchestraConfig) -> str | None:
@@ -282,7 +284,13 @@ def handle_query(state: ReplState, line: str) -> None:
         query = line
     history = format_history(state.turns)
     try:
-        answer = run_verb(verb, query, state.config, history=history)
+        answer = run_verb(
+            verb,
+            query,
+            state.config,
+            history=history,
+            progress_callback=state.progress_callback,
+        )
     except OrchestraError as exc:
         print(str(exc), file=sys.stderr)
         return
@@ -313,8 +321,15 @@ def run_repl(
     config: OrchestraConfig,
     *,
     session: Any | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> int:
-    """Run the interactive REPL. Returns the process exit code."""
+    """Run the interactive REPL. Returns the process exit code.
+
+    ``progress_callback`` defaults to a stderr reporter so the user
+    sees per-state progress while a multi-role verb runs. Pass
+    ``progress_callback=None`` (or invoke the CLI with ``--quiet``)
+    to suppress.
+    """
     default = _default_verb(config)
     if default is None:
         print(
@@ -324,7 +339,13 @@ def run_repl(
             file=sys.stderr,
         )
         return 1
-    state = ReplState(config=config, current_verb=default)
+    if progress_callback is None:
+        progress_callback = stderr_reporter()
+    state = ReplState(
+        config=config,
+        current_verb=default,
+        progress_callback=progress_callback,
+    )
     if session is None:
         session = _build_session()
 

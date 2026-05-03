@@ -255,7 +255,14 @@ def test_handle_query_routes_through_run_verb(
     )
     captured: dict[str, Any] = {}
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         captured["verb"] = verb
         captured["query"] = query
         captured["history"] = history
@@ -280,7 +287,14 @@ def test_handle_query_error_keeps_state_unchanged(
 ) -> None:
     state = _state_with_turns()
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         raise OrchestraError("blew up")
 
     monkeypatch.setattr(repl, "run_verb", _stub)
@@ -301,7 +315,14 @@ def test_handle_query_first_word_verb_routes_per_turn(
     state = _state_with_turns()  # current_verb is "ask" in _config()
     captured: dict[str, Any] = {}
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         captured["verb"] = verb
         captured["query"] = query
         return "deliberated answer"
@@ -346,7 +367,14 @@ def test_handle_query_unknown_first_word_falls_back_to_current_verb(
     state.current_verb = "ask"
     captured: dict[str, Any] = {}
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         captured["verb"] = verb
         captured["query"] = query
         return "Paris."
@@ -393,7 +421,14 @@ def test_run_repl_dispatches_query_and_appends_turn(
     cfg = _config()
     captured: dict[str, Any] = {}
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         captured.setdefault("calls", []).append((verb, query, history))
         return f"answer-to-{query}"
 
@@ -483,7 +518,14 @@ def test_run_repl_verb_error_does_not_break_loop(
     cfg = _config()
     calls = {"n": 0}
 
-    def _stub(verb: str, query: str, config: Any, *, history: str) -> str:
+    def _stub(
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        history: str,
+        progress_callback: Any = None,
+    ) -> str:
         calls["n"] += 1
         if calls["n"] == 1:
             raise OrchestraError("first fails")

@@ -308,6 +308,25 @@ No quoting around the question. The verb names a workflow; the rest
 of the line is the question. Verbs are user-defined in
 `~/.orchestra/config.json` — rename, add, remove freely.
 
+While a verb runs, orchestra prints one line to stderr per role as
+each state starts and finishes:
+
+```
+$ orchestra council should I rewrite this service in rust
+[1/7] framer (claude_code_text:opus) ... starting
+[1/7] framer (claude_code_text:opus) ... done in 2.4s
+[2/7] contrarian (claude_code_text:kimi-k2.6) ... starting
+[2/7] contrarian (claude_code_text:kimi-k2.6) ... done in 4.8s
+...
+[7/7] chairman (claude_code_text:opus) ... starting
+[7/7] chairman (claude_code_text:opus) ... done in 5.1s
+[final answer prints here on stdout]
+```
+
+Stdout still carries only the final answer so piping
+`orchestra ask "..." | something` keeps working. Pass `--quiet` (or
+`-q`) anywhere on the command line to suppress the per-state lines.
+
 ### Interactive REPL
 
 Bare `orchestra` (no arguments) drops you into a prompt:
@@ -353,6 +372,10 @@ Slash commands (in-process, no model calls):
 
 A single Ctrl-C cancels the current input line. A second Ctrl-C
 within one second exits the REPL.
+
+The REPL also streams the per-state progress lines to stderr while a
+verb runs, in the same format the CLI uses. The final answer prints
+to stdout.
 
 ### Direct workflow execution
 

@@ -101,10 +101,13 @@ def test_verb_dispatch_runs_configured_verb(
     _write_global_config(isolated_home, _ask_config_body())
     captured: dict[str, object] = {}
 
-    def _stub_run_verb(verb_name, query, config):
+    def _stub_run_verb(verb_name, query, config, **kwargs):
         captured["verb"] = verb_name
         captured["query"] = query
         captured["config_verbs"] = sorted(config.verbs)
+        captured["progress_callback_passed"] = (
+            kwargs.get("progress_callback") is not None
+        )
         return "Paris.\n"
 
     monkeypatch.setattr(cli, "run_verb", _stub_run_verb)
@@ -160,7 +163,7 @@ def test_verb_dispatch_propagates_run_verb_error(
 
     _write_global_config(isolated_home, _ask_config_body())
 
-    def _failing_run_verb(verb_name, query, config):
+    def _failing_run_verb(verb_name, query, config, **kwargs):
         raise WorkflowApiError("workflow blew up")
 
     monkeypatch.setattr(cli, "run_verb", _failing_run_verb)

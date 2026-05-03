@@ -117,6 +117,20 @@ class Executor:
         # when omitted. The store consults the same instance through
         # set_visibility_index().
         visibility_index: VisibilityIndex | None = None,
+        # Optional per-state progress hook. Fires once per state_enter
+        # and once per state_exit. The callback receives
+        # ``(kind, state_name, role, index, total, elapsed_seconds)``
+        # where ``index`` is the 1-based ordinal of the state's first
+        # entry (retries reuse the same index), ``total`` is the count
+        # of declared states in the workflow, and ``elapsed_seconds``
+        # is ``None`` for ``state_enter`` and the wall-clock duration
+        # for ``state_exit``. The CLI installs a default reporter that
+        # prints to stderr; the api wraps the user-facing
+        # ``progress_callback`` to enrich with adapter and model from
+        # the resolved role bindings.
+        progress_callback: Callable[
+            [str, str, str | None, int, int, float | None], None
+        ] | None = None,
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -154,6 +168,13 @@ class Executor:
         # remaining workflow-level mutable state.
         self._attempt_lock: threading.Lock = threading.Lock()
         self._envelope_lock: threading.Lock = threading.Lock()
+        # Progress reporting: per-state 1-based index assigned on first
+        # state_enter for that state name. Retries reuse the existing
+        # index so the [N/M] counter does not jump on a retry.
+        self._progress_callback = progress_callback
+        self._progress_state_indices: dict[str, int] = {}
+        self._progress_total: int = len(workflow.states)
+        self._progress_lock: threading.Lock = threading.Lock()
 
     # ----- entry points ------------------------------------------
 
@@ -217,6 +238,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        self._emit_progress("state_enter", state)
 
         # Step 2: build invocation request.
         actor_binding = self._build_actor_binding(state)
@@ -422,6 +444,9 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        self._emit_progress(
+            "state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0
+        )
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)
         else:
@@ -449,6 +474,40 @@ class Executor:
         )
 
     # ----- helpers ------------------------------------------------
+
+    def _emit_progress(
+        self,
+        kind: str,
+        state: StateDecl,
+        elapsed_seconds: float | None = None,
+    ) -> None:
+        """Surface a state_enter or state_exit to the optional callback.
+
+        Assigns a stable 1-based index per state name on first entry
+        so retries reuse the same index. Safe to call from worker
+        threads (the index map is guarded). If no callback is set,
+        this is a no-op.
+        """
+        if self._progress_callback is None:
+            return
+        with self._progress_lock:
+            index = self._progress_state_indices.get(state.name)
+            if index is None:
+                index = len(self._progress_state_indices) + 1
+                self._progress_state_indices[state.name] = index
+        try:
+            self._progress_callback(
+                kind,
+                state.name,
+                state.role,
+                index,
+                self._progress_total,
+                elapsed_seconds,
+            )
+        except Exception:
+            # The progress callback is for UX only. A misbehaving
+            # reporter must never abort an in-flight run.
+            pass
 
     def _build_actor_binding(self, state: StateDecl) -> dict[str, Any]:
         binding: dict[str, Any] = {"kind": state.actor.kind}
@@ -953,6 +1012,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        self._emit_progress("state_enter", state)
 
         actor_binding = self._build_actor_binding(state)
         reads = self._read_artifacts(state, snapshot=snapshot)
@@ -1133,6 +1193,9 @@ class Executor:
                 "payload_ref": None,
                 "invocation_id": invocation_id,
             },
+        )
+        self._emit_progress(
+            "state_exit", state, elapsed_seconds=duration_ms / 1000.0
         )
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)
@@ -1830,6 +1893,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        self._emit_progress("state_enter", state)
 
         actor_binding = self._build_actor_binding(state)
         prompt_artifact = self._resolve_prompt(state, snapshot=snapshot)
@@ -2046,6 +2110,9 @@ class Executor:
                 "payload_ref": payload_ref,
                 "invocation_id": invocation_id,
             },
+        )
+        self._emit_progress(
+            "state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0
         )
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)

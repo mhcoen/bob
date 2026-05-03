@@ -34,6 +34,7 @@ from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.log import LogWriter
+from orchestra.progress import ProgressCallback, silent_reporter, stderr_reporter
 from orchestra.registry.registry import with_core
 from orchestra.resume import replay_log, run_resume_hooks
 from orchestra.spine import NO_INITIAL, ExternalInputDecl, Workflow
@@ -420,7 +421,13 @@ def _no_global_config_hint() -> str:
     )
 
 
-def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
+def _dispatch_verb(
+    verb_name: str,
+    query_words: list[str],
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> int:
+    """Dispatch one verb invocation and print the answer."""
     project_dir = Path.cwd()
     config, err = _try_load_merged_config(project_dir=project_dir)
     if config is None:
@@ -447,7 +454,9 @@ def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
         return 2
     query = " ".join(query_words)
     try:
-        answer = run_verb(verb_name, query, config)
+        answer = run_verb(
+            verb_name, query, config, progress_callback=progress_callback
+        )
     except OrchestraError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -455,8 +464,41 @@ def _dispatch_verb(verb_name: str, query_words: list[str]) -> int:
     return 0
 
 
+def _extract_progress_flags(args: list[str]) -> tuple[list[str], bool]:
+    """Pull ``--quiet`` (or ``-q``) out of ``args``.
+
+    Verbs are dispatched before argparse runs so the ordinary
+    subparser machinery does not see them. We accept the quiet flag
+    anywhere in the argv tail so users can write either
+    ``orchestra --quiet council ...`` or
+    ``orchestra council --quiet ...`` without thinking about
+    positional ordering. Returns ``(remaining_args, quiet)``.
+    """
+    quiet = False
+    remaining: list[str] = []
+    for arg in args:
+        if arg in ("--quiet", "-q"):
+            quiet = True
+        else:
+            remaining.append(arg)
+    return remaining, quiet
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    # ``--quiet`` (or ``-q``) anywhere in the verb-style invocation
+    # suppresses per-state progress on stderr. Pull it out before
+    # the verb dispatcher inspects argv[0] so it does not get
+    # treated as a verb name. Passing ``silent_reporter()`` rather
+    # than ``None`` is intentional: downstream code (the REPL in
+    # particular) treats ``None`` as "install the default stderr
+    # reporter", so a no-op callback is the right way to express
+    # explicit suppression.
+    raw_args, quiet = _extract_progress_flags(raw_args)
+    progress_cb: ProgressCallback = (
+        silent_reporter() if quiet else stderr_reporter()
+    )
 
     # No arguments at all: drop into the interactive REPL. The user
     # is asking to use the tool, not asking what argparse complains
@@ -470,12 +512,14 @@ def main(argv: list[str] | None = None) -> int:
             print(err or "config unavailable", file=sys.stderr)
             return 1
         from orchestra.repl import run_repl
-        return run_repl(config)
+        return run_repl(config, progress_callback=progress_cb)
 
     # Handle the verb-style surface before argparse so positional
     # words can flow through unmangled.
     if raw_args and raw_args[0] not in _RESERVED_COMMANDS and not raw_args[0].startswith("-"):
-        return _dispatch_verb(raw_args[0], raw_args[1:])
+        return _dispatch_verb(
+            raw_args[0], raw_args[1:], progress_callback=progress_cb
+        )
 
     if raw_args and raw_args[0] == "help":
         config, _err = _try_load_merged_config(project_dir=Path.cwd())

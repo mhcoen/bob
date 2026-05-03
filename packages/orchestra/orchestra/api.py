@@ -56,6 +56,7 @@ that rely on the role's default prompt.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,7 @@ from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.log import LogWriter
+from orchestra.progress import ProgressCallback, ProgressEvent
 from orchestra.prompts import build_code_edit_prompt
 from orchestra.registry.registry import (
     ProfileRegistry,
@@ -243,6 +245,55 @@ keyed A through E with the texts as values. The corrected
 ``ask_council`` workflow does NOT use this transform: its chairman
 state reads the five named lens-advisor outputs directly with their
 identities in clear."""
+
+
+def _wrap_progress_callback(
+    user_callback: ProgressCallback | None,
+    role_bindings: dict[str, RoleBinding],
+) -> Callable[[str, str, str | None, int, int, float | None], None] | None:
+    """Adapt the user-facing ``ProgressCallback`` to the executor's
+    callback signature, enriching each event with the resolved adapter
+    and model from the role binding.
+
+    Returns ``None`` when ``user_callback`` is ``None`` so the
+    executor stays in its no-op fast path.
+    """
+    if user_callback is None:
+        return None
+
+    def _inner(
+        kind: str,
+        state_name: str,
+        role: str | None,
+        index: int,
+        total: int,
+        elapsed_seconds: float | None,
+    ) -> None:
+        adapter: str | None = None
+        model: str | None = None
+        if role is not None:
+            binding = role_bindings.get(role)
+            if binding is not None:
+                adapter = binding.adapter
+                model = binding.model
+        event = ProgressEvent(
+            kind=kind,
+            state_name=state_name,
+            role=role,
+            adapter=adapter,
+            model=model,
+            index=index,
+            total=total,
+            elapsed_seconds=elapsed_seconds,
+        )
+        try:
+            user_callback(event)
+        except Exception:
+            # The user-facing reporter is for UX only. A misbehaving
+            # callback must never abort an in-flight run.
+            pass
+
+    return _inner
 
 
 def _register_builtin_transforms(reg: ProfileRegistry) -> None:
@@ -726,6 +777,7 @@ def run_workflow(
     invocation_options: dict[str, Any] | None = None,
     project_dir: Path | str | None = None,
     data_root: Path | str | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> WorkflowRunResult:
     """Execute a configured workflow by name.
 
@@ -735,6 +787,13 @@ def run_workflow(
     plus any adapter-specific keys) that flow through to the adapter
     via ``backing_options`` and override the role's configured model
     on the actor binding.
+
+    ``progress_callback`` (optional) fires once per ``state_enter`` and
+    once per ``state_exit`` with a fully populated ``ProgressEvent``
+    that includes the resolved adapter and model from the role
+    bindings. The CLI installs a default reporter that prints to
+    stderr; library consumers can pass their own callback or omit the
+    argument to suppress progress.
     """
     if isinstance(config, dict):
         cfg = OrchestraConfig.from_dict(config)
@@ -795,6 +854,7 @@ def run_workflow(
         },
     )
 
+    executor_progress = _wrap_progress_callback(progress_callback, role_bindings)
     executor = Executor(
         workflow=workflow,
         registry=registry,
@@ -804,6 +864,7 @@ def run_workflow(
         run_id=run_id,
         external_inputs=dict(enriched),
         invocation_options=inv_opts,
+        progress_callback=executor_progress,
     )
 
     terminal: str = "stop"
@@ -865,6 +926,7 @@ def run_verb(
     config: OrchestraConfig,
     *,
     history: str = "",
+    progress_callback: ProgressCallback | None = None,
 ) -> str:
     """Run the workflow named by ``verb_name`` and return the answer text.
 
@@ -874,6 +936,9 @@ def run_verb(
     external_input, ``inputs["history"] = history`` too. Workflows
     that do not declare ``history`` ignore it silently so a custom
     verb pointing at a non-ask workflow keeps working.
+
+    ``progress_callback`` (optional) is forwarded to ``run_workflow``
+    so the CLI and REPL can stream per-state progress to stderr.
 
     Returns the final state's text payload, which the CLI prints to
     stdout. Raises ``WorkflowApiError`` if the verb is unknown, the
@@ -895,7 +960,9 @@ def run_verb(
     declared = {ext.name for ext in workflow.external_inputs}
     if "history" in declared:
         inputs["history"] = history
-    result = run_workflow(workflow_name, inputs, config)
+    result = run_workflow(
+        workflow_name, inputs, config, progress_callback=progress_callback
+    )
     if result.terminal != "done":
         raise WorkflowApiError(
             f"verb {verb_name!r} (workflow {workflow_name!r}) did not "
