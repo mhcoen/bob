@@ -651,6 +651,8 @@ def _resume_run(
         current_state=replay.current_state,
         step_count=replay.step_count,
         visibility_index=vi,
+        last_transition_state=replay.last_transition_state,
+        last_transition_outcome=replay.last_transition_outcome,
     )
     try:
         if (
@@ -1169,3 +1171,237 @@ def test_resume_with_payload_guard_picks_correct_branch(
         r for r in records if r.event == "state_enter" and r.state_id == "s_low"
     ]
     assert len(s_low_enters) == 0, "s_low must not have been entered"
+
+
+# --------------------------------------------------------------------
+# Pass-2 fix #1: refuse resume when commit landed without state_exit
+# --------------------------------------------------------------------
+
+
+def test_cmd_resume_refuses_agent_state_with_committed_artifacts_no_state_exit(
+    tmp_path: Path,
+) -> None:
+    """If an agent state's commit_tentative ran but the process died
+    before state_exit was written, the artifact version is durable in
+    the store and the log shows artifact_write records for the state
+    with no matching state_exit. Re-entering the state would invoke
+    the agent a second time and re-mutate the workspace. cmd_resume
+    must refuse with a targeted error."""
+    import argparse
+
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "agent.orc"
+    src.write_text(
+        """spec 0.1
+workflow ag
+  external_input topic text
+  max_total_steps 5
+  model m_help
+  agent worker
+    model m_help
+    adapter claude_code_agent
+    context_policy fresh
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md"
+  state edit
+    actor agent worker
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    log_path = run_dir / "log.jsonl"
+    with open(log_path, "w", encoding="utf-8") as fh:
+        records = [
+            {"ts": "2026-05-03T00:00:00.000Z", "run_id": run_id, "seq": 0,
+             "event": "run_start", "state_id": None, "attempt": None,
+             "workflow_path": str(src), "external_inputs": {"topic": "x"}},
+            {"ts": "2026-05-03T00:00:01.000Z", "run_id": run_id, "seq": 1,
+             "event": "state_enter", "state_id": "edit", "attempt": 1,
+             "attempts": {"edit": 1}, "retries": {"edit": 0},
+             "invocation_id": f"{run_id}::edit::1"},
+            {"ts": "2026-05-03T00:00:02.000Z", "run_id": run_id, "seq": 2,
+             "event": "actor_prepare", "state_id": "edit", "attempt": 1},
+            {"ts": "2026-05-03T00:00:03.000Z", "run_id": run_id, "seq": 3,
+             "event": "actor_invoke_start", "state_id": "edit", "attempt": 1},
+            {"ts": "2026-05-03T00:00:04.000Z", "run_id": run_id, "seq": 4,
+             "event": "actor_invoke_end", "state_id": "edit", "attempt": 1,
+             "payload_ref": None, "duration_ms": 0, "summary": {}},
+            {"ts": "2026-05-03T00:00:05.000Z", "run_id": run_id, "seq": 5,
+             "event": "artifact_write", "state_id": "edit", "attempt": 1,
+             "artifact": "reply", "version_id": "v1",
+             "invocation_id": f"{run_id}::edit::1"},
+        ]
+        import json as _json
+        for r in records:
+            fh.write(_json.dumps(r, sort_keys=True) + "\n")
+
+    # The store is also empty for this synthetic test; cmd_resume
+    # refuses BEFORE opening the store, so no SQLite is needed.
+    args = argparse.Namespace(
+        run_id=run_id,
+        data_root=str(data_root),
+    )
+    from orchestra import cli
+    rc = cli.cmd_resume(args)
+    assert rc == 2
+
+
+# --------------------------------------------------------------------
+# Pass-2 fix #2: retry counter survives a crash after retry transition
+# --------------------------------------------------------------------
+
+
+def _build_retry_fixture(tmp_path: Path) -> Path:
+    """``edit`` retries up to once on error then stops. The retry
+    transition routes back to ``edit`` so a successful retry
+    increments retries[edit] from 0 to 1."""
+    _write_dummy_template(tmp_path)
+    src = tmp_path / "retry.orc"
+    src.write_text(
+        """spec 0.1
+workflow retry_test
+  external_input topic text
+  max_total_steps 10
+  model m_e
+  artifact reply text
+  role r
+    prompt template "templates/dummy.md"
+  state edit
+    actor model m_e
+    role r
+    reads topic
+    writes reply text
+    on complete => done
+    on error retry max 1 then stop
+    on timeout => stop
+"""
+    )
+    return src
+
+
+def test_resume_after_retry_transition_does_not_reset_retries(
+    tmp_path: Path,
+) -> None:
+    """Workflow with `on error retry max 1 => edit`. First attempt
+    errors so the executor takes the retry branch and writes a
+    transition record back to ``edit`` with outcome=error. Crash
+    immediately after that transition. On resume, the second
+    invocation must count as the retry (retries[edit]=1, attempts
+    [edit]=2). Without the fix, replay restores attempts/retries from
+    the last state_enter (which had retries=0), the executor's in-memory
+    _last_state/_last_outcome reset to None, and the next entry
+    treats this as a fresh entry that resets retries to 0 instead of
+    incrementing it. The retry budget effectively doubles.
+
+    Verified pre-fix this test fails with retries[edit]=0 after the
+    second entry. Post-fix it shows retries[edit]=1.
+    """
+    src = _build_retry_fixture(tmp_path)
+    run_id = new_run_id()
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True)
+
+    # First run: fail on the first invoke, succeed on the second so
+    # the workflow reaches done. Then we will rewind to the durable
+    # transition and resume.
+    from orchestra.adapters.mock_model import MockModelAdapter
+
+    invoke_count = {"n": 0}
+
+    class _Flaky:
+        def __init__(self) -> None:
+            self._inner = MockModelAdapter()
+
+        def prepare(self, request: Any) -> Any:
+            return self._inner.prepare(request)
+
+        def invoke(self, prepared: Any) -> Any:
+            invoke_count["n"] += 1
+            if invoke_count["n"] == 1:
+                raise RuntimeError("synthetic first-attempt failure")
+            return self._inner.invoke(prepared)
+
+        def cancel(self, prepared: Any) -> None:
+            return None
+
+        def describe(self) -> dict[str, Any]:
+            return self._inner.describe()
+
+    reg = _registry_with_model_adapter(lambda: _Flaky())
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write("run_start", fields={"workflow_path": str(src)})
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    terminal = executor.run_to_completion()
+    log.close()
+    store.close()
+    assert terminal == "done"
+
+    # Truncate the log right after the durable retry transition. We
+    # keep records up to and including the first transition record
+    # (which routed back to edit on error) and drop everything after.
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    keep_until: int | None = None
+    for r in records:
+        if (
+            r.event == "transition"
+            and r.state_id == "edit"
+            and r.fields.get("target") == "edit"
+        ):
+            keep_until = r.seq
+            break
+    assert keep_until is not None, (
+        "expected a durable retry transition that targets 'edit'"
+    )
+    truncated = [r for r in records if r.seq <= keep_until]
+    with open(run_dir / "log.jsonl", "w", encoding="utf-8") as fh:
+        for r in truncated:
+            fh.write(r.to_json() + "\n")
+
+    # Resume. The second-attempt invoke happens here; the post-resume
+    # snapshot should show attempts[edit]=2 and retries[edit]=1.
+    invoke_count["n"] = 1  # already failed once before truncation
+    reg2 = _registry_with_model_adapter(lambda: _Flaky())
+    terminal2 = _resume_run(
+        run_dir=run_dir,
+        workflow_path=src,
+        registry=reg2,
+        external_inputs={"topic": "x"},
+    )
+    assert terminal2 == "done"
+
+    # Inspect the resumed log: the second state_enter for ``edit``
+    # must have attempts[edit]=2 and retries[edit]=1. Pre-fix
+    # retries[edit] would be 0 here.
+    records = LogReader(run_dir / "log.jsonl").read_all()
+    edit_enters = [
+        r for r in records if r.event == "state_enter" and r.state_id == "edit"
+    ]
+    assert len(edit_enters) >= 2
+    second_enter = edit_enters[1]
+    assert second_enter.attempt == 2
+    assert second_enter.fields["attempts"]["edit"] == 2
+    assert second_enter.fields["retries"]["edit"] == 1, (
+        "retries[edit] must be 1 on the second entry; pre-fix it "
+        "would be 0 because _last_state/_last_outcome were not "
+        "reconstructed from the log"
+    )

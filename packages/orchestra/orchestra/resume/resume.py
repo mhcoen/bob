@@ -79,6 +79,28 @@ class ReplayState:
     # so the caller can locate the envelope; the caller is expected
     # to advance ``current_state`` after writing the transition.
     state_exit_without_transition: bool = False
+    # Pass-2 fix #2: the live executor tracks _last_state and
+    # _last_outcome via _close_pending_transition so the next state
+    # entry can decide whether to increment the retry counter (when
+    # the last transition routes a state back to itself on error or
+    # timeout). Replay restores attempts and retries but not these
+    # two scalars; without them, a resume after `on error retry =>
+    # same_state` would reset retries to 0 and grant an extra retry.
+    # ``last_transition_state`` and ``last_transition_outcome`` are
+    # the (state_id, outcome) of the latest durable transition record,
+    # threaded into Executor.__init__ to seed _last_state/_last_outcome.
+    last_transition_state: str | None = None
+    last_transition_outcome: str | None = None
+    # Pass-2 fix #1: tracks per-state attempts that committed
+    # artifact versions before crashing. The executor commits writes
+    # before writing state_exit; a crash in that window leaves a
+    # state_enter on disk, durable artifact_write records, and no
+    # state_exit. Resume into such a state would re-run the actor and
+    # for agent states re-mutate the workspace. ``committed_without_exit``
+    # records the (state_id, attempt) pairs in this state so cmd_resume
+    # can refuse with a targeted error before re-entering an agent
+    # state with stranded committed work.
+    committed_without_exit: set[tuple[str, int]] = field(default_factory=set)
     pending_fan_out_transition: dict[str, Any] | None = None
     """Round-3 fix: when a durable ``fan_out_end`` is the latest
     routing-relevant record and the parent's ``transition`` write
@@ -161,10 +183,23 @@ def replay_log(log_path: str | Path) -> ReplayState:
                     }
                 if target in _TERMINAL_TARGETS:
                     state.is_terminal = True
+        elif rec.event == "artifact_write":
+            # Pass-2 fix #1 tracking: an artifact_write record is the
+            # durable signal that commit_tentative ran. If this write
+            # is followed by a state_exit for the same state+attempt
+            # the pair gets cleared below; otherwise it stays in the
+            # set and cmd_resume refuses to re-enter the state.
+            if rec.state_id is not None and rec.attempt is not None:
+                state.committed_without_exit.add(
+                    (rec.state_id, rec.attempt)
+                )
         elif rec.event == "state_exit":
             assert rec.state_id is not None
             assert rec.attempt is not None
             state.last_state_completed = True
+            state.committed_without_exit.discard(
+                (rec.state_id, rec.attempt)
+            )
             outcome = rec.fields.get("outcome")
             state.last_outcome = str(outcome) if outcome is not None else None
             # Slice A: invocation_id -> success/error in the
@@ -216,6 +251,15 @@ def replay_log(log_path: str | Path) -> ReplayState:
             sc = rec.fields.get("step_count")
             if isinstance(sc, int):
                 state.step_count = sc
+            # Pass-2 fix #2: capture the latest durable transition's
+            # (state_id, outcome) so the executor can rebuild
+            # _last_state and _last_outcome for retry-counter
+            # accounting on the resumed entry.
+            if rec.state_id is not None:
+                state.last_transition_state = rec.state_id
+            outcome_field = rec.fields.get("outcome")
+            if outcome_field is not None:
+                state.last_transition_outcome = str(outcome_field)
             # Round-3 fix: clear the pending fan-out transition when
             # this transition record closes the same parent that
             # ``fan_out_end`` opened. A transition for a different

@@ -253,3 +253,165 @@ def test_replay_increments_attempts_across_repeated_entries(tmp_path: Path) -> N
     assert state.attempts == {"A": 2}
     assert state.current_state == "A"
     assert state.last_state_completed is False
+
+
+# --------------------------------------------------------------------
+# Pass-2 fix #1: committed-without-exit detection
+# --------------------------------------------------------------------
+
+
+def test_replay_records_committed_without_exit(tmp_path: Path) -> None:
+    """state_enter + artifact_write + crash before state_exit leaves
+    a committed artifact version in the store with no completion
+    record. Resume must surface this so cmd_resume can refuse the
+    re-entry for an agent state."""
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(
+                1,
+                "state_enter",
+                state_id="A",
+                attempt=1,
+                attempts={"A": 1},
+                retries={"A": 0},
+            ),
+            _common(2, "actor_prepare", state_id="A", attempt=1),
+            _common(3, "actor_invoke_start", state_id="A", attempt=1),
+            _common(4, "actor_invoke_end", state_id="A", attempt=1,
+                    payload_ref=None),
+            _common(
+                5,
+                "artifact_write",
+                state_id="A",
+                attempt=1,
+                artifact="reply",
+                version_id="v1",
+                invocation_id="test-run::A::1",
+            ),
+        ],
+    )
+    state = replay_log(str(log))
+    assert ("A", 1) in state.committed_without_exit
+    assert state.current_state == "A"
+    assert state.last_state_completed is False
+
+
+def test_replay_clears_committed_without_exit_on_state_exit(
+    tmp_path: Path,
+) -> None:
+    """A matching state_exit closes the open artifact_write window.
+    The pair must NOT remain in committed_without_exit."""
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(
+                1,
+                "state_enter",
+                state_id="A",
+                attempt=1,
+                attempts={"A": 1},
+                retries={"A": 0},
+            ),
+            _common(
+                2,
+                "artifact_write",
+                state_id="A",
+                attempt=1,
+                artifact="reply",
+                version_id="v1",
+                invocation_id="test-run::A::1",
+            ),
+            _common(
+                3,
+                "state_exit",
+                state_id="A",
+                attempt=1,
+                status="ok",
+                outcome="complete",
+            ),
+        ],
+    )
+    state = replay_log(str(log))
+    assert state.committed_without_exit == set()
+
+
+# --------------------------------------------------------------------
+# Pass-2 fix #2: last-transition reconstruction for retry counter
+# --------------------------------------------------------------------
+
+
+def test_replay_records_last_transition_state_and_outcome(
+    tmp_path: Path,
+) -> None:
+    """A durable ``transition`` record's (state_id, outcome) is what
+    the live executor stores in _last_state/_last_outcome via
+    _close_pending_transition. Replay must recover both so a resume
+    after `on error retry => same_state` does not reset retries."""
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(
+                1,
+                "state_enter",
+                state_id="A",
+                attempt=1,
+                attempts={"A": 1},
+                retries={"A": 0},
+            ),
+            _common(2, "actor_prepare", state_id="A", attempt=1),
+            _common(3, "actor_invoke_start", state_id="A", attempt=1),
+            _common(4, "actor_invoke_end", state_id="A", attempt=1),
+            _common(
+                5,
+                "state_exit",
+                state_id="A",
+                attempt=1,
+                status="error",
+                outcome="error",
+            ),
+            _common(
+                6,
+                "transition",
+                state_id="A",
+                attempt=1,
+                outcome="error",
+                target="A",
+                step_count=1,
+            ),
+        ],
+    )
+    state = replay_log(str(log))
+    assert state.last_transition_state == "A"
+    assert state.last_transition_outcome == "error"
+
+
+def test_replay_last_transition_takes_latest_record(tmp_path: Path) -> None:
+    """When multiple transition records are durable the latest one is
+    what the live executor's _last_state/_last_outcome would hold."""
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(1, "state_enter", state_id="A", attempt=1),
+            _common(2, "state_exit", state_id="A", attempt=1,
+                    status="ok", outcome="complete"),
+            _common(3, "transition", state_id="A", attempt=1,
+                    outcome="complete", target="B", step_count=1),
+            _common(4, "state_enter", state_id="B", attempt=1),
+            _common(5, "state_exit", state_id="B", attempt=1,
+                    status="error", outcome="timeout"),
+            _common(6, "transition", state_id="B", attempt=1,
+                    outcome="timeout", target="B", step_count=2),
+        ],
+    )
+    state = replay_log(str(log))
+    assert state.last_transition_state == "B"
+    assert state.last_transition_outcome == "timeout"

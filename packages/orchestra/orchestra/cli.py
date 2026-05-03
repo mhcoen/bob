@@ -278,6 +278,48 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     registry = with_core()
     workflow = load_workflow(workflow_path, registry)
+
+    # Pass-2 fix #1: refuse to resume into a state that committed
+    # artifact versions before crashing without writing state_exit.
+    # The committed work is durable in the store, but replay would
+    # see only state_enter and re-enter the state to run the actor a
+    # second time. For agent states that mutate the workspace, the
+    # second run re-mutates and corrupts the workspace. The
+    # conservative path is to refuse and let the user decide; a
+    # log-repair path that synthesizes the missing state_exit can land
+    # separately.
+    if (
+        replay.current_state is not None
+        and not replay.last_state_completed
+    ):
+        for orphan_state, orphan_attempt in sorted(replay.committed_without_exit):
+            if orphan_state == replay.current_state:
+                state_decl = next(
+                    (s for s in workflow.states if s.name == orphan_state),
+                    None,
+                )
+                if state_decl is None:
+                    continue
+                if state_decl.actor.kind != "agent":
+                    continue
+                print(
+                    f"refusing to resume: state {orphan_state!r} "
+                    f"(attempt {orphan_attempt}) committed artifact "
+                    "versions to the store before crashing without a "
+                    "matching state_exit. Re-entering would run the "
+                    "agent a second time and re-mutate the workspace.",
+                    file=sys.stderr,
+                )
+                print(
+                    "Inspect the run directory and either repair the "
+                    "log manually with the recorded artifact_write "
+                    "records or roll the run back. The conservative "
+                    "default is refusal because agents are not assumed "
+                    "to be idempotent.",
+                    file=sys.stderr,
+                )
+                return 2
+
     store = ArtifactStore(run_dir / "store.sqlite")
     log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
 
@@ -305,6 +347,8 @@ def cmd_resume(args: argparse.Namespace) -> int:
         current_state=replay.current_state,
         step_count=replay.step_count,
         visibility_index=visibility_index,
+        last_transition_state=replay.last_transition_state,
+        last_transition_outcome=replay.last_transition_outcome,
     )
     terminal: str | None = None
     try:

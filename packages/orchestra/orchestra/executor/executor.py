@@ -108,6 +108,15 @@ class Executor:
         envelopes: dict[str, Envelope] | None = None,
         current_state: str | None = None,
         step_count: int = 0,
+        # Pass-2 fix #2: the (state_id, outcome) of the latest durable
+        # transition before resume. The live executor tracks these in
+        # _last_state/_last_outcome via _close_pending_transition; on
+        # resume we rebuild them from the log so the next state entry
+        # decides retry-counter increments the same way the live path
+        # would. Default to None (fresh run); cmd_resume threads them
+        # in from ReplayState.
+        last_transition_state: str | None = None,
+        last_transition_outcome: str | None = None,
         # Per-call invocation options. Merged into every state's
         # backing_options at invoke time so adapters see the overrides
         # without polluting the workflow's external_inputs surface.
@@ -157,8 +166,8 @@ class Executor:
         self._attempts: dict[str, int] = dict(attempts or {})
         self._retries: dict[str, int] = dict(retries or {})
         self._envelopes: dict[str, Envelope] = dict(envelopes or {})
-        self._last_outcome: str | None = None
-        self._last_state: str | None = None
+        self._last_outcome: str | None = last_transition_outcome
+        self._last_state: str | None = last_transition_state
         self._current_state: str = current_state or workflow.start_state_name()
         self._step_count = step_count
         self._payloads_dir = run_dir / "payloads"
