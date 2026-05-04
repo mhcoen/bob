@@ -1669,6 +1669,28 @@ matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 - macOS for iMessage notifications (Telegram works anywhere)
 - Playwright (optional, for web app investigation only)
 
+## Security notes
+
+Prompts and model outputs may be persisted in several places McLoop
+writes during a run:
+
+- per-task transcript logs under the configured `log_dir` (default
+  `logs/`)
+- `.mcloop/active-pid` while a session is running
+- `.mcloop/runs/latest.json` and dated run summaries
+- the JSONL run log (`log.jsonl` under the orchestra run directory)
+  when the orchestra wrapper is in use
+- live process listings (`ps` output) while the inner CLI is
+  running, because the prompt is part of the legacy direct path's
+  command line
+
+Do not run McLoop against codebases containing live credentials,
+customer data, or other sensitive material without first reviewing
+what gets persisted and where. The orchestra-backed path snapshots
+prompt-source files into the run directory so resume reads from
+there rather than the live filesystem; that snapshot is also
+unprotected at the OS level.
+
 ## Development
 
 ```bash
