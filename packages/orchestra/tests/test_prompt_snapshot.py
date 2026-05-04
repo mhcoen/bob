@@ -28,6 +28,7 @@ from orchestra.prompt_snapshot import (
 )
 from orchestra.spine import (
     ActorBinding,
+    ArtifactDecl,
     PromptSource,
     RoleDecl,
     StateDecl,
@@ -374,3 +375,107 @@ def test_restore_with_symlink_retargeting_does_not_bypass(
         "snapshot must hold the bytes captured at run_start, not the "
         "retargeted symlink's new target"
     )
+
+
+# --------------------------------------------------------------------
+# Schema snapshotting (commit 1.5)
+# --------------------------------------------------------------------
+
+
+_SCHEMA_TEXT = (
+    '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+    '"type":"object","required":["decision"],'
+    '"properties":{"decision":{"type":"string",'
+    '"enum":["accept","stop"]}}}\n'
+)
+
+
+def _build_schema_workflow(tmp_path: Path) -> Workflow:
+    schemas = tmp_path / "schemas"
+    schemas.mkdir(parents=True, exist_ok=True)
+    (schemas / "v.json").write_text(_SCHEMA_TEXT)
+    return Workflow(
+        spec_version="0.1",
+        name="t",
+        artifacts=(
+            ArtifactDecl(
+                name="verdict",
+                type="json",
+                schema_path="schemas/v.json",
+            ),
+        ),
+        states=(
+            StateDecl(
+                name="s1",
+                actor=ActorBinding(kind="model", ref="m"),
+                writes=(WriteDecl(name="verdict", type="json"),),
+                transitions=(
+                    Transition(outcome="accept", target="done"),
+                    Transition(outcome="stop", target="stop"),
+                    Transition(outcome="error", target="stop"),
+                    Transition(outcome="timeout", target="stop"),
+                ),
+            ),
+        ),
+        source_dir=str(tmp_path),
+    )
+
+
+def test_snapshot_copies_schema_into_run_dir(tmp_path: Path) -> None:
+    workflow = _build_schema_workflow(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    rewritten, manifest = snapshot_prompt_sources(workflow, run_dir)
+    assert any(e["kind"] == "schema" for e in manifest)
+    schema_entry = next(e for e in manifest if e["kind"] == "schema")
+    assert schema_entry["name"] == "verdict"
+    snapshot_path = Path(schema_entry["snapshot_path"])
+    assert snapshot_path.is_file()
+    assert snapshot_path.parent == run_dir / "prompt_sources"
+    assert snapshot_path.read_text() == _SCHEMA_TEXT
+    rewritten_art = next(a for a in rewritten.artifacts if a.name == "verdict")
+    assert rewritten_art.schema_path == str(snapshot_path)
+    digest = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+    assert schema_entry["sha256"] == digest
+
+
+def test_snapshot_schema_file_mode_is_private(tmp_path: Path) -> None:
+    import os
+    workflow = _build_schema_workflow(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    saved_umask = os.umask(0o022)
+    try:
+        _, manifest = snapshot_prompt_sources(workflow, run_dir)
+    finally:
+        os.umask(saved_umask)
+    schema_entry = next(e for e in manifest if e["kind"] == "schema")
+    snapshot_path = Path(schema_entry["snapshot_path"])
+    mode = snapshot_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_restore_rewrites_schema_paths(tmp_path: Path) -> None:
+    workflow = _build_schema_workflow(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _, manifest = snapshot_prompt_sources(workflow, run_dir)
+    fresh = _build_schema_workflow(tmp_path)
+    restored = restore_prompt_snapshots(fresh, manifest)
+    restored_art = next(a for a in restored.artifacts if a.name == "verdict")
+    schema_entry = next(e for e in manifest if e["kind"] == "schema")
+    assert restored_art.schema_path == schema_entry["snapshot_path"]
+
+
+def test_restore_rejects_mutated_schema_snapshot(tmp_path: Path) -> None:
+    workflow = _build_schema_workflow(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _, manifest = snapshot_prompt_sources(workflow, run_dir)
+    schema_entry = next(e for e in manifest if e["kind"] == "schema")
+    snapshot_path = Path(schema_entry["snapshot_path"])
+    snapshot_path.chmod(0o600)
+    snapshot_path.write_text(_SCHEMA_TEXT.replace("accept", "approve"))
+    fresh = _build_schema_workflow(tmp_path)
+    with pytest.raises(SnapshotIntegrityError):
+        restore_prompt_snapshots(fresh, manifest)

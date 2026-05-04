@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestra.spine import (
+    ArtifactDecl,
     PromptSource,
     RoleDecl,
     StateDecl,
@@ -204,9 +205,52 @@ def snapshot_prompt_sources(
         new_prompt = replace(state.prompt, path=str(snapshot_path))
         new_states.append(replace(state, prompt=new_prompt))
 
+    # Schema-verdict 1.5: schema files are static inputs identical in
+    # spirit to prompt templates. The walk includes every artifact's
+    # schema "<path>" qualifier; the workflow's artifact decl is
+    # rewritten so the executor's schema-spec cache loads the
+    # snapshot copy. Resume verifies the snapshot's bytes against the
+    # recorded sha256 so a schema file edited between crash and
+    # resume is a hard refusal.
+    new_artifacts: list[ArtifactDecl] = []
+    for art in workflow.artifacts:
+        if art.schema_path is None:
+            new_artifacts.append(art)
+            continue
+        candidate = Path(art.schema_path)
+        if not candidate.is_absolute():
+            candidate = base / art.schema_path
+        if not candidate.is_file():
+            new_artifacts.append(art)
+            continue
+        snapshot_name = _schema_snapshot_filename(art.name, str(candidate))
+        snapshot_path = snapshot_dir / snapshot_name
+        _copy_private(candidate, snapshot_path)
+        digest = _digest_file(snapshot_path)
+        manifest.append(
+            {
+                "kind": "schema",
+                "name": art.name,
+                "original_path": art.schema_path,
+                "resolved_path": str(candidate),
+                "snapshot_path": str(snapshot_path),
+                "sha256": digest,
+            }
+        )
+        new_artifacts.append(replace(art, schema_path=str(snapshot_path)))
+
     workflow.roles = tuple(new_roles)
     workflow.states = tuple(new_states)
+    workflow.artifacts = tuple(new_artifacts)
     return workflow, manifest
+
+
+def _schema_snapshot_filename(artifact_name: str, source_path: str) -> str:
+    """Stable filename for a snapshotted schema, parallel to
+    ``_snapshot_filename`` for prompt sources.
+    """
+    suffix = Path(source_path).suffix or ".json"
+    return f"schema_{artifact_name}{suffix}"
 
 
 class SnapshotIntegrityError(Exception):
@@ -239,6 +283,7 @@ def restore_prompt_snapshots(
     """
     by_role: dict[str, str] = {}
     by_state: dict[str, str] = {}
+    by_schema: dict[str, str] = {}
     for entry in manifest:
         kind = entry.get("kind")
         name = entry.get("name")
@@ -272,6 +317,8 @@ def restore_prompt_snapshots(
             by_role[name] = snapshot_path_str
         elif kind == "state":
             by_state[name] = snapshot_path_str
+        elif kind == "schema":
+            by_schema[name] = snapshot_path_str
         else:
             raise SnapshotIntegrityError(
                 f"unknown snapshot kind {kind!r} for {name!r}"
@@ -299,6 +346,15 @@ def restore_prompt_snapshots(
         new_prompt = replace(state.prompt, path=snap)
         new_states.append(replace(state, prompt=new_prompt))
 
+    new_artifacts: list[ArtifactDecl] = []
+    for art in workflow.artifacts:
+        snap = by_schema.get(art.name)
+        if snap is None or art.schema_path is None:
+            new_artifacts.append(art)
+            continue
+        new_artifacts.append(replace(art, schema_path=snap))
+
     workflow.roles = tuple(new_roles)
     workflow.states = tuple(new_states)
+    workflow.artifacts = tuple(new_artifacts)
     return workflow
