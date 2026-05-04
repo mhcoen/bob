@@ -888,7 +888,22 @@ def run_workflow(
     else:
         run_root = Path(data_root)
     run_dir = run_root / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    # Pass-8 fix #2: run directories carry prompt snapshots, log
+    # files, and SQLite stores that may contain credentials and
+    # proprietary content. Default umask 022 leaves them
+    # world-readable. Force 0700 on the run-root tree and the
+    # per-run directory so only the owning user can enumerate the
+    # contents.
+    run_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        run_root.chmod(0o700)
+    except OSError:
+        pass
+    run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        run_dir.chmod(0o700)
+    except OSError:
+        pass
 
     workflow = _apply_instruction_templates(
         workflow,

@@ -214,8 +214,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     }
 
     run_id = new_run_id()
-    run_dir = (Path(args.data_root) if args.data_root else _data_root()) / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_root = Path(args.data_root) if args.data_root else _data_root()
+    run_dir = run_root / run_id
+    # Pass-8 fix #2: run directories carry prompt snapshots, log
+    # files, and SQLite stores that may contain credentials and
+    # proprietary content. Force 0700 on the run-root tree and the
+    # per-run directory so the default umask cannot leave them
+    # world-readable.
+    run_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        run_root.chmod(0o700)
+    except OSError:
+        pass
+    run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        run_dir.chmod(0o700)
+    except OSError:
+        pass
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
     from orchestra.prompt_snapshot import snapshot_prompt_sources

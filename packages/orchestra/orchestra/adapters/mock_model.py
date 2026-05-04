@@ -12,6 +12,7 @@ and transcript fields set to ``None`` (subscription-billing semantics).
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any
 
@@ -25,14 +26,24 @@ class MockModelAdapter:
         self._response_override = response
 
     def prepare(self, request: InvocationRequest) -> PreparedInvocation:
+        # Pass-8 fix #1: same redaction discipline as the real
+        # subprocess adapters from pass-7. The prompt bytes stay
+        # only in non-persisted invocation internals; the durable
+        # actor_prepare summary carries a hex digest for correlation
+        # purposes only. Without this, a mock-driven test workflow
+        # writes prompt bodies into the JSONL log every time it runs.
         prompt = request.prompt_artifact or ""
+        prompt_bytes = prompt.encode("utf-8") if prompt else b""
+        prompt_sha256 = (
+            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
+        )
         prepared = PreparedInvocation(
             request=request,
             summary={
                 "kind": "model",
                 "model": (request.actor_binding or {}).get("model"),
                 "prompt_chars": len(prompt),
-                "prompt_preview": prompt[:160],
+                "prompt_sha256": prompt_sha256,
             },
             inner={"prompt": prompt},
         )

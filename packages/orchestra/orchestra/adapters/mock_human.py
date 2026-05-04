@@ -17,6 +17,7 @@ is no real notification backend in slice 1.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any
 
@@ -49,14 +50,22 @@ class MockHumanAdapter:
             raise AdapterError(
                 f"human state {request.state_id!r} declared no options"
             )
+        # Pass-8 fix #1: same redaction discipline as the real
+        # subprocess adapters from pass-7 and the mock_model adapter
+        # (also pass-8). The actor_prepare summary stores a hex
+        # digest for correlation, never the prompt body.
         prompt = request.prompt_artifact or ""
+        prompt_bytes = prompt.encode("utf-8") if prompt else b""
+        prompt_sha256 = (
+            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
+        )
         prepared = PreparedInvocation(
             request=request,
             summary={
                 "kind": "human",
                 "options": list(options),
                 "prompt_chars": len(prompt),
-                "prompt_preview": prompt[:160],
+                "prompt_sha256": prompt_sha256,
             },
             inner={"options": options},
         )

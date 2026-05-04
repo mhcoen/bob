@@ -309,7 +309,26 @@ def handle_query(state: ReplState, line: str) -> None:
 
 
 def _build_session() -> PromptSession[str]:
-    _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Pass-8 fix #3: REPL history persists raw user queries. The
+    # default umask (022) creates ~/.orchestra at 0755 and the
+    # history file at 0644, so other local users on a shared host
+    # can read the queries the audit verified can carry secrets.
+    # Tighten the parent directory to 0700 and the history file to
+    # 0600 before prompt_toolkit opens it. History stays enabled so
+    # up-arrow recall keeps working; the residual (root or backup
+    # processes) matches every shell history file's residual.
+    parent = _HISTORY_PATH.parent
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        parent.chmod(0o700)
+    except OSError:
+        pass
+    if not _HISTORY_PATH.exists():
+        _HISTORY_PATH.touch(mode=0o600)
+    try:
+        _HISTORY_PATH.chmod(0o600)
+    except OSError:
+        pass
     return PromptSession(
         history=FileHistory(str(_HISTORY_PATH)),
         auto_suggest=AutoSuggestFromHistory(),

@@ -80,6 +80,25 @@ def _digest_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _copy_private(src: Path, dst: Path) -> None:
+    """Copy bytes from ``src`` to ``dst`` and force 0600 on the
+    destination.
+
+    ``shutil.copyfile`` honours the calling process's umask, which
+    on most multi-user POSIX systems leaves files at 0644 and
+    therefore world-readable. Snapshot files are sensitive (the
+    audit verified they may contain credentials and proprietary
+    context), so an explicit chmod follows every copy.
+    """
+    shutil.copyfile(src, dst)
+    try:
+        dst.chmod(0o600)
+    except OSError:
+        # Filesystems without POSIX permission semantics fall through;
+        # the audit threat model is multi-user POSIX hosts.
+        pass
+
+
 def _snapshot_filename(kind: str, name: str, source_path: str) -> str:
     """Build a stable filename for a snapshot under prompt_sources/.
 
@@ -107,7 +126,20 @@ def snapshot_prompt_sources(
     would be unused metadata.
     """
     snapshot_dir = run_dir / SNAPSHOT_DIR_NAME
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    # Pass-8 fix #2: snapshot files may contain credentials,
+    # proprietary context, or customer data. Default umask 022
+    # produces 0755 directories and 0644 files, leaving the
+    # snapshots world-readable. Force a private mode 0700 on the
+    # directory so other local users cannot enumerate it. Files
+    # written below also get chmod 0600 to close the same hole.
+    snapshot_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        snapshot_dir.chmod(0o700)
+    except OSError:
+        # On platforms or filesystems that do not support chmod
+        # (e.g. some Windows configurations), proceed; the audit's
+        # threat model is multi-user POSIX systems.
+        pass
 
     base = (
         Path(workflow.source_dir)
@@ -127,7 +159,7 @@ def snapshot_prompt_sources(
             "role", role.name, str(resolved)
         )
         snapshot_path = snapshot_dir / snapshot_name
-        shutil.copyfile(resolved, snapshot_path)
+        _copy_private(resolved, snapshot_path)
         digest = _digest_file(snapshot_path)
         manifest.append(
             {
@@ -157,7 +189,7 @@ def snapshot_prompt_sources(
             "state", state.name, str(resolved)
         )
         snapshot_path = snapshot_dir / snapshot_name
-        shutil.copyfile(resolved, snapshot_path)
+        _copy_private(resolved, snapshot_path)
         digest = _digest_file(snapshot_path)
         manifest.append(
             {
