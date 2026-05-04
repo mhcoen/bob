@@ -47,6 +47,7 @@ that replay can correctly classify:
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
@@ -65,7 +66,9 @@ from orchestra.log import LogWriter
 from orchestra.payloads import payload_name_from_invocation, write_payload
 from orchestra.payloads import strip_internal as _strip_internal
 from orchestra.registry import ProfileRegistry
+from orchestra.schema import Invalid, SchemaSpec, Valid, load_schema
 from orchestra.spine import (
+    ArtifactDecl,
     Envelope,
     ErrorRecord,
     InvocationRequest,
@@ -83,6 +86,24 @@ from orchestra.transforms import (
 from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
+
+
+def _coerce_to_text(value: Any) -> str:
+    """Convert a schema-extracted scalar value to its canonical text
+    form for writing into a text artifact.
+
+    Strings are passed through. Booleans are emitted as the
+    lowercase JSON literals (``"true"``/``"false"``) rather than the
+    Python title-case repr, matching the schema spec's "canonical text
+    form". Integers and floats use ``str()``.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int | float):
+        return str(value)
+    return json.dumps(value)
 
 
 def _now_iso() -> str:
@@ -199,6 +220,30 @@ class Executor:
         self._progress_state_indices: dict[str, int] = {}
         self._progress_total: int = len(workflow.states)
         self._progress_lock: threading.Lock = threading.Lock()
+        # Schema-verdict 1.4: per-artifact SchemaSpec cache. Loaded once
+        # at executor construction so each state invocation reuses the
+        # parsed schema rather than re-reading the file. Schemas are
+        # static inputs (snapshotted by 1.5 the same way prompt files
+        # are); resume rebuilds the cache from the same files.
+        self._schema_specs: dict[str, SchemaSpec] = {}
+        self._schema_artifacts: dict[str, ArtifactDecl] = {}
+        for art in workflow.artifacts:
+            if art.schema_path is None:
+                continue
+            schema_full = Path(art.schema_path)
+            if not schema_full.is_absolute():
+                schema_full = Path(workflow.source_dir) / art.schema_path
+            self._schema_specs[art.name] = load_schema(schema_full)
+            self._schema_artifacts[art.name] = art
+        # Set of artifact names handled by the schema layer
+        # (the json artifact itself plus every declared extraction
+        # target). The parser-dispatch path filters writes to skip
+        # these because the schema layer commits them directly.
+        self._schema_handled_artifacts: set[str] = set()
+        for name, art in self._schema_artifacts.items():
+            self._schema_handled_artifacts.add(name)
+            for ext in art.extractions:
+                self._schema_handled_artifacts.add(ext.target)
 
     # ----- entry points ------------------------------------------
 
@@ -404,6 +449,45 @@ class Executor:
                     message=str(exc),
                     detail={"exception": type(exc).__name__},
                 )
+
+        # Step 6.5: schema-verdict layer. Runs after parsers (so
+        # non-schema-handled writes are already staged) but before
+        # commit. On a schema-validation failure all tentative handles
+        # are discarded and the state routes to its ``error`` outcome.
+        if status == "ok" and prepared is not None and self._state_schema_artifact(state) is not None:
+            try:
+                schema_handles, decision_outcome, schema_error = (
+                    self._apply_schema_layer(
+                        state,
+                        payload,
+                        attempt,
+                        invocation_id,
+                        tentative_handles,
+                        payload_ref,
+                    )
+                )
+            except Exception as exc:
+                self._store.discard_tentative(tentative_handles)
+                tentative_handles = []
+                status = "error"
+                outcome = "error"
+                error_record = ErrorRecord(
+                    kind="parser_failure",
+                    message=f"schema layer raised: {exc}",
+                    detail={"exception": type(exc).__name__},
+                )
+            else:
+                if schema_error is not None:
+                    if tentative_handles:
+                        self._store.discard_tentative(tentative_handles)
+                    tentative_handles = []
+                    status = "error"
+                    outcome = "error"
+                    error_record = schema_error
+                else:
+                    tentative_handles.extend(schema_handles)
+                    if decision_outcome is not None:
+                        outcome = decision_outcome
 
         # Step 7: commit writes.
         committed_ids: list[str] = []
@@ -782,8 +866,18 @@ class Executor:
 
         Returns the list of tentative handles that ``commit_tentative``
         will promote on success.
+
+        Writes whose target is handled by the schema layer (the
+        schema-backed json artifact and any of its declared extraction
+        targets) are filtered out before the parser dispatch: the
+        schema layer commits them directly in the same transaction
+        as the json write, after this method returns.
         """
-        write_types = tuple(w.type for w in state.writes)
+        parser_writes = tuple(
+            w for w in state.writes
+            if w.name not in self._schema_handled_artifacts
+        )
+        write_types = tuple(w.type for w in parser_writes)
         parsers = self._registry.parsers_for(
             backing=state.actor.kind, artifact_types=write_types
         )
@@ -803,7 +897,7 @@ class Executor:
             payload={
                 **payload,
                 "_declared_writes": [
-                    {"name": w.name, "type": w.type} for w in state.writes
+                    {"name": w.name, "type": w.type} for w in parser_writes
                 ],
             },
             error=None,
@@ -845,8 +939,20 @@ class Executor:
     ) -> list[dict[str, str]]:
         """Pair committed version IDs with their artifact names by
         re-running the parsers in their declared order. Parsers are
-        pure, so re-running is safe and cheap."""
-        write_types = tuple(w.type for w in state.writes)
+        pure, so re-running is safe and cheap.
+
+        The ``schema_handle_names`` field on the payload (set by
+        ``_apply_schema_layer`` when a schema-backed write fires) lists
+        the schema-layer-committed artifact names in their declared
+        order; those names are appended after any parser-produced
+        names so the (name, version_id) pairing matches the order of
+        ``commit_tentative``'s input.
+        """
+        parser_writes = tuple(
+            w for w in state.writes
+            if w.name not in self._schema_handled_artifacts
+        )
+        write_types = tuple(w.type for w in parser_writes)
         parsers = self._registry.parsers_for(
             backing=state.actor.kind, artifact_types=write_types
         )
@@ -864,7 +970,7 @@ class Executor:
             payload={
                 **payload,
                 "_declared_writes": [
-                    {"name": w.name, "type": w.type} for w in state.writes
+                    {"name": w.name, "type": w.type} for w in parser_writes
                 ],
             },
             error=None,
@@ -873,10 +979,195 @@ class Executor:
         for parser in parsers:
             for name, _ in parser.fn(envelope_for_parser, self._store):
                 names.append(name)
+        schema_names = payload.get("_schema_handle_names")
+        if isinstance(schema_names, list):
+            for n in schema_names:
+                if isinstance(n, str):
+                    names.append(n)
         out: list[dict[str, str]] = []
         for n, vid in zip(names, committed_ids, strict=False):
             out.append({"artifact": n, "version_id": vid})
         return out
+
+    def _state_schema_artifact(
+        self, state: StateDecl
+    ) -> ArtifactDecl | None:
+        """Return the schema-backed json artifact this state writes,
+        or ``None`` when the state has no schema-backed write.
+
+        At most one schema-backed write per state (enforced by the
+        validator), so this returns either the single matching
+        ArtifactDecl or None.
+        """
+        for w in state.writes:
+            if w.name in self._schema_artifacts:
+                return self._schema_artifacts[w.name]
+        return None
+
+    def _apply_schema_layer(
+        self,
+        state: StateDecl,
+        payload: dict[str, Any],
+        attempt: int,
+        invocation_id: str,
+        existing_handles: list[str],
+        payload_ref: str | None,
+    ) -> tuple[list[str], str | None, ErrorRecord | None]:
+        """Schema-verdict 1.4: parse the model output as JSON, validate
+        against the artifact's schema, tentative-write the json
+        artifact and any declared extractions atomically (returned to
+        the caller as additional handles), and emit a
+        ``schema_validation`` log record.
+
+        Returns ``(new_handles, decision_outcome, error_record)``:
+
+        - ``new_handles``: tentative handles to append to the existing
+          parser handles. Empty when validation failed or no schema
+          applies.
+        - ``decision_outcome``: the schema's decision string when
+          validation passes; ``None`` otherwise.
+        - ``error_record``: an ``ErrorRecord`` carrying ``reason`` in
+          ``detail`` (``"json_parse"`` or ``"schema_violation"``) when
+          validation fails; ``None`` on success or when no schema
+          applies.
+
+        On any failure the caller is expected to discard
+        ``existing_handles`` and route to the state's ``error``
+        outcome.
+        """
+        artifact = self._state_schema_artifact(state)
+        if artifact is None:
+            return [], None, None
+        spec = self._schema_specs[artifact.name]
+        raw_output = payload.get("output")
+        if not isinstance(raw_output, str):
+            err = ErrorRecord(
+                kind="actor_failure",
+                message=(
+                    "schema-backed state requires a string 'output' "
+                    f"field on the model payload, got {type(raw_output).__name__}"
+                ),
+                detail={
+                    "reason": "json_parse",
+                    "phase": "schema_validation",
+                },
+            )
+            self._log.write(
+                "schema_validation",
+                state_id=state.name,
+                attempt=attempt,
+                fields={
+                    "artifact": artifact.name,
+                    "outcome": "parse_error",
+                    "decision": None,
+                    "validation_errors": ["payload.output is not a string"],
+                    "payload_ref": payload_ref,
+                    "invocation_id": invocation_id,
+                },
+            )
+            return [], None, err
+        try:
+            parsed = json.loads(raw_output)
+        except json.JSONDecodeError as exc:
+            err = ErrorRecord(
+                kind="actor_failure",
+                message=f"json parse error: {exc}",
+                detail={
+                    "reason": "json_parse",
+                    "phase": "schema_validation",
+                    "exception": "JSONDecodeError",
+                },
+            )
+            self._log.write(
+                "schema_validation",
+                state_id=state.name,
+                attempt=attempt,
+                fields={
+                    "artifact": artifact.name,
+                    "outcome": "parse_error",
+                    "decision": None,
+                    "validation_errors": [str(exc)],
+                    "payload_ref": payload_ref,
+                    "invocation_id": invocation_id,
+                },
+            )
+            return [], None, err
+        result = spec.validate(parsed)
+        if isinstance(result, Invalid):
+            err = ErrorRecord(
+                kind="actor_failure",
+                message="schema validation failed",
+                detail={
+                    "reason": "schema_violation",
+                    "phase": "schema_validation",
+                    "errors": list(result.errors),
+                },
+            )
+            self._log.write(
+                "schema_validation",
+                state_id=state.name,
+                attempt=attempt,
+                fields={
+                    "artifact": artifact.name,
+                    "outcome": "schema_error",
+                    "decision": None,
+                    "validation_errors": list(result.errors),
+                    "payload_ref": payload_ref,
+                    "invocation_id": invocation_id,
+                },
+            )
+            return [], None, err
+        assert isinstance(result, Valid)
+        decision = result.decision
+        new_handles: list[str] = []
+        handle_names: list[str] = []
+        try:
+            json_handle = self._store.tentative_write(
+                artifact.name,
+                parsed,
+                written_by=f"{state.name}#{attempt}",
+                invocation_id=invocation_id,
+            )
+            new_handles.append(json_handle)
+            handle_names.append(artifact.name)
+            for ext in artifact.extractions:
+                if ext.source_field not in parsed:
+                    # Optional source field omitted from the validated
+                    # object: skip the extraction; the target retains
+                    # its prior value (or its declared ``initial``).
+                    continue
+                value = parsed[ext.source_field]
+                text_value = _coerce_to_text(value)
+                ext_handle = self._store.tentative_write(
+                    ext.target,
+                    text_value,
+                    written_by=f"{state.name}#{attempt}",
+                    invocation_id=invocation_id,
+                )
+                new_handles.append(ext_handle)
+                handle_names.append(ext.target)
+        except Exception:
+            if new_handles:
+                self._store.discard_tentative(new_handles)
+            raise
+        # Pass extraction handle names through to _artifact_writes_record
+        # via the payload's side-channel slot. _strip_internal drops
+        # this before the envelope is finalized.
+        payload["_schema_handle_names"] = handle_names
+        self._log.write(
+            "schema_validation",
+            state_id=state.name,
+            attempt=attempt,
+            fields={
+                "artifact": artifact.name,
+                "outcome": "valid",
+                "decision": decision,
+                "validation_errors": [],
+                "payload_ref": payload_ref,
+                "invocation_id": invocation_id,
+            },
+        )
+        return new_handles, decision, None
 
     def _discard_stale_tentatives(self, state_name: str) -> None:
         """Discard tentatives left over from any earlier attempt on
@@ -2204,6 +2495,44 @@ class Executor:
                     message=str(exc),
                     detail={"exception": type(exc).__name__},
                 )
+
+        # Schema-verdict 1.4: parse the model output as JSON, validate
+        # against the artifact's schema, and tentative-write the json
+        # artifact plus any extraction targets.
+        if status == "ok" and prepared is not None and self._state_schema_artifact(state) is not None:
+            try:
+                schema_handles, decision_outcome, schema_error = (
+                    self._apply_schema_layer(
+                        state,
+                        payload,
+                        attempt,
+                        invocation_id,
+                        tentative_handles,
+                        payload_ref,
+                    )
+                )
+            except Exception as exc:
+                self._store.discard_tentative(tentative_handles)
+                tentative_handles = []
+                status = "error"
+                outcome = "error"
+                error_record = ErrorRecord(
+                    kind="parser_failure",
+                    message=f"schema layer raised: {exc}",
+                    detail={"exception": type(exc).__name__},
+                )
+            else:
+                if schema_error is not None:
+                    if tentative_handles:
+                        self._store.discard_tentative(tentative_handles)
+                    tentative_handles = []
+                    status = "error"
+                    outcome = "error"
+                    error_record = schema_error
+                else:
+                    tentative_handles.extend(schema_handles)
+                    if decision_outcome is not None:
+                        outcome = decision_outcome
 
         committed_ids: list[str] = []
         if status == "ok" and tentative_handles:
