@@ -8,6 +8,7 @@ import pytest
 
 from orchestra.errors import ParseError, ValidationError
 from orchestra.loader import load_workflow
+from orchestra.loader.parser import parse_workflow
 from orchestra.registry.registry import with_core
 
 FIXTURE = Path(__file__).parent / "fixtures" / "slice1" / "echo.orc"
@@ -1591,3 +1592,125 @@ def test_dominator_check_accepts_anonymous_reviewers_workflow():
     _register_builtin_transforms(reg)
     wf = load_workflow(wf_path, reg)
     assert wf.name == "ask_anonymous_reviewers"
+
+
+# --------------------------------------------------------------------
+# Schema and extract qualifiers (commit 1.1)
+# --------------------------------------------------------------------
+
+
+def test_artifact_schema_qualifier_parses(tmp_path):
+    """``artifact <name> json`` followed by ``schema "<path>"`` populates
+    ArtifactDecl.schema_path. Tests parse step only; validator coverage
+    arrives in commit 1.3.
+    """
+    src_text = """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads x
+    writes verdict json
+    on accept => done
+    on error => stop
+    on timeout => stop
+"""
+    wf = parse_workflow(src_text, tmp_path / "wf.orc")
+    art = next(a for a in wf.artifacts if a.name == "verdict")
+    assert art.schema_path == "schemas/v.json"
+    assert art.extractions == ()
+
+
+def test_artifact_extract_qualifier_parses(tmp_path):
+    """``extract <field> => <artifact> <type>`` populates
+    ArtifactDecl.extractions with the source field, target artifact, and
+    target type.
+    """
+    src_text = """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+    extract feedback => fb text
+    extract score => sc text
+  artifact fb text
+    initial ""
+  artifact sc text
+    initial ""
+  state s
+    actor model m
+    reads x
+    writes verdict json
+    writes fb text
+    writes sc text
+    on accept => done
+    on error => stop
+    on timeout => stop
+"""
+    wf = parse_workflow(src_text, tmp_path / "wf.orc")
+    art = next(a for a in wf.artifacts if a.name == "verdict")
+    assert art.schema_path == "schemas/v.json"
+    assert len(art.extractions) == 2
+    first, second = art.extractions
+    assert first.source_field == "feedback"
+    assert first.target == "fb"
+    assert first.type == "text"
+    assert second.source_field == "score"
+    assert second.target == "sc"
+    assert second.type == "text"
+
+
+def test_artifact_schema_declared_twice_rejected(tmp_path):
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact a json
+    schema "x.json"
+    schema "y.json"
+  state s
+    actor model m
+    reads x
+    writes a json
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ParseError) as exc:
+        load_workflow(src, with_core())
+    assert "schema" in str(exc.value)
+
+
+def test_state_level_schema_clause_rejected(tmp_path):
+    """State-level ``schema <identifier>`` clause is removed; the parser
+    raises with a hint pointing at the new artifact-level form.
+    """
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact a json
+  state s
+    actor model m
+    schema verdict
+    reads x
+    writes a json
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ParseError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "schema" in msg
+    assert "artifact" in msg

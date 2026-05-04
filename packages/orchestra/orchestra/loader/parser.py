@@ -26,6 +26,7 @@ from orchestra.spine import (
     ArtifactDecl,
     Comparison,
     ExternalInputDecl,
+    ExtractionDecl,
     GroupDecl,
     GuardExpr,
     Literal_,
@@ -274,9 +275,12 @@ class Parser:
         initial: Any = NO_INITIAL
         source_kind: Any = None
         source_value: str | None = None
+        schema_path: str | None = None
+        extractions: list[ExtractionDecl] = []
         if self._peek().kind == "INDENT":
             self._advance()
             while self._peek().kind != "DEDENT":
+                kw_tok = self._peek()
                 kw = self._expect("IDENT").value
                 if kw == "source":
                     sk = self._expect("IDENT").value
@@ -299,10 +303,32 @@ class Parser:
                 elif kw == "initial":
                     initial = self._parse_literal()
                     self._expect("NEWLINE")
+                elif kw == "schema":
+                    if schema_path is not None:
+                        raise ParseError(
+                            f"artifact {name!r}: 'schema' declared more "
+                            "than once",
+                            line=kw_tok.line,
+                        )
+                    schema_path = self._expect("STRING").value
+                    self._expect("NEWLINE")
+                elif kw == "extract":
+                    src_field = self._expect("IDENT").value
+                    self._expect("ARROW")
+                    tgt_artifact = self._expect("IDENT").value
+                    tgt_type = self._expect("IDENT").value
+                    self._expect("NEWLINE")
+                    extractions.append(
+                        ExtractionDecl(
+                            source_field=src_field,
+                            target=tgt_artifact,
+                            type=tgt_type,
+                        )
+                    )
                 else:
                     raise ParseError(
                         f"unknown artifact qualifier: {kw!r}",
-                        line=self._peek().line,
+                        line=kw_tok.line,
                     )
             self._expect("DEDENT")
         return ArtifactDecl(
@@ -311,6 +337,8 @@ class Parser:
             initial=initial,
             source_kind=source_kind,
             source_value=source_value,
+            schema_path=schema_path,
+            extractions=tuple(extractions),
         )
 
     def _parse_state(self) -> StateDecl:
@@ -369,9 +397,13 @@ class Parser:
                 self._expect("IDENT")
                 self._expect("NEWLINE")
             elif kw == "schema":
-                self._advance()
-                self._expect("IDENT")
-                self._expect("NEWLINE")
+                raise ParseError(
+                    f"state {name!r}: 'schema <identifier>' is no longer "
+                    "supported on states. Move the schema to the json "
+                    "artifact declaration as 'schema \"<path>\"' (see "
+                    "design/schema-verdict-runtime-support.md).",
+                    line=tok.line,
+                )
             elif kw == "reads":
                 self._advance()
                 reads.append(self._expect("IDENT").value)

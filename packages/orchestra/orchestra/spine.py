@@ -101,6 +101,23 @@ class GroupDecl:
 
 
 @dataclass(frozen=True)
+class ExtractionDecl:
+    """One ``extract <field> => <artifact> <type>`` qualifier on a
+    schema-backed json artifact.
+
+    The runtime, after validating the parsed JSON object against the
+    schema, looks up ``source_field`` in the validated object,
+    converts its value to text, and writes it to the named target
+    artifact in the same transaction as the JSON write. v0 supports
+    text targets only.
+    """
+
+    source_field: str
+    target: str
+    type: str
+
+
+@dataclass(frozen=True)
 class ArtifactDecl:
     name: str
     type: str
@@ -110,6 +127,15 @@ class ArtifactDecl:
     (``initial null`` in the source)."""
     source_kind: Literal["file", "path", None] = None
     source_value: str | None = None  # path string or external_input ref
+    schema_path: str | None = None
+    """Path to a JSON Schema file relative to the workflow source
+    directory, set when the artifact is declared with the
+    ``schema "<path>"`` qualifier. v0 supports schema-backed
+    artifacts of type ``json`` only."""
+    extractions: tuple[ExtractionDecl, ...] = ()
+    """Field-extraction qualifiers declared on a schema-backed json
+    artifact. Each entry promotes a top-level schema field into a
+    separately declared text artifact at write time."""
 
 
 @dataclass(frozen=True)
