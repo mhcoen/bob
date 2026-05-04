@@ -10,8 +10,15 @@ from pathlib import Path
 
 from orchestra.errors import ValidationError
 from orchestra.registry import ProfileRegistry
+from orchestra.schema import (
+    EXTRACTABLE_FIELD_TYPES,
+    SchemaError,
+    SchemaSpec,
+    load_schema,
+)
 from orchestra.spine import (
     NO_INITIAL,
+    ArtifactDecl,
     Comparison,
     GuardExpr,
     Reference,
@@ -37,11 +44,44 @@ _BACKING_SCOPED_KEYWORDS: dict[str, frozenset[str]] = {
 def validate(workflow: Workflow, registry: ProfileRegistry) -> None:
     """Run all validation phases. Raises ValidationError on failure."""
 
+    schema_specs = _load_schemas(workflow)
     _phase3_declaration_resolution(workflow, registry)
     _phase4_name_uniqueness(workflow)
-    _phase5_state_validation(workflow, registry)
+    _phase5_state_validation(workflow, registry, schema_specs)
     _phase6_dataflow(workflow)
     _phase7_cycle_bounds(workflow)
+
+
+def _load_schemas(workflow: Workflow) -> dict[str, SchemaSpec]:
+    """Load every schema-backed json artifact's schema file and validate
+    its v0 shape. Returns a mapping from artifact name to SchemaSpec.
+
+    Schema-backed artifacts whose ``type`` is not ``json`` fail here
+    rather than later: the runtime cannot meaningfully populate a
+    text artifact from a parsed JSON object, and the schema-verdict
+    contract is specifically about json-shaped output.
+    """
+    out: dict[str, SchemaSpec] = {}
+    source_dir = Path(workflow.source_dir) if workflow.source_dir else Path.cwd()
+    for art in workflow.artifacts:
+        if art.schema_path is None:
+            continue
+        if art.type != "json":
+            raise ValidationError(
+                f"artifact {art.name!r}: 'schema' qualifier requires "
+                f"artifact type 'json', got {art.type!r}"
+            )
+        full = Path(art.schema_path)
+        if not full.is_absolute():
+            full = source_dir / art.schema_path
+        try:
+            spec = load_schema(full)
+        except SchemaError as exc:
+            raise ValidationError(
+                f"artifact {art.name!r}: {exc}"
+            ) from exc
+        out[art.name] = spec
+    return out
 
 
 # --------------------------------------------------------------------
@@ -157,15 +197,32 @@ def _phase4_name_uniqueness(workflow: Workflow) -> None:
 
 
 def _phase5_state_validation(
-    workflow: Workflow, registry: ProfileRegistry
+    workflow: Workflow,
+    registry: ProfileRegistry,
+    schema_specs: dict[str, SchemaSpec],
 ) -> None:
     state_names = {s.name for s in workflow.states}
     artifact_names = {a.name for a in workflow.artifacts}
     artifact_types = {a.name: a.type for a in workflow.artifacts}
+    artifact_decls = {a.name: a for a in workflow.artifacts}
     external_names = {e.name for e in workflow.external_inputs}
     model_names = {m.name for m in workflow.models}
     role_names = {r.name for r in workflow.roles}
     agent_names = {a.name for a in workflow.agents}
+
+    _validate_extractions(workflow, schema_specs, artifact_decls)
+
+    # Names of artifacts whose writes are populated by the schema layer
+    # (the schema-backed json artifact itself plus every declared
+    # extraction target). The parser-coverage rule below skips these
+    # because the executor's schema layer commits them directly.
+    schema_handled_artifacts: set[str] = set()
+    for art in workflow.artifacts:
+        if art.schema_path is None:
+            continue
+        schema_handled_artifacts.add(art.name)
+        for ext in art.extractions:
+            schema_handled_artifacts.add(ext.target)
 
     for state in workflow.states:
         if (
@@ -359,6 +416,66 @@ def _phase5_state_validation(
                             "'retry max N then <terminal>'."
                         )
 
+        # Schema-backed state checks: a state writing a schema-backed
+        # json artifact has its transition outcomes derived from the
+        # schema's ``decision`` enum. ``on complete`` is meaningless
+        # because the runtime never emits ``complete`` for such
+        # states; every enum value must have a transition; every
+        # non-failure transition outcome must be in the enum.
+        schema_backed_writes = [
+            w
+            for w in state.writes
+            if w.name in schema_specs
+        ]
+        if schema_backed_writes:
+            if len(schema_backed_writes) > 1:
+                raise ValidationError(
+                    f"state {state.name!r}: writes more than one "
+                    "schema-backed json artifact "
+                    f"({sorted(w.name for w in schema_backed_writes)}); "
+                    "v0 admits at most one per state"
+                )
+            spec = schema_specs[schema_backed_writes[0].name]
+            if "complete" in seen_outcomes:
+                raise ValidationError(
+                    f"state {state.name!r}: 'on complete' is not "
+                    "permitted on a schema-backed state; declare a "
+                    "transition for each value of the schema's "
+                    f"decision enum {list(spec.decision_enum)!r} instead"
+                )
+            failure_outcomes = {"error", "timeout", "cancelled"}
+            non_failure = seen_outcomes - failure_outcomes
+            for required_enum in spec.decision_enum:
+                if required_enum not in seen_outcomes:
+                    raise ValidationError(
+                        f"state {state.name!r}: missing 'on "
+                        f"{required_enum}' transition (required by "
+                        "the schema's decision enum)"
+                    )
+            extra = non_failure - set(spec.decision_enum)
+            if extra:
+                raise ValidationError(
+                    f"state {state.name!r}: transition outcomes "
+                    f"{sorted(extra)!r} are not in the schema's "
+                    f"decision enum {list(spec.decision_enum)!r}"
+                )
+            # The state must also list each extraction target in writes
+            # so the data flow is visible at the state site.
+            schema_artifact_name = schema_backed_writes[0].name
+            schema_artifact = artifact_decls[schema_artifact_name]
+            declared_writes = {w.name for w in state.writes}
+            for ext in schema_artifact.extractions:
+                if ext.target not in declared_writes:
+                    raise ValidationError(
+                        f"state {state.name!r}: writes schema-backed "
+                        f"artifact {schema_artifact_name!r} but does "
+                        "not list extraction target "
+                        f"{ext.target!r} in 'writes'. Schema-backed "
+                        "states must declare each extraction target "
+                        "in 'writes' so the data flow is visible at "
+                        "the state site."
+                    )
+
         # Per design rule 9 plus the success-outcome rule: every
         # outcome the executor could derive must have a matching
         # transition, otherwise the state would invoke its actor,
@@ -427,9 +544,15 @@ def _phase5_state_validation(
         # by at least one applicable parser. The "any matches any"
         # rule is wrong; we check each write individually. Transform
         # states bypass the parser dispatch, so the parser-coverage
-        # rule does not apply to them.
+        # rule does not apply to them. Writes whose target is the
+        # schema-backed json artifact itself or one of its declared
+        # extraction targets are populated by the executor's schema
+        # layer in the same transaction as the json write, so they
+        # also bypass the parser-coverage rule.
         if state.writes and state.actor.kind != "transform":
             for w in state.writes:
+                if w.name in schema_handled_artifacts:
+                    continue
                 applicable = registry.parsers_for(
                     backing=state.actor.kind,
                     artifact_types=(w.type,),
@@ -444,6 +567,90 @@ def _phase5_state_validation(
             if t.guard is not None:
                 _validate_guard_refs(
                     state, t.guard, state_names, artifact_names, external_names
+                )
+
+
+def _validate_extractions(
+    workflow: Workflow,
+    schema_specs: dict[str, SchemaSpec],
+    artifact_decls: dict[str, ArtifactDecl],
+) -> None:
+    """Validate every ``extract`` clause attached to a schema-backed
+    json artifact.
+
+    Per the design's "Surface: field extraction" section:
+      - Source field must exist in the schema's properties.
+      - Source field's type must be in EXTRACTABLE_FIELD_TYPES (string,
+        integer, number, boolean). Object/array source fields are a
+        load error in v0.
+      - Target artifact must be separately declared in the workflow as
+        type ``text``.
+      - For any extract whose target is read by a downstream state,
+        the source field must be in the schema's ``required`` list so
+        a successful but field-omitting model output cannot leave a
+        stale extracted value visible to that read.
+    """
+    # Set of artifact names read by any state (for the required-field
+    # check on extractions whose targets are downstream reads).
+    read_by_some_state: set[str] = set()
+    for s in workflow.states:
+        for r in s.reads:
+            read_by_some_state.add(r)
+
+    for art in workflow.artifacts:
+        if art.schema_path is None and art.extractions:
+            raise ValidationError(
+                f"artifact {art.name!r}: 'extract' qualifier requires "
+                "a 'schema' qualifier on the same artifact"
+            )
+        if art.schema_path is None:
+            continue
+        spec = schema_specs[art.name]
+        for ext in art.extractions:
+            if ext.source_field not in spec.field_types:
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract source field "
+                    f"{ext.source_field!r} is not declared in the "
+                    f"schema's properties"
+                )
+            src_type = spec.field_types[ext.source_field]
+            if src_type not in EXTRACTABLE_FIELD_TYPES:
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract source field "
+                    f"{ext.source_field!r} has schema type "
+                    f"{src_type!r}; v0 admits only "
+                    f"{sorted(EXTRACTABLE_FIELD_TYPES)}"
+                )
+            if ext.target not in artifact_decls:
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract target "
+                    f"{ext.target!r} is not a declared artifact"
+                )
+            target_decl = artifact_decls[ext.target]
+            if ext.type != "text":
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract target type "
+                    f"{ext.type!r} is unsupported in v0; use 'text'"
+                )
+            if target_decl.type != "text":
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract target "
+                    f"{ext.target!r} is declared as type "
+                    f"{target_decl.type!r}, but v0 requires 'text'"
+                )
+            if (
+                ext.target in read_by_some_state
+                and ext.source_field not in spec.required_fields
+            ):
+                raise ValidationError(
+                    f"artifact {art.name!r}: extract source field "
+                    f"{ext.source_field!r} is not in the schema's "
+                    "'required' list, but the extraction target "
+                    f"{ext.target!r} is read by at least one state. "
+                    "An optional source field would let the runtime "
+                    "leave stale data visible to downstream reads. "
+                    "Add the field to 'required' in the schema or "
+                    "remove the extract clause."
                 )
 
 

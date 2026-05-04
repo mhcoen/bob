@@ -1688,6 +1688,329 @@ workflow x
     assert "schema" in str(exc.value)
 
 
+_SCHEMA_TWO_BRANCH_TEXT = (
+    '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+    '"type":"object","required":["decision"],'
+    '"properties":{"decision":{"type":"string",'
+    '"enum":["accept","iterate"]},"feedback":{"type":"string"}}}\n'
+)
+
+
+def _two_branch_schema_dir(tmp_path: Path) -> Path:
+    schema_dir = tmp_path / "schemas"
+    schema_dir.mkdir(exist_ok=True)
+    (schema_dir / "v.json").write_text(_SCHEMA_TWO_BRANCH_TEXT)
+    return schema_dir
+
+
+def test_schema_artifact_validates_against_workflow(tmp_path):
+    """A schema-backed json artifact loads end to end (parse +
+    validate) when the workflow declares matching transitions for the
+    decision enum."""
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "wf.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    on accept => done
+    on iterate => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    wf = load_workflow(src, with_core())
+    assert wf.name == "x"
+
+
+def test_schema_artifact_non_json_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  max_total_steps 5
+  model m
+  artifact verdict text
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads x
+    writes verdict text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "json" in str(exc.value)
+
+
+def test_schema_backed_state_rejects_on_complete(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    on accept => done
+    on iterate => done
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "complete" in str(exc.value)
+
+
+def test_schema_backed_state_missing_enum_branch_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    on accept => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "iterate" in str(exc.value)
+
+
+def test_schema_backed_state_extra_outcome_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    on accept => done
+    on iterate => done
+    on punt => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "punt" in str(exc.value)
+
+
+def test_schema_extract_target_must_be_in_writes(tmp_path):
+    schema_dir = _two_branch_schema_dir(tmp_path)
+    (schema_dir / "v.json").write_text(
+        '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+        '"type":"object","required":["decision","feedback"],'
+        '"properties":{"decision":{"type":"string",'
+        '"enum":["accept","iterate"]},"feedback":{"type":"string"}}}\n'
+    )
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+    extract feedback => fb text
+  artifact fb text
+    initial ""
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    on accept => done
+    on iterate => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "fb" in msg
+    assert "writes" in msg
+
+
+def test_schema_extract_unknown_source_field_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+    extract ghost => fb text
+  artifact fb text
+    initial ""
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    writes fb text
+    on accept => done
+    on iterate => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "ghost" in str(exc.value)
+
+
+def test_schema_extract_target_undeclared_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+    extract feedback => fb text
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    writes fb text
+    on accept => done
+    on iterate => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "fb" in msg
+
+
+def test_schema_extract_target_wrong_type_rejected(tmp_path):
+    _two_branch_schema_dir(tmp_path)
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 5
+  model m
+  artifact verdict json
+    schema "schemas/v.json"
+    extract feedback => fb json
+  artifact fb json
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    writes fb json
+    on accept => done
+    on iterate => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    assert "text" in str(exc.value)
+
+
+def test_schema_extract_target_read_requires_source_in_required(tmp_path):
+    """When an extraction target is read by another state, the source
+    field must be in the schema's ``required`` list. Otherwise an
+    optional-and-omitted source would leave stale extracted data
+    visible to downstream reads."""
+    schema_dir = tmp_path / "schemas"
+    schema_dir.mkdir()
+    (schema_dir / "v.json").write_text(
+        '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+        '"type":"object","required":["decision"],'
+        '"properties":{"decision":{"type":"string",'
+        '"enum":["accept","iterate"]},"feedback":{"type":"string"}}}\n'
+    )
+    src = tmp_path / "bad.orc"
+    src.write_text(
+        """spec 0.1
+workflow x
+  external_input topic text
+  max_total_steps 10
+  model m
+  model m2
+  artifact verdict json
+    schema "schemas/v.json"
+    extract feedback => fb text
+  artifact fb text
+    initial ""
+  artifact echo text
+  state s
+    actor model m
+    reads topic
+    writes verdict json
+    writes fb text
+    on accept => done
+    on iterate => reader
+    on error => stop
+    on timeout => stop
+  state reader
+    actor model m2
+    reads fb
+    writes echo text
+    on complete => done
+    on error => stop
+    on timeout => stop
+"""
+    )
+    with pytest.raises(ValidationError) as exc:
+        load_workflow(src, with_core())
+    msg = str(exc.value)
+    assert "feedback" in msg
+    assert "required" in msg
+
+
 def test_state_level_schema_clause_rejected(tmp_path):
     """State-level ``schema <identifier>`` clause is removed; the parser
     raises with a hint pointing at the new artifact-level form.
