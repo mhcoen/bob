@@ -195,6 +195,7 @@ class ClaudeCodeAgentAdapter:
             "supports_cancel": False,
             "reports_cost": False,
             "supports_streaming": True,
+            "workspace_mutation": "mutating",
         }
 
     # ----- internals --------------------------------------------------

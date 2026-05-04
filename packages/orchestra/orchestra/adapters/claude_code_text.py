@@ -187,6 +187,7 @@ class ClaudeCodeTextAdapter:
             "supports_cancel": False,
             "reports_cost": False,
             "supports_streaming": True,
+            "workspace_mutation": "text_only",
         }
 
     # ----- internals --------------------------------------------------

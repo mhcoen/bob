@@ -548,3 +548,43 @@ def test_extract_final_text_ignores_non_text_deltas() -> None:
         json.dumps({"type": "result", "subtype": "success", "result": "ok"}),
     ]
     assert extract_final_text("\n".join(lines)) == "ok"
+
+
+# --------------------------------------------------------------------
+# workspace_mutation contract (PRJI prerequisite)
+# --------------------------------------------------------------------
+
+
+def test_workspace_mutation_classification_for_shipped_adapters():
+    """Every shipped adapter declares workspace_mutation in describe()
+    per design/iteration-and-implementation-workflows.md. The PRJI
+    workflow's config validation rule reads this field to enforce the
+    "implementer is the only mutator" invariant.
+    """
+    from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
+    from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
+    from orchestra.adapters.codex_agent import CodexAgentAdapter
+    from orchestra.adapters.codex_text import CodexTextAdapter
+    from orchestra.adapters.mock_human import MockHumanAdapter
+    from orchestra.adapters.mock_model import MockModelAdapter
+    from orchestra.adapters.mock_shell import MockShellAdapter
+
+    expected = {
+        ClaudeCodeAgentAdapter: "mutating",
+        ClaudeCodeTextAdapter: "text_only",
+        CodexAgentAdapter: "mutating",
+        CodexTextAdapter: "text_only",
+        MockModelAdapter: "text_only",
+        MockHumanAdapter: "text_only",
+        MockShellAdapter: "text_only",
+    }
+    for cls, expected_value in expected.items():
+        desc = cls().describe()
+        assert "workspace_mutation" in desc, (
+            f"{cls.__name__}.describe() missing 'workspace_mutation'"
+        )
+        actual = desc["workspace_mutation"]
+        assert actual == expected_value, (
+            f"{cls.__name__} declared {actual!r}, "
+            f"expected {expected_value!r}"
+        )

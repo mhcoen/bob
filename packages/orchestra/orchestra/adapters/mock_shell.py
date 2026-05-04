@@ -103,12 +103,20 @@ class MockShellAdapter:
         return None
 
     def describe(self) -> dict[str, Any]:
+        # Workspace mutation is a self-classification of the adapter's
+        # actual runtime behavior. MockShellAdapter does not execute
+        # the configured commands; it returns canned (exit_code,
+        # stdout, stderr) tuples from a response table and leaves the
+        # filesystem untouched. So this mock is "text_only". The real
+        # shell adapter (slice 2) will classify itself as "mutating"
+        # since real shell commands can modify the workspace.
         return {
             "backing": "shell",
             "kind": "mock",
             "supports_cancel": False,
             "reports_cost": False,
             "supports_streaming": False,
+            "workspace_mutation": "text_only",
         }
 
     # ----- internals ----------------------------------------------

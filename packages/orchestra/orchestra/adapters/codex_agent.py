@@ -202,6 +202,7 @@ class CodexAgentAdapter:
             "supports_cancel": False,
             "reports_cost": False,
             "supports_streaming": False,
+            "workspace_mutation": "mutating",
         }
 
     # ----- internals --------------------------------------------------
