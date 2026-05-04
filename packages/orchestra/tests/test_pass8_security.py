@@ -247,3 +247,80 @@ def test_repl_history_file_is_private_under_default_umask(
     assert file_mode == 0o600, (
         f"history file mode is {oct(file_mode)}, expected 0o600"
     )
+
+
+# --------------------------------------------------------------------
+# Pass-9 fix: subprocess transcript modes
+# --------------------------------------------------------------------
+
+
+def test_write_log_transcript_is_private_under_default_umask(
+    tmp_path: Path,
+) -> None:
+    """Pass-9 fix: subprocess transcript logs duplicate raw model
+    stdout/stderr at project_dir/.mcloop/logs/<timestamp>.log. Under
+    default umask 022 the directory is 0755 and the file 0644,
+    leaving any secret, customer snippet, internal doc excerpt, or
+    tool output the model printed readable by other local users.
+    Force umask 022 so the assertion is meaningful regardless of the
+    developer's environment."""
+    from orchestra.adapters import _subprocess
+
+    log_dir = tmp_path / ".mcloop" / "logs"
+    with _forced_umask(0o022):
+        log_path = _subprocess.write_log(
+            log_dir,
+            "task label",
+            ["echo", "hi"],
+            "MODEL OUTPUT WITH SECRET_TOKEN_123 inside\n",
+            0,
+        )
+    assert log_path.is_file()
+    body = log_path.read_text(encoding="utf-8")
+    assert "SECRET_TOKEN_123" in body, (
+        "sanity check: the transcript must actually carry the "
+        "sensitive content the mode is protecting"
+    )
+    file_mode = stat.S_IMODE(log_path.stat().st_mode)
+    assert file_mode == 0o600, (
+        f"transcript file mode is {oct(file_mode)}, expected 0o600"
+    )
+    log_dir_mode = stat.S_IMODE(log_dir.stat().st_mode)
+    assert log_dir_mode == 0o700, (
+        f"log dir mode is {oct(log_dir_mode)}, expected 0o700"
+    )
+    mcloop_mode = stat.S_IMODE(log_dir.parent.stat().st_mode)
+    assert mcloop_mode == 0o700, (
+        f".mcloop mode is {oct(mcloop_mode)}, expected 0o700"
+    )
+
+
+def test_write_log_tightens_existing_loose_mcloop_directory(
+    tmp_path: Path,
+) -> None:
+    """If a prior mcloop run left .mcloop or .mcloop/logs at 0755,
+    the next write_log must chmod them down. Regression coverage for
+    the 'pre-existing directory keeps its old mode' edge case the
+    pass-8 fix shipped on the run directory; the same shape applies
+    here."""
+    from orchestra.adapters import _subprocess
+
+    log_dir = tmp_path / ".mcloop" / "logs"
+    log_dir.mkdir(parents=True, mode=0o755)
+    log_dir.chmod(0o755)
+    log_dir.parent.chmod(0o755)
+    assert stat.S_IMODE(log_dir.stat().st_mode) == 0o755
+    assert stat.S_IMODE(log_dir.parent.stat().st_mode) == 0o755
+
+    with _forced_umask(0o022):
+        log_path = _subprocess.write_log(
+            log_dir,
+            "task",
+            ["echo"],
+            "body\n",
+            0,
+        )
+
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(log_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(log_dir.parent.stat().st_mode) == 0o700

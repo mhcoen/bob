@@ -422,7 +422,28 @@ def write_log(
     write_log calls in tests, or two different adapters writing for
     the same state).
     """
-    log_dir.mkdir(parents=True, exist_ok=True)
+    # Pass-9 fix: transcript files are debug convenience; they hold
+    # raw model stdout/stderr including any secret, customer data,
+    # internal doc excerpt, or tool output the model emitted. The
+    # default umask 022 leaves them 0644 on a multi-user POSIX host,
+    # readable by every other local user. Tighten the directory
+    # tree to 0700 and the file to 0600. Mirrors the pass-8
+    # discipline that locked down the run directory and prompt
+    # snapshots.
+    log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        log_dir.chmod(0o700)
+    except OSError:
+        pass
+    # Tighten the .mcloop parent too when log_dir lives under it.
+    # The convention is project_dir/.mcloop/logs; chmod that parent
+    # so a stale 0755 left over from earlier mcloop runs is closed.
+    parent = log_dir.parent
+    if parent.name == ".mcloop":
+        try:
+            parent.chmod(0o700)
+        except OSError:
+            pass
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = _slugify(task_text)
     parts: list[str] = [timestamp, slug]
@@ -439,6 +460,10 @@ def write_log(
         f"{'=' * 60}\n"
         f"{output}\n"
     )
+    try:
+        log_path.chmod(0o600)
+    except OSError:
+        pass
     return log_path
 
 

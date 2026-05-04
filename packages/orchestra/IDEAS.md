@@ -82,3 +82,56 @@ existing fan-out child rule in `_phase5_state_validation`).
 
 Status: backlog. Pass-6 fix landed snapshot-fully via commit
 extending FanOutSnapshot with attempts and retries.
+
+
+## Subprocess transcript location: per-project vs per-run
+
+Subprocess adapters write each invocation's raw stdout/stderr to a
+debug transcript at `project_dir/.mcloop/logs/<timestamp>.log`. The
+file holds the model's full output: any secret, customer snippet,
+internal doc excerpt, tool output, or stderr diagnostic the model
+emitted. The pass-9 fix tightened the file mode to 0600 and the
+parent directories to 0700 so other local users on a shared host
+cannot read them. The location convention itself is unchanged: one
+`.mcloop/logs/` per project across runs, designed for cross-run
+debugging visibility.
+
+The structural question pass-9 surfaced: should transcripts move
+into the run directory entirely (so they live and die with the
+run, get cleaned up when a run is rolled back, and inherit the
+run-directory's pass-8 mode discipline by construction)? Or should
+they become opt-in / debug-only (default off, tooling that wants
+them sets a flag)?
+
+Current arguments for per-project:
+- mcloop reads transcripts by convention; moving them under the
+  run directory breaks that without an mcloop-side change.
+- A user looking at a project's recent debug history wants
+  cross-run visibility, not per-run isolation.
+- Old transcripts persist after a run completes, which is useful
+  for offline post-mortem.
+
+Current arguments for per-run:
+- Run-directory mode discipline (0700) becomes the only knob; no
+  separate per-project enforcement to forget.
+- Run lifecycle = transcript lifecycle. Rolling back a run clears
+  its transcripts. No "stale debug logs from six runs ago"
+  accumulation.
+- Cleaner threat model: every byte the run produced lives under
+  one tree, and removing the tree removes everything.
+
+Current arguments for opt-in/debug-only:
+- Cuts the persistence surface entirely for production use.
+  Transcripts only exist when explicitly requested.
+- The pass-7/8/9 redaction discipline becomes unnecessary in the
+  default path because the file is not produced.
+
+Recommendation pending decision: hold per-project, transcripts at
+0600 / 0700 directories, until a real workflow surfaces a problem
+that the per-run or opt-in approach would have prevented. The
+mode-discipline fix from pass-9 closes the immediate leak; the
+structural change is only worth doing if cross-run debugging
+visibility turns out to be unused or the cleanup burden becomes
+real.
+
+Status: backlog. Pass-9 fix landed mode-discipline only.
