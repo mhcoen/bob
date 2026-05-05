@@ -754,3 +754,114 @@ def test_adapter_workspace_mutation_accepts_valid_classification(
     assert (
         api_mod._adapter_workspace_mutation(binding) == "mutating"
     )
+
+
+# --------------------------------------------------------------------
+# Phase 1 integration: a single canned trajectory exercising every
+# verdict branch (accept, implement, rereview, reframe) before
+# terminating in accept. Verifies the state-transition log shows
+# all four branches taken and the workflow reaches the accept
+# terminal cleanly.
+# --------------------------------------------------------------------
+
+
+def test_prji_each_branch_traversed(tmp_path: Path) -> None:
+    """Trajectory:
+        propose → review → judge(reframe)
+        → propose → review → judge(implement)
+        → implement → review → judge(rereview)
+        → review → judge(accept) → done
+
+    Four judge calls: reframe, implement, rereview, accept. All four
+    nonterminal branches plus the terminal accept are exercised in
+    one run. The test pins the per-judge outcome sequence so a
+    regression that re-routes a verdict (or an executor change that
+    misroutes one of the schema-derived outcomes) breaks the test
+    rather than silently changing behavior.
+    """
+    model_responses = {
+        "propose": ["FRAMING-1", "FRAMING-2"],
+        "review": ["REVIEW-1", "REVIEW-2", "REVIEW-3", "REVIEW-4"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "reframe",
+                    "feedback": "reframe-feedback",
+                    "fix_instructions": "",
+                }
+            ),
+            json.dumps(
+                {
+                    "decision": "implement",
+                    "feedback": "implement-feedback",
+                    "fix_instructions": "do the fix",
+                }
+            ),
+            json.dumps(
+                {
+                    "decision": "rereview",
+                    "feedback": "rereview-feedback",
+                    "fix_instructions": "",
+                }
+            ),
+            json.dumps(
+                {
+                    "decision": "accept",
+                    "feedback": "accept-feedback",
+                    "fix_instructions": "",
+                }
+            ),
+        ],
+    }
+    agent_responses = {"implement": ["fix applied"]}
+    model_adapter, agent_adapter, run_dir, terminal, store = _run_prji(
+        tmp_path,
+        model_responses=model_responses,
+        agent_responses=agent_responses,
+    )
+    try:
+        assert terminal == "done"
+        # Per-state call counts pin the trajectory shape.
+        propose_calls = [
+            c for c in model_adapter.calls if c["state_id"] == "propose"
+        ]
+        review_calls = [
+            c for c in model_adapter.calls if c["state_id"] == "review"
+        ]
+        judge_calls = [
+            c for c in model_adapter.calls if c["state_id"] == "judge"
+        ]
+        impl_calls = [
+            c for c in agent_adapter.calls if c["state_id"] == "implement"
+        ]
+        # Two propose calls (initial + reframe), four reviews
+        # (one per judge call), four judges (one per verdict), one
+        # implement (from the implement verdict).
+        assert len(propose_calls) == 2
+        assert len(review_calls) == 4
+        assert len(judge_calls) == 4
+        assert len(impl_calls) == 1
+        # Per-judge outcome sequence: every nonterminal branch fired
+        # before the terminal accept.
+        from orchestra.log import LogReader
+        records = LogReader(run_dir / "log.jsonl").read_all()
+        state_exits = [
+            r for r in records
+            if r.event == "state_exit" and r.state_id == "judge"
+        ]
+        outcomes = [r.fields["outcome"] for r in state_exits]
+        assert outcomes == ["reframe", "implement", "rereview", "accept"]
+        # State-transition log shows the four branches taken.
+        transitions = [
+            r for r in records
+            if r.event == "transition" and r.state_id == "judge"
+        ]
+        targets = [r.fields["target"] for r in transitions]
+        assert targets == ["propose", "implement", "review", "done"]
+        # Final verdict artifact reflects the accept payload.
+        verdict = store.read_latest("judge_verdict")
+        assert verdict is not None
+        assert verdict.value["decision"] == "accept"
+        assert verdict.value["feedback"] == "accept-feedback"
+    finally:
+        store.close()
