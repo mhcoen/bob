@@ -263,3 +263,61 @@ def test_parallel_thinking_fan_out_records_in_log(tmp_path: Path) -> None:
         assert "fan_out_end" in events
     finally:
         store.close()
+
+
+# --------------------------------------------------------------------
+# Phase 1 integration: explicit five-panelists-succeed verification
+# per the phase-1 directive. The pre-existing
+# test_parallel_thinking_happy_path covers the same path; this test
+# pins the explicit assertions Desktop's directive asks for: the
+# finish_panel transform runs, finish_marker is written, all five
+# panelist_N_output artifacts are populated, and the final state is
+# reached.
+# --------------------------------------------------------------------
+
+
+def test_parallel_thinking_five_panelists_succeed(tmp_path: Path) -> None:
+    """Five panelists return text outputs through the fan_out;
+    finish_panel runs at the join site, finish_marker is written,
+    all five panelist_N_output artifacts carry the panelist's
+    response, and the workflow terminates in done."""
+    adapter, run_dir, terminal, store = _run_parallel_thinking(tmp_path)
+    try:
+        assert terminal == "done", (
+            f"five-panelists-succeed must terminate in done, not {terminal!r}"
+        )
+        # All five panelist outputs are committed under their named
+        # artifacts.
+        for i, state_name in enumerate(PANELIST_STATES, start=1):
+            art = store.read_latest(f"panelist_{i}_output")
+            assert art is not None, (
+                f"panelist_{i}_output must be committed when all five "
+                "panelists succeed"
+            )
+            assert art.value == PANELIST_RESPONSES[state_name]
+        # finish_panel ran at the join site and wrote finish_marker.
+        finish_art = store.read_latest("finish_marker")
+        assert finish_art is not None, (
+            "finish_panel transform must run at the join site and "
+            "write finish_marker"
+        )
+        assert finish_art.value == "ok"
+        records = LogReader(run_dir / "log.jsonl").read_all()
+        # The finish state's state_exit confirms the transform's
+        # success path closed the workflow.
+        finish_exits = [
+            r for r in records
+            if r.event == "state_exit" and r.state_id == "finish"
+        ]
+        assert len(finish_exits) == 1
+        assert finish_exits[0].fields["status"] == "ok"
+        assert finish_exits[0].fields["outcome"] == "complete"
+        # The finish state's transition routed to the done terminal.
+        finish_transitions = [
+            r for r in records
+            if r.event == "transition" and r.state_id == "finish"
+        ]
+        assert len(finish_transitions) == 1
+        assert finish_transitions[0].fields["target"] == "done"
+    finally:
+        store.close()
