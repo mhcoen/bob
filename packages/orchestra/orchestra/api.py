@@ -95,7 +95,7 @@ from orchestra.spine import (
     Workflow,
 )
 from orchestra.store import ArtifactStore
-from orchestra.transforms import anonymize_outputs
+from orchestra.transforms import anonymize_outputs, finish_panel
 
 # Maps a configured adapter name to the workflow actor kind it serves.
 # Slice 1 grammar limits the kind vocabulary to {model, agent, shell,
@@ -242,6 +242,18 @@ _ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA: dict[str, Any] = {
     "panelist_4_output": str,
     "panelist_5_output": str,
 }
+_PARALLEL_THINKING_FINISH_PANEL_INPUT_SCHEMA: dict[str, Any] = {
+    "panelist_1_output": str,
+    "panelist_2_output": str,
+    "panelist_3_output": str,
+    "panelist_4_output": str,
+    "panelist_5_output": str,
+}
+"""Input schema the Parallel Thinking workflow's ``finish_panel``
+transform reads. Keys are the five panelist outputs that must reach
+the join site for the workflow to terminate cleanly. The transform
+produces only ``finish_marker``; the consumer of the workflow reads
+the per-panelist outputs by name."""
 """Input schema the ``ask_anonymous_reviewers`` workflow's
 ``anonymize`` state expects. Keys are the five panelist output
 artifacts; values are the panelist texts. ``anonymize_outputs``
@@ -382,6 +394,13 @@ def _register_builtin_transforms(reg: ProfileRegistry) -> None:
                 _ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA
             ),
             output_schema={"anon_map": dict[str, str]},
+        )
+    if "finish_panel" not in reg.transforms:
+        reg.register_transform(
+            "finish_panel",
+            finish_panel,
+            input_schema=dict(_PARALLEL_THINKING_FINISH_PANEL_INPUT_SCHEMA),
+            output_schema={"finish_marker": str},
         )
 
 

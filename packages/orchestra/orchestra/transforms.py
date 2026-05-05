@@ -226,6 +226,28 @@ def anonymize_outputs(
     return {"anon_map": anon_map}
 
 
+def finish_panel(
+    inputs: dict[str, Any], ctx: TransformContext
+) -> dict[str, Any]:
+    """Pure-function join for the Parallel Thinking workflow.
+
+    Reads the five panelist outputs (pinning them in the must-reach
+    analysis), produces a trivial ``finish_marker`` text artifact,
+    and returns control to the workflow's terminal state. The
+    transform performs no model work and produces no synthesis: its
+    only purpose is to provide a join target for the framer's
+    fan_out and a clean terminal hand-off.
+
+    A simple "all panelists ok" marker is the output. The consumer
+    of the workflow reads the per-panelist outputs by name; this
+    artifact is not the value the workflow produces.
+    """
+    # The transform contract requires the inputs to match the
+    # registered input_schema. We trust the validator and the
+    # executor's runtime check have already enforced that.
+    return {"finish_marker": "ok"}
+
+
 def _anon_letter(index: int) -> str:
     """A, B, ..., Z, AA, AB, ... so the mapping is open-ended.
 
@@ -246,6 +268,7 @@ __all__ = [
     "TransformCallable",
     "TransformContext",
     "anonymize_outputs",
+    "finish_panel",
     "is_dict_str_str",
     "is_supported_type",
     "runtime_check",
