@@ -392,3 +392,81 @@ def test_iterate_distinct_actor_rule_judge_can_match_proposer() -> None:
     workflow = load_workflow(path, _pre_load_registry())
     bindings = _validate_role_bindings(workflow, "iterate_until_acceptable", cfg)
     assert "judge_role" in bindings
+
+
+# --------------------------------------------------------------------
+# Phase 1 integration: trajectory verification for the canonical
+# 2-iterate-then-accept cycle. The existing
+# test_iterate_accept_after_two_iterations covers the same path; this
+# test pins the explicit assertions Desktop's phase-1 directive
+# specifies (final terminal, proposal stability, judge_feedback as
+# the last feedback string).
+# --------------------------------------------------------------------
+
+
+def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
+    """Judge emits iterate twice, then accept (three judge calls).
+    Verifies the workflow terminates at the accept terminal, the
+    proposal artifact reflects the proposer's single output (the
+    proposal is fixed across iterations per the design doc; only the
+    review iterates), and judge_feedback carries the last feedback
+    string from the accept verdict."""
+    responses = {
+        "propose": ["DRAFT-1"],
+        "review": ["REVIEW-1", "REVIEW-2", "REVIEW-3"],
+        "judge": [
+            json.dumps(
+                {"decision": "iterate", "feedback": "first iteration"}
+            ),
+            json.dumps(
+                {"decision": "iterate", "feedback": "second iteration"}
+            ),
+            json.dumps(
+                {"decision": "accept", "feedback": "final accept"}
+            ),
+        ],
+    }
+    adapter, run_dir, terminal, store = _run_iterate(
+        tmp_path, responses=responses
+    )
+    try:
+        assert terminal == "done"
+        # Three judge calls: two iterates, one accept.
+        judge_calls = [c for c in adapter.calls if c["state_id"] == "judge"]
+        assert len(judge_calls) == 3
+        # Proposer fired exactly once: the proposal is fixed across
+        # iterations in this workflow.
+        propose_calls = [
+            c for c in adapter.calls if c["state_id"] == "propose"
+        ]
+        assert len(propose_calls) == 1
+        proposal = store.read_latest("proposal")
+        assert proposal is not None
+        assert proposal.value == "DRAFT-1"
+        # Final state envelope: the judge state's last invocation has
+        # outcome "accept" and routed to done.
+        from orchestra.log import LogReader
+        records = LogReader(run_dir / "log.jsonl").read_all()
+        state_exits = [r for r in records if r.event == "state_exit"]
+        last_judge_exit = next(
+            r for r in reversed(state_exits) if r.state_id == "judge"
+        )
+        assert last_judge_exit.fields["outcome"] == "accept"
+        transitions = [r for r in records if r.event == "transition"]
+        last_judge_transition = next(
+            r for r in reversed(transitions) if r.state_id == "judge"
+        )
+        assert last_judge_transition.fields["target"] == "done"
+        # judge_feedback carries the last feedback string.
+        feedback = store.read_latest("judge_feedback")
+        assert feedback is not None
+        assert feedback.value == "final accept"
+        # The verdict json artifact reflects the final accept payload.
+        verdict = store.read_latest("judge_verdict")
+        assert verdict is not None
+        assert verdict.value == {
+            "decision": "accept",
+            "feedback": "final accept",
+        }
+    finally:
+        store.close()
