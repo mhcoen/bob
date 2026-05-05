@@ -755,7 +755,160 @@ def _validate_role_bindings(
             f"workflow {workflow_name!r}: role-adapter kind mismatch:\n  "
             + "\n  ".join(mismatches)
         )
+    _apply_workflow_specific_rules(workflow, resolved, workflow_name)
     return resolved
+
+
+# --------------------------------------------------------------------
+# Workflow-specific config validation rules
+#
+# Some shipped workflows enforce binding-level invariants the grammar
+# cannot express. The Iterate-Until-Acceptable workflow requires the
+# proposer and reviewer to resolve to distinct actors so the review
+# is independent. The Propose-Review-Judge-Implement workflow has the
+# same distinct-actor rule plus a workspace-mutation rule (only the
+# implementer may be bound to a "mutating" adapter). Both checks run
+# after role-binding resolution and adapter-kind matching but before
+# the executor starts.
+# --------------------------------------------------------------------
+
+
+def _actor_identity(binding: RoleBinding) -> tuple[str, str | None]:
+    """The (adapter, model) tuple used as actor identity.
+
+    Per
+    ``design/iteration-and-implementation-workflows.md`` the
+    distinct-actor constraint is about training-data independence,
+    not prompt independence; the role binding's ``parameters`` map
+    is excluded so two roles bound to the same (adapter, model) with
+    different system prompts or temperatures still count as the same
+    actor.
+    """
+    return (binding.adapter, binding.model)
+
+
+def _adapter_workspace_mutation(binding: RoleBinding) -> str:
+    """Read the ``workspace_mutation`` self-classification off the
+    adapter the binding names. Returns ``"text_only"`` when the
+    adapter is unknown to the api layer (defensive fallback; every
+    shipped adapter classifies itself explicitly)."""
+    cls = _ADAPTER_CLASSES.get(binding.adapter)
+    if cls is None:
+        return "text_only"
+    try:
+        instance = cls()
+    except Exception:
+        return "text_only"
+    desc = instance.describe() if hasattr(instance, "describe") else {}
+    value = desc.get("workspace_mutation", "text_only")
+    return str(value)
+
+
+def _apply_workflow_specific_rules(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+    workflow_name: str,
+) -> None:
+    rule = _WORKFLOW_RULES.get(workflow.name)
+    if rule is None:
+        return
+    rule(workflow, role_bindings, workflow_name)
+
+
+def _validate_iterate_until_acceptable(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+    workflow_name: str,
+) -> None:
+    """Enforce the iterate_until_acceptable distinct-actor rule:
+    proposer and reviewer must resolve to distinct (adapter, model)
+    tuples. Judge typically resolves to the same actor as proposer;
+    that is permitted.
+    """
+    missing = [r for r in ("proposer", "reviewer") if r not in role_bindings]
+    if missing:
+        raise ConfigError(
+            f"workflow {workflow_name!r}: missing required role "
+            f"bindings: {missing!r}"
+        )
+    proposer_identity = _actor_identity(role_bindings["proposer"])
+    reviewer_identity = _actor_identity(role_bindings["reviewer"])
+    if proposer_identity == reviewer_identity:
+        raise ConfigError(
+            f"workflow {workflow_name!r}: 'proposer' and 'reviewer' "
+            "resolve to the same actor "
+            f"(adapter={proposer_identity[0]!r}, "
+            f"model={proposer_identity[1]!r}). The iterate-until-"
+            "acceptable pattern requires the reviewer to be a "
+            "different actor so the critique is independent of the "
+            "proposer's training data and blind spots."
+        )
+
+
+def _validate_prji(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+    workflow_name: str,
+) -> None:
+    """Enforce the propose_review_judge_implement constraints:
+
+    - Proposer, reviewer, and implementer must resolve to pairwise
+      distinct (adapter, model) tuples.
+    - Implementer must be bound to a "mutating" adapter.
+    - Proposer, reviewer, and judge must each be bound to a
+      "text_only" adapter.
+    """
+    required = ("proposer", "reviewer", "judge_role", "implementer")
+    missing = [r for r in required if r not in role_bindings]
+    if missing:
+        raise ConfigError(
+            f"workflow {workflow_name!r}: missing required role "
+            f"bindings: {missing!r}"
+        )
+    distinct_roles = ("proposer", "reviewer", "implementer")
+    seen: dict[tuple[str, str | None], str] = {}
+    for role_name in distinct_roles:
+        identity = _actor_identity(role_bindings[role_name])
+        prior = seen.get(identity)
+        if prior is not None:
+            raise ConfigError(
+                f"workflow {workflow_name!r}: roles {prior!r} and "
+                f"{role_name!r} both resolve to actor "
+                f"(adapter={identity[0]!r}, model={identity[1]!r}). "
+                "PRJI requires proposer, reviewer, and implementer "
+                "to be pairwise distinct so the review and the fix "
+                "do not share blind spots with what is being judged."
+            )
+        seen[identity] = role_name
+    implementer_mut = _adapter_workspace_mutation(role_bindings["implementer"])
+    if implementer_mut != "mutating":
+        raise ConfigError(
+            f"workflow {workflow_name!r}: 'implementer' is bound to "
+            f"adapter {role_bindings['implementer'].adapter!r}, which "
+            "self-classifies as 'text_only'. The implementer is the "
+            "only role permitted to mutate the workspace; bind it to "
+            "a mutating adapter (the *_agent variants)."
+        )
+    for role_name in ("proposer", "reviewer", "judge_role"):
+        mut = _adapter_workspace_mutation(role_bindings[role_name])
+        if mut == "mutating":
+            raise ConfigError(
+                f"workflow {workflow_name!r}: role {role_name!r} is "
+                f"bound to adapter "
+                f"{role_bindings[role_name].adapter!r}, which "
+                "self-classifies as 'mutating'. PRJI restricts "
+                "workspace mutation to the implementer; bind this "
+                "role to a text-only adapter (the *_text variants)."
+            )
+
+
+_WORKFLOW_RULES: dict[
+    str,
+    Callable[[Workflow, dict[str, RoleBinding], str], None],
+] = {
+    "iterate_until_acceptable": _validate_iterate_until_acceptable,
+    "propose_review_judge_implement": _validate_prji,
+}
 
 
 def _validate_inputs(workflow: Workflow, inputs: dict[str, Any]) -> None:
