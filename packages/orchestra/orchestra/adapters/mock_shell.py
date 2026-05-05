@@ -20,6 +20,13 @@ from orchestra.spine import InvocationRequest, PreparedInvocation
 class MockShellAdapter:
     """Deterministic mock for the ``shell`` backing."""
 
+    WORKSPACE_MUTATION: str = "text_only"
+    """The mock returns canned (exit_code, stdout, stderr) tuples
+    from a response table without executing commands, so it cannot
+    mutate the workspace. The real shell adapter (slice 2) will
+    declare ``"mutating"`` because real shell commands can modify
+    the workspace."""
+
     def __init__(
         self,
         response_table: dict[str, tuple[int, str, str]] | None = None,

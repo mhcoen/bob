@@ -22,6 +22,10 @@ from orchestra.spine import InvocationRequest, PreparedInvocation
 class MockModelAdapter:
     """Deterministic mock for the ``model`` backing."""
 
+    WORKSPACE_MUTATION: str = "text_only"
+    """The mock returns synthesized text without touching the
+    workspace; classified text_only per the adapter contract."""
+
     def __init__(self, response: str | None = None) -> None:
         self._response_override = response
 

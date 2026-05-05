@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
 from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
 from orchestra.adapters.codex_agent import CodexAgentAdapter
@@ -788,19 +789,41 @@ def _actor_identity(binding: RoleBinding) -> tuple[str, str | None]:
 
 
 def _adapter_workspace_mutation(binding: RoleBinding) -> str:
-    """Read the ``workspace_mutation`` self-classification off the
-    adapter the binding names. Returns ``"text_only"`` when the
-    adapter is unknown to the api layer (defensive fallback; every
-    shipped adapter classifies itself explicitly)."""
+    """Read the ``WORKSPACE_MUTATION`` class-level metadata off the
+    adapter class the binding names. Fails closed: an unknown
+    adapter, a missing attribute, or an out-of-vocabulary value
+    raises ``ConfigError`` rather than defaulting to a permissive
+    classification.
+
+    The earlier defaulting-to-``"text_only"`` fallback could let a
+    mutating adapter with broken metadata pass the PRJI proposer/
+    reviewer/judge bindings (which forbid mutating adapters). The
+    audit pass against the implementation flagged it as a SERIOUS
+    finding; the contract is now read from the class without
+    instantiation, and any contract violation aborts validation.
+    """
     cls = _ADAPTER_CLASSES.get(binding.adapter)
     if cls is None:
-        return "text_only"
-    try:
-        instance = cls()
-    except Exception:
-        return "text_only"
-    desc = instance.describe() if hasattr(instance, "describe") else {}
-    value = desc.get("workspace_mutation", "text_only")
+        raise ConfigError(
+            f"adapter {binding.adapter!r} is not registered in "
+            "_ADAPTER_CLASSES; cannot determine workspace_mutation. "
+            f"Known adapters: {sorted(_ADAPTER_CLASSES)}"
+        )
+    if not hasattr(cls, "WORKSPACE_MUTATION"):
+        raise ConfigError(
+            f"adapter {cls.__name__!r}: missing required class-level "
+            "'WORKSPACE_MUTATION' attribute. The adapter contract "
+            "requires every adapter class to declare "
+            "'WORKSPACE_MUTATION = \"mutating\"' or "
+            "'WORKSPACE_MUTATION = \"text_only\"'."
+        )
+    value = cls.WORKSPACE_MUTATION
+    if value not in WORKSPACE_MUTATION_VALUES:
+        raise ConfigError(
+            f"adapter {cls.__name__!r}: WORKSPACE_MUTATION value "
+            f"{value!r} is not valid. Must be one of "
+            f"{sorted(WORKSPACE_MUTATION_VALUES)}."
+        )
     return str(value)
 
 

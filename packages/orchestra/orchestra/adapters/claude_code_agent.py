@@ -46,6 +46,12 @@ class ClaudeCodeAgentAdapter:
     """
 
     backing: str = "claude_code_agent"
+    WORKSPACE_MUTATION: str = "mutating"
+    """The agent variant runs an editor CLI with file-edit and shell
+    tools enabled, so an invocation can modify the project
+    workspace. PRJI binds only the implementer role to this kind of
+    adapter; other roles must be text-only."""
+
     manages_own_timeout: bool = True
     """``run_session`` enforces a wall-clock timeout and returns
     exit_code -2 on expiry. The executor honors this flag so it does

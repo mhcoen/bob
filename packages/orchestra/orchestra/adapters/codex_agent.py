@@ -56,6 +56,11 @@ class CodexAgentAdapter:
     """
 
     backing: str = "codex_agent"
+    WORKSPACE_MUTATION: str = "mutating"
+    """The agent variant runs codex with workspace-write sandbox, so
+    an invocation may edit files and run shell commands. PRJI binds
+    only the implementer role to a mutating adapter."""
+
     manages_own_timeout: bool = True
     """``run_session`` enforces a wall-clock timeout and returns
     exit_code -2 on expiry. The executor honors this flag so it does

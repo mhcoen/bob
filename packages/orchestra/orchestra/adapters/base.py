@@ -8,13 +8,11 @@ Adapters do not mutate the artifact store. They return payloads. The
 executor commits any artifact writes proposed by the payload through
 the result-parser dispatch path.
 
-``describe()`` return contract
-------------------------------
+``WORKSPACE_MUTATION`` class-level metadata
+-------------------------------------------
 
-In addition to the historical ``backing``, ``kind``, ``supports_cancel``,
-``reports_cost``, and ``supports_streaming`` fields, every adapter's
-``describe()`` is required to include a ``workspace_mutation`` key
-with one of two values:
+Every adapter class is required to declare a class-level
+``WORKSPACE_MUTATION`` attribute with one of two literal values:
 
   - ``"mutating"``: the adapter, when invoked, may modify the
     project workspace (file create/delete/rename, command execution,
@@ -29,21 +27,41 @@ with one of two values:
     workspace. PRJI binds the proposer, reviewer, and judge to
     text-only adapters and refuses to bind the implementer to one.
 
-Adapters that do not classify themselves are treated as
-``"text_only"`` by the validator: a missing key is interpreted
-conservatively, but every shipped adapter declares the key
-explicitly and a new adapter is expected to do the same.
+The classification is a static property of the adapter class, not a
+runtime computation. The validator reads it from the class without
+instantiation: a missing attribute or an out-of-vocabulary value is
+a hard ``ConfigError`` because the previous fall-back-to-text_only
+defaulting could let a mutating adapter with broken metadata pass as
+proposer/reviewer/judge.
+
+Adapters should also include the same value in their ``describe()``
+return for parity with the older debug-introspection path; the
+canonical source of truth is the class attribute.
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from orchestra.spine import InvocationRequest, PreparedInvocation
+
+WorkspaceMutation = Literal["mutating", "text_only"]
+"""The two valid values for an adapter's ``WORKSPACE_MUTATION``
+class-level metadata attribute."""
+
+WORKSPACE_MUTATION_VALUES: frozenset[str] = frozenset(
+    {"mutating", "text_only"}
+)
+"""Set form of ``WorkspaceMutation`` for runtime membership checks
+the api validator runs against arbitrary class attributes."""
 
 
 class Adapter(Protocol):
     """Adapter contract."""
+
+    WORKSPACE_MUTATION: ClassVar[WorkspaceMutation]
+    """Static classification of the adapter's workspace-mutation
+    behavior. See module docstring."""
 
     def prepare(self, request: InvocationRequest) -> PreparedInvocation:
         """Build the prepared invocation. No side effects."""
@@ -57,6 +75,9 @@ class Adapter(Protocol):
     def describe(self) -> dict[str, Any]:
         """Return adapter metadata.
 
-        Must include the ``workspace_mutation`` key. See the
-        module docstring for the contract.
+        For parity with the older debug-introspection path, the
+        return should include a ``workspace_mutation`` key with the
+        same value as the class-level ``WORKSPACE_MUTATION``
+        attribute. The class attribute is the canonical source of
+        truth.
         """

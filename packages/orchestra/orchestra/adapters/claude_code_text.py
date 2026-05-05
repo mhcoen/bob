@@ -46,6 +46,12 @@ class ClaudeCodeTextAdapter:
     """
 
     backing: str = "claude_code_text"
+    WORKSPACE_MUTATION: str = "text_only"
+    """The text variant runs in print mode and emits the model's
+    output to stdout. The runtime captures the output but the
+    adapter performs no workspace edits, so PRJI binds proposer,
+    reviewer, and judge to text-only adapters of this kind."""
+
     manages_own_timeout: bool = True
     """``run_session`` enforces a wall-clock timeout and returns
     exit_code -2 on expiry. The executor honors this flag so it does

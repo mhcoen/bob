@@ -28,6 +28,10 @@ from orchestra.spine import InvocationRequest, PreparedInvocation
 class MockHumanAdapter:
     """Deterministic mock for the ``human`` backing."""
 
+    WORKSPACE_MUTATION: str = "text_only"
+    """The mock returns scripted choices without touching the
+    workspace; classified text_only per the adapter contract."""
+
     # Class-level shared script is convenient for the CLI/integration
     # path: tests can set a script before launching the runner without
     # needing to thread an instance through.

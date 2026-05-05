@@ -556,10 +556,13 @@ def test_extract_final_text_ignores_non_text_deltas() -> None:
 
 
 def test_workspace_mutation_classification_for_shipped_adapters():
-    """Every shipped adapter declares workspace_mutation in describe()
-    per design/iteration-and-implementation-workflows.md. The PRJI
-    workflow's config validation rule reads this field to enforce the
-    "implementer is the only mutator" invariant.
+    """Every shipped adapter declares workspace_mutation as a
+    class-level WORKSPACE_MUTATION attribute per
+    design/iteration-and-implementation-workflows.md. The PRJI
+    workflow's config validation rule reads this attribute (without
+    instantiating the adapter) to enforce the "implementer is the
+    only mutator" invariant. The describe() return parity remains
+    documented but the canonical source is the class attribute.
     """
     from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
     from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
@@ -579,12 +582,13 @@ def test_workspace_mutation_classification_for_shipped_adapters():
         MockShellAdapter: "text_only",
     }
     for cls, expected_value in expected.items():
-        desc = cls().describe()
-        assert "workspace_mutation" in desc, (
-            f"{cls.__name__}.describe() missing 'workspace_mutation'"
+        # Canonical source: class-level WORKSPACE_MUTATION attribute.
+        assert hasattr(cls, "WORKSPACE_MUTATION"), (
+            f"{cls.__name__}: missing class-level "
+            "'WORKSPACE_MUTATION' attribute"
         )
-        actual = desc["workspace_mutation"]
-        assert actual == expected_value, (
-            f"{cls.__name__} declared {actual!r}, "
+        cls_value = cls.WORKSPACE_MUTATION
+        assert cls_value == expected_value, (
+            f"{cls.__name__}.WORKSPACE_MUTATION = {cls_value!r}, "
             f"expected {expected_value!r}"
         )

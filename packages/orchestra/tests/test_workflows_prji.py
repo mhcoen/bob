@@ -661,3 +661,96 @@ def test_prji_workspace_mutation_rejects_mutating_reviewer() -> None:
         )
     msg = str(exc.value)
     assert "reviewer" in msg
+
+
+# --------------------------------------------------------------------
+# Fail-closed contract checks on _adapter_workspace_mutation
+#
+# The earlier defaulting-to-"text_only" fallback could let a mutating
+# adapter with broken metadata pass the PRJI proposer/reviewer/judge
+# rule. _adapter_workspace_mutation is now class-attribute based and
+# fails closed on every contract violation.
+# --------------------------------------------------------------------
+
+
+def test_adapter_workspace_mutation_rejects_unknown_adapter() -> None:
+    """An unknown adapter name fails closed."""
+    from orchestra.api import _adapter_workspace_mutation
+    binding = RoleBinding(adapter="not_a_real_adapter", model="m")
+    with pytest.raises(ConfigError) as exc:
+        _adapter_workspace_mutation(binding)
+    msg = str(exc.value)
+    assert "not_a_real_adapter" in msg
+    assert "_ADAPTER_CLASSES" in msg or "Known adapters" in msg
+
+
+def test_adapter_workspace_mutation_rejects_class_missing_attribute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An adapter class without the WORKSPACE_MUTATION class attribute
+    is rejected by the validator. The contract is fail-closed: a
+    missing attribute is a hard error, not a silent default."""
+    import orchestra.api as api_mod
+
+    class _BrokenAdapter:
+        pass
+
+    monkeypatch.setitem(
+        api_mod._ADAPTER_CLASSES, "broken_adapter", _BrokenAdapter
+    )
+    binding = RoleBinding(adapter="broken_adapter", model="m")
+    with pytest.raises(ConfigError) as exc:
+        api_mod._adapter_workspace_mutation(binding)
+    msg = str(exc.value)
+    assert "_BrokenAdapter" in msg
+    assert "WORKSPACE_MUTATION" in msg
+
+
+def test_adapter_workspace_mutation_rejects_invalid_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An adapter class whose WORKSPACE_MUTATION attribute is not in
+    the allowed vocabulary is rejected."""
+    import orchestra.api as api_mod
+
+    class _MisclassifiedAdapter:
+        WORKSPACE_MUTATION = "kinda_mutating_sometimes"
+
+    monkeypatch.setitem(
+        api_mod._ADAPTER_CLASSES,
+        "misclassified_adapter",
+        _MisclassifiedAdapter,
+    )
+    binding = RoleBinding(adapter="misclassified_adapter", model="m")
+    with pytest.raises(ConfigError) as exc:
+        api_mod._adapter_workspace_mutation(binding)
+    msg = str(exc.value)
+    assert "_MisclassifiedAdapter" in msg
+    assert "kinda_mutating_sometimes" in msg
+    assert "mutating" in msg and "text_only" in msg
+
+
+def test_adapter_workspace_mutation_accepts_valid_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A class with a valid WORKSPACE_MUTATION attribute passes
+    without instantiation. The constructor below requires args; the
+    validator never touches it. This pins the class-attribute path
+    so a future refactor that re-introduces instantiation will
+    break the test rather than silently change the contract surface."""
+    import orchestra.api as api_mod
+
+    class _StrictAdapter:
+        WORKSPACE_MUTATION = "mutating"
+
+        def __init__(self, required_arg: str) -> None:
+            self.required_arg = required_arg
+
+    monkeypatch.setitem(
+        api_mod._ADAPTER_CLASSES, "strict_adapter", _StrictAdapter
+    )
+    binding = RoleBinding(adapter="strict_adapter", model="m")
+    # No exception: the validator reads the class attribute directly.
+    assert (
+        api_mod._adapter_workspace_mutation(binding) == "mutating"
+    )
