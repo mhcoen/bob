@@ -23,7 +23,7 @@ workflow iterate_until_acceptable
     initial ""
 
   role proposer
-    prompt template "templates/iterate_proposer.md" with query, history
+    prompt template "templates/iterate_proposer.md" with query, history, judge_decision, judge_feedback
 
   role reviewer
     prompt template "templates/iterate_reviewer.md" with query, proposal, judge_decision, judge_feedback
@@ -34,7 +34,7 @@ workflow iterate_until_acceptable
   state propose
     actor model m_proposer
     role proposer
-    reads query, history
+    reads query, history, judge_decision, judge_feedback
     writes proposal text
     on complete => review
     on error => stop
@@ -57,7 +57,7 @@ workflow iterate_until_acceptable
     writes judge_decision text
     writes judge_feedback text
     on accept => done
-    on iterate when attempts.judge < 6 => review
+    on iterate when attempts.judge < 6 => propose
     on iterate => done
     on stuck => stop
     on error => stop

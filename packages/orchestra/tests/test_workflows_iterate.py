@@ -1,13 +1,14 @@
 """Tests for the iterate_until_acceptable workflow.
 
-Pattern: a proposer produces an initial draft once; a reviewer-judge
-loop runs until the judge accepts or the iteration cap is reached.
-The proposal is fixed across iterations; only the review iterates.
-The judge's verdict is schema-backed JSON with a feedback field
-extracted into an artifact the reviewer reads on the next pass.
+Pattern: a propose-review-judge loop runs until the judge accepts or
+the iteration cap is reached. On iterate, the proposer redrafts with
+the prior judge decision and feedback as context; on accept, the
+loop terminates. The judge's verdict is schema-backed JSON with the
+decision and feedback fields extracted into artifacts the proposer
+and reviewer read on the next pass.
 
 Tests cover: workflow load and validate, accept-on-first-try,
-accept-after-multiple-iterations (loops back through review), accept-
+accept-after-multiple-iterations (loops back through propose), accept-
 on-cap (the unguarded ``on iterate => done`` fallback), schema
 violation routing to error/stop, and the workflow-specific
 distinct-actor config validation rule.
@@ -212,7 +213,7 @@ def test_iterate_accept_on_first_try(tmp_path: Path) -> None:
 
 def test_iterate_accept_after_two_iterations(tmp_path: Path) -> None:
     responses = {
-        "propose": ["DRAFT-1"],
+        "propose": ["DRAFT-1", "DRAFT-2", "DRAFT-3"],
         "review": ["REVIEW-1", "REVIEW-2", "REVIEW-3"],
         "judge": [
             json.dumps({"decision": "iterate", "feedback": "needs work"}),
@@ -226,27 +227,39 @@ def test_iterate_accept_after_two_iterations(tmp_path: Path) -> None:
     try:
         assert terminal == "done"
         states = [c["state_id"] for c in adapter.calls]
-        # Expected: propose, then review/judge x3
-        assert states[0] == "propose"
-        assert states[1::2] == ["review", "review", "review"]
-        assert states[2::2] == ["judge", "judge", "judge"]
+        # Expected: (propose, review, judge) x 3
+        assert states[0::3] == ["propose", "propose", "propose"]
+        assert states[1::3] == ["review", "review", "review"]
+        assert states[2::3] == ["judge", "judge", "judge"]
         # Final verdict accepted; feedback artifact carries the most
-        # recent judge feedback ("ok now").
+        # recent judge feedback ("ok now"). Proposal carries the most
+        # recent draft (DRAFT-3) since iterate now re-proposes.
         verdict = store.read_latest("judge_verdict")
         assert verdict is not None
         assert verdict.value["decision"] == "accept"
         feedback = store.read_latest("judge_feedback")
         assert feedback is not None
         assert feedback.value == "ok now"
-        # The reviewer's prompt on iteration 2 should include the
-        # iteration-1 feedback (extracted into judge_feedback).
+        proposal = store.read_latest("proposal")
+        assert proposal is not None and proposal.value == "DRAFT-3"
+        # The proposer on iteration 2 should see iteration-1 judge
+        # feedback (and decision) in its prompt; the reviewer also
+        # sees prior feedback, both flow through judge_decision and
+        # judge_feedback artifacts.
+        propose_calls = [c for c in adapter.calls if c["state_id"] == "propose"]
+        assert len(propose_calls) == 3
+        # First propose pass sees empty initial feedback.
+        assert "needs work" not in propose_calls[0]["prompt"]
+        # Second propose pass sees iteration-1 judge feedback.
+        assert "needs work" in propose_calls[1]["prompt"]
+        assert "iterate" in propose_calls[1]["prompt"]
+        # Third propose pass sees iteration-2 judge feedback.
+        assert "still off" in propose_calls[2]["prompt"]
+        # Reviewer continues to see prior feedback on cycles 2 and 3.
         review_calls = [c for c in adapter.calls if c["state_id"] == "review"]
         assert len(review_calls) == 3
-        # First review pass sees empty initial feedback.
         assert "needs work" not in review_calls[0]["prompt"]
-        # Second review pass sees iteration-1 judge feedback.
         assert "needs work" in review_calls[1]["prompt"]
-        # Third review pass sees iteration-2 judge feedback.
         assert "still off" in review_calls[2]["prompt"]
     finally:
         store.close()
@@ -263,7 +276,7 @@ def test_iterate_accept_on_cap(tmp_path: Path) -> None:
         {"decision": "iterate", "feedback": "still iterate"}
     )
     responses = {
-        "propose": ["DRAFT-1"],
+        "propose": ["DRAFT"] * 6,
         "review": ["REVIEW"] * 6,
         "judge": [iterate_response] * 6,
     }
@@ -274,9 +287,10 @@ def test_iterate_accept_on_cap(tmp_path: Path) -> None:
         # accept-on-cap: workflow terminates done with the proposal.
         assert terminal == "done"
         states = [c["state_id"] for c in adapter.calls]
-        # propose + (review, judge) x 6 = 13 calls.
-        assert states.count("judge") == 6
+        # (propose, review, judge) x 6 = 18 calls.
+        assert states.count("propose") == 6
         assert states.count("review") == 6
+        assert states.count("judge") == 6
         records = LogReader(run_dir / "log.jsonl").read_all()
         sv = [r for r in records if r.event == "schema_validation"]
         # Six judge invocations -> six schema_validation records.
@@ -401,7 +415,7 @@ def test_iterate_distinct_actor_rule_judge_can_match_proposer() -> None:
 # 2-iterate-then-accept cycle. The existing
 # test_iterate_accept_after_two_iterations covers the same path; this
 # test pins the explicit assertions Desktop's phase-1 directive
-# specifies (final terminal, proposal stability, judge_feedback as
+# specifies (final terminal, proposal trajectory, judge_feedback as
 # the last feedback string).
 # --------------------------------------------------------------------
 
@@ -409,12 +423,12 @@ def test_iterate_distinct_actor_rule_judge_can_match_proposer() -> None:
 def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
     """Judge emits iterate twice, then accept (three judge calls).
     Verifies the workflow terminates at the accept terminal, the
-    proposal artifact reflects the proposer's single output (the
-    proposal is fixed across iterations per the design doc; only the
-    review iterates), and judge_feedback carries the last feedback
-    string from the accept verdict."""
+    proposal artifact reflects the most recent proposer output (with
+    on iterate => propose, the proposer redrafts each cycle), and
+    judge_feedback carries the last feedback string from the accept
+    verdict."""
     responses = {
-        "propose": ["DRAFT-1"],
+        "propose": ["DRAFT-1", "DRAFT-2", "DRAFT-3"],
         "review": ["REVIEW-1", "REVIEW-2", "REVIEW-3"],
         "judge": [
             json.dumps(
@@ -436,15 +450,16 @@ def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
         # Three judge calls: two iterates, one accept.
         judge_calls = [c for c in adapter.calls if c["state_id"] == "judge"]
         assert len(judge_calls) == 3
-        # Proposer fired exactly once: the proposal is fixed across
-        # iterations in this workflow.
+        # Proposer fires once per cycle under on iterate => propose:
+        # three calls total for two iterate verdicts plus the final
+        # accept cycle.
         propose_calls = [
             c for c in adapter.calls if c["state_id"] == "propose"
         ]
-        assert len(propose_calls) == 1
+        assert len(propose_calls) == 3
         proposal = store.read_latest("proposal")
         assert proposal is not None
-        assert proposal.value == "DRAFT-1"
+        assert proposal.value == "DRAFT-3"
         # Final state envelope: the judge state's last invocation has
         # outcome "accept" and routed to done.
         from orchestra.log import LogReader
@@ -549,11 +564,12 @@ def test_iterate_stuck_routes_to_stop(tmp_path: Path) -> None:
 
 
 def test_iterate_iterate_then_stuck(tmp_path: Path) -> None:
-    """Multi-cycle: iterate on cycle 1, stuck on cycle 2 after the
-    judge sees its own prior decision and feedback in the prompt
-    (verified via the prior_decision read going through the template)."""
+    """Multi-cycle: iterate on cycle 1 (re-proposes via on iterate =>
+    propose), stuck on cycle 2 after the judge sees its own prior
+    decision and feedback in the prompt. Pins both the propose and
+    review prior-context plumbing."""
     responses = {
-        "propose": ["DRAFT-1"],
+        "propose": ["DRAFT-1", "DRAFT-2"],
         "review": ["REVIEW-1", "REVIEW-2"],
         "judge": [
             json.dumps(
@@ -565,7 +581,7 @@ def test_iterate_iterate_then_stuck(tmp_path: Path) -> None:
             json.dumps(
                 {
                     "decision": "stuck",
-                    "feedback": "item 3 still missing after re-review",
+                    "feedback": "item 3 still missing after revision",
                 }
             ),
         ],
@@ -576,9 +592,17 @@ def test_iterate_iterate_then_stuck(tmp_path: Path) -> None:
         decision_art = store.read_latest("judge_decision")
         assert decision_art is not None
         assert decision_art.value == "stuck"
-        # Cycle 2 reviewer prompt must include the prior decision and
-        # feedback, which only flow through if the judge_decision
-        # artifact is read by the reviewer's template.
+        # Cycle 2 proposer prompt must include the prior decision and
+        # feedback, which only flow through if judge_decision and
+        # judge_feedback are read by the proposer's template. This is
+        # the load-bearing assertion for the iterate => propose
+        # transition: without it, the redrafted proposal is uninformed
+        # by the judge's verdict.
+        propose_calls = [c for c in adapter.calls if c["state_id"] == "propose"]
+        assert len(propose_calls) == 2
+        assert "iterate" in propose_calls[1]["prompt"]
+        assert "the proposal misses item 3" in propose_calls[1]["prompt"]
+        # Reviewer also sees prior context on cycle 2.
         review_calls = [c for c in adapter.calls if c["state_id"] == "review"]
         assert len(review_calls) == 2
         assert "iterate" in review_calls[1]["prompt"]
