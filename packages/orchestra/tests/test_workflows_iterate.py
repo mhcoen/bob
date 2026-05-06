@@ -167,9 +167,11 @@ def test_iterate_workflow_loads_and_validates() -> None:
     assert verdict.schema_path is not None
     assert verdict.schema_path.endswith("iterate_judge_verdict.json")
     # The single extract clause must reference feedback.
-    assert len(verdict.extractions) == 1
-    assert verdict.extractions[0].source_field == "feedback"
-    assert verdict.extractions[0].target == "judge_feedback"
+    extracts = {(e.source_field, e.target) for e in verdict.extractions}
+    assert extracts == {
+        ("decision", "judge_decision"),
+        ("feedback", "judge_feedback"),
+    }
 
 
 # --------------------------------------------------------------------
@@ -468,5 +470,118 @@ def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
             "decision": "accept",
             "feedback": "final accept",
         }
+    finally:
+        store.close()
+
+
+# --------------------------------------------------------------------
+# F2: stuck enum branch + judge_decision plumbing + stuck => stop
+# --------------------------------------------------------------------
+
+
+def test_iterate_judge_decision_artifact_extracted(tmp_path: Path) -> None:
+    """The new `extract decision => judge_decision text` clause writes
+    the decision string to a separate text artifact alongside
+    judge_feedback, so prompt templates can consume both prior fields
+    symmetrically. After a single accept verdict, judge_decision should
+    contain the literal string "accept"."""
+    responses = {
+        "propose": ["DRAFT-1"],
+        "review": ["REVIEW-1"],
+        "judge": [json.dumps({"decision": "accept", "feedback": "ok"})],
+    }
+    _, _, terminal, store = _run_iterate(tmp_path, responses=responses)
+    try:
+        assert terminal == "done"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "accept"
+        feedback_art = store.read_latest("judge_feedback")
+        assert feedback_art is not None
+        assert feedback_art.value == "ok"
+    finally:
+        store.close()
+
+
+def test_iterate_stuck_routes_to_stop(tmp_path: Path) -> None:
+    """The new `on stuck => stop` transition fires when the judge
+    issues decision=stuck. terminal=stop, last judge state_exit
+    outcome=stuck, last transition target=stop. This is distinct from
+    the on-error path: status=ok and outcome=stuck (not error)."""
+    responses = {
+        "propose": ["DRAFT-1"],
+        "review": ["REVIEW-1"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "stuck",
+                    "feedback": "the same issue persists across iterations",
+                }
+            )
+        ],
+    }
+    _, run_dir, terminal, store = _run_iterate(tmp_path, responses=responses)
+    try:
+        assert terminal == "stop"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "stuck"
+        from orchestra.log import LogReader
+        records = LogReader(run_dir / "log.jsonl").read_all()
+        last_judge_exit = next(
+            r
+            for r in reversed(records)
+            if r.event == "state_exit" and r.state_id == "judge"
+        )
+        # Status is ok (the state ran cleanly); outcome is the
+        # schema-derived `stuck`. Distinct from outcome=error.
+        assert last_judge_exit.fields["status"] == "ok"
+        assert last_judge_exit.fields["outcome"] == "stuck"
+        last_judge_transition = next(
+            r
+            for r in reversed(records)
+            if r.event == "transition" and r.state_id == "judge"
+        )
+        assert last_judge_transition.fields["target"] == "stop"
+        assert last_judge_transition.fields["outcome"] == "stuck"
+    finally:
+        store.close()
+
+
+def test_iterate_iterate_then_stuck(tmp_path: Path) -> None:
+    """Multi-cycle: iterate on cycle 1, stuck on cycle 2 after the
+    judge sees its own prior decision and feedback in the prompt
+    (verified via the prior_decision read going through the template)."""
+    responses = {
+        "propose": ["DRAFT-1"],
+        "review": ["REVIEW-1", "REVIEW-2"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "iterate",
+                    "feedback": "the proposal misses item 3",
+                }
+            ),
+            json.dumps(
+                {
+                    "decision": "stuck",
+                    "feedback": "item 3 still missing after re-review",
+                }
+            ),
+        ],
+    }
+    adapter, _, terminal, store = _run_iterate(tmp_path, responses=responses)
+    try:
+        assert terminal == "stop"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "stuck"
+        # Cycle 2 reviewer prompt must include the prior decision and
+        # feedback, which only flow through if the judge_decision
+        # artifact is read by the reviewer's template.
+        review_calls = [c for c in adapter.calls if c["state_id"] == "review"]
+        assert len(review_calls) == 2
+        assert "iterate" in review_calls[1]["prompt"]
+        assert "the proposal misses item 3" in review_calls[1]["prompt"]
     finally:
         store.close()

@@ -15,7 +15,10 @@ workflow iterate_until_acceptable
   artifact review_output text
   artifact judge_verdict json
     schema "schemas/iterate_judge_verdict.json"
+    extract decision => judge_decision text
     extract feedback => judge_feedback text
+  artifact judge_decision text
+    initial ""
   artifact judge_feedback text
     initial ""
 
@@ -23,10 +26,10 @@ workflow iterate_until_acceptable
     prompt template "templates/iterate_proposer.md" with query, history
 
   role reviewer
-    prompt template "templates/iterate_reviewer.md" with query, proposal, judge_feedback
+    prompt template "templates/iterate_reviewer.md" with query, proposal, judge_decision, judge_feedback
 
   role judge_role
-    prompt template "templates/iterate_judge.md" with query, proposal, review_output
+    prompt template "templates/iterate_judge.md" with query, proposal, review_output, judge_decision, judge_feedback
 
   state propose
     actor model m_proposer
@@ -40,7 +43,7 @@ workflow iterate_until_acceptable
   state review
     actor model m_reviewer
     role reviewer
-    reads query, proposal, judge_feedback
+    reads query, proposal, judge_decision, judge_feedback
     writes review_output text
     on complete => judge
     on error => stop
@@ -49,11 +52,13 @@ workflow iterate_until_acceptable
   state judge
     actor model m_judge
     role judge_role
-    reads query, proposal, review_output
+    reads query, proposal, review_output, judge_decision, judge_feedback
     writes judge_verdict json
+    writes judge_decision text
     writes judge_feedback text
     on accept => done
     on iterate when attempts.judge < 6 => review
     on iterate => done
+    on stuck => stop
     on error => stop
     on timeout => stop

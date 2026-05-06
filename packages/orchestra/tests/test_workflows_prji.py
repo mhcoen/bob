@@ -191,6 +191,7 @@ def test_prji_workflow_loads_and_validates() -> None:
         (e.source_field, e.target) for e in verdict.extractions
     }
     assert extracts == {
+        ("decision", "judge_decision"),
         ("feedback", "judge_feedback"),
         ("fix_instructions", "fix_instructions"),
     }
@@ -863,5 +864,150 @@ def test_prji_each_branch_traversed(tmp_path: Path) -> None:
         assert verdict is not None
         assert verdict.value["decision"] == "accept"
         assert verdict.value["feedback"] == "accept-feedback"
+    finally:
+        store.close()
+
+
+# --------------------------------------------------------------------
+# F2: stuck enum branch + judge_decision plumbing + stuck => stop
+# --------------------------------------------------------------------
+
+
+def test_prji_judge_decision_artifact_extracted(tmp_path: Path) -> None:
+    """The new `extract decision => judge_decision text` clause writes
+    the decision string to a separate text artifact alongside
+    judge_feedback and fix_instructions, so prompt templates can
+    consume all three prior fields symmetrically. After a single
+    accept verdict, judge_decision should contain "accept"."""
+    model_responses = {
+        "propose": ["FRAMING-1"],
+        "review": ["REVIEW-1"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "accept",
+                    "feedback": "looks good",
+                    "fix_instructions": "",
+                }
+            )
+        ],
+    }
+    agent_responses: dict[str, list[str]] = {}
+    _, _, _, terminal, store = _run_prji(
+        tmp_path,
+        model_responses=model_responses,
+        agent_responses=agent_responses,
+    )
+    try:
+        assert terminal == "done"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "accept"
+        feedback_art = store.read_latest("judge_feedback")
+        assert feedback_art is not None
+        assert feedback_art.value == "looks good"
+    finally:
+        store.close()
+
+
+def test_prji_stuck_routes_to_stop(tmp_path: Path) -> None:
+    """The new `on stuck => stop` transition fires when the judge
+    issues decision=stuck. terminal=stop, last judge state_exit
+    outcome=stuck (status=ok), last transition target=stop. Distinct
+    from the on-error path's outcome=error."""
+    model_responses = {
+        "propose": ["FRAMING-1"],
+        "review": ["REVIEW-1"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "stuck",
+                    "feedback": "the same issue persists across iterations",
+                    "fix_instructions": "",
+                }
+            )
+        ],
+    }
+    agent_responses: dict[str, list[str]] = {}
+    _, _, run_dir, terminal, store = _run_prji(
+        tmp_path,
+        model_responses=model_responses,
+        agent_responses=agent_responses,
+    )
+    try:
+        assert terminal == "stop"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "stuck"
+        from orchestra.log import LogReader
+        records = LogReader(run_dir / "log.jsonl").read_all()
+        last_judge_exit = next(
+            r
+            for r in reversed(records)
+            if r.event == "state_exit" and r.state_id == "judge"
+        )
+        assert last_judge_exit.fields["status"] == "ok"
+        assert last_judge_exit.fields["outcome"] == "stuck"
+        last_judge_transition = next(
+            r
+            for r in reversed(records)
+            if r.event == "transition" and r.state_id == "judge"
+        )
+        assert last_judge_transition.fields["target"] == "stop"
+        assert last_judge_transition.fields["outcome"] == "stuck"
+    finally:
+        store.close()
+
+
+def test_prji_implement_then_stuck_propagates_prior_decision(
+    tmp_path: Path,
+) -> None:
+    """Multi-cycle: judge implements on cycle 1, then issues stuck on
+    cycle 2 because the same material issue persists post-fix. The
+    cycle-2 reviewer prompt must include the prior decision (implement)
+    and prior feedback, and the cycle-2 judge prompt must include both
+    too — pinning the judge_decision plumbing through the templates."""
+    model_responses = {
+        "propose": ["FRAMING-1"],
+        "review": ["REVIEW-1", "REVIEW-2"],
+        "judge": [
+            json.dumps(
+                {
+                    "decision": "implement",
+                    "feedback": "fix the variance formula",
+                    "fix_instructions": "change / n to / (n-1)",
+                }
+            ),
+            json.dumps(
+                {
+                    "decision": "stuck",
+                    "feedback": "the implementation did not change the formula",
+                    "fix_instructions": "",
+                }
+            ),
+        ],
+    }
+    agent_responses = {"implement": ["claimed to fix"]}
+    model_adapter, _, _, terminal, store = _run_prji(
+        tmp_path,
+        model_responses=model_responses,
+        agent_responses=agent_responses,
+    )
+    try:
+        assert terminal == "stop"
+        decision_art = store.read_latest("judge_decision")
+        assert decision_art is not None
+        assert decision_art.value == "stuck"
+        review_calls = [c for c in model_adapter.calls if c["state_id"] == "review"]
+        assert len(review_calls) == 2
+        # The cycle-2 reviewer prompt must carry both prior judge
+        # outputs through the template substitution.
+        assert "implement" in review_calls[1]["prompt"]
+        assert "fix the variance formula" in review_calls[1]["prompt"]
+        # The cycle-2 judge prompt also carries them.
+        judge_calls = [c for c in model_adapter.calls if c["state_id"] == "judge"]
+        assert len(judge_calls) == 2
+        assert "implement" in judge_calls[1]["prompt"]
+        assert "fix the variance formula" in judge_calls[1]["prompt"]
     finally:
         store.close()

@@ -5,7 +5,7 @@
   "properties": {
     "decision": {
       "type": "string",
-      "enum": ["accept", "iterate"]
+      "enum": ["accept", "iterate", "stuck"]
     },
     "feedback": {
       "type": "string"

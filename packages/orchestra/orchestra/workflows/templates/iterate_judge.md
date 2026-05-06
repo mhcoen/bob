@@ -10,16 +10,34 @@ Proposal:
 Reviewer's critique:
 {review_output}
 
+Your prior decision (empty string if this is the first judge call):
+{judge_decision}
+
+Your prior feedback (empty string if this is the first judge call):
+{judge_feedback}
+
 Respond with a single JSON object on stdout. Nothing else. The object
 must conform to this shape exactly:
 
   {{
-    "decision": "accept" | "iterate",
+    "decision": "accept" | "iterate" | "stuck",
     "feedback": "<plain prose feedback for the reviewer>"
   }}
 
-Choose "accept" when the proposal is acceptable as-is given the
-reviewer's critique. Choose "iterate" when another review pass would
-likely surface a clearer judgement. The "feedback" field must always
-be present and must be plain prose; it is what the next reviewer
-iteration will read.
+Decision semantics:
+
+  - "accept": the proposal is acceptable as-is given the reviewer's
+    critique. The workflow terminates.
+
+  - "iterate": another review pass would likely surface a clearer
+    judgement. The workflow loops back to the reviewer with your
+    feedback.
+
+  - "stuck": choose "stuck" when the same material issue persists
+    after prior feedback or implementation, and you assess that
+    further iteration is unlikely to change the outcome.
+
+The "feedback" field must always be present and must be plain prose.
+On a non-first iteration, your feedback should reference how your
+judgement has evolved relative to your prior verdict so the next
+reviewer pass sees the trajectory.

@@ -8,9 +8,14 @@ User's question:
 Proposal under review:
 {proposal}
 
-Most recent judge feedback (empty on the first iteration):
+Judge's prior decision (empty string on the first review pass):
+{judge_decision}
+
+Judge's prior feedback (empty string on the first review pass):
 {judge_feedback}
 
 Write a focused critique. Identify what is strong, what is weak, and
 what specifically would need to change for acceptability. Keep it
-plain prose. Do not rewrite the proposal.
+plain prose. Do not rewrite the proposal. If the judge's prior
+decision was non-empty, your critique should explicitly address what
+has changed since that prior verdict.

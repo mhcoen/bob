@@ -15,11 +15,17 @@ Most recent implementer output (empty when no fix has been applied
 yet):
 {implementer_output}
 
+Your prior decision (empty string if this is the first judge call):
+{judge_decision}
+
+Your prior feedback (empty string if this is the first judge call):
+{judge_feedback}
+
 Respond with a single JSON object on stdout. Nothing else. The
 object must conform to this shape exactly:
 
   {{
-    "decision": "accept" | "implement" | "rereview" | "reframe",
+    "decision": "accept" | "implement" | "rereview" | "reframe" | "stuck",
     "feedback": "<plain prose feedback>",
     "fix_instructions": "<plain prose fix instructions>"
   }}
@@ -45,9 +51,12 @@ Decision semantics:
     itself is wrong. Send your reasoning back to the proposer in
     ``feedback`` so the next framing can address it.
 
+  - "stuck": choose "stuck" when the same material issue persists
+    after prior feedback or implementation, and you assess that
+    further iteration is unlikely to change the outcome.
+
 When this is your second or later judge call, summarize in
-``feedback`` how your judgement has evolved across iterations so
-the next reader (proposer or reviewer) sees the trajectory inside
-the text. Both ``feedback`` and ``fix_instructions`` are required
-fields; populate both even when empty content would technically
-suffice.
+``feedback`` how your judgement has evolved across iterations
+relative to your prior decision and feedback. Both ``feedback`` and
+``fix_instructions`` are required fields; populate both even when
+empty content would technically suffice.
