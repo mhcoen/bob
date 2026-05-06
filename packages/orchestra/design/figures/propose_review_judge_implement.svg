@@ -1,0 +1,41 @@
+<svg viewBox="0 0 870 370" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+  <rect width="870" height="370" fill="#ffffff"/>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#bf616a"/>
+    </marker>
+  </defs>
+  <text x="368" y="73" text-anchor="middle" font-size="12" font-weight="bold" fill="#bf616a">reframe</text>
+  <path d="M 495 120 L 495 93 Q 495 80 482 80 L 253 80 Q 240 80 240 93 L 240 117" fill="none" stroke="#bf616a" stroke-width="2" marker-end="url(#arr-red)"/>
+  <text x="200" y="105" text-anchor="middle" font-size="11" font-style="italic" fill="#4c566a">drafts a plan</text>
+  <text x="375" y="105" text-anchor="middle" font-size="11" font-style="italic" fill="#4c566a">looks for problems</text>
+  <text x="550" y="105" text-anchor="middle" font-size="11" font-style="italic" fill="#4c566a">decides what's next</text>
+  <rect x="25" y="125" width="80" height="30" rx="15" fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="65" y="144" text-anchor="middle" font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+  <line x1="105" y1="140" x2="133" y2="140" stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="135" y="120" width="130" height="40" rx="10" fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="200" y="144" text-anchor="middle" font-size="14" font-weight="bold" fill="#2e3440">Proposer</text>
+  <line x1="265" y1="140" x2="308" y2="140" stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="310" y="120" width="130" height="40" rx="10" fill="#ebcb8b" stroke="#c0a060" stroke-width="2"/>
+  <text x="375" y="144" text-anchor="middle" font-size="14" font-weight="bold" fill="#2e3440">Reviewer</text>
+  <line x1="440" y1="140" x2="483" y2="140" stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="485" y="120" width="130" height="40" rx="10" fill="#d8a48f" stroke="#b07060" stroke-width="2"/>
+  <text x="550" y="144" text-anchor="middle" font-size="14" font-weight="bold" fill="#2e3440">Judge</text>
+  <line x1="615" y1="140" x2="748" y2="140" stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="682" y="130" text-anchor="middle" font-size="13" font-weight="bold" fill="#2e3440">accept</text>
+  <rect x="750" y="125" width="85" height="30" rx="15" fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="792" y="144" text-anchor="middle" font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+  <rect x="485" y="250" width="130" height="40" rx="10" fill="#b48ead" stroke="#8a6a88" stroke-width="2"/>
+  <text x="550" y="274" text-anchor="middle" font-size="14" font-weight="bold" fill="#2e3440">Implementer</text>
+  <text x="550" y="307" text-anchor="middle" font-size="11" font-style="italic" fill="#4c566a">applies the fix</text>
+  <line x1="550" y1="160" x2="550" y2="248" stroke="#bf616a" stroke-width="2" marker-end="url(#arr-red)"/>
+  <text x="565" y="208" font-size="12" font-weight="bold" fill="#bf616a">implement</text>
+  <path d="M 485 270 L 333 270 Q 320 270 320 257 L 320 162" fill="none" stroke="#bf616a" stroke-width="2" marker-end="url(#arr-red)"/>
+  <path d="M 525 160 L 525 202 Q 525 215 512 215 L 423 215 Q 410 215 410 202 L 410 162" fill="none" stroke="#bf616a" stroke-width="2" marker-end="url(#arr-red)"/>
+  <text x="467" y="207" text-anchor="middle" font-size="12" font-weight="bold" fill="#bf616a">rereview</text>
+  <text x="435" y="350" text-anchor="middle" font-size="12" font-style="italic" fill="#4c566a">every loop is bounded by a counter cap; on cap, the workflow stops with a refusal</text>
+</svg>
