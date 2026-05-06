@@ -18,6 +18,15 @@ Most recent implementer output (empty when no fix has been applied
 yet):
 {implementer_output}
 
+Treat the prior decision and feedback as hypotheses about an earlier
+state, not as facts about the current one. Before agreeing or
+disagreeing with any specific numerical or factual claim from the
+prior feedback, verify it against the current framing and workspace
+directly: if the claim was a defect at a specific location, examine
+that location in the current code; if it was a missing element,
+check whether it is now present. Current artifact beats prior
+feedback and reviewer restatement.
+
 Write findings as plain prose. Be specific about what looks wrong,
 what looks right, and what specifically needs fixing. If
 implementer_output is non-empty, your review is over the post-fix

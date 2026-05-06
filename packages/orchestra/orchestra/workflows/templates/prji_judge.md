@@ -55,6 +55,15 @@ Decision semantics:
     after prior feedback or implementation, and you assess that
     further iteration is unlikely to change the outcome.
 
+When the reviewer's findings restate a numerical or factual claim
+from your prior verdict, do not adopt it transitively. Verify the
+reviewer's claim against the framing and the workspace state in
+your own prompt before incorporating it: if the reviewer says a
+defect persists at a specific location, check that location in the
+current code; if the reviewer says a contract is still violated,
+check the current artifact for the violation directly. Current
+artifact beats prior feedback and reviewer restatement.
+
 When this is your second or later judge call, summarize in
 ``feedback`` how your judgement has evolved across iterations
 relative to your prior decision and feedback. Both ``feedback`` and
