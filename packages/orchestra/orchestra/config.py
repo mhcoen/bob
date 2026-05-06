@@ -50,6 +50,55 @@ class ConfigError(OrchestraError):
 
 
 @dataclass(frozen=True)
+class CriterionDecl:
+    """One acceptance criterion declared in ``.orchestra/config.json``.
+
+    Promoted by F2.5a as the source of truth for criterion enumeration:
+    the judge's verdict must include exactly one ``criteria_compliance``
+    entry per declared criterion, observed against the current artifact.
+    The pre-F2.5a model relied on the judge enumerating criteria from
+    free-form ``task.md`` prose, which the iter-anchor calibration
+    falsified as insufficient (see REPORT.md Addendum 6).
+
+    ``id`` is referenced from the verdict's ``criterion_id`` field and
+    must appear as a whole word in ``task.md`` (enforced by
+    ``orchestra.calibration.lint_scenario``). ``required=True``
+    criteria gate the accept-consistency invariant; ``required=False``
+    criteria are reported in ``criteria_compliance`` for trajectory
+    analysis but do not block accept.
+    """
+
+    id: str
+    description: str
+    required: bool = True
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> CriterionDecl:
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"criterion: expected an object, got {type(raw).__name__}"
+            )
+        cid = raw.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            raise ConfigError(
+                f"criterion: 'id' must be a non-empty string, got {cid!r}"
+            )
+        description = raw.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise ConfigError(
+                f"criterion {cid!r}: 'description' must be a non-empty string, "
+                f"got {description!r}"
+            )
+        required = raw.get("required", True)
+        if not isinstance(required, bool):
+            raise ConfigError(
+                f"criterion {cid!r}: 'required' must be a bool, got "
+                f"{type(required).__name__}"
+            )
+        return cls(id=cid, description=description, required=required)
+
+
+@dataclass(frozen=True)
 class RoleBinding:
     """One role's binding to an adapter, model, template, and parameters."""
 
@@ -262,6 +311,7 @@ class OrchestraConfig:
     roles: dict[str, RoleBinding] = field(default_factory=dict)
     workflows: dict[str, WorkflowConfig] = field(default_factory=dict)
     verbs: dict[str, VerbBinding] = field(default_factory=dict)
+    criteria: tuple[CriterionDecl, ...] = ()
 
     def workflow(self, name: str) -> WorkflowConfig:
         try:
@@ -304,7 +354,23 @@ class OrchestraConfig:
             name: VerbBinding.from_dict(name, body)
             for name, body in verbs_raw.items()
         }
-        return cls(roles=roles, workflows=workflows, verbs=verbs)
+        criteria_raw = raw.get("criteria") or []
+        if not isinstance(criteria_raw, list):
+            raise ConfigError("'criteria' must be an array")
+        criteria_list = [CriterionDecl.from_dict(item) for item in criteria_raw]
+        seen_ids: set[str] = set()
+        for crit in criteria_list:
+            if crit.id in seen_ids:
+                raise ConfigError(
+                    f"criteria: duplicate id {crit.id!r}; ids must be unique"
+                )
+            seen_ids.add(crit.id)
+        return cls(
+            roles=roles,
+            workflows=workflows,
+            verbs=verbs,
+            criteria=tuple(criteria_list),
+        )
 
 
 def default_config() -> OrchestraConfig:

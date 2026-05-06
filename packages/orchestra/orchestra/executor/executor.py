@@ -59,8 +59,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from orchestra.adapters.base import Adapter
+from orchestra.config import CriterionDecl
 from orchestra.errors import ExecutorError
 from orchestra.executor import guards
+from orchestra.executor.criteria import (
+    DecisionConsistencyMode,
+    DecisionConsistencyResult,
+    check_decision_consistency,
+)
 from orchestra.executor.guards import GuardContext
 from orchestra.log import LogWriter
 from orchestra.payloads import payload_name_from_invocation, write_payload
@@ -291,6 +297,16 @@ class Executor:
             ],
             None,
         ] | None = None,
+        # F2.5a decision-consistency invariant. When ``criteria`` is
+        # non-empty the executor enforces the configured criteria
+        # against each schema-validated verdict's
+        # ``criteria_compliance`` field, with the strength governed by
+        # ``decision_consistency_mode``. Empty tuple ⇒ checks
+        # disabled (back-compat for non-calibration workflows).
+        criteria: tuple[CriterionDecl, ...] = (),
+        decision_consistency_mode: DecisionConsistencyMode = (
+            DecisionConsistencyMode.ACCEPT_ONLY
+        ),
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -335,6 +351,11 @@ class Executor:
         self._progress_state_indices: dict[str, int] = {}
         self._progress_total: int = len(workflow.states)
         self._progress_lock: threading.Lock = threading.Lock()
+        # F2.5a decision-consistency invariant configuration.
+        self._criteria: tuple[CriterionDecl, ...] = criteria
+        self._decision_consistency_mode: DecisionConsistencyMode = (
+            decision_consistency_mode
+        )
         # Schema-verdict 1.4: per-artifact SchemaSpec cache. Loaded once
         # at executor construction so each state invocation reuses the
         # parsed schema rather than re-reading the file. Schemas are
@@ -1282,6 +1303,78 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
+        # F2.5a decision-consistency invariant. The schema check passes
+        # the SHAPE of criteria_compliance; this check enforces the
+        # SEMANTICS (id coverage, accept-with-noncompliant, and the
+        # iterate-only non_accept_with_full_compliance invariant). On
+        # violation: discard the tentatives, log a decision_consistency
+        # event with the failure reason, return an ErrorRecord so the
+        # state exits via the error outcome.
+        if self._criteria:
+            compliance_raw = parsed.get("criteria_compliance")
+            compliance: list[dict[str, Any]] = (
+                list(compliance_raw)
+                if isinstance(compliance_raw, list)
+                else []
+            )
+            consistency: DecisionConsistencyResult = check_decision_consistency(
+                decision=decision,
+                criteria_compliance=compliance,
+                configured=self._criteria,
+                mode=self._decision_consistency_mode,
+            )
+            if not consistency.ok:
+                if new_handles:
+                    self._store.discard_tentative(new_handles)
+                self._log.write(
+                    "decision_consistency",
+                    state_id=state.name,
+                    attempt=attempt,
+                    fields={
+                        "artifact": artifact.name,
+                        "outcome": "violation",
+                        "decision": decision,
+                        "reason": consistency.reason,
+                        "missing_ids": list(consistency.missing_ids),
+                        "extra_ids": list(consistency.extra_ids),
+                        "duplicate_ids": list(consistency.duplicate_ids),
+                        "noncompliant_required_ids": list(
+                            consistency.noncompliant_required_ids
+                        ),
+                        "mode": self._decision_consistency_mode.value,
+                        "payload_ref": payload_ref,
+                        "invocation_id": invocation_id,
+                    },
+                )
+                err = ErrorRecord(
+                    kind="actor_failure",
+                    message=(
+                        "decision-consistency violation: "
+                        f"{consistency.reason}"
+                    ),
+                    detail={
+                        "reason": "decision_consistency_violation",
+                        "phase": "decision_consistency",
+                        "consistency_reason": consistency.reason,
+                    },
+                )
+                # Strip the schema-handle side-channel since we are not
+                # returning the schema-write handles to the caller.
+                payload.pop("_schema_handle_names", None)
+                return [], None, err
+            self._log.write(
+                "decision_consistency",
+                state_id=state.name,
+                attempt=attempt,
+                fields={
+                    "artifact": artifact.name,
+                    "outcome": "ok",
+                    "decision": decision,
+                    "mode": self._decision_consistency_mode.value,
+                    "payload_ref": payload_ref,
+                    "invocation_id": invocation_id,
+                },
+            )
         return new_handles, decision, None
 
     def _discard_stale_tentatives(self, state_name: str) -> None:

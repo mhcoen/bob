@@ -27,8 +27,25 @@ object must conform to this shape exactly:
   {{
     "decision": "accept" | "implement" | "rereview" | "reframe" | "stuck",
     "feedback": "<plain prose feedback>",
-    "fix_instructions": "<plain prose fix instructions>"
+    "fix_instructions": "<plain prose fix instructions>",
+    "criteria_compliance": [
+      {{
+        "criterion_id": "<id from .orchestra/config.json>",
+        "observed_value": "<the actual value observed in the workspace>",
+        "compliant": true | false
+      }},
+      ...
+    ]
   }}
+
+The criteria_compliance array must contain exactly one entry per
+configured acceptance criterion (see the task above for the enumerated
+criteria). Use each criterion's id as the criterion_id. Observe the
+framing and workspace directly and report what you actually see in
+observed_value as a string. Mark compliant true only if the observation
+satisfies the criterion. Choose "accept" only when every required
+criterion is compliant; non-accept routes (implement, rereview,
+reframe, stuck) imply at least one required criterion is non-compliant.
 
 Decision semantics:
 

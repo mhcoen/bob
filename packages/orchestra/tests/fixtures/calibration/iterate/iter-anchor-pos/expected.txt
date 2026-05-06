@@ -1,0 +1,61 @@
+positive
+
+# Expected behavior under T1 + T2:
+#
+# Title-only task with five coordination-heavy constraints: exactly
+# 12 words AND total length between 60 and 80 characters AND must
+# contain the phrase "workflow orchestration" AND must end with a
+# question mark AND must not contain a colon or a semicolon.
+#
+# The "workflow orchestration" requirement consumes 22 of the 80-char
+# budget, leaving ~58 characters for 10 other words plus spaces and
+# the question mark. The no-colon-or-semicolon rule prevents the
+# proposer from wedging in a sub-title structure to manage word count
+# independently of the rest. The 12-word and 60-80-char constraints
+# coupled with the fixed phrase requirement create real tension:
+# satisfying word count tends to push character count over the cap,
+# satisfying character count tends to drop the word count below 12
+# or push the fixed phrase out of position.
+#
+# Cycle 1: proposer drafts a title that misses one or more
+# constraints. Reviewer cites the specific length/count violations
+# (e.g., "title is 13 words and 84 characters; word count must be
+# exactly 12 and character count must be 60-80").
+#
+# Cycle 2: proposer redrafts to address feedback. Hitting all
+# constraints simultaneously is hard; the redraft likely fixes one
+# while breaking another. Reviewer cycle 2 cites the persisting
+# defect class (length/count/phrase compliance). Same material issue
+# persists, satisfying the F2 stuck wording verbatim.
+#
+# Cycle 3 (if reached): same pattern. Judge eventually fires `stuck`
+# because the title cannot stabilize across all constraints
+# simultaneously.
+#
+# Expected trajectory: [iterate, stuck] or [iterate, iterate, stuck].
+# Classifier label: match.
+#
+# Persistence pattern: repeated length/count/phrase violations on
+# the same constraint set. Same defect class, possibly different
+# specific values per cycle, but same material failure mode.
+#
+# Stuck-correct condition: stuck cited "length", "word count",
+# "character count", "workflow orchestration phrase position",
+# or similar verbatim defect descriptions across cycles. Confirms
+# the stuck call was based on real artifact content, not on
+# transitively adopted prior claims.
+#
+# Failure modes to watch for:
+# - If [accept] on cycle 1: task is too easy. Tighten the character
+#   window (e.g., 60-72 inclusive) or add another structural
+#   constraint.
+# - If stuck fires correctly: confirm reviewer/judge cited the
+#   defects from the current title verbatim across cycles. The
+#   reviewer should NOT restate cycle-1 numbers while reading
+#   cycle-2's title; T1 instructs the reviewer to recount.
+# - If T1+T2 over-corrected and stuck never fires despite genuine
+#   coupled failure: examine prompts and outputs to confirm whether
+#   the constraint set was actually verified or hand-waved. Reviewer
+#   or judge ignoring real defects in the artifact would indicate
+#   T1+T2 instructions are too aggressive against legitimate
+#   persistence claims.

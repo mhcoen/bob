@@ -1,0 +1,11 @@
+{
+  "roles": {
+    "proposer":    { "adapter": "claude_code_text",  "model": "haiku",   "parameters": {} },
+    "reviewer":    { "adapter": "codex_text",        "model": "gpt-5.5", "parameters": {} },
+    "judge_role":  { "adapter": "codex_text",        "model": "gpt-5.5", "parameters": {} },
+    "implementer": { "adapter": "claude_code_agent", "model": "sonnet",  "tools": "default", "parameters": {} }
+  },
+  "workflows": {
+    "propose_review_judge_implement": { "pattern": "propose_review_judge_implement" }
+  }
+}

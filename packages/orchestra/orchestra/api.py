@@ -68,6 +68,7 @@ from orchestra.adapters.codex_agent import CodexAgentAdapter
 from orchestra.adapters.codex_text import CodexTextAdapter
 from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
 from orchestra.errors import OrchestraError
+from orchestra.executor.criteria import mode_for_workflow
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.loader import load_workflow
@@ -1153,6 +1154,8 @@ def run_workflow(
         external_inputs=dict(enriched),
         invocation_options=inv_opts,
         progress_callback=executor_progress,
+        criteria=cfg.criteria,
+        decision_consistency_mode=mode_for_workflow(name),
     )
 
     terminal: str = "stop"

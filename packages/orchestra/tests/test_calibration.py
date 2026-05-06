@@ -34,7 +34,10 @@ from orchestra.calibration.helpers import (
     clean_stale_versioned_artifacts,
     read_expected_classifier,
 )
+from orchestra.calibration.lint_scenario import lint_scenario
 from orchestra.calibration.retag import retag_polluted_meta
+
+FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "calibration"
 
 # --------------------------------------------------------------------
 # clean_stale_versioned_artifacts
@@ -319,3 +322,138 @@ def test_scenario_rows_skips_stale_higher_numbered_only_when_logs_pristine(
     _, summary_after = scenario_rows(spec)
     assert summary_after["judge_calls"] == 1
     assert summary_after["decision_trajectory"] == ["accept"]
+
+
+# --------------------------------------------------------------------
+# lint_scenario: criterion id appears in task.md
+# --------------------------------------------------------------------
+
+
+def _seed_scenario(
+    scenario_dir: Path,
+    *,
+    task_text: str,
+    config: dict[str, object],
+    expected: str = "negative",
+) -> None:
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+    (scenario_dir / "task.md").write_text(task_text)
+    (scenario_dir / "expected.txt").write_text(expected + "\n")
+    (scenario_dir / ".orchestra").mkdir(exist_ok=True)
+    (scenario_dir / ".orchestra" / "config.json").write_text(json.dumps(config))
+
+
+def test_lint_passes_when_all_ids_present(tmp_path: Path) -> None:
+    _seed_scenario(
+        tmp_path / "ok",
+        task_text=(
+            "Task with criteria.\n"
+            "  1. exact_12_words: ...\n"
+            "  2. ends_question: ...\n"
+        ),
+        config={
+            "criteria": [
+                {"id": "exact_12_words", "description": "d", "required": True},
+                {"id": "ends_question",  "description": "d", "required": True},
+            ]
+        },
+    )
+    result = lint_scenario(tmp_path / "ok")
+    assert result.ok
+    assert result.missing_in_task_md == ()
+    assert set(result.configured_ids) == {"exact_12_words", "ends_question"}
+
+
+def test_lint_fails_when_id_missing_from_task_md(tmp_path: Path) -> None:
+    _seed_scenario(
+        tmp_path / "bad",
+        task_text="Task mentions exact_12_words but nothing else.\n",
+        config={
+            "criteria": [
+                {"id": "exact_12_words", "description": "d", "required": True},
+                {"id": "ends_question",  "description": "d", "required": True},
+            ]
+        },
+    )
+    result = lint_scenario(tmp_path / "bad")
+    assert not result.ok
+    assert result.missing_in_task_md == ("ends_question",)
+
+
+def test_lint_word_boundary_rejects_substring_match(tmp_path: Path) -> None:
+    """\\b boundary: id 'len' must not match 'length'."""
+    _seed_scenario(
+        tmp_path / "boundary",
+        task_text="Title length must be 12. The word len does not appear elsewhere.\n",
+        config={
+            "criteria": [
+                {"id": "len", "description": "d", "required": True},
+            ]
+        },
+    )
+    # 'len' as a whole word IS in the prose, so this passes.
+    result = lint_scenario(tmp_path / "boundary")
+    assert result.ok
+
+    _seed_scenario(
+        tmp_path / "no-boundary",
+        task_text="Title length must be 12. No standalone token elsewhere.\n",
+        config={
+            "criteria": [
+                {"id": "len", "description": "d", "required": True},
+            ]
+        },
+    )
+    result2 = lint_scenario(tmp_path / "no-boundary")
+    # 'len' as substring of 'length' should NOT count.
+    assert not result2.ok
+    assert result2.missing_in_task_md == ("len",)
+
+
+def test_lint_skips_when_criteria_absent(tmp_path: Path) -> None:
+    """Pre-F2.5a scenarios without criteria field pass with a warning."""
+    _seed_scenario(
+        tmp_path / "preF25",
+        task_text="Pre-F2.5a task. No criteria configured.\n",
+        config={"roles": {}, "workflows": {}},
+    )
+    result = lint_scenario(tmp_path / "preF25")
+    assert result.ok
+    assert any("no criteria configured" in w for w in result.warnings)
+
+
+def test_lint_fails_when_task_md_missing(tmp_path: Path) -> None:
+    cfg_dir = tmp_path / "no-task" / ".orchestra"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text("{}")
+    result = lint_scenario(tmp_path / "no-task")
+    assert not result.ok
+    assert any("task.md missing" in w for w in result.warnings)
+
+
+# --------------------------------------------------------------------
+# Parametric: every fixture in tests/fixtures/calibration/ lints clean.
+# --------------------------------------------------------------------
+
+
+def _all_scenario_dirs() -> list[Path]:
+    if not FIXTURES_ROOT.is_dir():
+        return []
+    return sorted(p for p in FIXTURES_ROOT.glob("*/*") if p.is_dir())
+
+
+@pytest.mark.parametrize(
+    "scenario_dir",
+    _all_scenario_dirs(),
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
+def test_fixture_scenarios_lint_clean(scenario_dir: Path) -> None:
+    """Every scenario under tests/fixtures/calibration/ passes lint.
+
+    Scenarios with no criteria field pass with a warning. Scenarios
+    that DO declare criteria must have all ids present in task.md.
+    """
+    result = lint_scenario(scenario_dir)
+    assert result.ok, (
+        f"lint failed for {scenario_dir}: missing ids {result.missing_in_task_md}"
+    )

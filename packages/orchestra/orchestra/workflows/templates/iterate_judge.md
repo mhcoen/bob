@@ -21,8 +21,26 @@ must conform to this shape exactly:
 
   {{
     "decision": "accept" | "iterate" | "stuck",
-    "feedback": "<plain prose feedback for the reviewer>"
+    "feedback": "<plain prose feedback for the reviewer>",
+    "criteria_compliance": [
+      {{
+        "criterion_id": "<id from .orchestra/config.json>",
+        "observed_value": "<the actual value observed in the proposal>",
+        "compliant": true | false
+      }},
+      ...
+    ]
   }}
+
+The criteria_compliance array must contain exactly one entry per
+configured acceptance criterion (see the question/task above for the
+enumerated criteria). Use each criterion's id as the criterion_id.
+Observe the proposal directly and report what you actually see in
+observed_value as a string. Mark compliant true only if the
+observation satisfies the criterion. Decision must agree with
+compliance: choose "accept" only when every required criterion is
+compliant; choose "iterate" or "stuck" only when at least one
+required criterion is non-compliant.
 
 Decision semantics:
 
