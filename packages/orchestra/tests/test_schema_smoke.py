@@ -537,3 +537,108 @@ workflow x
         assert n.value == "INITIAL"
     finally:
         store.close()
+
+
+# --------------------------------------------------------------------
+# F1 regression: tolerant JSON extraction from real LLM CLI output
+# shapes. Phase-2 trajectory data showed that codex_text wraps JSON
+# in a banner+prompt-echo+footer transcript and claude_code_text
+# wraps it in markdown ```json fences with prose preamble. Strict
+# json.loads(raw_output) failed at line 1 col 0 in both cases,
+# blocking every schema-backed real-adapter run. The extractor's
+# tolerant scan unblocks both shapes; these tests pin the e2e
+# behavior via the existing scripted mock_model fixture.
+# --------------------------------------------------------------------
+
+
+_CODEX_WRAPPED_VERDICT = """\
+Reading prompt from stdin...
+OpenAI Codex v0.128.0 (research preview)
+--------
+workdir: /tmp/whatever
+model: gpt-5.5
+provider: openai
+--------
+user
+[prompt body echoed here]
+
+Reasoning text from the model goes here. The judge considered the
+proposal against the checklist and reached a decision.
+
+{"decision":"accept","feedback":"meets all four criteria"}
+
+tokens used
+3,182
+"""
+
+_CLAUDE_WRAPPED_VERDICT = """\
+Looking at the proposal and the reviewer's critique, the decision is clear.
+
+```json
+{
+  "decision": "accept",
+  "feedback": "the proposal addresses every checklist item"
+}
+```
+"""
+
+
+def test_schema_layer_tolerates_codex_wrapped_verdict(tmp_path: Path) -> None:
+    """End-to-end regression for F1: a scripted model adapter emits a
+    codex-style wrapped verdict (banner + prompt-echo + reasoning +
+    footer surrounding the JSON object). The schema layer's tolerant
+    extractor finds the JSON, schema validation passes, the workflow
+    routes to done."""
+    workflow = load_workflow(FIXTURE, with_core())
+    registry = _build_registry([_CODEX_WRAPPED_VERDICT])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    terminal, envelopes, store, log_path = _run(
+        workflow, registry, run_dir, {"query": "anything"}
+    )
+    try:
+        assert terminal == "done"
+        env = envelopes["judge"]
+        assert env.outcome == "accept"
+        assert env.status == "ok"
+        verdict = store.read_latest("verdict")
+        assert verdict is not None
+        assert verdict.value == {
+            "decision": "accept",
+            "feedback": "meets all four criteria",
+        }
+        records = LogReader(log_path).read_all()
+        sv = [r for r in records if r.event == "schema_validation"]
+        assert len(sv) == 1
+        assert sv[0].fields["outcome"] == "valid"
+        assert sv[0].fields["decision"] == "accept"
+    finally:
+        store.close()
+
+
+def test_schema_layer_tolerates_claude_markdown_wrapped_verdict(
+    tmp_path: Path,
+) -> None:
+    """End-to-end regression for F1: a scripted model adapter emits a
+    claude-style markdown-fenced verdict (prose preamble + ```json
+    fence + JSON body + closing fence). The schema layer's tolerant
+    extractor finds the JSON inside the fence, schema validation
+    passes, the workflow routes to done."""
+    workflow = load_workflow(FIXTURE, with_core())
+    registry = _build_registry([_CLAUDE_WRAPPED_VERDICT])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    terminal, envelopes, store, log_path = _run(
+        workflow, registry, run_dir, {"query": "anything"}
+    )
+    try:
+        assert terminal == "done"
+        env = envelopes["judge"]
+        assert env.outcome == "accept"
+        assert env.status == "ok"
+        verdict = store.read_latest("verdict")
+        assert verdict is not None
+        assert verdict.value["decision"] == "accept"
+        assert "every checklist item" in verdict.value["feedback"]
+    finally:
+        store.close()

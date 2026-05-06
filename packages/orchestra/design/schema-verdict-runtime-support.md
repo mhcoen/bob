@@ -208,6 +208,18 @@ When a schema-backed state writes its json artifact, the runtime:
    message and the raw output (subject to the same redaction
    rules pass-7/pass-8 applied to other persisted content).
 
+   Schema-backed model outputs are parsed with a tolerant
+   JSON-object extraction step before schema validation. The
+   extractor scans the raw model text for balanced top-level
+   `{...}` spans, respecting JSON string and escape boundaries,
+   then attempts `json.loads` from the last span to the first and
+   returns the first span that parses. The extractor is
+   schema-agnostic: once it returns a parsed object, schema
+   validation is final and the runtime does not retry earlier JSON
+   candidates after a schema violation. If no balanced object is
+   found, or no candidate parses cleanly, the state records a
+   schema parse_error.
+
 2. Validates the parsed object against the declared schema. Any
    schema violation (missing required field, wrong type, enum
    miss on `decision`, additional property when forbidden) is the

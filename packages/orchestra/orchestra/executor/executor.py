@@ -106,6 +106,121 @@ def _coerce_to_text(value: Any) -> str:
     return json.dumps(value)
 
 
+class _JsonExtractError(Exception):
+    """Raised by ``_extract_last_json_object`` when no balanced JSON
+    object span in the model output parses cleanly."""
+
+
+def _extract_last_json_object(text: str) -> Any:
+    """Tolerant JSON-object extraction for schema-backed model output.
+
+    Scans ``text`` for balanced top-level ``{...}`` spans, respecting
+    JSON string and escape boundaries, then attempts ``json.loads``
+    from the last span to the first and returns the first that
+    parses. The extractor is schema-agnostic: once it returns a
+    parsed object, schema validation is the runtime's responsibility
+    and is not retried here.
+
+    Raises ``_JsonExtractError`` when no balanced object exists or
+    when no candidate parses cleanly. The caller surfaces the
+    exception's message in the schema_validation log record's
+    ``validation_errors`` list.
+
+    Real LLM CLI output wraps the model's JSON answer in non-JSON
+    content: codex prepends a banner and prompt-echo and appends a
+    "tokens used" footer; claude wraps the JSON in a markdown
+    ``json fence with prose preamble. Strict ``json.loads`` on the
+    raw payload's ``output`` field fails at line 1 col 0 in both
+    cases. This extractor is the runtime's parse-tolerance contract:
+    we accept any output that contains a parseable JSON object and
+    let schema validation decide shape correctness.
+    """
+    spans = _balanced_json_spans(text)
+    if not spans:
+        raise _JsonExtractError("no balanced JSON object found in model output")
+    last_parse_error: Exception | None = None
+    for start, end in reversed(spans):
+        candidate = text[start:end]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_parse_error = exc
+            continue
+    if last_parse_error is not None:
+        raise _JsonExtractError(
+            f"no balanced JSON object parsed cleanly: {last_parse_error}"
+        )
+    raise _JsonExtractError("no balanced JSON object parsed cleanly")
+
+
+def _balanced_json_spans(text: str) -> list[tuple[int, int]]:
+    """Return half-open ``(start, end)`` indices of every balanced
+    top-level ``{...}`` span in ``text``.
+
+    A "top-level" span has its outermost ``{`` not contained inside
+    another open object. The scanner respects JSON string boundaries:
+    ``{`` and ``}`` characters inside double-quoted strings do not
+    affect brace depth, and string-escape sequences (``\\"``,
+    ``\\\\``, etc.) do not terminate the string prematurely. This
+    makes the scanner transparent to nested markdown fences,
+    JSON-shaped fragments inside string values, and trailing garbage
+    after the closing brace.
+
+    Square-bracket arrays are not extracted as top-level candidates;
+    schema-backed verdicts in v0 are JSON objects only.
+    """
+    spans: list[tuple[int, int]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == "{":
+            end = _scan_balanced_object(text, i)
+            if end is not None:
+                spans.append((i, end + 1))
+                i = end + 1
+                continue
+        i += 1
+    return spans
+
+
+def _scan_balanced_object(text: str, start: int) -> int | None:
+    """Given ``text[start] == '{'``, return the index of the matching
+    closing ``}`` or ``None`` if no balanced match exists.
+
+    Tracks brace depth while honoring JSON string boundaries. Inside
+    a double-quoted string, only an unescaped ``"`` ends the string;
+    a backslash escapes the next character regardless of what it is.
+    """
+    depth = 0
+    in_string = False
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            i += 1
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+            if depth < 0:
+                return None
+        i += 1
+    return None
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -1067,15 +1182,15 @@ class Executor:
             )
             return [], None, err
         try:
-            parsed = json.loads(raw_output)
-        except json.JSONDecodeError as exc:
+            parsed = _extract_last_json_object(raw_output)
+        except _JsonExtractError as exc:
             err = ErrorRecord(
                 kind="actor_failure",
                 message=f"json parse error: {exc}",
                 detail={
                     "reason": "json_parse",
                     "phase": "schema_validation",
-                    "exception": "JSONDecodeError",
+                    "exception": "JsonExtractError",
                 },
             )
             self._log.write(
