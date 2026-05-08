@@ -964,12 +964,81 @@ def _validate_prji(
             )
 
 
+def _validate_council_four(
+    workflow: Workflow,
+    role_bindings: dict[str, RoleBinding],
+    workflow_name: str,
+) -> None:
+    """Enforce the council_four distinct-actor rule:
+
+    - All five required roles present (framer + four proposers +
+      synthesizer).
+    - The four proposers must resolve to pairwise distinct
+      (adapter, model) tuples. Otherwise the council is not actually
+      drawing on N distinct model biases.
+    - The synthesizer must differ from each of the four proposers.
+      A model judging its own proposal against itself loses the
+      multi-model-judging discipline; for the initial scaffold this
+      is a hard refusal rather than auto-rotation with own-proposal
+      exclusion. Auto-rotation is defensible later but adds
+      transition semantics that need explicit test coverage.
+    - Framer's identity is unconstrained; it can match any other role.
+    """
+    required = (
+        "framer",
+        "proposer_code",
+        "proposer_codex",
+        "proposer_kimi",
+        "proposer_deepseek",
+        "synthesizer",
+    )
+    missing = [r for r in required if r not in role_bindings]
+    if missing:
+        raise ConfigError(
+            f"workflow {workflow_name!r}: missing required role "
+            f"bindings: {missing!r}"
+        )
+    proposer_roles = (
+        "proposer_code",
+        "proposer_codex",
+        "proposer_kimi",
+        "proposer_deepseek",
+    )
+    seen: dict[tuple[str, str | None], str] = {}
+    for role_name in proposer_roles:
+        identity = _actor_identity(role_bindings[role_name])
+        prior = seen.get(identity)
+        if prior is not None:
+            raise ConfigError(
+                f"workflow {workflow_name!r}: proposer roles {prior!r} "
+                f"and {role_name!r} both resolve to actor "
+                f"(adapter={identity[0]!r}, model={identity[1]!r}). "
+                "council_four expects four distinct model biases; "
+                "bind each proposer to a different (adapter, model) "
+                "tuple."
+            )
+        seen[identity] = role_name
+    synth_identity = _actor_identity(role_bindings["synthesizer"])
+    for role_name in proposer_roles:
+        if synth_identity == _actor_identity(role_bindings[role_name]):
+            raise ConfigError(
+                f"workflow {workflow_name!r}: 'synthesizer' resolves "
+                f"to the same actor as {role_name!r} "
+                f"(adapter={synth_identity[0]!r}, "
+                f"model={synth_identity[1]!r}). council_four requires "
+                "the synthesizer to differ from every proposer so a "
+                "model is not judging its own output. Configure a "
+                "fifth distinct binding for 'synthesizer'."
+            )
+
+
 _WORKFLOW_RULES: dict[
     str,
     Callable[[Workflow, dict[str, RoleBinding], str], None],
 ] = {
     "iterate_until_acceptable": _validate_iterate_until_acceptable,
     "propose_review_judge_implement": _validate_prji,
+    "council_four": _validate_council_four,
 }
 
 
