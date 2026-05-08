@@ -681,6 +681,8 @@ def _invoke_council_for_reauthor(
     """
     from orchestra import run_workflow
 
+    from duplo.council import make_duplo_progress_callback
+
     cfg = _resolve_orchestra_config(council, project_dir)
 
     inputs: dict[str, Any] = {
@@ -698,7 +700,7 @@ def _invoke_council_for_reauthor(
         cfg,
         project_dir=project_dir,
         data_root=audits_root / "_runs",
-        quiet=True,
+        progress_callback=make_duplo_progress_callback(),
     )
 
     if result.terminal != "done":

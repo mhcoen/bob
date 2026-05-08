@@ -64,6 +64,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from collections.abc import Callable
+
 _ENABLE_ENV = "DUPLO_USE_COUNCIL"
 _DISABLE_ENV = "DUPLO_NO_COUNCIL"
 _CONFIG_PATH_ENV = "DUPLO_COUNCIL_CONFIG"
@@ -91,6 +93,71 @@ _COUNCIL_REQUIRED_ROLES: tuple[str, ...] = (
     "proposer_deepseek",
     "synthesizer",
 )
+
+
+def make_duplo_progress_callback() -> Callable[[Any], None]:
+    """Return a ``ProgressCallback`` that prints duplo-shaped lines.
+
+    One line per ``state_enter`` and ``state_exit`` from
+    orchestra.run_workflow:
+
+      [duplo] state=propose_kimi model=kimi-k2.6 status=running
+      [duplo] state=propose_kimi model=kimi-k2.6 elapsed=168.9s status=complete
+
+    Fan-out boundaries (``fan_out_start`` / ``fan_out_end``) print a
+    single header line so the user sees the parallel block exists;
+    individual child enter/exit events still print as ordinary
+    state transitions inside the block.
+
+    Lines go to stderr so stdout-only consumers (smoke harnesses,
+    pipelines) are unaffected. The callback is thread-safe: orchestra
+    fan-out workers may emit ``state_exit`` events from worker
+    threads, and a module-level lock keeps line writes from
+    interleaving.
+    """
+    import threading
+
+    lock = threading.Lock()
+
+    def _emit(line: str) -> None:
+        with lock:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+
+    def callback(event: Any) -> None:
+        kind = event.kind
+        if kind == "fan_out_start":
+            children = event.children or ()
+            count = len(children)
+            _emit(
+                f"[duplo] fan_out start ({count} parallel proposers)"
+            )
+            return
+        if kind == "fan_out_end":
+            _emit("[duplo] fan_out end")
+            return
+        if kind not in ("state_enter", "state_exit"):
+            return
+        model = event.model or event.adapter or "transform"
+        if kind == "state_enter":
+            _emit(
+                f"[duplo] state={event.state_name} model={model} "
+                "status=running"
+            )
+            return
+        elapsed = event.elapsed_seconds
+        if elapsed is None:
+            _emit(
+                f"[duplo] state={event.state_name} model={model} "
+                "status=complete"
+            )
+        else:
+            _emit(
+                f"[duplo] state={event.state_name} model={model} "
+                f"elapsed={elapsed:.1f}s status=complete"
+            )
+
+    return callback
 
 _TRUTHY = ("1", "true", "yes", "on")
 
@@ -200,7 +267,7 @@ def author_phase_plan(
             cfg,
             project_dir=project_dir,
             data_root=audits_root / "_runs",
-            quiet=True,
+            progress_callback=make_duplo_progress_callback(),
         )
     except Exception as exc:  # noqa: BLE001 — surface any wiring failure
         raise CouncilError(
