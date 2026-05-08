@@ -156,12 +156,17 @@ def run_init(args: argparse.Namespace) -> None:
     from_description = getattr(args, "from_description", None)
     if url is None and from_description is None:
         _run_no_args(args)
-    elif url is not None and from_description is None:
+        _write_orchestra_council_config(Path.cwd())
+        return
+    if url is not None and from_description is None:
         _run_url(args, url)
-    elif url is None and from_description is not None:
+        _write_orchestra_council_config(Path.cwd())
+        return
+    if url is None and from_description is not None:
         _run_description(args, from_description)
-    else:
-        _run_combined(args, url, from_description)
+        _write_orchestra_council_config(Path.cwd())
+        return
+    _run_combined(args, url, from_description)
     _write_orchestra_council_config(Path.cwd())
 
 

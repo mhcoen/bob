@@ -31,23 +31,6 @@ from duplo.extractor import Feature
 from duplo.planner import generate_phase_plan
 from duplo.questioner import BuildPreferences
 
-# Tests that exercise the council bridge (author_phase_plan and the
-# config-resolution helpers) need ``orchestra`` importable. Duplo
-# does not list it as a hard dependency in pyproject.toml: a project
-# can run ``duplo`` legacy-mode without orchestra. Skip those tests
-# when orchestra is not on the path; the env-var, planner-routing,
-# and init-helper tests do not need it.
-try:
-    import orchestra as _orchestra  # noqa: F401
-    _ORCHESTRA_AVAILABLE = True
-except ImportError:
-    _ORCHESTRA_AVAILABLE = False
-
-_needs_orchestra = pytest.mark.skipif(
-    not _ORCHESTRA_AVAILABLE,
-    reason="council bridge tests require the 'orchestra' package",
-)
-
 
 # --------------------------------------------------------------------
 # Helpers
@@ -175,7 +158,6 @@ class TestIsEnabled:
 # --------------------------------------------------------------------
 
 
-@_needs_orchestra
 class TestAuthorPhasePlan:
     def test_returns_synthesizer_plan_text(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -292,7 +274,6 @@ class TestAuthorPhasePlan:
 # --------------------------------------------------------------------
 
 
-@_needs_orchestra
 class TestAuthorPhasePlanFailureModes:
     def test_terminal_not_done_raises(self, tmp_path):
         bad = _StubResult(
@@ -356,7 +337,6 @@ class TestAuthorPhasePlanFailureModes:
 # --------------------------------------------------------------------
 
 
-@_needs_orchestra
 class TestConfigResolution:
     def test_falls_back_when_no_project_config(self, tmp_path):
         captured: dict[str, Any] = {}
