@@ -12,11 +12,14 @@ Coverage:
   - Multi-rule deterministic ordering.
   - Empty-state and disabled-rule edge cases.
   - Four mandatory determinism invariants.
+  - Slice B part 2: record_crossings idempotence, determinism, and
+    round-trip-as-no-op.
 """
 
 from __future__ import annotations
 
 import random
+from pathlib import Path
 from typing import Any
 
 from bob_tools.ledger import (
@@ -26,6 +29,7 @@ from bob_tools.ledger import (
     Event,
     EventType,
     GitSnapshot,
+    Storage,
     ThresholdCrossing,
     ThresholdParams,
     ThresholdRecommendedAction,
@@ -33,6 +37,7 @@ from bob_tools.ledger import (
     ThresholdSeverity,
     evaluate_thresholds,
     project,
+    record_crossings,
 )
 from bob_tools.ledger._uuid7 import uuid7
 from bob_tools.ledger.events import (
@@ -977,3 +982,246 @@ class TestCrossCutting:
             c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
             for c in crossings
         )
+
+
+# ---------------------------------------------------------------------
+# record_crossings (Slice B part 2)
+# ---------------------------------------------------------------------
+
+
+def _seed_unattributed_commits(
+    storage: Storage, *, n: int = 1
+) -> list[Event]:
+    """Append n unattributed commit_landed events. Returns the
+    captured Events so tests can read their event_ids."""
+    out: list[Event] = []
+    for i in range(n):
+        out.append(
+            storage.append(
+                event_type=EventType.COMMIT_LANDED,
+                payload=_commit_payload(
+                    attributed_phase_id=None,
+                    commit=f"r000{i:04d}",
+                ),
+                run_id="rec",
+            )
+        )
+    return out
+
+
+class TestRecordCrossings:
+    def test_emits_one_threshold_crossed_per_crossing(
+        self, tmp_path: Path
+    ) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        # Two unattributed commits → two rule-1 crossings.
+        commits = _seed_unattributed_commits(storage, n=2)
+        events = storage.read_all()
+        crossings = evaluate_thresholds(
+            project(events), events, ThresholdParams()
+        )
+        assert len(crossings) == 2
+
+        emitted_ids = record_crossings(storage, crossings, run_id="rec")
+        assert len(emitted_ids) == 2
+
+        all_events = storage.read_all()
+        threshold_events = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 2
+
+        # Each emitted event references one of the original commits.
+        recorded_triggering = {
+            tuple(e.payload["triggering_event_ids"]) for e in threshold_events
+        }
+        assert recorded_triggering == {(c.event_id,) for c in commits}
+
+    def test_emit_order_matches_crossing_order(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        _seed_unattributed_commits(storage, n=3)
+        events = storage.read_all()
+        crossings = evaluate_thresholds(
+            project(events), events, ThresholdParams()
+        )
+        emitted_ids = record_crossings(storage, crossings, run_id="rec")
+
+        # The emitted ids appear on disk in the same order as the
+        # crossings list, which is itself sorted by
+        # (detected_at_event_id, rule_id) per the evaluator contract.
+        all_events = storage.read_all()
+        threshold_events_in_order = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        on_disk_order = [e.event_id for e in threshold_events_in_order]
+        assert on_disk_order == emitted_ids
+        # And: the n-th emitted event references the n-th crossing's
+        # evidence.
+        for emitted, crossing in zip(
+            threshold_events_in_order, crossings, strict=True
+        ):
+            assert (
+                tuple(emitted.payload["triggering_event_ids"])
+                == crossing.evidence_event_ids
+            )
+
+    def test_idempotent_no_double_emit(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        _seed_unattributed_commits(storage, n=2)
+        events = storage.read_all()
+        crossings = evaluate_thresholds(
+            project(events), events, ThresholdParams()
+        )
+
+        first = record_crossings(storage, crossings, run_id="rec")
+        assert len(first) == 2
+
+        # Re-evaluate after recording: the same two crossings still
+        # surface (threshold_crossed events are reserved no-ops on
+        # the projector and don't suppress the active rules).
+        events_after = storage.read_all()
+        crossings_after = evaluate_thresholds(
+            project(events_after), events_after, ThresholdParams()
+        )
+        assert len(crossings_after) == 2
+
+        # Recording again must NOT double-emit.
+        second = record_crossings(storage, crossings_after, run_id="rec")
+        assert second == []
+
+        all_events = storage.read_all()
+        threshold_events = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 2
+
+    def test_partial_idempotent_only_new_crossings_emit(
+        self, tmp_path: Path
+    ) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        _seed_unattributed_commits(storage, n=2)
+        events = storage.read_all()
+        crossings_initial = evaluate_thresholds(
+            project(events), events, ThresholdParams()
+        )
+        record_crossings(storage, crossings_initial, run_id="rec")
+
+        # Add one more unattributed commit, re-evaluate.
+        _seed_unattributed_commits(storage, n=1)
+        events_again = storage.read_all()
+        crossings_again = evaluate_thresholds(
+            project(events_again), events_again, ThresholdParams()
+        )
+        assert len(crossings_again) == 3
+
+        # Only the new crossing should emit a new event.
+        emitted = record_crossings(storage, crossings_again, run_id="rec")
+        assert len(emitted) == 1
+
+        # Total threshold_crossed on disk now == 3.
+        all_events = storage.read_all()
+        threshold_events = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 3
+
+    def test_recorded_events_project_as_no_ops(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        _seed_unattributed_commits(storage, n=2)
+        # Add one phase + invariant for non-trivial state.
+        storage.append(
+            event_type=EventType.PHASE_STARTED,
+            payload=make_phase_started_payload(phase_id="p1", title="x"),
+            run_id="rec",
+        )
+        storage.append(
+            event_type=EventType.INVARIANT_DECLARED,
+            payload=make_invariant_declared_payload(
+                invariant_id="inv-1", statement="x", source="m"
+            ),
+            run_id="rec",
+        )
+        events_pre = storage.read_all()
+        state_pre = project(events_pre)
+
+        crossings = evaluate_thresholds(
+            state_pre, events_pre, ThresholdParams()
+        )
+        record_crossings(storage, crossings, run_id="rec")
+
+        events_post = storage.read_all()
+        state_post = project(events_post)
+
+        # All non-high-water-mark fields must be identical.
+        assert state_post.phases == state_pre.phases
+        assert state_post.invariants == state_pre.invariants
+        assert state_post.assumptions == state_pre.assumptions
+        assert state_post.human_decisions == state_pre.human_decisions
+        assert (
+            state_post.findings_unattributed == state_pre.findings_unattributed
+        )
+        assert (
+            state_post.orphaned_design_reasoning
+            == state_pre.orphaned_design_reasoning
+        )
+        assert (
+            state_post.orphaned_design_reasoning_count
+            == state_pre.orphaned_design_reasoning_count
+        )
+        # High-water marks DID advance because reserved events count
+        # as successfully applied per the projector's contract.
+        assert (
+            state_post.last_event_seq_per_writer["w-1"]
+            > state_pre.last_event_seq_per_writer["w-1"]
+        )
+        assert state_post.last_event_id != state_pre.last_event_id
+
+    def test_payload_shape_matches_crossing(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        commits = _seed_unattributed_commits(storage, n=1)
+        events = storage.read_all()
+        crossings = evaluate_thresholds(
+            project(events), events, ThresholdParams()
+        )
+        record_crossings(storage, crossings, run_id="rec")
+
+        all_events = storage.read_all()
+        threshold_events = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 1
+        emitted = threshold_events[0]
+        assert emitted.payload["rule_id"] == "unattributable_commit"
+        assert emitted.payload["triggering_event_ids"] == [commits[0].event_id]
+        assert emitted.payload["summary"] == crossings[0].summary
+
+    def test_empty_crossings_list_emits_nothing(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        # Seed with one event so the file exists.
+        storage.append(
+            event_type=EventType.PHASE_STARTED,
+            payload=make_phase_started_payload(phase_id="p1", title="x"),
+            run_id="rec",
+        )
+        emitted = record_crossings(storage, [], run_id="rec")
+        assert emitted == []
+        # No threshold_crossed events on disk.
+        all_events = storage.read_all()
+        assert not any(
+            e.type is EventType.THRESHOLD_CROSSED for e in all_events
+        )
+
+    def test_empty_run_id_raises(self, tmp_path: Path) -> None:
+        storage = Storage(tmp_path, writer_id="w-1")
+        commit = ThresholdCrossing(
+            rule_id=ThresholdRuleId.UNATTRIBUTABLE_COMMIT,
+            severity=ThresholdSeverity.TRIGGER_REAUTHOR,
+            evidence_event_ids=(uuid7(),),
+            recommended_action=ThresholdRecommendedAction.REAUTHOR_PLAN,
+            summary="x",
+            detected_at_event_id=uuid7(),
+        )
+        import pytest
+
+        with pytest.raises(ValueError, match="run_id"):
+            record_crossings(storage, [commit], run_id="")

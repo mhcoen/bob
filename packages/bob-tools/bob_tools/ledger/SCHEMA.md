@@ -491,12 +491,36 @@ The evaluator inherits the projector's contract:
 These four invariants are encoded in
 `tests/test_thresholds.py::TestDeterminism`.
 
+### Recording crossings (Slice B part 2)
+
+`record_crossings(storage, crossings, *, run_id, git=None)` appends
+one `threshold_crossed` event per new crossing and returns the list
+of newly emitted event_ids. Idempotent: a crossing whose
+`(rule_id, frozenset(evidence_event_ids))` matches a pre-existing
+`threshold_crossed` event in the ledger is skipped silently.
+
+```
+crossings = evaluate_thresholds(state, events, params, since=since)
+emitted_ids = record_crossings(
+    storage, crossings, run_id=run_id, git=git_snapshot
+)
+```
+
+Determinism. Emit order matches the input list. Callers usually
+pass the list returned by `evaluate_thresholds`, which is sorted by
+`(detected_at_event_id, rule_id)`, so on-disk recorded crossings
+are deterministic.
+
+Round-trip. Recorded events are reserved-type
+`threshold_crossed`, which Slice A's projector treats as no-ops.
+Recording therefore advances `last_event_id` and the per-writer
+high-water marks but leaves all other PlanState fields unchanged.
+
 ### What Slice B does NOT do
 
-- Does NOT write back to the ledger. `record_crossings(storage,
-  crossings)` lands later (Slice B part 2 or Slice C).
 - Does NOT auto-pause McLoop or auto-trigger re-authoring.
-- Does NOT mutate PlanState or add fields to PLAN.state.json.
+- Does NOT mutate PlanState or add fields to PLAN.state.json beyond
+  the projector contract that already covers `threshold_crossed`.
 
 ## Slice A boundary
 

@@ -42,8 +42,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from bob_tools.ledger.events import CommitChangeClass, Event, EventType
+from bob_tools.ledger.events import (
+    CommitChangeClass,
+    Event,
+    EventType,
+    GitSnapshot,
+    make_threshold_crossed_payload,
+)
 from bob_tools.ledger.projector import PlanState
+from bob_tools.ledger.storage import Storage
 
 # ---------------------------------------------------------------------
 # Public types
@@ -447,6 +454,92 @@ def evaluate_thresholds(
     return crossings
 
 
+# ---------------------------------------------------------------------
+# record_crossings — Slice B part 2
+# ---------------------------------------------------------------------
+
+
+def _existing_crossing_keys(
+    storage: Storage,
+) -> set[tuple[str, frozenset[str]]]:
+    """Build the dedupe set from threshold_crossed events on disk.
+
+    A crossing's identity for idempotence is ``(rule_id,
+    frozenset(triggering_event_ids))``. ``summary`` is human-readable
+    and must not affect identity. ``detected_at_event_id`` is
+    redundant with the evidence for event-based rules and a derived
+    pick for the count-based rule, so it is also excluded from the
+    key.
+    """
+    keys: set[tuple[str, frozenset[str]]] = set()
+    for ev in storage.iter_events():
+        if ev.type is not EventType.THRESHOLD_CROSSED:
+            continue
+        rule_id = ev.payload.get("rule_id")
+        triggering = ev.payload.get("triggering_event_ids") or []
+        if isinstance(rule_id, str) and isinstance(triggering, list):
+            keys.add((rule_id, frozenset(triggering)))
+    return keys
+
+
+def record_crossings(
+    storage: Storage,
+    crossings: Sequence[ThresholdCrossing],
+    *,
+    run_id: str,
+    git: GitSnapshot | None = None,
+) -> list[str]:
+    """Append one ``threshold_crossed`` event per new crossing.
+
+    Idempotent. Reads existing ``threshold_crossed`` events from
+    ``storage`` first; any incoming crossing whose ``(rule_id,
+    frozenset(evidence_event_ids))`` key matches a pre-existing
+    record is skipped. The skip is silent: callers see only the
+    list of newly emitted ``event_id``s, in the order the
+    corresponding crossings appeared in ``crossings``.
+
+    Determinism: emit order matches input order. Callers usually
+    pass a list returned by ``evaluate_thresholds``, which is
+    already sorted by ``(detected_at_event_id, rule_id)``, so the
+    on-disk order of recorded crossings is deterministic.
+
+    Round-trip: emitted events are reserved-type ``threshold_crossed``,
+    which Slice A's projector treats as no-ops. Recording crossings
+    therefore advances ``last_event_id`` and the per-writer
+    ``last_event_seq_per_writer`` high-water mark but does not
+    change any other field of ``PlanState``.
+
+    Returns the event_ids of newly emitted events. Returns an
+    empty list if every crossing was already recorded or if
+    ``crossings`` is empty.
+    """
+    if not run_id:
+        raise ValueError("run_id must be non-empty")
+
+    if not crossings:
+        return []
+
+    seen_keys = _existing_crossing_keys(storage)
+    emitted: list[str] = []
+    for crossing in crossings:
+        key = (crossing.rule_id.value, frozenset(crossing.evidence_event_ids))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        ev = storage.append(
+            event_type=EventType.THRESHOLD_CROSSED,
+            payload=make_threshold_crossed_payload(
+                rule_id=crossing.rule_id.value,
+                triggering_event_ids=list(crossing.evidence_event_ids),
+                summary=crossing.summary,
+            ),
+            run_id=run_id,
+            git=git,
+        )
+        emitted.append(ev.event_id)
+    return emitted
+
+
 __all__ = [
     "ALL_RULES",
     "ThresholdCrossing",
@@ -455,4 +548,5 @@ __all__ = [
     "ThresholdRuleId",
     "ThresholdSeverity",
     "evaluate_thresholds",
+    "record_crossings",
 ]

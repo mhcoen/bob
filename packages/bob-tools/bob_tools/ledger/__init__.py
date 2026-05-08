@@ -59,6 +59,7 @@ from bob_tools.ledger.thresholds import (
     ThresholdRuleId,
     ThresholdSeverity,
     evaluate_thresholds,
+    record_crossings,
 )
 
 __all__ = [
@@ -98,6 +99,7 @@ __all__ = [
     "is_well_formed_event_id",
     "iter_validation_errors",
     "project",
+    "record_crossings",
     "validate_event",
     "validate_event_id_format",
 ]
