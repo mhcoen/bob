@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +30,34 @@ from orchestra.adapters._subprocess import (
     run_session,
     write_log,
 )
+from orchestra.errors import OrchestraError
 from orchestra.spine import InvocationRequest, PreparedInvocation
 
 ALLOWED_TOOLS: str = "Read,Glob,Grep"
 """Read-only tool list. Enforced via the CLI's ``--allowedTools`` flag."""
+
+# Markers in the CLI's stream-json output that indicate a Cloudflare
+# rate-limit response. The Moonshot anthropic-compatible endpoint is
+# fronted by Cloudflare; tight bursts (council fan-out where Kimi is
+# one of N parallel proposers) can briefly hit a 403 / 429 response
+# from the edge before the request reaches Moonshot. Retry-with-backoff
+# at the adapter level resolves this without surfacing a transient
+# subprocess failure to the caller. See REPORT.md Addendum 6 / Kimi
+# 403 diagnosis (2026-05-08) for the empirical basis.
+_THROTTLE_MARKERS: tuple[str, ...] = (
+    "status 403",
+    "status 429",
+    "403 forbidden",
+    "429 too many requests",
+    "rate limit",
+    "rate-limit",
+    "rate_limit",
+    "too many requests",
+)
+
+
+class ProviderCredentialError(OrchestraError):
+    """Raised when a provider-routing adapter is missing its API key."""
 
 
 class ClaudeCodeTextAdapter:
@@ -65,11 +90,42 @@ class ClaudeCodeTextAdapter:
         default_model: str | None = None,
         allowed_tools: str = ALLOWED_TOOLS,
         default_timeout_s: int = DEFAULT_TIMEOUT_S,
+        provider_config: dict[str, Any] | None = None,
+        retry_on_throttle: bool = False,
+        max_retries: int = 3,
+        initial_backoff_s: float = 1.0,
     ) -> None:
         self._cli = cli
         self._default_model = default_model
         self._allowed_tools = allowed_tools
         self._default_timeout_s = default_timeout_s
+        # Provider routing config (base_url, auth_token_env,
+        # use_slug_model, claude_config_dir) for direct-provider
+        # bindings (claude_code_text_kimi, claude_code_text_deepseek).
+        # When None, the adapter falls back to the default OpenRouter
+        # routing path or native Anthropic, depending on the model.
+        self._provider_config: dict[str, Any] | None = (
+            dict(provider_config) if provider_config is not None else None
+        )
+        # Retry-on-throttle wraps invoke() with exponential backoff
+        # against Cloudflare 403/429 responses from the provider edge.
+        # Default off; the kimi/deepseek bindings turn it on. See
+        # REPORT.md (Kimi 403 diagnosis 2026-05-08) for context.
+        self._retry_on_throttle = retry_on_throttle
+        self._max_retries = max_retries
+        self._initial_backoff_s = initial_backoff_s
+        # Fail fast if a direct-provider binding is missing its
+        # credential. The check inspects the parent env at adapter
+        # construction time (option (i) per F2.5 design); the secret
+        # itself is read at invoke time and passed to the subprocess
+        # via apply_provider_env(), never logged.
+        if self._provider_config is not None:
+            auth_token_env = self._provider_config.get("auth_token_env")
+            if auth_token_env and not os.environ.get(auth_token_env):
+                raise ProviderCredentialError(
+                    f"adapter requires {auth_token_env} in environ; "
+                    "set it before invoking this binding"
+                )
 
     # ----- Adapter contract -------------------------------------------
 
@@ -105,7 +161,10 @@ class ClaudeCodeTextAdapter:
 
         cmd = self._build_command(model)
         env = build_session_env(
-            task_label=task_label, cli=self._cli, model=model
+            task_label=task_label,
+            cli=self._cli,
+            model=model,
+            executor_config=self._provider_config,
         )
 
         prompt_bytes = prompt.encode("utf-8") if prompt else b""
@@ -146,12 +205,11 @@ class ClaudeCodeTextAdapter:
             stdin_arg = prompt_bytes_raw
         else:
             stdin_arg = None
-        output, exit_code = run_session(
+        output, exit_code = self._run_with_optional_retry(
             inner["cmd"],
             inner["cwd"],
             env=inner["env"],
             timeout=int(inner["timeout_s"]),
-            silent=True,
             stdin_bytes=stdin_arg,
         )
         log_path = write_log(
@@ -198,6 +256,43 @@ class ClaudeCodeTextAdapter:
 
     # ----- internals --------------------------------------------------
 
+    def _run_with_optional_retry(
+        self,
+        cmd: list[str],
+        cwd: Path,
+        *,
+        env: dict[str, str],
+        timeout: int,
+        stdin_bytes: bytes | None,
+    ) -> tuple[str, int]:
+        """Run the subprocess once, with optional retry-on-throttle.
+
+        When ``retry_on_throttle`` is False (default), this is a thin
+        pass-through to ``run_session``. When True, exits matching the
+        Cloudflare-throttle pattern (non-zero exit + a known throttle
+        marker in the output) trigger up to ``max_retries`` retries
+        with exponential backoff starting at ``initial_backoff_s``.
+        Successful runs and non-throttle failures return on the first
+        attempt.
+        """
+        output, exit_code = run_session(
+            cmd, cwd, env=env, timeout=timeout, silent=True,
+            stdin_bytes=stdin_bytes,
+        )
+        if not self._retry_on_throttle:
+            return output, exit_code
+        backoff = self._initial_backoff_s
+        for _attempt in range(1, self._max_retries + 1):
+            if exit_code == 0 or not _looks_throttled(output):
+                return output, exit_code
+            time.sleep(backoff)
+            backoff *= 2
+            output, exit_code = run_session(
+                cmd, cwd, env=env, timeout=timeout, silent=True,
+                stdin_bytes=stdin_bytes,
+            )
+        return output, exit_code
+
     def _build_command(self, model: str | None) -> list[str]:
         # Pass-7 fix: the prompt no longer appears in argv. The
         # adapter pipes the rendered prompt to the inner CLI via
@@ -221,6 +316,20 @@ class ClaudeCodeTextAdapter:
         if model:
             cmd.extend(["--model", model])
         return cmd
+
+
+def _looks_throttled(output: str) -> bool:
+    """Heuristic: did this output suggest a Cloudflare 403/429?
+
+    Scans the lowercased output for known throttle markers. Coarse but
+    inspectable; the markers list is small and explicit so the false-
+    positive rate is bounded. Used by claude_code_text_kimi and
+    claude_code_text_deepseek to decide whether to retry.
+    """
+    if not output:
+        return False
+    lo = output.lower()
+    return any(marker in lo for marker in _THROTTLE_MARKERS)
 
 
 def _verdict_for_exit_code(exit_code: int) -> str:

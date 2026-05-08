@@ -105,6 +105,8 @@ from orchestra.transforms import anonymize_outputs, finish_panel
 # kind and edit-agent adapters with the ``agent`` kind.
 _ADAPTER_TO_KIND: dict[str, str] = {
     "claude_code_text": "model",
+    "claude_code_text_kimi": "model",
+    "claude_code_text_deepseek": "model",
     "claude_code_agent": "agent",
     "codex_text": "model",
     "codex_agent": "agent",
@@ -112,9 +114,38 @@ _ADAPTER_TO_KIND: dict[str, str] = {
 
 _ADAPTER_CLASSES: dict[str, type] = {
     "claude_code_text": ClaudeCodeTextAdapter,
+    # The kimi/deepseek bindings reuse ClaudeCodeTextAdapter with
+    # provider_config injected by _build_role_adapter; the class is
+    # the same, the adapter NAME is what selects the routing config.
+    "claude_code_text_kimi": ClaudeCodeTextAdapter,
+    "claude_code_text_deepseek": ClaudeCodeTextAdapter,
     "claude_code_agent": ClaudeCodeAgentAdapter,
     "codex_text": CodexTextAdapter,
     "codex_agent": CodexAgentAdapter,
+}
+
+# Provider-routing configs for the direct-provider bindings. Each entry
+# specifies the anthropic-compatible base URL, the env var to read the
+# bearer token from, an isolated CLAUDE_CONFIG_DIR per provider (so
+# conversation history, MCP configs, and permissions state stay
+# separated across providers), and use_slug_model=False because the
+# direct endpoints expect the bare model name (not the OpenRouter-
+# style provider/slug prefix). Matches Michael's shell wrappers
+# verbatim. See design/criteria-compliance.md and the F2.5 actor-
+# registry workstream notes for context.
+_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
+    "claude_code_text_kimi": {
+        "base_url": "https://api.moonshot.ai/anthropic/",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "claude_config_dir": "~/.claude-kimi",
+        "use_slug_model": False,
+    },
+    "claude_code_text_deepseek": {
+        "base_url": "https://api.deepseek.com/anthropic",
+        "auth_token_env": "DEEPSEEK_API_KEY",
+        "claude_config_dir": "~/.claude-deepseek",
+        "use_slug_model": False,
+    },
 }
 
 FINAL_PROMPT_INPUT: str = "final_prompt"
@@ -458,10 +489,17 @@ def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
     if binding.tools and binding.tools != "default":
         if adapter_name == "claude_code_agent":
             params.setdefault("default_allowed_tools", binding.tools)
-        elif adapter_name == "claude_code_text":
+        elif adapter_name in ("claude_code_text", "claude_code_text_kimi",
+                              "claude_code_text_deepseek"):
             params.setdefault("allowed_tools", binding.tools)
         elif adapter_name == "codex_agent":
             params.setdefault("default_sandbox", binding.tools)
+    if adapter_name in _PROVIDER_CONFIGS:
+        # Direct-provider bindings: inject the routing config and turn
+        # on retry-on-throttle. Cloudflare fronts the Moonshot edge and
+        # tight bursts (council fan-out) can hit 403/429 transiently.
+        params.setdefault("provider_config", _PROVIDER_CONFIGS[adapter_name])
+        params.setdefault("retry_on_throttle", True)
     return cls(**params), kind
 
 

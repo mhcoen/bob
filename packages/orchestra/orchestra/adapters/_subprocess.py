@@ -182,6 +182,24 @@ def apply_provider_env(
 
     No-op when ``model`` is empty or refers to a native Anthropic or
     Codex model. Lifted from mcloop's ``_apply_provider_env``.
+
+    The ``executor`` config dict supports these keys:
+
+    - ``base_url`` (str): provider base URL. Default OpenRouter.
+    - ``auth_token_env`` (str): env var name to read the bearer token
+      from. Default ``OPENROUTER_API_KEY``.
+    - ``use_slug_model`` (bool): when True (default), the model name
+      written into the subprocess env is prefixed with the provider
+      slug (``moonshotai/kimi-k2.6``). OpenRouter requires the prefix.
+      Direct provider routing (Moonshot's anthropic-compat endpoint,
+      DeepSeek's anthropic-compat endpoint) requires the bare model
+      name; set ``use_slug_model: False`` for those.
+    - ``claude_config_dir`` (str): path written into ``CLAUDE_CONFIG_DIR``
+      so the subprocess uses an isolated config dir per provider.
+      ``~`` is expanded. Optional. Direct-routing bindings set this to
+      ``~/.claude-kimi`` or ``~/.claude-deepseek`` to prevent
+      cross-contamination of conversation history, MCP configs, and
+      permissions state across providers.
     """
     if provider_for_model(model) is None:
         return
@@ -189,7 +207,8 @@ def apply_provider_env(
     base_url = config.get("base_url") or DEFAULT_PROVIDER_BASE_URL
     auth_token_env = config.get("auth_token_env", "OPENROUTER_API_KEY")
     auth_token = os.environ.get(auth_token_env, "")
-    slug = provider_model_slug(model)
+    use_slug_model = config.get("use_slug_model", True)
+    slug = provider_model_slug(model) if use_slug_model else model
     env["ANTHROPIC_BASE_URL"] = base_url
     if auth_token:
         env["ANTHROPIC_AUTH_TOKEN"] = auth_token
@@ -201,6 +220,9 @@ def apply_provider_env(
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["ENABLE_TOOL_SEARCH"] = "1"
+    claude_config_dir = config.get("claude_config_dir")
+    if claude_config_dir:
+        env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(str(claude_config_dir))
 
 
 def build_session_env(
