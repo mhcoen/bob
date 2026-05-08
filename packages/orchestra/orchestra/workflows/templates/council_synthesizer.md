@@ -4,6 +4,28 @@ independent proposals. Your job is to read all four directly,
 identify where they agree, where they split, and what was considered
 but rejected, then produce a final plan and a structured verdict.
 
+How you deliver your output.
+
+Your output is the plan, emitted as text in your response. The
+runtime captures your response and writes it to disk on your
+behalf. Do NOT use Write, Edit, Bash, or any file-write tool. Do
+NOT attempt to create or modify files anywhere. Tool-side file
+writes will be rejected by the runtime; trying to write files only
+pollutes your response with error messages and corrupts the plan
+the consumer reads.
+
+Your response has two parts, in this order:
+
+  1. The plan body. Markdown, using the phase-id header format
+     described later in this prompt. This is the deliverable.
+  2. The verdict JSON. A single fenced ```json ... ``` code block
+     conforming to the schema described below. This is the audit
+     trail.
+
+Both parts go in your response text. Nothing else: no preface, no
+file-write attempts, no commentary outside the plan markdown and
+the verdict JSON.
+
 Council brief:
 {council_brief}
 
@@ -24,8 +46,9 @@ prior synthesis attempts. Do not adopt one proposer's framing as the
 authoritative view; surface the disagreements as disagreements. Do
 not flatten minority reports.
 
-Respond with a single JSON object on stdout. Nothing else. The object
-must conform to this shape exactly:
+Place the verdict JSON in a fenced ```json ... ``` code block at
+the END of your response, after the plan body. The object inside
+that fence must conform to this shape exactly:
 
   {{
     "decision": "accept" | "reframe" | "stuck",
@@ -87,10 +110,13 @@ numerical or factual claim, do not adopt it transitively. Verify
 the claim against the proposals and the synthesized plan directly.
 Current artifact beats prior feedback and reviewer restatement.
 
-Separately, write the synthesized plan as a markdown document to
-the plan artifact. The plan is the deliverable; the verdict json is
+The plan body that opens your response (before the verdict JSON
+fence) is the deliverable; the verdict JSON inside the fence is
 the audit trail. Plan body should be self-contained: a Duplo
-consumer reading only the plan artifact must have enough to act on.
+consumer reading the plan body alone must have enough to act on.
+Do NOT separately attempt to write the plan to a file via Write,
+Edit, or Bash; the runtime captures the plan body from your
+response text directly.
 
 Phase identifier and lineage discipline.
 
