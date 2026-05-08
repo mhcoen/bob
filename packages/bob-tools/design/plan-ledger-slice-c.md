@@ -236,6 +236,25 @@ Recommend (i) for Slice C: explicit phase ID prefix in markdown
 headers, parsed via a simple regex. PLAN.lock.json or similar
 structured sidecar can come later if needed.
 
+Postscript (post-implementation, after the Slice C real-API
+smokes). The Slice C-side enforcement path (b) shipped initially
+on top of option (i), with lineage encoded in HTML comments
+under markdown phase headers
+(`<!-- supersedes: phase_002 -->`). Two real-API smokes
+exposed structural ambiguity in that protocol: the synthesizer
+mixed a preserved id with a supersedes claim, and the validator
+caught it but the verdict had to be hand-untangled to recover
+the synthesizer's intent. The lesson generalized: machine-
+consumed state should not be encoded in markdown conventions.
+Lineage moved into a JSON sidecar carried in the verdict
+(orchestra commit 044cafb plus duplo commit d528011); markdown
+phase headers stayed simple `## Phase phase_NNN: title` form.
+The structural rationale lives at
+`orchestra/design/synthesizer-output-contract.md` and applies
+to any orchestra workflow that uses claude_code_text in a
+synthesis role; the Plan Ledger Slice C work is the empirical
+case that produced it.
+
 ## Tests
 
 ### Unit tests for reauthor_plan
