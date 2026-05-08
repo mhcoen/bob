@@ -26,6 +26,10 @@ Both parts go in your response text. Nothing else: no preface, no
 file-write attempts, no commentary outside the plan markdown and
 the verdict JSON.
 
+See orchestra/design/synthesizer-output-contract.md for the
+structural rationale: machine-consumed state goes in the verdict
+JSON; markdown is for the prose deliverable only.
+
 Council brief:
 {council_brief}
 
