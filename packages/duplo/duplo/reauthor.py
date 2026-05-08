@@ -36,7 +36,7 @@ from typing import Any
 from duplo.reauthor_phase_ids import (
     LineageDiff,
     LineageValidationError,
-    ParsedPhase,
+    ParsedHeader,
     compute_lineage_diff,
     parse_plan_phases,
     validate_lineage,
@@ -126,8 +126,10 @@ def reauthor_plan(
         On input validation failures (missing crossing event,
         missing PLAN.md, etc.).
     LineageValidationError
-        When the synthesizer's plan introduces phase ids without
-        the required lineage metadata.
+        When the synthesizer's plan body and lineage sidecar
+        violate Slice C's lineage invariants (missing or
+        contradictory action declarations, unaccounted prior ids,
+        unknown predecessors, etc.).
     """
     # Lazy imports for the same reason ``duplo.council`` does it: keep
     # the legacy duplo CLI usable without orchestra installed.
@@ -177,11 +179,15 @@ def reauthor_plan(
     question = (
         "Re-author the plan in light of the following triggering "
         f"threshold crossing: {crossing_summary}. Preserve phase ids "
-        "from the prior plan where the phase remains valid; declare "
-        "supersedes / split_from / merge_from metadata under each new "
-        "phase header that replaces, splits, or merges a prior phase. "
+        "from the prior plan where the phase remains valid; introduce "
+        "new ids for derived phases. Declare lineage in the verdict "
+        "JSON's 'lineage' object (NOT in the markdown). Each plan "
+        "header gets one phases[] entry with an action from "
+        "{preserve, supersede, split, merge, new}; supersede/split/"
+        "merge entries name their predecessors in 'from'. Drop a "
+        "prior phase entirely by listing it in lineage.abandoned. "
         "See the council_synthesizer template's phase-id and lineage "
-        "discipline section for the exact format."
+        "discipline section for the schema and per-action constraints."
     )
 
     state_blob = _build_state_blob(plan_text_old, old_phases, state)
@@ -190,7 +196,7 @@ def reauthor_plan(
         council.set_config_path(str(council_config_path))
 
     council_run_id = run_id or _new_run_id()
-    new_plan_text = _invoke_council_for_reauthor(
+    new_plan_text, verdict = _invoke_council_for_reauthor(
         council=council,
         state_blob=state_blob,
         question=question,
@@ -199,12 +205,23 @@ def reauthor_plan(
         project_dir=project_dir,
     )
 
+    lineage_obj = verdict.get("lineage") if isinstance(verdict, dict) else None
+    if not isinstance(lineage_obj, dict):
+        raise LineageValidationError(
+            "synthesizer verdict is missing the required 'lineage' object; "
+            "the re-author path requires the JSON lineage sidecar"
+        )
+
     # Validate the synthesizer's output before emitting any events.
     # Validation failures must NOT leave a partial event sequence on
     # disk.
     new_phases = parse_plan_phases(new_plan_text)
-    validate_lineage(old_phases, new_phases)
-    diff = compute_lineage_diff(old_phases, new_phases)
+    validate_lineage(
+        (p.id for p in old_phases),
+        (p.id for p in new_phases),
+        lineage_obj,
+    )
+    diff = compute_lineage_diff(lineage_obj)
 
     git_snapshot = _capture_git_snapshot(project_dir)
 
@@ -302,7 +319,7 @@ def _build_ledger_slice(
     state: Any,
     crossing: Any,
     since_event_id: str | None,
-    old_phases: list[ParsedPhase],
+    old_phases: list[ParsedHeader],
 ) -> str:
     """Markdown brief grouped by phase, per the Codex Q3 shape.
 
@@ -493,7 +510,7 @@ def _build_design_context(
     events: Iterable[Any],
     state: Any,
     plan_text: str,
-    old_phases: list[ParsedPhase],
+    old_phases: list[ParsedHeader],
 ) -> str:
     """Markdown brief of design rationale.
 
@@ -636,7 +653,7 @@ def _extract_plan_text_design_context(
 
 
 def _build_state_blob(
-    plan_text: str, old_phases: list[ParsedPhase], state: Any
+    plan_text: str, old_phases: list[ParsedHeader], state: Any
 ) -> str:
     """The ``state`` external input passed into council_four.
 
@@ -672,12 +689,15 @@ def _invoke_council_for_reauthor(
     ledger_slice_md: str,
     design_context_md: str,
     project_dir: Path,
-) -> str:
+) -> tuple[str, dict[str, Any]]:
     """Run council_four with the four framer inputs populated.
 
-    Returns the synthesizer's plan body (the ``plan`` artifact).
-    Raises ``CouncilError`` from ``duplo.council`` on terminal !=
-    done or missing plan artifact.
+    Returns ``(plan_text, verdict)`` where ``plan_text`` is the
+    synthesizer's plan body (the ``plan`` artifact) and ``verdict``
+    is the parsed ``judge_verdict`` JSON object (which carries the
+    lineage sidecar the re-author consumer needs). Raises
+    ``ReauthorError`` on terminal != done, missing plan artifact, or
+    a verdict whose shape is not a JSON object.
     """
     from orchestra import run_workflow
 
@@ -718,7 +738,17 @@ def _invoke_council_for_reauthor(
     plan_text: str = plan_view.value.strip()
     if not plan_text:
         raise ReauthorError("council_four produced an empty plan")
-    return plan_text + "\n"
+
+    verdict_view = result.artifacts.get("judge_verdict")
+    if verdict_view is None or not isinstance(verdict_view.value, dict):
+        raise ReauthorError(
+            "council_four accepted but produced no 'judge_verdict' "
+            "artifact (or its value is not a JSON object); the "
+            "re-author path requires the verdict for the lineage "
+            "sidecar"
+        )
+    verdict: dict[str, Any] = dict(verdict_view.value)
+    return plan_text + "\n", verdict
 
 
 def _resolve_orchestra_config(council: Any, project_dir: Path) -> Any:
@@ -759,8 +789,8 @@ def _emit_lifecycle_events(
 
     Order is deterministic per the LineageDiff sort: superseded
     pairs by (old_id, new_id), splits by old_id, merges by sorted
-    parents, then elisions by old_id. The returned list is the
-    event ids in emission order; the plan_reauthored payload's
+    parents, then abandonment entries by id. The returned list is
+    the event ids in emission order; the plan_reauthored payload's
     ``ledger_slice_event_ids`` references this list plus the
     triggering crossing.
     """
@@ -822,12 +852,12 @@ def _emit_lifecycle_events(
         )
         emitted.append(ev.event_id)
 
-    for old_id in diff.elided:
+    for old_id, reason in diff.abandoned:
         ev = storage.append(
             event_type=EventType.PHASE_ABANDONED,
             payload=make_phase_abandoned_payload(
                 phase_id=old_id,
-                reason="elided in re-author",
+                reason=reason or "abandoned in re-author",
             ),
             run_id=run_id,
             git=git,
