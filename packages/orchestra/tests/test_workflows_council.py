@@ -295,14 +295,30 @@ def test_distinct_actor_rule_passes_with_five_distinct() -> None:
     }
 
 
-def test_distinct_actor_rule_rejects_synthesizer_overlap() -> None:
-    """Synthesizer cannot match any proposer; refuse-on-four."""
+def test_distinct_actor_rule_passes_with_synthesizer_sharing_proposer_model() -> None:
+    """Synthesizer MAY share a model string with a proposer.
+
+    The original distinct-actor rule conflated role-binding distinctness
+    (each role has its own template and conversation context) with
+    model-string distinctness (no two roles use the same model). The
+    same-model-judging concern that motivated the rule applies to
+    single-prompt self-evaluation, not synthesis across four parallel
+    proposals under a synthesis-specific prompt.
+
+    Concretely: proposer_code = (claude_code_text, opus) and
+    synthesizer = (claude_code_text, opus) is now a valid configuration.
+    See ``design/council-actor-bindings.md``.
+    """
     cfg = _make_council_config(
-        synthesizer=_binding("codex_text", "gpt-5.5"),
+        proposers={
+            "proposer_code": _binding("claude_code_text", "opus"),
+        },
+        synthesizer=_binding("claude_code_text", "opus"),
     )
     workflow = _load_council_workflow()
-    with pytest.raises(ConfigError, match="synthesizer"):
-        _validate_role_bindings(workflow, "council_four", cfg)
+    bindings = _validate_role_bindings(workflow, "council_four", cfg)
+    assert bindings["proposer_code"].model == "opus"
+    assert bindings["synthesizer"].model == "opus"
 
 
 def test_distinct_actor_rule_rejects_proposer_overlap() -> None:

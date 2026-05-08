@@ -969,20 +969,23 @@ def _validate_council_four(
     role_bindings: dict[str, RoleBinding],
     workflow_name: str,
 ) -> None:
-    """Enforce the council_four distinct-actor rule:
+    """Enforce the council_four binding constraints:
 
-    - All five required roles present (framer + four proposers +
+    - All six required roles present (framer + four proposers +
       synthesizer).
     - The four proposers must resolve to pairwise distinct
       (adapter, model) tuples. Otherwise the council is not actually
-      drawing on N distinct model biases.
-    - The synthesizer must differ from each of the four proposers.
-      A model judging its own proposal against itself loses the
-      multi-model-judging discipline; for the initial scaffold this
-      is a hard refusal rather than auto-rotation with own-proposal
-      exclusion. Auto-rotation is defensible later but adds
-      transition semantics that need explicit test coverage.
-    - Framer's identity is unconstrained; it can match any other role.
+      drawing on N distinct model biases; the parallel fan-out is
+      the value here.
+    - Framer and synthesizer identities are unconstrained. The
+      synthesizer in particular MAY share a model string with one of
+      the proposers. See ``design/council-actor-bindings.md`` for the
+      reasoning: the original same-model-judging concern was about
+      single-prompt self-evaluation, which does not match the
+      synthesis-across-four shape. Distinct ROLE BINDINGS remain
+      structural (each role is its own dict key with its own
+      template); distinct MODEL STRINGS are not required across
+      roles, only across the four proposers.
     """
     required = (
         "framer",
@@ -1018,18 +1021,6 @@ def _validate_council_four(
                 "tuple."
             )
         seen[identity] = role_name
-    synth_identity = _actor_identity(role_bindings["synthesizer"])
-    for role_name in proposer_roles:
-        if synth_identity == _actor_identity(role_bindings[role_name]):
-            raise ConfigError(
-                f"workflow {workflow_name!r}: 'synthesizer' resolves "
-                f"to the same actor as {role_name!r} "
-                f"(adapter={synth_identity[0]!r}, "
-                f"model={synth_identity[1]!r}). council_four requires "
-                "the synthesizer to differ from every proposer so a "
-                "model is not judging its own output. Configure a "
-                "fifth distinct binding for 'synthesizer'."
-            )
 
 
 _WORKFLOW_RULES: dict[
