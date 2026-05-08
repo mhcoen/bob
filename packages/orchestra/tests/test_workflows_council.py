@@ -240,6 +240,41 @@ def test_council_schema_requires_structured_arrays() -> None:
     assert set(diss["required"]) == {"topic", "positions"}
 
 
+def test_council_schema_lineage_shape() -> None:
+    """The verdict schema gains a lineage object whose phases[] entries
+    carry a strict action enum and an optional from list.
+    council_four's re-author consumer parses this sidecar instead of
+    inferring lineage from markdown HTML comments.
+    """
+    path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "schemas"
+        / "council_synthesis_verdict.json"
+    )
+    schema = json.loads(path.read_text())
+    lineage = schema["properties"]["lineage"]
+    assert lineage["type"] == "object"
+    assert lineage["required"] == ["phases"]
+    phase_item = lineage["properties"]["phases"]["items"]
+    assert set(phase_item["required"]) == {"id", "action"}
+    assert phase_item["properties"]["action"]["enum"] == [
+        "preserve",
+        "supersede",
+        "split",
+        "merge",
+        "new",
+    ]
+    assert phase_item["properties"]["from"]["type"] == "array"
+    abandoned_item = lineage["properties"]["abandoned"]["items"]
+    assert set(abandoned_item["required"]) == {"id", "reason"}
+    # lineage itself is OPTIONAL at the verdict level (canonical-mode
+    # synthesis without a prior plan still works without one);
+    # presence is a duplo-side requirement on the re-author path.
+    assert "lineage" not in schema["required"]
+
+
 # --------------------------------------------------------------------
 # Distinct-actor invariant
 # --------------------------------------------------------------------

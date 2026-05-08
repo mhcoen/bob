@@ -69,7 +69,19 @@ that fence must conform to this shape exactly:
         "compliant": true | false
       }},
       ...
-    ]
+    ],
+    "lineage": {{
+      "phases": [
+        {{ "id": "<phase_id>", "action": "preserve" }},
+        {{ "id": "<phase_id>", "action": "supersede", "from": ["<prior_id>"] }},
+        {{ "id": "<phase_id>", "action": "split", "from": ["<prior_id>"] }},
+        {{ "id": "<phase_id>", "action": "merge", "from": ["<prior_id>", "<prior_id>", ...] }},
+        {{ "id": "<phase_id>", "action": "new" }}
+      ],
+      "abandoned": [
+        {{ "id": "<prior_id>", "reason": "<short reason>" }}
+      ]
+    }}
   }}
 
 Decision semantics:
@@ -120,73 +132,71 @@ response text directly.
 
 Phase identifier and lineage discipline.
 
-If the council brief includes a ledger_slice describing existing
-phases (i.e., this is a re-authoring rather than a fresh authoring),
-each phase header in the synthesized plan must follow this format
+Each phase header in the synthesized plan must follow this format
 exactly:
 
   ## Phase <phase_id>: <human title>
 
-The phase_id is a stable identifier that callers use to track plan
-state across re-authorings. Pick ids matching `[A-Za-z0-9_]+`. Do
-not change letter case or insert spaces; the consumer's parser is
-strict.
+The phase_id matches `[A-Za-z0-9_]+`. Do not change letter case
+or insert spaces; the consumer's parser is strict. Headers carry
+no embedded lineage metadata. Plan markdown stays simple.
 
-Lineage rules — read carefully. The Plan Ledger projector cannot
-infer relationships between old and new phases on its own. If you
-change the structure of an existing phase, you must declare the
-relationship explicitly using an HTML comment on the line directly
-following the header:
+Lineage is declared in the verdict JSON's `lineage` object, not in
+the markdown. Declaring lineage in JSON instead of in the prose
+removes the ambiguity that lets a synthesizer write a preserved id
+under a header while claiming supersession in a comment, or write
+a new id with no claim at all. The runtime parses the JSON, applies
+a strict semantic check, and rejects on mismatch. There is no
+inference path; what the JSON says is what the ledger records.
 
-  - Phase id from the prior plan that remains valid in this plan:
-    KEEP THE SAME phase_id. Do not rename. The consumer treats a
-    preserved id as continuity.
+The `lineage.phases` array has ONE entry for every phase header in
+the plan body, in any order. Each entry has an `id` matching the
+header and an `action` from this enum:
 
-  - Phase that supersedes a prior phase (replaces it; old work is
-    redone or reframed): use a new phase_id and add the supersedes
-    metadata.
+  preserve   The phase is carried forward unchanged from the prior
+             plan. The id MUST exist in the prior plan. NO `from`
+             field. The id remains a stable handle.
 
-      ## Phase phase_002b: Refactored auth
-      <!-- supersedes: phase_002 -->
+  supersede  The phase REPLACES one prior phase. The id MUST NOT
+             exist in the prior plan. `from` MUST be a non-empty
+             list whose entries are prior plan ids; for a clean
+             one-to-one supersession the list has one element.
 
-  - Phase that is one branch of a split from a prior phase
-    (the prior phase is being divided into two or more new phases):
-    use a new phase_id per branch and add split_from metadata to
-    each branch, all pointing at the same prior id.
+  split      The phase is one branch of a split from one prior
+             phase. The id MUST NOT exist in the prior plan. `from`
+             MUST be a non-empty list of prior plan ids; for a
+             clean split each branch entry has one element naming
+             the same prior id.
 
-      ## Phase phase_002a: Auth foundation (split)
-      <!-- split_from: phase_002 -->
+  merge      The phase merges two or more prior phases into one
+             new phase. The id MUST NOT exist in the prior plan.
+             `from` MUST be a list of TWO OR MORE prior plan ids.
 
-      ## Phase phase_002b: Token refresh (split)
-      <!-- split_from: phase_002 -->
+  new        A genuinely new phase that did not exist in the prior
+             plan. The id MUST NOT exist in the prior plan. NO
+             `from` field.
 
-  - Phase that merges two or more prior phases into one new phase:
-    use a new phase_id and add merge_from metadata listing every
-    prior id absorbed.
+The `lineage.abandoned` array (optional; omit when empty) lists
+prior plan phases the new plan drops entirely. Each entry has an
+`id` from the prior plan and a `reason` string. An abandoned id
+must NOT appear elsewhere in `lineage.phases` (neither as the id of
+a preserved phase nor as a `from` entry of any action).
 
-      ## Phase phase_merged_x: Combined feature flag system
-      <!-- merge_from: phase_003, phase_004 -->
+The consumer enforces these invariants and fails closed on any
+violation:
 
-  - A genuinely new phase that did not exist in the prior plan: use
-    a fresh phase_id and add NO lineage metadata. Brand-new phases
-    stand on their own.
+  - The set of ids on plan headers equals the set of `lineage.phases`
+    ids exactly. No unmentioned headers; no phantom entries.
+  - All ids within `lineage.phases` are unique.
+  - Per-action constraints above hold.
+  - Every prior plan phase id appears EXACTLY ONCE across the
+    union of: preserved ids, `from` entries of supersede/split/
+    merge entries, and `abandoned` ids. No missing prior id; no
+    double-claim.
+  - No preserved id appears in any `from` list.
 
-  - A prior phase you are dropping entirely: the consumer detects
-    elision (a prior phase id with no successor claim from any new
-    phase) and records it as an abandonment. You may also signal
-    this intent in `feedback`; the structural detection happens in
-    the consumer regardless.
-
-The consumer's lineage validator fails closed: any new phase_id
-that is neither a preserved id from the prior plan nor accompanied
-by explicit supersedes / split_from / merge_from metadata pointing
-at prior ids is REJECTED. It is the synthesizer's job to declare
-relationships explicitly. Do not invent or omit lineage metadata to
-fit a narrative; the structural integrity of the ledger depends on
-the metadata you write here.
-
-For fresh authoring (the council brief contains no ledger_slice or
-the ledger_slice section indicates no prior phases), use phase_001,
-phase_002, etc. for first-time ids. No supersedes / split_from /
-merge_from metadata is required because there is no prior plan to
-reference.
+For fresh authoring (the council brief contains no ledger_slice
+or the ledger_slice section indicates no prior phases), use
+phase_001, phase_002, etc. for first-time ids. Every entry in
+`lineage.phases` has action `new`; `lineage.abandoned` is omitted
+or empty.
