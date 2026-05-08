@@ -9,8 +9,10 @@ take:
   -> ``Storage.read_all`` -> events from disk
   -> ``project`` -> PlanState
   -> ``evaluate_thresholds`` -> crossings
+  -> ``record_crossings`` -> threshold_crossed events on disk
 
-Six scenarios per the Slice C readiness gate:
+Slice A -> B round-trip scenarios (TestSingleWriter / Multi /
+Since / Storage / Reserved / CountAcrossWriters):
 
   1. Single-writer happy path covering all seven rule triggers.
   2. Multi-writer concurrent appends; determinism holds.
@@ -19,6 +21,14 @@ Six scenarios per the Slice C readiness gate:
   5. Reserved events validate, persist, and project as no-ops.
   6. Count-based rule fires once across two writers' interleaved
      exploratory commits.
+
+Slice B part 2 round-trip scenarios (TestRecordCrossingsIntegration):
+
+  7. record_crossings round-trip via fresh Storage instance.
+  8. record_crossings idempotence holds across Storage instances
+     (dedupe seeds from on-disk events, not in-memory state).
+  9. threshold_crossed payload survives JSONL: rule_id,
+     triggering_event_ids ordering, and unicode summary.
 
 Each test uses a fresh ``tmp_path`` so storage state is isolated.
 """
@@ -35,12 +45,14 @@ from bob_tools.ledger import (
     CommitChangeClass,
     EventType,
     Storage,
+    ThresholdCrossing,
     ThresholdParams,
     ThresholdRecommendedAction,
     ThresholdRuleId,
     ThresholdSeverity,
     evaluate_thresholds,
     project,
+    record_crossings,
 )
 from bob_tools.ledger._uuid7 import uuid7
 from bob_tools.ledger.events import (
@@ -557,3 +569,237 @@ class TestCountAcrossWriters:
         ordered = sorted(emitted, key=lambda e: e.event_id)
         assert c.evidence_event_ids == (ordered[4].event_id,)
         assert c.detected_at_event_id == ordered[4].event_id
+
+
+# ---------------------------------------------------------------------
+# Scenario 7-9: record_crossings round-trip via disk
+# ---------------------------------------------------------------------
+
+
+class TestRecordCrossingsIntegration:
+    """Slice B part 2 integration: writes by record_crossings must
+    survive a fresh Storage instance and a clean projector replay."""
+
+    def test_record_crossings_round_trip_via_disk(
+        self, tmp_path: Path
+    ) -> None:
+        # Stage a sequence with multiple rule triggers so the recorded
+        # threshold_crossed payload exercises non-trivial fields.
+        writer = Storage(tmp_path, writer_id="w-1")
+        writer.append(
+            event_type=EventType.PHASE_STARTED,
+            payload=make_phase_started_payload(phase_id="p1", title="x"),
+            run_id="r",
+        )
+        abandon_ev = writer.append(
+            event_type=EventType.PHASE_ABANDONED,
+            payload=make_phase_abandoned_payload(phase_id="p1", reason="r"),
+            run_id="r",
+        )
+        invariant_ev = writer.append(
+            event_type=EventType.INVARIANT_DECLARED,
+            payload=make_invariant_declared_payload(
+                invariant_id="inv-1", statement="x", source="m"
+            ),
+            run_id="r",
+        )
+        unattributed_ev = writer.append(
+            event_type=EventType.COMMIT_LANDED,
+            payload=_commit_payload(attributed_phase_id=None),
+            run_id="r",
+        )
+
+        events_pre = writer.read_all()
+        state_pre = project(events_pre)
+        crossings = evaluate_thresholds(
+            state_pre, events_pre, ThresholdParams()
+        )
+        assert len(crossings) == 3
+
+        emitted_ids = record_crossings(writer, crossings, run_id="r")
+        assert len(emitted_ids) == 3
+
+        # Drop the writer reference. Open a FRESH Storage instance
+        # pointing at the same dir; this is the load-bearing
+        # round-trip the unit tests do not exercise.
+        reader = Storage(tmp_path, writer_id="reader")
+        events_post = reader.read_all()
+
+        # All events present: the original four plus the three
+        # threshold_crossed records.
+        assert len(events_post) == 4 + 3
+        threshold_events = [
+            e for e in events_post if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 3
+
+        # PlanState round-trips: every field except the high-water
+        # marks is unchanged, since threshold_crossed events are
+        # reserved and the projector treats them as no-ops.
+        state_post = project(events_post)
+        assert state_post.phases == state_pre.phases
+        assert state_post.invariants == state_pre.invariants
+        assert state_post.assumptions == state_pre.assumptions
+        assert state_post.human_decisions == state_pre.human_decisions
+        assert (
+            state_post.findings_unattributed == state_pre.findings_unattributed
+        )
+        assert (
+            state_post.orphaned_design_reasoning
+            == state_pre.orphaned_design_reasoning
+        )
+        assert (
+            state_post.orphaned_design_reasoning_count
+            == state_pre.orphaned_design_reasoning_count
+        )
+        # High-water marks DO advance.
+        assert state_post.last_event_id != state_pre.last_event_id
+        assert (
+            state_post.last_event_seq_per_writer["w-1"]
+            > state_pre.last_event_seq_per_writer["w-1"]
+        )
+
+        # threshold_crossed payload shape on disk matches the Slice A
+        # schema: rule_id (string), triggering_event_ids (list of
+        # event_id strings), summary (string). severity,
+        # recommended_action, and detected_at_event_id are NOT in the
+        # threshold_crossed payload schema -- they are properties of
+        # the in-memory ThresholdCrossing object, not persisted in
+        # the ledger event. Slice C looks up severity and
+        # recommended_action from rule_id.
+        recorded_by_rule = {
+            e.payload["rule_id"]: e for e in threshold_events
+        }
+        assert recorded_by_rule.keys() == {
+            "phase_abandoned",
+            "invariant_declared",
+            "unattributable_commit",
+        }
+        assert recorded_by_rule["phase_abandoned"].payload[
+            "triggering_event_ids"
+        ] == [abandon_ev.event_id]
+        assert recorded_by_rule["invariant_declared"].payload[
+            "triggering_event_ids"
+        ] == [invariant_ev.event_id]
+        assert recorded_by_rule["unattributable_commit"].payload[
+            "triggering_event_ids"
+        ] == [unattributed_ev.event_id]
+        # Each payload is exactly the documented shape -- no extra
+        # fields, no missing required fields.
+        for e in threshold_events:
+            assert set(e.payload.keys()) == {
+                "rule_id",
+                "triggering_event_ids",
+                "summary",
+            }
+            assert isinstance(e.payload["summary"], str)
+            assert e.payload["summary"]
+
+    def test_record_crossings_idempotent_across_storage_instances(
+        self, tmp_path: Path
+    ) -> None:
+        # Instance A: write, evaluate, record.
+        writer_a = Storage(tmp_path, writer_id="w-A")
+        for i in range(3):
+            writer_a.append(
+                event_type=EventType.COMMIT_LANDED,
+                payload=_commit_payload(
+                    attributed_phase_id=None, commit=f"a000{i:04d}"
+                ),
+                run_id="r",
+            )
+        events_a = writer_a.read_all()
+        crossings_a = evaluate_thresholds(
+            project(events_a), events_a, ThresholdParams()
+        )
+        first_emit = record_crossings(writer_a, crossings_a, run_id="r")
+        assert len(first_emit) == 3
+
+        # Drop instance A. Instance B opens the same dir as a
+        # completely fresh Storage object; its dedupe set must seed
+        # from disk.
+        writer_b = Storage(tmp_path, writer_id="w-B")
+        events_b = writer_b.read_all()
+        # Re-evaluating from disk produces the same 3 crossings (the
+        # threshold_crossed events the projector ignores; the rule-1
+        # triggers are still there).
+        crossings_b = evaluate_thresholds(
+            project(events_b), events_b, ThresholdParams()
+        )
+        # Filter to only unattributable_commit so the count is exact
+        # (writer-B has not added new events of its own).
+        unattributable = [
+            c
+            for c in crossings_b
+            if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
+        ]
+        assert len(unattributable) == 3
+
+        second_emit = record_crossings(writer_b, crossings_b, run_id="r")
+        assert second_emit == []
+
+        # Disk still has exactly 3 threshold_crossed events.
+        all_after = writer_b.read_all()
+        threshold_events = [
+            e for e in all_after if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 3
+
+    def test_record_crossings_payload_survives_jsonl(
+        self, tmp_path: Path
+    ) -> None:
+        # Construct a synthetic crossing whose summary contains
+        # unicode glyphs that are commonly mishandled by careless
+        # serializers (curly quotes, em-dashes, a non-BMP emoji,
+        # combining characters). The payload schema validates only
+        # rule_id / triggering_event_ids / summary, so those are the
+        # fields under test.
+        evidence_a = uuid7()
+        evidence_b = uuid7()
+        evidence_c = uuid7()
+        # Preserve a specific (non-sorted) input order to confirm
+        # ordering survives.
+        ordered_evidence = (evidence_b, evidence_a, evidence_c)
+        unicode_summary = (
+            "Phase 1 — “retry budget” exhausted; "
+            "\U0001f6a7 invariant added; combining: "
+            "négation"
+        )
+        crossing = ThresholdCrossing(
+            rule_id=ThresholdRuleId.PHASE_ABANDONED,
+            severity=ThresholdSeverity.TRIGGER_REAUTHOR,
+            evidence_event_ids=ordered_evidence,
+            recommended_action=ThresholdRecommendedAction.REAUTHOR_PHASE,
+            summary=unicode_summary,
+            detected_at_event_id=evidence_b,
+        )
+
+        writer = Storage(tmp_path, writer_id="w-1")
+        emitted = record_crossings(writer, [crossing], run_id="r")
+        assert len(emitted) == 1
+
+        reader = Storage(tmp_path, writer_id="reader")
+        events = reader.read_all()
+        threshold_events = [
+            e for e in events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 1
+        recorded = threshold_events[0]
+
+        # rule_id round-trips as the canonical enum value string.
+        assert recorded.payload["rule_id"] == "phase_abandoned"
+        # triggering_event_ids preserves order; stored as list per
+        # the JSON Schema.
+        assert recorded.payload["triggering_event_ids"] == list(
+            ordered_evidence
+        )
+        # The unicode summary survives JSONL serialization byte-for-
+        # byte: no escaping artifacts, no NFC/NFD normalization, no
+        # quote-style swap.
+        assert recorded.payload["summary"] == unicode_summary
+        # And the line on disk decodes back to the same string. This
+        # catches ASCII-only json.dumps default behavior that would
+        # produce \\u-escapes -- the resulting decode would still
+        # equal unicode_summary, so this check is implicit; the
+        # recorded.payload comparison above is the load-bearing
+        # assertion.
