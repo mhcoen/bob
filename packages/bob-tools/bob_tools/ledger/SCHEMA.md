@@ -312,6 +312,99 @@ The projector maintains one status per phase. The full enum:
 - `provisional` — reserved for Slice C/D async re-author. No Slice A
   event transitions to this.
 
+## PLAN.state.json
+
+The projected state. Built by `bob_tools.ledger.projector.project`
+from a sequence of events. One JSON object:
+
+```
+{
+  "schema_version":              "1.0",
+  "last_event_id":               <event_id of most recent applied event or null>,
+  "last_event_seq_per_writer":   {"<writer_id>": <highest applied seq>, ...},
+  "writer_ids_seen":             [<writer_id>, ...],
+  "phases":                      [<PhaseRecord>, ...],
+  "invariants":                  [<InvariantRecord>, ...],
+  "assumptions":                 [<AssumptionRecord>, ...],
+  "human_decisions":             [<HumanDecisionRecord>, ...],
+  "findings_unattributed":       [<event_id>, ...],
+  "orphaned_design_reasoning":   [<event_id>, ...],
+  "orphaned_design_reasoning_count": <int, mirrors list length>
+}
+```
+
+`last_event_seq_per_writer` records, per writer, the highest seq seen
+on a successfully-applied event. Slice A treats every event reaching
+`project()` as successfully applied — including the two reserved
+types whose semantics are deferred. Validation-rejected events never
+reach `project()` and so do not appear here. Per Codex's Slice A
+tightening (T1).
+
+`orphaned_design_reasoning_count` mirrors the list's length and is
+written explicitly so any CLI / diagnostic surface can report orphan
+volume without scanning the array. Per Codex's Slice A tightening
+(T2).
+
+### PhaseRecord
+
+```
+{
+  "id":                    "<stable phase id>",
+  "title":                 "<string>",
+  "goal":                  <string or null>,
+  "status":                <pending|active|completed|abandoned|superseded
+                           |split|merged|blocked|provisional>,
+  "created_event_id":      "<event_id of the phase_started>",
+  "lineage": {
+    "predecessors": [<phase_id>, ...],
+    "successors":   [<phase_id>, ...],
+    "supersession": null | {"superseded_by_id": <phase_id>, "reason": <string>}
+  },
+  "evidence_refs":          [<event_id>, ...],
+  "modification_history":   [<event_id>, ...],
+  "design_reasoning_refs":  [<event_id>, ...]
+}
+```
+
+`evidence_refs` collects `commit_landed`, `test_failed`,
+`finding_observed`, and `work_observed` events that name this phase.
+`modification_history` collects the lifecycle events that changed the
+phase's status: `phase_started`, `phase_completed`, `phase_abandoned`,
+`phase_blocked`, `phase_superseded`, `phase_split`, `phase_merged`.
+`design_reasoning_refs` collects `design_reasoning_recorded` events
+whose `linked_event_id` resolved to this phase at projection time.
+
+`status` becomes `active` lazily on the first attributed
+`commit_landed` or `work_observed`. `provisional` is reserved for
+Slice C/D async re-author and is never reached by Slice A events.
+
+### InvariantRecord, AssumptionRecord, HumanDecisionRecord
+
+Top-level records. Each carries a `<thing>_id`, the originating event
+id (`declared_event_id` / `decided_event_id`), and the payload-level
+fields. `AssumptionRecord` additionally carries `falsified`,
+`falsified_event_id`, and `falsified_summary` which an
+`assumption_falsified` event mutates in place.
+
+### Replay determinism
+
+`project(events)` is a pure function. The output is invariant under:
+
+- **Input order**: `project(shuffle(events)) == project(events)` for
+  any permutation. The projector sorts by `(event_id, writer_id,
+  seq)` internally.
+- **Timestamp shifts**: changing `ts` on every event does not affect
+  state. `ts` is for human audit only; the projector never reads it.
+- **Concurrent writers**: two writers with overlapping or skewed
+  timestamps project to the same state regardless of clock drift.
+- **Reserved events**: adding `threshold_crossed` or
+  `plan_reauthored` to a log changes only `last_event_id`,
+  `last_event_seq_per_writer`, and `writer_ids_seen`. All other
+  collections are unaffected at Slice A.
+
+These four invariants are encoded in `tests/test_projector.py`
+(`TestDeterminism`).
+
 ## Slice A boundary
 
 Slice A ships:
@@ -319,11 +412,11 @@ Slice A ships:
 - `events.py` — Event/EventType dataclasses, payload builders.
 - `schema.py` — JSON Schema, validator.
 - `_uuid7.py` — UUIDv7 generator.
+- `projector.py` — `PlanState` dataclasses + pure `project()` function.
+- `storage.py` — append-only writer, writer_id allocation, per-writer
+  seq persistence, atomic-append discipline.
 - This file.
+- `tests/test_events.py`, `tests/test_projector.py`, `tests/test_storage.py`.
 
-Slice A part 2 (next surface) ships:
-
-- `storage.py` — append-only writer, writer_id allocation, seq
-  persistence, atomic-append discipline.
-- `projector.py` — pure events -> PlanState replay.
-- `PlanState` schema (separate review surface before code lands).
+Slice B (next workstream) lands threshold rules on top of the
+existing schema. Reserved events become active there.
