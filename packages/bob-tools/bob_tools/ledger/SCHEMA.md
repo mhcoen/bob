@@ -405,6 +405,99 @@ fields. `AssumptionRecord` additionally carries `falsified`,
 These four invariants are encoded in `tests/test_projector.py`
 (`TestDeterminism`).
 
+## Threshold rules (Slice B)
+
+`bob_tools.ledger.thresholds.evaluate_thresholds` is a pure
+on-demand classifier. Given the projected `PlanState` plus the
+events that produced it, it returns a list of `ThresholdCrossing`
+records describing rules that have fired since an opaque caller-
+owned cursor.
+
+```
+crossings = evaluate_thresholds(
+    state, events, params, since=None
+)
+```
+
+`since` is a UUIDv7 event_id; only crossings with evidence newer
+than `since` are emitted. For count-based rules, the crossing
+fires only when the threshold is crossed AFTER `since` (count was
+below limit at `since` and is at or above limit now), not on a
+state where the count was already above the limit before the
+cursor.
+
+The evaluator is stateless. Different consumers (CLI, McLoop,
+human review, future Plan Steward) own their own cursors. No state
+is added to PLAN.state.json for thresholds at Slice B; the
+crossings list is computed each call.
+
+### ThresholdCrossing
+
+```
+{
+  "rule_id":              <enum: see below>,
+  "severity":             <annotate | trigger_reauthor>,
+  "evidence_event_ids":   [<event_id>, ...],
+  "recommended_action":   <log_only | reauthor_phase | reauthor_plan>,
+  "summary":              "<human-readable>",
+  "detected_at_event_id": "<event_id of the triggering event>"
+}
+```
+
+### Rules shipped in Slice B
+
+All seven fire at `severity=trigger_reauthor`. `severity=annotate`
+is reserved for future rules.
+
+| rule_id                       | recommended_action | trigger                                                   |
+| ----------------------------- | ------------------ | --------------------------------------------------------- |
+| `unattributable_commit`       | `reauthor_plan`    | `commit_landed` with `attributed_phase_id == null`        |
+| `phase_abandoned`             | `reauthor_phase`   | one `phase_abandoned` event                               |
+| `phase_superseded`            | `reauthor_phase`   | one `phase_superseded` event                              |
+| `phase_topology_changed`      | `reauthor_phase`   | one `phase_split` or `phase_merged` event                 |
+| `invariant_declared`          | `reauthor_plan`    | one `invariant_declared` event                            |
+| `assumption_falsified`        | `reauthor_phase`   | one `assumption_falsified` event                          |
+| `exploratory_count_exceeded`  | `reauthor_plan`    | count of unattributed non-plan-artifact `commit_landed` reaches `exploratory_commit_limit` (default 5) |
+
+Rule 7 ("exploratory commit") explicitly excludes
+`commit_landed` events whose `change_class == plan_artifact` and
+those with a non-null `attributed_phase_id`. Plan-artifact commits
+are the plan being refreshed, not exploratory work that escaped it.
+
+### ThresholdParams
+
+```
+{
+  "exploratory_commit_limit": <int, default 5>,
+  "enabled_rules":            <set[rule_id], default ALL_RULES>
+}
+```
+
+A rule absent from `enabled_rules` is skipped entirely. Other
+rules continue to evaluate normally.
+
+### Determinism contract
+
+The evaluator inherits the projector's contract:
+
+- Same crossings regardless of input event order. Sort key:
+  `event_id`.
+- Independent of `ts`. The evaluator never reads it.
+- Shuffle-invariant on the projector composition:
+  `evaluate_thresholds(project(shuffle), shuffle)` ==
+  `evaluate_thresholds(project(sorted), sorted)`.
+- Returned list is sorted by `(detected_at_event_id, rule_id)`.
+
+These four invariants are encoded in
+`tests/test_thresholds.py::TestDeterminism`.
+
+### What Slice B does NOT do
+
+- Does NOT write back to the ledger. `record_crossings(storage,
+  crossings)` lands later (Slice B part 2 or Slice C).
+- Does NOT auto-pause McLoop or auto-trigger re-authoring.
+- Does NOT mutate PlanState or add fields to PLAN.state.json.
+
 ## Slice A boundary
 
 Slice A ships:
