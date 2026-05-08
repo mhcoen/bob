@@ -337,8 +337,47 @@ def main() -> None:
             default=None,
             help="Product URL to duplicate (e.g. https://numi.app)",
         )
+        council_group = parser.add_mutually_exclusive_group()
+        council_group.add_argument(
+            "--use-council",
+            dest="use_council",
+            action="store_true",
+            default=None,
+            help=(
+                "Author plans via Orchestra's council_four workflow "
+                "(framer + 4 proposers + synthesizer). Roughly 6 LLM "
+                "calls per phase plan; 3-4x wall-clock vs the legacy "
+                "single-actor mode."
+            ),
+        )
+        council_group.add_argument(
+            "--no-council",
+            dest="use_council",
+            action="store_false",
+            help=(
+                "Force the legacy single-actor plan-author path even "
+                "when DUPLO_USE_COUNCIL is set in the environment."
+            ),
+        )
+        parser.add_argument(
+            "--council-config",
+            dest="council_config",
+            default=None,
+            metavar="PATH",
+            help=(
+                "Path to an alternate .orchestra/config.json used "
+                "only by the council path. Implies --use-council."
+            ),
+        )
         args = parser.parse_args()
         args.command = None
+        if args.council_config is not None and args.use_council is None:
+            args.use_council = True
+        from duplo import council as _council
+        if args.use_council is not None:
+            _council.set_enabled(args.use_council)
+        if args.council_config is not None:
+            _council.set_config_path(args.council_config)
 
     def _handle_signal(signum, frame):
         print("\nInterrupted.", flush=True)

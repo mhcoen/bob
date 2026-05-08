@@ -6,6 +6,7 @@ import dataclasses
 import re
 from pathlib import Path
 
+from duplo import council
 from duplo.claude_cli import query
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
@@ -421,7 +422,14 @@ Generate the PLAN.md now.
 """
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
-    raw = _strip_fences(query(prompt, system=system))
+    if council.is_enabled():
+        raw = _strip_fences(
+            council.author_phase_plan(
+                prompt=prompt, system=system, phase_num=phase_num
+            )
+        )
+    else:
+        raw = _strip_fences(query(prompt, system=system))
     with_heading = _ensure_h1_heading(raw, project_name, phase_num, phase_title)
     return _strip_trailing_commentary(with_heading)
 

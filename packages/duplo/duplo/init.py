@@ -156,14 +156,56 @@ def run_init(args: argparse.Namespace) -> None:
     from_description = getattr(args, "from_description", None)
     if url is None and from_description is None:
         _run_no_args(args)
-        return
-    if url is not None and from_description is None:
+    elif url is not None and from_description is None:
         _run_url(args, url)
-        return
-    if url is None and from_description is not None:
+    elif url is None and from_description is not None:
         _run_description(args, from_description)
+    else:
+        _run_combined(args, url, from_description)
+    _write_orchestra_council_config(Path.cwd())
+
+
+_ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
+    "roles": {
+        "framer": {"adapter": "claude_code_text", "model": "haiku"},
+        "proposer_code": {"adapter": "claude_code_text", "model": "sonnet"},
+        "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
+        "proposer_kimi": {
+            "adapter": "claude_code_text_kimi",
+            "model": "kimi-k2.6",
+        },
+        "proposer_deepseek": {
+            "adapter": "claude_code_text_deepseek",
+            "model": "deepseek-v4-pro",
+        },
+        "synthesizer": {"adapter": "claude_code_text", "model": "opus"},
+    },
+    "workflows": {"council_four": {"pattern": "council_four"}},
+}
+
+
+def _write_orchestra_council_config(cwd: Path) -> None:
+    """Write ``.orchestra/config.json`` with the council_four bindings.
+
+    Idempotent: leaves an existing config file untouched (users may
+    have customized their bindings). Required by Duplo's
+    ``--use-council`` path so the project's council_four workflow
+    runs against the recommended five-distinct-actor configuration
+    out of the box. The same defaults are encoded as a hardcoded
+    fallback in ``duplo.council`` for projects that pre-date this
+    template.
+    """
+    import json
+
+    orchestra_dir = cwd / ".orchestra"
+    config_path = orchestra_dir / "config.json"
+    if config_path.exists():
         return
-    _run_combined(args, url, from_description)
+    orchestra_dir.mkdir(exist_ok=True)
+    config_path.write_text(
+        json.dumps(_ORCHESTRA_COUNCIL_CONFIG, indent=2, sort_keys=True) + "\n"
+    )
+    print("Created .orchestra/config.json (council_four defaults).")
 
 
 def _run_no_args(args: argparse.Namespace) -> None:
