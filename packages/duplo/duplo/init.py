@@ -173,7 +173,7 @@ def run_init(args: argparse.Namespace) -> None:
 _ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
     "roles": {
         "framer": {"adapter": "claude_code_text", "model": "haiku"},
-        "proposer_code": {"adapter": "claude_code_text", "model": "sonnet"},
+        "proposer_code": {"adapter": "claude_code_text", "model": "opus"},
         "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
         "proposer_kimi": {
             "adapter": "claude_code_text_kimi",
@@ -195,10 +195,14 @@ def _write_orchestra_council_config(cwd: Path) -> None:
     Idempotent: leaves an existing config file untouched (users may
     have customized their bindings). Required by Duplo's
     ``--use-council`` path so the project's council_four workflow
-    runs against the recommended five-distinct-actor configuration
-    out of the box. The same defaults are encoded as a hardcoded
-    fallback in ``duplo.council`` for projects that pre-date this
-    template.
+    runs against the recommended six-role binding configuration out
+    of the box: framer + four proposers (each on a distinct
+    (adapter, model) tuple) + synthesizer. The synthesizer shares
+    its model string with proposer_code; that is permitted by
+    Orchestra's ``_validate_council_four`` (distinct role bindings,
+    not distinct model strings). The same defaults are encoded as a
+    hardcoded fallback in ``duplo.council`` for projects that
+    pre-date this template.
     """
     import json
 

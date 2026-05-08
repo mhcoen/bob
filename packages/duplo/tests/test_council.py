@@ -357,24 +357,33 @@ class TestConfigResolution:
         assert "council_four" in cfg.workflows
         assert cfg.workflows["council_four"].pattern == "council_four"
 
-    def test_fallback_synthesizer_distinct_from_proposers(self, tmp_path):
+    def test_fallback_proposers_pairwise_distinct(self, tmp_path):
+        """Cross-model diversity at the proposer layer is what the
+        council fan-out is for; Orchestra's ``_validate_council_four``
+        still enforces it. The synthesizer is allowed to share a model
+        string with a proposer (see council-actor-bindings.md in the
+        Orchestra tree); that constraint is gone.
+        """
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
             council.author_phase_plan(
                 prompt="p", system="s", phase_num=1, project_dir=tmp_path
             )
         cfg = captured["args"][2]
-        synth = cfg.roles["synthesizer"]
-        for proposer in (
+        proposers = (
             "proposer_code",
             "proposer_codex",
             "proposer_kimi",
             "proposer_deepseek",
-        ):
-            other = cfg.roles[proposer]
-            assert (synth.adapter, synth.model) != (other.adapter, other.model), (
-                f"synthesizer collides with {proposer}"
+        )
+        seen: dict[tuple[str, str | None], str] = {}
+        for role in proposers:
+            b = cfg.roles[role]
+            key = (b.adapter, b.model)
+            assert key not in seen, (
+                f"proposer {role} collides with {seen[key]} on {key}"
             )
+            seen[key] = role
 
     def test_uses_project_config_when_six_council_roles_present(
         self, tmp_path

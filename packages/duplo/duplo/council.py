@@ -22,14 +22,19 @@ Hardcoded fallback role bindings, used when the project has no
 ``.orchestra/config.json`` (or one without the council roles):
 
   framer:             claude_code_text          (haiku)
-  proposer_code:      claude_code_text          (sonnet)
+  proposer_code:      claude_code_text          (opus)
   proposer_codex:     codex_text                (gpt-5.5)
   proposer_kimi:      claude_code_text_kimi     (kimi-k2.6)
   proposer_deepseek:  claude_code_text_deepseek (deepseek-v4-pro)
   synthesizer:        claude_code_text          (opus)
 
-Synthesizer differs from every proposer (refuse-on-four invariant
-in Orchestra's ``_validate_council_four``).
+The four proposers resolve to pairwise distinct (adapter, model)
+tuples (the council fan-out value). The synthesizer shares a model
+string with proposer_code; this is permitted by Orchestra's
+``_validate_council_four`` -- distinct ROLE BINDINGS, not distinct
+MODEL STRINGS, are the rule. See
+``design/council-actor-bindings.md`` in the Orchestra tree for the
+rationale.
 
 Audit layout. After a successful run, Duplo writes:
 
@@ -72,7 +77,7 @@ _CONFIG_PATH_ENV = "DUPLO_COUNCIL_CONFIG"
 
 _FALLBACK_ROLE_BINDINGS: dict[str, dict[str, Any]] = {
     "framer": {"adapter": "claude_code_text", "model": "haiku"},
-    "proposer_code": {"adapter": "claude_code_text", "model": "sonnet"},
+    "proposer_code": {"adapter": "claude_code_text", "model": "opus"},
     "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
     "proposer_kimi": {
         "adapter": "claude_code_text_kimi",
