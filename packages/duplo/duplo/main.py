@@ -276,6 +276,100 @@ def main() -> None:
         diagnostics_print_summary()
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "reauthor":
+        from duplo.reauthor import (
+            LineageValidationError,
+            ReauthorError,
+            default_ledger_dir,
+            reauthor_plan,
+        )
+
+        reauthor_parser = argparse.ArgumentParser(
+            prog="duplo reauthor",
+            description=(
+                "Re-author PLAN.md against the Plan Ledger when a "
+                "threshold crossing warrants reframing."
+            ),
+        )
+        reauthor_parser.add_argument(
+            "--plan",
+            dest="plan",
+            default="PLAN.md",
+            metavar="PATH",
+            help="Path to existing PLAN.md (default: ./PLAN.md).",
+        )
+        reauthor_parser.add_argument(
+            "--ledger-dir",
+            dest="ledger_dir",
+            default=None,
+            metavar="PATH",
+            help=(
+                "Path to the Plan Ledger directory "
+                "(default: ./.duplo/ledger)."
+            ),
+        )
+        reauthor_parser.add_argument(
+            "--crossing-event-id",
+            dest="crossing_event_id",
+            required=True,
+            metavar="EVENT_ID",
+            help=(
+                "event_id of the threshold_crossed event that "
+                "triggered this re-author."
+            ),
+        )
+        reauthor_parser.add_argument(
+            "--out",
+            dest="out",
+            default=None,
+            metavar="PATH",
+            help="Write the new plan to PATH (default: overwrite --plan).",
+        )
+        reauthor_parser.add_argument(
+            "--council-config",
+            dest="council_config",
+            default=None,
+            metavar="PATH",
+            help=(
+                "Optional .orchestra/config.json forwarded to the "
+                "council invocation."
+            ),
+        )
+        reauthor_args = reauthor_parser.parse_args(sys.argv[2:])
+
+        plan_path = Path(reauthor_args.plan)
+        ledger_dir = (
+            Path(reauthor_args.ledger_dir)
+            if reauthor_args.ledger_dir
+            else default_ledger_dir(Path.cwd())
+        )
+        out_path = (
+            Path(reauthor_args.out) if reauthor_args.out else None
+        )
+        council_config_path = (
+            Path(reauthor_args.council_config)
+            if reauthor_args.council_config
+            else None
+        )
+
+        try:
+            result = reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=reauthor_args.crossing_event_id,
+                out_path=out_path,
+                council_config_path=council_config_path,
+            )
+        except (ReauthorError, LineageValidationError) as exc:
+            print(f"reauthor failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Wrote {result.new_plan_path}")
+        print(f"Lifecycle events emitted: {len(result.lifecycle_event_ids)}")
+        print(f"plan_reauthored event_id: {result.plan_reauthored_event_id}")
+        diagnostics_print_summary()
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] in ("fix", "investigate"):
         subcmd = sys.argv[1]
         fix_parser = argparse.ArgumentParser(
