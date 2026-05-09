@@ -139,11 +139,17 @@ _FENCE_RE = re.compile(
 
 _H1_HEADING_RE = re.compile(r"^# \S")
 
-# Matches any "# <prefix> — Phase <N>: <rest>" H1 heading, regardless of
-# project name. Used by _ensure_h1_heading to strip model-authored phase
-# H1s before Duplo renders the canonical heading, and by
-# validate_h1_ordinal_sequence to check the on-disk PLAN.md.
-_PHASE_H1_RE = re.compile(r"^# .+? — Phase (\d+): .+$")
+# Matches any H1 line whose text contains "Phase <N>:" regardless of
+# the surrounding separator (em-dash, en-dash, hyphen-minus, or none),
+# trailing whitespace, or capitalization. Used by _ensure_h1_heading to
+# strip model-authored phase H1s before Duplo renders the canonical
+# heading, and by validate_h1_ordinal_sequence to extract ordinals
+# from the on-disk PLAN.md.
+#
+# Be permissive on the strip; be exact on the render. False positives
+# on strip are fine (Duplo renders the canonical H1 anyway); false
+# negatives leave duplicate H1s in PLAN.md.
+_PHASE_H1_RE = re.compile(r"^# .*?\bPhase\s+(\d+)\s*:", re.IGNORECASE)
 
 
 def _strip_fences(text: str) -> str:

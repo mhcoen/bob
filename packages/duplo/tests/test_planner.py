@@ -53,11 +53,13 @@ _SAMPLE_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal working app."
 
 class TestGeneratePhasePlan:
     def test_returns_string(self):
-        """generate_phase_plan returns a string. Duplo prepends a
-        canonical H1 from its roadmap state regardless of what the
-        synthesizer wrote, so the return is no longer byte-identical
-        to the synthesizer's body — it's the canonical envelope plus
-        the body content."""
+        """generate_phase_plan returns a string. Duplo strips any
+        ``# ... Phase N: ...`` line from the synthesizer's body
+        (broader strip per clarification #2: matches any H1 with
+        ``Phase \\d+:`` regardless of separator/case) and prepends
+        the canonical envelope. _SAMPLE_PLAN's ``# Phase 1: Core
+        Auth`` matches the strip, so only the non-H1 body content
+        survives, plus Duplo's canonical H1 on top."""
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
@@ -65,10 +67,12 @@ class TestGeneratePhasePlan:
                 _sample_prefs(),
             )
         assert isinstance(result, str)
-        # Sample plan content survives in the result.
-        assert "Core Auth" in result
+        # Non-H1 body content survives in the result.
         assert "## Objective" in result
         assert "Minimal working app" in result
+        # The synthesizer's stray ``# Phase 1: Core Auth`` H1 was
+        # stripped (broader strip applies).
+        assert "Core Auth" not in result
         # Duplo's canonical H1 is at the top.
         assert result.startswith("# ")
         assert " — Phase " in result.split("\n", 1)[0]
@@ -487,6 +491,86 @@ class TestEnsureH1Heading:
         assert "- [ ] Real task" in result
         assert "Stray one" not in result
         assert "Stray two" not in result
+
+    # ----------- Broader strip regex (clarification #2) -----------
+
+    def test_strips_phase_h1_with_hyphen_separator(self):
+        """Synthesizer uses ASCII hyphen-minus instead of em-dash."""
+        body = "# project - Phase 1: Hyphen sep\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "Hyphen sep" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_with_en_dash(self):
+        """Synthesizer uses en-dash instead of em-dash."""
+        body = "# project – Phase 1: En dash\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "En dash" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_without_separator(self):
+        """Synthesizer omits the separator entirely."""
+        body = "# project Phase 1: No sep\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "No sep" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_without_project_prefix(self):
+        """Synthesizer drops the project name and writes a bare
+        ``# Phase N: ...`` heading."""
+        body = "# Phase 1: Bare phase\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "Bare phase" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_with_lowercase_phase(self):
+        """Synthesizer writes ``phase`` in lowercase. Strip is
+        case-insensitive."""
+        body = "# project — phase 1: Lowercase\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "Lowercase" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_with_uppercase_phase(self):
+        """All-caps PHASE."""
+        body = "# project — PHASE 1: Uppercase\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "Uppercase" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_strips_phase_h1_with_extra_whitespace(self):
+        """Extra whitespace around the digit and colon."""
+        body = "# project — Phase   1   :   Whitespace\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "Whitespace" not in result
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_does_not_strip_h2_phase_headings(self):
+        """The inner ``## Phase phase_NNN:`` semantic header MUST
+        survive the strip; it's the phase_id boundary that mcloop's
+        Slice C parser anchors on. Strip is anchored at ``# ``
+        (single hash), not ``## ``."""
+        body = (
+            "## Phase phase_001: Inner header\n"
+            "\n"
+            "- [ ] Task\n"
+        )
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        assert "## Phase phase_001:" in result, (
+            "the inner Slice C semantic header must be preserved"
+        )
+        assert result.startswith("# Real — Phase 3: Real Title")
+
+    def test_does_not_strip_unrelated_h1_text(self):
+        """An H1 line that mentions 'phase' but doesn't match the
+        ``Phase \\d+:`` shape (e.g., 'phases of work') is content,
+        not a phase H1, and must not be stripped."""
+        body = "# Phases of work overview\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        # The non-phase H1 stays in the body (with Duplo's canonical
+        # prepended on top).
+        assert "Phases of work overview" in result
+        assert result.startswith("# Real — Phase 3: Real Title")
 
     def test_prepends_when_no_heading(self):
         result = _ensure_h1_heading("plain text\n", "Widget", 2, "Polish")
