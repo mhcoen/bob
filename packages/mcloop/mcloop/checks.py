@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mcloop.test_runner import (
+    NoTestRunnerAvailableError,
+    resolve_test_command,
+)
+
 # Ruff codes we consider safely salvageable by appending `# noqa: CODE`
 # to the offending line. These are purely stylistic or cosmetic checks
 # that should never block a long-running batch.
@@ -354,7 +359,14 @@ def _detect_commands(
             commands.append("ruff check .")
             commands.append("ruff format --check .")
         if "pytest" in toml_text:
-            commands.append("pytest")
+            try:
+                commands.append(resolve_test_command(project_dir))
+            except NoTestRunnerAvailableError:
+                # Preserve legacy behavior when no fallback resolves:
+                # appending bare "pytest" lets the subsequent
+                # subprocess fail with a clear "command not found"
+                # rather than swallowing the project's intent here.
+                commands.append("pytest")
         if "[tool.mypy]" in toml_text:
             has_mypy_section = True
     if has_mypy_section or (project_dir / "mypy.ini").exists():
