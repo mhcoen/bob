@@ -71,6 +71,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from duplo.canonical_consistency import (
+    validate_spec_pyproject_runsh_consistency,
+)
+
 _ENABLE_ENV = "DUPLO_USE_COUNCIL"
 _DISABLE_ENV = "DUPLO_NO_COUNCIL"
 _CONFIG_PATH_ENV = "DUPLO_COUNCIL_CONFIG"
@@ -445,6 +449,17 @@ def author_phase_plan(
     artifact, or import-time failures.
     """
     project_dir = (project_dir or Path.cwd()).resolve()
+
+    # Pre-flight: SPEC.md, pyproject.toml, and run.sh must agree on
+    # the project's script and package identifiers. Drift between
+    # these declarations otherwise gets papered over by the
+    # synthesizer at plan-authoring time, producing tasks that
+    # invoke a script under a different name than SPEC promises or
+    # that import a package the pyproject does not declare. Same
+    # fail-closed shape as Slice C lineage validation; the council
+    # is not invoked when consistency fails.
+    validate_spec_pyproject_runsh_consistency(project_dir)
+
     _print_council_notice()
 
     try:
