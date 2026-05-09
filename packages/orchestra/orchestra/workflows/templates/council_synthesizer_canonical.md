@@ -123,6 +123,29 @@ Phases may carry section headers, prose explanation, or
 sub-bullets for context, but at least one `- [ ]` task line per
 phase is mandatory.
 
+Toolchain discipline.
+
+Before writing tasks that invoke command-line tools (pytest,
+ruff, mypy, black, isort, npm, cargo, etc.), verify the tool is
+declared in the target project's pyproject.toml under
+`[project.dependencies]` or `[project.optional-dependencies].dev`
+(or the language-equivalent manifest entry). If the tool is
+referenced but not declared, the first task of your plan must
+declare it AND install it (e.g., add the package to
+`[project.optional-dependencies].dev` and run
+`pip install -e '.[dev]'`). Do not write tasks that invoke
+undeclared tools.
+
+mcloop runs a pre-flight validator that fails the run when
+declared deps are missing from the project venv. The synthesized
+plan owns the inverse: every tool the plan invokes must appear in
+the project's declared dependencies, so the validator and the
+plan agree on what tools the project knows about. A plan that
+invokes `pytest -n auto` without declaring `pytest-xdist` is the
+canonical failure mode this discipline prevents: the first task
+to run pytest fails with `unrecognized arguments: -n` and retries
+cannot fix it (the venv contents do not change between retries).
+
 Place the verdict JSON in a fenced ```json ... ``` code block at
 the END of your response, after the plan body. The object
 inside that fence must conform to this shape exactly:

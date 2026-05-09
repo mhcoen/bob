@@ -298,6 +298,31 @@ def test_canonical_synthesizer_template_uses_required_phase_id() -> None:
     assert "use phase_001, phase_002, etc. for first-time ids" not in body
 
 
+def test_canonical_synthesizer_template_requires_toolchain_discipline() -> None:
+    """The canonical synthesizer template MUST carry a toolchain-
+    discipline section instructing the synthesizer to verify any
+    command-line tool it invokes is declared in the target
+    project's pyproject.toml. Pairs with mcloop's pre-flight
+    dependency validator: mcloop fails the run when declared deps
+    are missing; the synthesized plan must not invoke tools that
+    are not declared. Pinned so a future template edit cannot
+    silently drop the discipline.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text().lower()
+    assert "toolchain discipline" in body
+    assert "[project.optional-dependencies].dev" in body
+    assert "[project.dependencies]" in body
+    assert "undeclared tools" in body
+    assert "pytest-xdist" in body  # the canonical failure-mode example
+
+
 def test_canonical_proposer_template_uses_required_phase_id() -> None:
     """The shared proposer template instructs proposers to use
     required_phase_id verbatim when present in the brief. Reauthor
