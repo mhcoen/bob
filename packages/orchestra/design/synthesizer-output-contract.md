@@ -101,6 +101,58 @@ to write events to the ledger, to compare against criteria, or to
 trigger follow-up workflow steps. Encode those parts in JSON;
 leave the rest in markdown.
 
+## Workflow boundary, not prose-instruction layer
+
+The Slice D smoke surfaced a related lesson on the same
+structural pattern. The original `council_four` workflow served
+both Duplo's canonical-mode plan authoring (output consumed by
+McLoop's task-driver, which expects checklist tasks under phase
+headers) AND Duplo's re-author mode (output consumed by Slice C's
+lineage validator, which expects narrative-prose phase bodies
+plus a JSON lineage sidecar). One workflow, one synthesizer
+template, two distinct consumer contracts inferred from "is the
+council brief's `ledger_slice` empty?"
+
+The canonical-mode smoke produced four phases of narrative prose
+with zero `- [ ]` task lines. McLoop saw a plan it could not run.
+No validator existed at the canonical-output boundary; the
+synthesizer's template could correctly satisfy the re-author
+contract while silently violating the canonical contract.
+
+The fix split the workflow at the boundary visible to the
+runtime, not at the prose layer:
+
+- `council_four_canonical.orc` + `council_synthesizer_canonical.md`
+  + `council_synthesis_verdict_canonical.json`. The canonical
+  template instructs McLoop-executable output: phase headers in
+  Slice C form, per-phase `- [ ]` checklist tasks. The schema
+  has no `lineage` field. Duplo's `author_phase_plan` invokes
+  this name and runs a deterministic markdown-format validator
+  on the synthesized body before returning.
+- `council_four_reauthor.orc` + `council_synthesizer_reauthor.md`
+  + `council_synthesis_verdict_reauthor.json`. The re-author
+  template is the previous (Slice C lineage-discipline)
+  template. The schema keeps the `lineage` field. Duplo's
+  `_invoke_council_for_reauthor` invokes this name and runs the
+  Slice C lineage validator.
+- The merged `council_four` name persists as a deprecated alias
+  for one release with a `DeprecationWarning`; new callers must
+  pick the explicit name.
+
+Generalization: when one synthesizer state would serve multiple
+consumer contracts, split the workflow rather than branch the
+prompt. Single-workflow-with-mode-detection is the anti-pattern;
+explicit workflow-per-contract is the structural enforcement.
+The mode boundary is then visible at four layers (workflow file,
+template path, schema path, caller name) rather than implicit in
+"how did the synthesizer guess the contract from the brief
+shape?"
+
+References: 34d5509 / 044cafb / d528011 (the prior synthesizer-
+output failures that established the JSON-vs-markdown lesson),
+plus the Slice D smoke that surfaced the workflow-boundary
+lesson.
+
 ## References
 
 The F1 / F2 / T1+T2 / F2.5a sequence in the orchestra Phase 2

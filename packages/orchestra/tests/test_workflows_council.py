@@ -240,6 +240,124 @@ def test_council_schema_requires_structured_arrays() -> None:
     assert set(diss["required"]) == {"topic", "positions"}
 
 
+def test_council_four_canonical_workflow_loads() -> None:
+    """The canonical-mode workflow split (Slice D smoke surfaced
+    that mixing canonical and reauthor under one workflow leaks
+    template assumptions across modes; see
+    orchestra/design/synthesizer-output-contract.md).
+    """
+    path = resolve_workflow_path("council_four_canonical", project_dir=None)
+    workflow = load_workflow(path, _pre_load_registry())
+    assert workflow.name == "council_four_canonical"
+    verdict = next(a for a in workflow.artifacts if a.name == "judge_verdict")
+    assert verdict.schema_path is not None
+    assert verdict.schema_path.endswith(
+        "council_synthesis_verdict_canonical.json"
+    )
+
+
+def test_council_four_reauthor_workflow_loads() -> None:
+    path = resolve_workflow_path("council_four_reauthor", project_dir=None)
+    workflow = load_workflow(path, _pre_load_registry())
+    assert workflow.name == "council_four_reauthor"
+    verdict = next(a for a in workflow.artifacts if a.name == "judge_verdict")
+    assert verdict.schema_path is not None
+    assert verdict.schema_path.endswith(
+        "council_synthesis_verdict_reauthor.json"
+    )
+
+
+def test_canonical_schema_omits_lineage() -> None:
+    """Canonical-mode plan authoring is fresh authoring; there is no
+    prior plan to track lineage against. The canonical schema must
+    NOT carry a lineage field; lineage belongs to the re-author
+    schema only.
+    """
+    path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "schemas"
+        / "council_synthesis_verdict_canonical.json"
+    )
+    schema = json.loads(path.read_text())
+    assert "lineage" not in schema["properties"]
+    assert set(schema["required"]) >= {
+        "decision",
+        "feedback",
+        "agreements",
+        "disagreements",
+        "rejected_options",
+    }
+
+
+def test_reauthor_schema_keeps_lineage() -> None:
+    path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "schemas"
+        / "council_synthesis_verdict_reauthor.json"
+    )
+    schema = json.loads(path.read_text())
+    assert "lineage" in schema["properties"]
+    lineage = schema["properties"]["lineage"]
+    assert lineage["required"] == ["phases"]
+
+
+def test_council_synthesizer_canonical_template_specifies_checklist_format() -> None:
+    """The canonical synthesizer template MUST instruct McLoop-
+    executable output (- [ ] task lines per phase). The Slice D
+    smoke against the merged template produced narrative-prose
+    plans McLoop could not run; this test pins the regression so a
+    future template edit cannot drop the contract.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text()
+    assert "- [ ]" in body
+    assert "checklist" in body.lower()
+    assert "McLoop-executable" in body
+
+
+def test_council_four_alias_deprecated() -> None:
+    """The merged council_four name remains as an alias for one
+    release with a DeprecationWarning. The workflow file is still
+    loadable so existing callers do not break; new callers must
+    use the canonical or reauthor name.
+    """
+    import warnings
+
+    from orchestra.api import run_workflow
+
+    # The DeprecationWarning fires unconditionally inside
+    # run_workflow when name == "council_four"; triggering the
+    # full execution path is expensive, so we patch in a stub
+    # config and intercept after the warning emits but before
+    # the workflow body runs. The simplest reliable assertion is
+    # to call run_workflow with a config that will fail late,
+    # catch the inevitable error, and check the warning fired.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        try:
+            run_workflow(
+                "council_four",
+                inputs={},
+                config={"workflows": {"council_four": {"pattern": "council_four"}}},
+            )
+        except Exception:  # noqa: BLE001 -- we expect downstream failure
+            pass
+    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert any("council_four" in str(w.message) for w in deprecations), (
+        f"expected DeprecationWarning naming council_four, got {[str(w.message) for w in caught]}"
+    )
+
+
 def test_council_schema_lineage_shape() -> None:
     """The verdict schema gains a lineage object whose phases[] entries
     carry a strict action enum and an optional from list.

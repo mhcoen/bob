@@ -1029,7 +1029,13 @@ _WORKFLOW_RULES: dict[
 ] = {
     "iterate_until_acceptable": _validate_iterate_until_acceptable,
     "propose_review_judge_implement": _validate_prji,
+    # The canonical / reauthor split landed alongside Slice D's
+    # smoke. The same role-binding rule applies to all three names;
+    # the old council_four entry is kept as the deprecated alias.
+    # See orchestra/design/synthesizer-output-contract.md.
     "council_four": _validate_council_four,
+    "council_four_canonical": _validate_council_four,
+    "council_four_reauthor": _validate_council_four,
 }
 
 
@@ -1156,6 +1162,19 @@ def run_workflow(
     installs its own callback up front (``stderr_reporter`` by
     default, ``silent_reporter`` for ``--quiet``).
     """
+    if name == "council_four":
+        import warnings
+
+        warnings.warn(
+            "workflow name 'council_four' is deprecated; the workflow "
+            "split into 'council_four_canonical' (McLoop-executable plan "
+            "authoring) and 'council_four_reauthor' (Slice C lineage-"
+            "preserving re-author). The old name continues to work for "
+            "this release but will be removed in a follow-up. See "
+            "orchestra/design/synthesizer-output-contract.md.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if isinstance(config, dict):
         cfg = OrchestraConfig.from_dict(config)
     else:
