@@ -139,6 +139,12 @@ _FENCE_RE = re.compile(
 
 _H1_HEADING_RE = re.compile(r"^# \S")
 
+# Matches any "# <prefix> — Phase <N>: <rest>" H1 heading, regardless of
+# project name. Used by _ensure_h1_heading to strip model-authored phase
+# H1s before Duplo renders the canonical heading, and by
+# validate_h1_ordinal_sequence to check the on-disk PLAN.md.
+_PHASE_H1_RE = re.compile(r"^# .+? — Phase (\d+): .+$")
+
 
 def _strip_fences(text: str) -> str:
     """Remove outer triple-backtick fences if the LLM wrapped the plan."""
@@ -180,27 +186,100 @@ def _ensure_h1_heading(
     phase_num: int,
     phase_title: str,
 ) -> str:
-    """Ensure *content* starts with a proper H1 markdown heading.
+    """Strip-and-render the H1 phase heading.
 
-    Scans *content* for the first line that begins with ``# `` followed by
-    heading text and discards everything before it. This strips LLM
-    meta-commentary (e.g. "Here is the plan:") and separator lines (``---``)
-    that some models emit before the real phase heading.
+    Phase ordinal in the outer ``# <project_name> — Phase N: <title>``
+    H1 is execution metadata that belongs to Duplo's roadmap state,
+    not to the synthesizer. Earlier versions of this function trusted
+    whatever H1 the synthesizer wrote (or prepended one only when
+    none was present). That kept the synthesizer in the ownership
+    loop for phase ordinals: parallel council invocations have no
+    shared counter, the synthesizer guesses the ordinal, gets it
+    wrong (duplicates, gaps, off-by-one), the resulting PLAN.md
+    fails mcloop's parser.
 
-    If no H1 heading is found, prepends
-    ``# <project_name> — Phase <num>: <title>`` so mcloop's phase parser can
-    reliably locate the phase heading at the top of PLAN.md.
+    The durable rule (codex's framing): model emits phase content;
+    Duplo wraps it in the deterministic PLAN.md envelope. So this
+    function:
+
+      1. Strips any leading non-H1 commentary (preambles like "Here
+         is the plan:" or stray "---" separators that some models
+         emit above the heading).
+      2. Strips ALL model-authored ``# <something> — Phase N: ...``
+         H1 lines from the body. The synthesizer may have written
+         one, several, or none; all are removed.
+      3. Renders the canonical H1 from Duplo's roadmap state
+         (``project_name``, ``phase_num``, ``phase_title``) and
+         prepends it to the cleaned body.
+
+    Even if the synthesizer ignores its template instructions and
+    fabricates an H1, the strip-and-render step overwrites it.
+    Model-authored phase ordinals cannot escape Duplo's control.
     """
     lines = content.splitlines(keepends=True)
+
+    # Step 1: strip leading non-H1 commentary up to the first H1.
+    first_h1_idx: int | None = None
     for i, line in enumerate(lines):
         if _H1_HEADING_RE.match(line):
-            return "".join(lines[i:])
+            first_h1_idx = i
+            break
+    if first_h1_idx is not None:
+        lines = lines[first_h1_idx:]
+
+    # Step 2: drop every "# X — Phase N: ..." H1 line from the body.
+    cleaned: list[str] = []
+    for line in lines:
+        if _PHASE_H1_RE.match(line.rstrip("\n")):
+            continue
+        cleaned.append(line)
+
+    body = "".join(cleaned).lstrip()
+
+    # Step 3: render the canonical H1 from Duplo's roadmap state.
     app_name = project_name or "App"
     heading = f"# {app_name} — Phase {phase_num}: {phase_title}"
-    stripped = content.lstrip()
-    if stripped:
-        return f"{heading}\n\n{stripped}"
+    if body:
+        return f"{heading}\n\n{body}"
     return f"{heading}\n"
+
+
+class CanonicalH1OrdinalError(RuntimeError):
+    """Raised when PLAN.md's H1 phase ordinals violate the expected sequence."""
+
+
+def validate_h1_ordinal_sequence(plan_text: str) -> None:
+    """Check H1 phase ordinals form a contiguous monotonic sequence.
+
+    Extracts every ``# <prefix> — Phase (\\d+): <rest>`` H1 line in
+    document order and validates the sequence is exactly
+    ``[K, K+1, K+2, ...]`` for some non-negative starting K.
+
+    Catches:
+      - Duplicate ordinals (e.g. ``[0, 1, 3, 3, 4]``).
+      - Gap-skip ordinals (e.g. ``[0, 1, 3, 4]``).
+      - Out-of-order ordinals (e.g. ``[0, 2, 1]``).
+
+    Raises ``CanonicalH1OrdinalError`` naming the observed sequence
+    and the expected sequence on any mismatch. Returns silently
+    when the sequence is valid OR when no H1 phase headings are
+    present (the validator is no-op for plans that have not yet
+    received their first canonical H1).
+    """
+    ordinals: list[int] = []
+    for raw_line in plan_text.splitlines():
+        match = _PHASE_H1_RE.match(raw_line)
+        if match:
+            ordinals.append(int(match.group(1)))
+    if not ordinals:
+        return
+    expected = list(range(ordinals[0], ordinals[0] + len(ordinals)))
+    if ordinals == expected:
+        return
+    raise CanonicalH1OrdinalError(
+        "PLAN.md H1 phase ordinal sequence is not contiguous and "
+        f"monotonic. Observed: {ordinals}. Expected: {expected}."
+    )
 
 
 @dataclasses.dataclass
@@ -530,7 +609,19 @@ def save_plan(
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
     if path.exists():
         existing = path.read_text(encoding="utf-8")
-        path.write_text(existing.rstrip("\n") + "\n\n" + content, encoding="utf-8")
+        accumulated = existing.rstrip("\n") + "\n\n" + content
     else:
-        path.write_text(content, encoding="utf-8")
+        accumulated = content
+
+    # H1 ordinal sequence check on the FULL accumulated PLAN.md
+    # (after Duplo's strip-and-render in _ensure_h1_heading has run
+    # on the per-phase content). Catches duplicate, gap-skip, and
+    # out-of-order ordinals BEFORE writing so a violation leaves
+    # PLAN.md untouched. The check is a no-op when no H1 phase
+    # headings are present (e.g., during a pre-canonical scaffold
+    # write where the body has not yet been wrapped in the
+    # ``# <project> — Phase N: <title>`` envelope).
+    validate_h1_ordinal_sequence(accumulated)
+
+    path.write_text(accumulated, encoding="utf-8")
     return path

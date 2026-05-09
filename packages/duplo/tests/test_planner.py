@@ -11,6 +11,7 @@ import pytest
 
 from duplo.extractor import Feature
 from duplo.planner import (
+    CanonicalH1OrdinalError,
     CompletedTask,
     _NEXT_PHASE_SYSTEM,
     _PHASE_SYSTEM,
@@ -26,6 +27,7 @@ from duplo.planner import (
     generate_phase_plan,
     parse_completed_tasks,
     save_plan,
+    validate_h1_ordinal_sequence,
 )
 from duplo.questioner import BuildPreferences
 
@@ -51,6 +53,11 @@ _SAMPLE_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal working app."
 
 class TestGeneratePhasePlan:
     def test_returns_string(self):
+        """generate_phase_plan returns a string. Duplo prepends a
+        canonical H1 from its roadmap state regardless of what the
+        synthesizer wrote, so the return is no longer byte-identical
+        to the synthesizer's body — it's the canonical envelope plus
+        the body content."""
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
@@ -58,7 +65,13 @@ class TestGeneratePhasePlan:
                 _sample_prefs(),
             )
         assert isinstance(result, str)
-        assert result == _SAMPLE_PLAN
+        # Sample plan content survives in the result.
+        assert "Core Auth" in result
+        assert "## Objective" in result
+        assert "Minimal working app" in result
+        # Duplo's canonical H1 is at the top.
+        assert result.startswith("# ")
+        assert " — Phase " in result.split("\n", 1)[0]
 
     def test_passes_source_url_to_prompt(self):
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
@@ -331,7 +344,12 @@ class TestGeneratePhasePlanH1Heading:
         assert "Polish" in first_line
         assert "## Subsection heading" in result
 
-    def test_preserves_existing_h1(self):
+    def test_overrides_synthesizer_h1_with_canonical(self):
+        """Synthesizer emits an H1 with one project name + ordinal;
+        Duplo overrides with the canonical H1 from its roadmap state.
+        The body content survives but the H1 envelope is Duplo's.
+        Codex's framing: model emits content, Duplo wraps it in the
+        deterministic envelope."""
         with_h1 = "# LLM Heading — Phase 1: Core\n\n- [ ] Task"
         with patch("duplo.planner.query", return_value=with_h1):
             result = generate_phase_plan(
@@ -340,16 +358,19 @@ class TestGeneratePhasePlanH1Heading:
                 _sample_prefs(),
                 project_name="Different",
             )
-        assert result == with_h1
+        # Duplo's canonical H1 is at the top, NOT the synthesizer's.
+        assert result.startswith("# Different — Phase ")
+        # Synthesizer's H1 is stripped.
+        assert "LLM Heading" not in result
+        # Task content survives.
+        assert "- [ ] Task" in result
 
     def test_strips_llm_preamble_before_h1(self):
-        """generate_phase_plan() strips LLM meta-commentary before the H1.
-
-        Reproduces the numi Phase 4 regression: the LLM prefixed the plan
-        with 'The PLAN.md content is ready. Here it is...' followed by
-        a '---' separator before the real heading. After _strip_fences(),
-        that preamble must be discarded so mcloop parses a single clean
-        phase heading.
+        """generate_phase_plan strips LLM meta-commentary before
+        the H1 AND the H1 itself, then renders Duplo's canonical
+        envelope. Reproduces the numi Phase 4 regression with the
+        new strip-and-render contract: preamble + model H1 both
+        gone, single clean Duplo H1 at the top.
         """
         with_preamble = (
             "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
@@ -362,20 +383,36 @@ class TestGeneratePhasePlanH1Heading:
             "\n"
             "- [ ] Build advanced scientific functions\n"
         )
+        phase = {
+            "phase": 4,
+            "title": "Advanced",
+            "goal": "scientific funcs",
+            "features": [],
+            "test": "",
+        }
         with patch("duplo.planner.query", return_value=with_preamble):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
+                phase=phase,
                 project_name="Numi",
-                phase_number=4,
             )
+        # Duplo's canonical H1 is at the top.
         assert result.startswith("# Numi — Phase 4: Advanced")
+        # LLM preamble fully stripped.
         assert "The PLAN.md content is ready" not in result
         assert "append to PLAN.md" not in result
-        # Only one H1 heading in the result.
-        h1_lines = [ln for ln in result.splitlines() if ln.startswith("# ")]
-        assert len(h1_lines) == 1
+        # Body content survives.
+        assert "Python/SwiftUI calculator app" in result
+        assert "Build advanced scientific functions" in result
+        # Exactly one phase H1 heading in the result.
+        phase_h1_lines = [
+            ln
+            for ln in result.splitlines()
+            if ln.startswith("# ") and " — Phase " in ln
+        ]
+        assert len(phase_h1_lines) == 1
 
     def test_prepended_heading_uses_phase_number_and_title(self):
         no_h1 = "- [ ] Task"
@@ -399,10 +436,57 @@ class TestGeneratePhasePlanH1Heading:
 
 
 class TestEnsureH1Heading:
-    def test_content_with_h1_stripped_of_leading_ws(self):
-        assert _ensure_h1_heading("\n\n# App — Phase 1: Core\n", "X", 1, "Core") == (
-            "# App — Phase 1: Core\n"
+    """Strip-and-render contract.
+
+    Phase ordinals in the outer ``# <project> — Phase N: <title>`` H1
+    are execution metadata owned by Duplo's roadmap state, not the
+    synthesizer. _ensure_h1_heading strips ANY model-authored
+    ``# X — Phase N: ...`` H1 from the body and renders the canonical
+    H1 from (project_name, phase_num, phase_title). This is the
+    durable fix for the "synthesizer guesses the phase ordinal,
+    gets it wrong" anti-pattern. Codex framing: model emits phase
+    content; Duplo wraps it in the deterministic envelope.
+    """
+
+    def test_overrides_synthesizer_h1_with_canonical(self):
+        """Synthesizer emits an H1 with project name 'App' and ordinal
+        1; Duplo's roadmap state says project 'X' and ordinal 1. The
+        canonical H1 wins regardless of what the synthesizer wrote."""
+        result = _ensure_h1_heading(
+            "\n\n# App — Phase 1: Core\n", "X", 1, "Core"
         )
+        assert result == "# X — Phase 1: Core\n"
+
+    def test_overrides_when_synthesizer_uses_wrong_ordinal(self):
+        """Synthesizer emits 'Phase 7' when Duplo's roadmap says
+        Phase 2. The canonical H1 (Phase 2) overwrites the wrong
+        ordinal — the bug fix."""
+        body = "# Widget — Phase 7: WrongOrdinal\n\n- [ ] Real task\n"
+        result = _ensure_h1_heading(body, "Widget", 2, "Polish")
+        assert result.startswith("# Widget — Phase 2: Polish\n")
+        assert "Phase 7" not in result
+        assert "WrongOrdinal" not in result
+        assert "- [ ] Real task" in result
+
+    def test_strips_multiple_phase_h1s(self):
+        """Synthesizer emits multiple stray phase H1s; all are
+        stripped, only Duplo's canonical H1 remains."""
+        body = (
+            "# Foo — Phase 1: Stray one\n"
+            "\n"
+            "# Bar — Phase 5: Stray two\n"
+            "\n"
+            "- [ ] Real task\n"
+        )
+        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
+        phase_h1_count = sum(
+            1 for line in result.splitlines() if " — Phase " in line and line.startswith("# ")
+        )
+        assert phase_h1_count == 1
+        assert result.startswith("# Real — Phase 3: Real Title\n")
+        assert "- [ ] Real task" in result
+        assert "Stray one" not in result
+        assert "Stray two" not in result
 
     def test_prepends_when_no_heading(self):
         result = _ensure_h1_heading("plain text\n", "Widget", 2, "Polish")
@@ -420,20 +504,18 @@ class TestEnsureH1Heading:
         assert result.startswith("# App — Phase 1: Core")
 
     def test_hash_without_space_is_not_h1(self):
-        # "#foo" is not a valid markdown heading in CommonMark.
         result = _ensure_h1_heading("#foo\n", "App", 1, "Core")
         assert result.startswith("# App — Phase 1: Core\n\n#foo")
 
     def test_empty_h1_line_is_not_accepted(self):
-        # "# \n" (hash + space + newline, no heading text) should not qualify.
         result = _ensure_h1_heading("# \n- [ ] Task", "App", 1, "Core")
         assert result.startswith("# App — Phase 1: Core")
 
     def test_strips_preamble_before_h1(self):
-        # Regression: numi Phase 4 output had LLM meta-commentary before the
-        # real phase heading. Previously _ensure_h1_heading would prepend a
-        # new heading while leaving the original intact (two H1s, preamble
-        # garbage in between). It must discard everything up to the H1 line.
+        """LLM meta-commentary before the H1 is discarded, the H1
+        is also discarded (strip-and-render), and Duplo's canonical
+        H1 prepends. Previously this test pinned that the model's
+        original H1 survived; the new contract says it doesn't."""
         content = (
             "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
             "\n"
@@ -443,16 +525,25 @@ class TestEnsureH1Heading:
             "\n"
             "- [ ] First task\n"
         )
-        result = _ensure_h1_heading(content, "Ignored", 99, "Ignored")
+        result = _ensure_h1_heading(content, "Numi", 4, "Advanced")
         assert result.startswith("# Numi — Phase 4: Advanced")
         assert "The PLAN.md content is ready" not in result
         assert "---" not in result
-        assert result.count("# ") == 1  # no duplicate H1 heading
+        # Exactly one phase H1 line in the result.
+        phase_h1_count = sum(
+            1
+            for line in result.splitlines()
+            if line.startswith("# ") and " — Phase " in line
+        )
+        assert phase_h1_count == 1
 
     def test_strips_preamble_with_separator_only(self):
         content = "---\n\n# App — Phase 2: Core\n\n- [ ] Task"
         result = _ensure_h1_heading(content, "Ignored", 99, "Ignored")
-        assert result == "# App — Phase 2: Core\n\n- [ ] Task"
+        # Old behavior kept the model's H1 verbatim. New behavior
+        # strips it and renders Duplo's canonical envelope.
+        assert result == "# Ignored — Phase 99: Ignored\n\n- [ ] Task"
+        assert "App — Phase 2" not in result
 
 
 class TestPhaseSystemPromptAnnotations:
@@ -813,6 +904,143 @@ class TestSavePlan:
         monkeypatch.chdir(tmp_path)
         path = save_plan("# Plan")
         assert path.parent == tmp_path.resolve()
+
+
+class TestValidateH1OrdinalSequence:
+    """H1 phase ordinal sequence must be contiguous and monotonic.
+
+    Codex's broader framing: Duplo owns the deterministic envelope
+    and validates the final markdown mcloop will consume. The
+    validator catches the case where strip-and-render renders the
+    wrong sequence (e.g., a Duplo-side bug in roadmap_phase_ordinal
+    bookkeeping), as a fail-closed backstop.
+    """
+
+    def test_passes_with_no_h1_headings(self):
+        # Pre-canonical scaffold writes have no phase H1 yet.
+        validate_h1_ordinal_sequence("- [ ] Bare task without an H1\n")
+
+    def test_passes_on_zero_indexed_sequence(self):
+        text = (
+            "# App — Phase 0: Scaffold\n\n- [ ] x\n\n"
+            "# App — Phase 1: Core\n\n- [ ] y\n\n"
+            "# App — Phase 2: Polish\n\n- [ ] z\n"
+        )
+        validate_h1_ordinal_sequence(text)
+
+    def test_passes_on_one_indexed_sequence(self):
+        text = (
+            "# App — Phase 1: Scaffold\n\n- [ ] x\n\n"
+            "# App — Phase 2: Core\n\n- [ ] y\n\n"
+            "# App — Phase 3: Polish\n\n- [ ] z\n"
+        )
+        validate_h1_ordinal_sequence(text)
+
+    def test_passes_on_single_phase(self):
+        validate_h1_ordinal_sequence("# App — Phase 0: Scaffold\n\n- [ ] x\n")
+
+    def test_raises_on_duplicate_ordinal(self):
+        """The canonical failure case from tonight's bug. Phase 3
+        appears twice; mcloop's parser refuses to load the file."""
+        text = (
+            "# App — Phase 0: A\n"
+            "# App — Phase 1: B\n"
+            "# App — Phase 3: C\n"
+            "# App — Phase 3: D\n"
+            "# App — Phase 4: E\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError) as ei:
+            validate_h1_ordinal_sequence(text)
+        msg = str(ei.value)
+        assert "[0, 1, 3, 3, 4]" in msg
+        assert "[0, 1, 2, 3, 4]" in msg
+
+    def test_raises_on_gap_skip_ordinal(self):
+        """Even without a duplicate, gap-skip is invalid: a phase
+        ordinal that skips a value indicates one was lost
+        somewhere in the rendering pipeline."""
+        text = (
+            "# App — Phase 0: A\n"
+            "# App — Phase 1: B\n"
+            "# App — Phase 3: C\n"
+            "# App — Phase 4: D\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError) as ei:
+            validate_h1_ordinal_sequence(text)
+        msg = str(ei.value)
+        assert "[0, 1, 3, 4]" in msg
+        assert "[0, 1, 2, 3]" in msg
+
+    def test_raises_on_out_of_order_ordinal(self):
+        text = (
+            "# App — Phase 0: A\n"
+            "# App — Phase 2: C\n"
+            "# App — Phase 1: B\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError) as ei:
+            validate_h1_ordinal_sequence(text)
+        msg = str(ei.value)
+        assert "[0, 2, 1]" in msg
+
+    def test_passes_when_starting_ordinal_is_nonzero(self):
+        """Sequence [3, 4, 5] is valid: contiguous and monotonic
+        starting from 3. Used when validating a partial PLAN.md
+        slice that doesn't include the earliest phases."""
+        validate_h1_ordinal_sequence(
+            "# App — Phase 3: A\n# App — Phase 4: B\n# App — Phase 5: C\n"
+        )
+
+    def test_ignores_non_phase_h1s(self):
+        """A plain ``# Heading`` line is not a phase H1 and does
+        not participate in the ordinal-sequence check."""
+        text = (
+            "# Some other heading\n\n"
+            "# App — Phase 0: A\n"
+            "# App — Phase 1: B\n"
+        )
+        validate_h1_ordinal_sequence(text)
+
+
+class TestSavePlanH1OrdinalValidation:
+    """save_plan validates the FULL accumulated PLAN.md before
+    writing. A violation leaves PLAN.md untouched (atomicity)."""
+
+    def test_save_plan_passes_on_valid_sequence(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(
+            "# App — Phase 0: A\n\n- [ ] a\n",
+            encoding="utf-8",
+        )
+        save_plan("# App — Phase 1: B\n\n- [ ] b\n", target_dir=tmp_path)
+        text = plan_path.read_text(encoding="utf-8")
+        assert "Phase 0: A" in text
+        assert "Phase 1: B" in text
+
+    def test_save_plan_raises_on_duplicate_after_append(self, tmp_path: Path):
+        """Appending a phase that duplicates an existing ordinal
+        raises BEFORE writing — the file contents are unchanged."""
+        plan_path = tmp_path / _PLAN_FILENAME
+        original = "# App — Phase 0: A\n\n- [ ] a\n"
+        plan_path.write_text(original, encoding="utf-8")
+        with pytest.raises(CanonicalH1OrdinalError):
+            save_plan("# App — Phase 0: Dup\n\n- [ ] dup\n", target_dir=tmp_path)
+        # Atomicity: file unchanged.
+        assert plan_path.read_text(encoding="utf-8") == original
+
+    def test_save_plan_raises_on_gap_after_append(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        original = "# App — Phase 0: A\n\n- [ ] a\n"
+        plan_path.write_text(original, encoding="utf-8")
+        with pytest.raises(CanonicalH1OrdinalError):
+            save_plan("# App — Phase 2: Skipped\n\n- [ ] x\n", target_dir=tmp_path)
+        assert plan_path.read_text(encoding="utf-8") == original
+
+    def test_save_plan_passes_when_no_h1_phases_present(self, tmp_path: Path):
+        # Pre-canonical scaffold content has no phase H1; validator
+        # is a no-op, save_plan writes successfully.
+        save_plan("- [ ] task without H1\n", target_dir=tmp_path)
+        path = tmp_path / _PLAN_FILENAME
+        assert path.exists()
 
 
 class TestParseCompletedTasks:
@@ -1333,15 +1561,22 @@ class TestStripFences:
         assert _strip_fences(wrapped) == "# Phase 1"
 
     def test_generate_phase_plan_strips_fences(self):
+        """generate_phase_plan strips an outer code fence from the
+        synthesizer's body. Strip-and-render then overrides the
+        inner H1 with Duplo's canonical envelope, so the test
+        passes project_name explicitly to make the canonical match
+        a stable expected value."""
         fenced = "```markdown\n# MyApp — Phase 1: Core\n\n- [ ] Task\n```"
         with patch("duplo.planner.query", return_value=fenced):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
+                project_name="MyApp",
             )
         assert not result.startswith("```")
-        assert result.startswith("# MyApp")
+        assert result.startswith("# MyApp — Phase ")
+        assert "- [ ] Task" in result
 
     def test_generate_next_phase_plan_strips_fences(self):
         fenced = "```markdown\n# Phase 2: Search\n\n- [ ] Task\n```"
