@@ -178,6 +178,7 @@ def main() -> None:
     import traceback
 
     import mcloop.runner as _runner
+    from mcloop.ledger_pause import HardStop
 
     atexit.register(_kill_active_process)
     atexit.register(_terminate_reviewers)
@@ -185,6 +186,20 @@ def main() -> None:
     register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
     try:
         _main()
+    except HardStop as exc:
+        # Plan Ledger Slice D: a threshold crossing that warrants
+        # auto-reauthor either could not run (reauthor_unavailable),
+        # produced an invalid plan (lineage_invalid), or otherwise
+        # failed (reauthor_failed); OR auto_reauthor is disabled and
+        # a manual pause is required (manual_pause). Exit code 5 is
+        # reserved for this class of pause per the Slice D design.
+        print(
+            f"\nmcloop: Plan Ledger paused the run "
+            f"(reason={exc.reason})",
+            file=sys.stderr,
+        )
+        print(f"  detail: {exc.detail}", file=sys.stderr)
+        sys.exit(5)
     except PlanCorruptionError as exc:
         # The user shouldn't see a Python traceback for an expected
         # condition like a malformed PLAN.md. Print the error message
@@ -276,6 +291,8 @@ def _main() -> None:
         stop_after_one=args.stop_after_one,
         task_timeout=args.timeout,
         retry=args.retry,
+        no_plan_ledger=getattr(args, "no_plan_ledger", False),
+        no_auto_reauthor=getattr(args, "no_auto_reauthor", False),
     )
     if not result.ok:
         sys.exit(1)
@@ -605,6 +622,8 @@ def run_loop(
     stop_after_one: bool = False,
     task_timeout: int | None = None,
     retry: bool = False,
+    no_plan_ledger: bool = False,
+    no_auto_reauthor: bool = False,
 ) -> RunStatus:
     """Run the main loop. Returns a RunStatus indicating outcome."""
     import mcloop.runner as _runner
@@ -733,6 +752,129 @@ def run_loop(
         for f in pending_dir.iterdir():
             if f.is_file():
                 f.unlink(missing_ok=True)
+
+    # ---- Plan Ledger Slice D: settings + storage + startup eval ----
+    # Imported lazily so projects without bob_tools/duplo on the path
+    # do not pay the import cost; the loader returns disabled
+    # settings when ledger_dir is absent, so the runtime cost is
+    # zero on Plan-Ledger-disabled projects.
+    from mcloop.ledger_config import load_plan_ledger_settings
+    from mcloop.ledger_emit import (
+        TaskOutcome,
+        emit_task_lifecycle_events,
+        open_mcloop_storage,
+        record_phase_id_fallback,
+        resolve_phase_id,
+    )
+    from mcloop.ledger_pause import HardStop, auto_reauthor, evaluate_and_maybe_pause
+
+    _pl_settings = load_plan_ledger_settings(
+        project_dir=project_dir,
+        plan_path=master_path,
+        cli_no_plan_ledger=no_plan_ledger,
+        cli_no_auto_reauthor=no_auto_reauthor,
+    )
+    _pl_storage = None
+    _pl_run_id: str | None = None
+    if _pl_settings.enabled:
+        print(
+            formatting.system_msg(
+                "Plan Ledger: enabled "
+                f"(auto_reauthor={'on' if _pl_settings.auto_reauthor else 'off'},"
+                f" ledger_dir={_pl_settings.ledger_dir})"
+            ),
+            flush=True,
+        )
+        _pl_storage = open_mcloop_storage(_pl_settings.ledger_dir)
+        _pl_run_id = f"mcloop-{int(time.time())}"
+        # One-shot startup eval: catches crossings introduced by
+        # actors other than McLoop (Duplo writes, manual edits)
+        # since the last McLoop run.
+        startup_pause = evaluate_and_maybe_pause(
+            storage=_pl_storage,
+            run_id=_pl_run_id,
+        )
+        if startup_pause is not None:
+            if _pl_settings.auto_reauthor:
+                auto_reauthor(
+                    decision=startup_pause,
+                    plan_path=_pl_settings.plan_path,
+                    ledger_dir=_pl_settings.ledger_dir,
+                    project_dir=project_dir,
+                )
+            else:
+                raise HardStop(
+                    reason="manual_pause",
+                    detail=(
+                        "startup ledger evaluation surfaced crossing "
+                        f"{startup_pause.crossing_event_id} "
+                        f"(rule={startup_pause.rule_id}); auto_reauthor "
+                        "is disabled for this run"
+                    ),
+                )
+
+    def _ledger_settle(task_label: str, outcome: TaskOutcome) -> None:
+        """Plan Ledger Slice D per-task settle hook.
+
+        Emits lifecycle events, evaluates thresholds, and either
+        auto-reauthors (refresh happens automatically at the next
+        outer-loop iteration that re-parses PLAN.md) or raises
+        HardStop with reason="manual_pause" when auto_reauthor is
+        disabled.
+
+        No-op on projects without Plan Ledger enabled.
+        """
+        if not _pl_settings.enabled or _pl_storage is None or _pl_run_id is None:
+            return
+        resolution = resolve_phase_id(
+            plan_path=_pl_settings.plan_path,
+            task_label=task_label,
+        )
+        if resolution.source == "ordinal":
+            record_phase_id_fallback(
+                storage=_pl_storage,
+                task_label=task_label,
+                resolution=resolution,
+                run_id=_pl_run_id,
+            )
+        emit_task_lifecycle_events(
+            storage=_pl_storage,
+            task_label=task_label,
+            phase_id=resolution.phase_id,
+            outcome=outcome,
+            project_dir=project_dir,
+            run_id=_pl_run_id,
+        )
+        decision = evaluate_and_maybe_pause(
+            storage=_pl_storage,
+            run_id=_pl_run_id,
+        )
+        if decision is None:
+            return
+        if _pl_settings.auto_reauthor:
+            auto_reauthor(
+                decision=decision,
+                plan_path=_pl_settings.plan_path,
+                ledger_dir=_pl_settings.ledger_dir,
+                project_dir=project_dir,
+            )
+            # Plan refreshed on disk by Slice C's reauthor. The
+            # outer `while True:` re-parses bug_tasks and plan_tasks
+            # at the top of every iteration, so the refreshed task
+            # mapping is picked up automatically (Q3 mandatory
+            # refresh contract).
+            return
+        raise HardStop(
+            reason="manual_pause",
+            detail=(
+                f"crossing {decision.crossing_event_id} "
+                f"(rule={decision.rule_id}, "
+                f"action={decision.recommended_action}); "
+                "auto_reauthor disabled for this run -- re-author "
+                "manually with `duplo reauthor` or re-invoke without "
+                "--no-auto-reauthor"
+            ),
+        )
 
     notes_snapshot = _snapshot_notes(project_dir)
     ctx = SessionContext()
@@ -1393,6 +1535,16 @@ def run_loop(
                         failed_task = f"{label}) {task.text}"
                         failed_reason = str(exc)
                         terminal_failure = f"Commit failed: {exc}"
+                        _ledger_settle(
+                            label,
+                            TaskOutcome(
+                                success=False,
+                                abandoned=False,
+                                summary=f"commit failed: {exc}",
+                                changed_files=tuple(changed_files or ()),
+                                failure_kind="commit_failed",
+                            ),
+                        )
                         break
                     if task_hash:
                         commit_hashes.append(task_hash)
@@ -1431,6 +1583,15 @@ def run_loop(
                         elapsed,
                         result.output,
                         changed_files=changed_files,
+                    )
+                    _ledger_settle(
+                        label,
+                        TaskOutcome(
+                            success=True,
+                            abandoned=False,
+                            summary=task.text[:200],
+                            changed_files=tuple(changed_files or ()),
+                        ),
                     )
                     success = True
                     break
@@ -1488,6 +1649,16 @@ def run_loop(
                 level="error",
             )
             terminal_failure = f"Task failed: {task.text}"
+            _ledger_settle(
+                label,
+                TaskOutcome(
+                    success=False,
+                    abandoned=True,
+                    summary=last_error or "max retries exceeded",
+                    changed_files=tuple(changed_files or ()),
+                    failure_kind="max_retries_exceeded",
+                ),
+            )
             break
 
         # --stop-after-one: exit after one successful task
