@@ -8,6 +8,9 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "orchestra",
+    "bob-tools",
+    "duplo",
+    "jsonschema>=4.21",
 ]
 
 [tool.setuptools]

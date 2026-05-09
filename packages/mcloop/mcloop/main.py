@@ -1831,6 +1831,25 @@ def _parse_args() -> argparse.Namespace:
             " CURRENT_PLAN.md and BUGS.md before starting the loop"
         ),
     )
+    parser.add_argument(
+        "--no-plan-ledger",
+        dest="no_plan_ledger",
+        action="store_true",
+        help=(
+            "Disable Plan Ledger (Slice D) emission and threshold "
+            "evaluation for this run. Mirrors MCLOOP_NO_PLAN_LEDGER=1."
+        ),
+    )
+    parser.add_argument(
+        "--no-auto-reauthor",
+        dest="no_auto_reauthor",
+        action="store_true",
+        help=(
+            "Emit Plan Ledger events and evaluate thresholds, but do "
+            "NOT auto-invoke duplo's re-author when a crossing fires. "
+            "Hard-stop instead. Mirrors MCLOOP_NO_AUTO_REAUTHOR=1."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command")
     sync_parser = subparsers.add_parser("sync", help="Sync PLAN.md with the codebase")
     sync_parser.add_argument(
