@@ -715,7 +715,7 @@ def _invoke_council_for_reauthor(
     audits_root = project_dir / ".duplo" / "audits" / "council"
     audits_root.mkdir(parents=True, exist_ok=True)
     result = run_workflow(
-        "council_four",
+        "council_four_reauthor",
         inputs,
         cfg,
         project_dir=project_dir,
@@ -725,7 +725,7 @@ def _invoke_council_for_reauthor(
 
     if result.terminal != "done":
         raise ReauthorError(
-            "council_four did not accept during re-author "
+            "council_four_reauthor did not accept during re-author "
             f"(terminal={result.terminal!r}); see audit at "
             f"{audits_root / result.run_id}"
         )
@@ -733,16 +733,16 @@ def _invoke_council_for_reauthor(
     plan_view = result.artifacts.get("plan")
     if plan_view is None or not isinstance(plan_view.value, str):
         raise ReauthorError(
-            "council_four accepted but produced no 'plan' artifact"
+            "council_four_reauthor accepted but produced no 'plan' artifact"
         )
     plan_text: str = plan_view.value.strip()
     if not plan_text:
-        raise ReauthorError("council_four produced an empty plan")
+        raise ReauthorError("council_four_reauthor produced an empty plan")
 
     verdict_view = result.artifacts.get("judge_verdict")
     if verdict_view is None or not isinstance(verdict_view.value, dict):
         raise ReauthorError(
-            "council_four accepted but produced no 'judge_verdict' "
+            "council_four_reauthor accepted but produced no 'judge_verdict' "
             "artifact (or its value is not a JSON object); the "
             "re-author path requires the verdict for the lineage "
             "sidecar"

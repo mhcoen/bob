@@ -64,12 +64,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-from collections.abc import Callable
 
 _ENABLE_ENV = "DUPLO_USE_COUNCIL"
 _DISABLE_ENV = "DUPLO_NO_COUNCIL"
@@ -171,6 +171,101 @@ class CouncilError(RuntimeError):
     """Raised when the council path cannot run or returns no plan."""
 
 
+class CanonicalPlanFormatError(ValueError):
+    """Raised when a synthesized canonical PLAN.md is not McLoop-executable.
+
+    The canonical-mode plan body must contain at least one
+    ``## Phase phase_NNN: title`` header (Slice C convention) and
+    each phase must have at least one unchecked ``- [ ]`` task line.
+    A plan body that fails either invariant is rejected fail-closed
+    before duplo writes PLAN.md to disk; the upstream caller in
+    ``duplo.planner.generate_phase_plan`` surfaces the error rather
+    than handing McLoop a plan it cannot execute.
+
+    This is the canonical-mode counterpart to Slice C's
+    ``LineageValidationError`` (re-author mode). Both validators
+    enforce contracts the synthesizer template documents but the
+    schema cannot. The Slice D fswatch-run smoke is the empirical
+    case that produced the need (4 phases, narrative prose, zero
+    ``- [ ]`` lines, McLoop saw a plan it could not run); see
+    ``orchestra/design/synthesizer-output-contract.md``'s
+    "Workflow boundary" section for the structural rationale.
+    """
+
+
+# Canonical-mode plan body parsing: same regex Duplo's reauthor
+# parser uses for the phase header (Slice C convention shared
+# across modes), plus a permissive task-line detector that
+# accepts the unchecked ``- [ ]`` form mcloop iterates over.
+_CANONICAL_PHASE_HEADER_RE = re.compile(
+    r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
+)
+_CANONICAL_TASK_LINE_RE = re.compile(r"^\s*-\s+\[\s*\]\s+\S")
+
+
+def _validate_canonical_plan_markdown(plan_body: str) -> None:
+    """Fail-closed check that ``plan_body`` is McLoop-executable.
+
+    Invariants:
+
+      - The plan body MUST contain at least one phase header in the
+        Slice C ``## Phase phase_NNN: title`` form.
+      - Each phase section (the lines between consecutive phase
+        headers, or from the final header to EOF) MUST contain at
+        least one unchecked ``- [ ]`` task line.
+      - The total number of unchecked task lines across the plan
+        body MUST be greater than zero.
+
+    Raises :class:`CanonicalPlanFormatError` with a message naming
+    every offending phase. All violations are accumulated; one raise
+    surfaces the full picture so the synthesizer (or a debugging
+    human) sees what to fix in one error message.
+    """
+    lines = plan_body.splitlines()
+    headers: list[tuple[int, str, str]] = []
+    for index, line in enumerate(lines):
+        match = _CANONICAL_PHASE_HEADER_RE.match(line)
+        if match is not None:
+            headers.append(
+                (index, match.group("id"), match.group("title"))
+            )
+
+    if not headers:
+        raise CanonicalPlanFormatError(
+            "synthesized PLAN.md has no `## Phase phase_NNN: title` "
+            "headers; canonical mode requires the Slice C phase-id "
+            "header form so McLoop can resolve task -> phase mappings"
+        )
+
+    errors: list[str] = []
+    total_tasks = 0
+    for idx, (line_idx, phase_id, title) in enumerate(headers):
+        next_line_idx = (
+            headers[idx + 1][0] if idx + 1 < len(headers) else len(lines)
+        )
+        section = lines[line_idx + 1 : next_line_idx]
+        tasks = sum(1 for line in section if _CANONICAL_TASK_LINE_RE.match(line))
+        total_tasks += tasks
+        if tasks == 0:
+            errors.append(
+                f"phase {phase_id!r} ({title!r}) has no `- [ ]` task "
+                "lines; mcloop cannot iterate a phase that contains "
+                "only narrative prose"
+            )
+
+    if total_tasks == 0:
+        errors.insert(
+            0,
+            "synthesized PLAN.md has zero `- [ ]` task lines across "
+            f"{len(headers)} phase header(s); the canonical contract "
+            "requires executable checklist tasks (the Slice D smoke "
+            "regression case)",
+        )
+
+    if errors:
+        raise CanonicalPlanFormatError("; ".join(errors))
+
+
 def is_enabled() -> bool:
     """Return True when council mode should run for this invocation.
 
@@ -267,7 +362,7 @@ def author_phase_plan(
     started_at = time.time()
     try:
         result = run_workflow(
-            "council_four",
+            "council_four_canonical",
             inputs,
             cfg,
             project_dir=project_dir,
@@ -276,7 +371,7 @@ def author_phase_plan(
         )
     except Exception as exc:  # noqa: BLE001 — surface any wiring failure
         raise CouncilError(
-            f"council_four invocation failed: {exc}"
+            f"council_four_canonical invocation failed: {exc}"
         ) from exc
     elapsed_s = time.time() - started_at
 
@@ -293,7 +388,7 @@ def author_phase_plan(
             else None
         )
         raise CouncilError(
-            f"council_four did not accept (terminal={result.terminal!r}, "
+            f"council_four_canonical did not accept (terminal={result.terminal!r}, "
             f"decision={decision!r}). Feedback: {feedback!r}. "
             f"Run audit at {audits_root / result.run_id}"
         )
@@ -301,12 +396,12 @@ def author_phase_plan(
     plan_view = result.artifacts.get("plan")
     if plan_view is None or not isinstance(plan_view.value, str):
         raise CouncilError(
-            "council_four accepted but produced no 'plan' artifact"
+            "council_four_canonical accepted but produced no 'plan' artifact"
         )
     plan_text: str = plan_view.value.strip()
     if not plan_text:
         raise CouncilError(
-            "council_four accepted but the 'plan' artifact is empty"
+            "council_four_canonical accepted but the 'plan' artifact is empty"
         )
 
     _write_audit(
@@ -315,6 +410,15 @@ def author_phase_plan(
         question=question,
         elapsed_s=elapsed_s,
     )
+
+    # Canonical-mode format validator: the McLoop consumer expects
+    # phase headers in `## Phase phase_NNN: title` form and at least
+    # one `- [ ]` task line per phase. Audit dir is already written
+    # for debugging; PLAN.md is NOT written by author_phase_plan
+    # itself (the caller in duplo.planner does that), so a raise
+    # here means PLAN.md stays untouched.
+    _validate_canonical_plan_markdown(plan_text)
+
     return plan_text
 
 
@@ -403,13 +507,34 @@ def _load_or_fallback_config(
     )
 
 
+_CANONICAL_WORKFLOW_NAME = "council_four_canonical"
+_REAUTHOR_WORKFLOW_NAME = "council_four_reauthor"
+
+
 def _ensure_council_workflow(
     cfg: Any, *, config_cls: Any, workflow_cls: Any
 ) -> Any:
-    if "council_four" in cfg.workflows:
+    """Ensure both council variants exist in ``cfg.workflows``.
+
+    The canonical and reauthor workflows are independently named in
+    orchestra after the Slice D smoke split (see commit ee44ba5);
+    duplo adds either if missing. Callers that already declared the
+    new names see no change. Pre-split callers that only declared
+    ``council_four`` get the new entries injected; the deprecated
+    ``council_four`` name is left untouched in their config so any
+    other code path that references it keeps working for one
+    release while the DeprecationWarning fires from orchestra.
+    """
+    needed = (
+        _CANONICAL_WORKFLOW_NAME,
+        _REAUTHOR_WORKFLOW_NAME,
+    )
+    if all(name in cfg.workflows for name in needed):
         return cfg
     new_workflows = dict(cfg.workflows)
-    new_workflows["council_four"] = workflow_cls(pattern="council_four")
+    for name in needed:
+        if name not in new_workflows:
+            new_workflows[name] = workflow_cls(pattern=name)
     return config_cls(
         roles=dict(cfg.roles),
         workflows=new_workflows,
@@ -428,7 +553,10 @@ def _build_fallback_config(
         name: role_cls(adapter=spec["adapter"], model=spec["model"])
         for name, spec in _FALLBACK_ROLE_BINDINGS.items()
     }
-    workflows = {"council_four": workflow_cls(pattern="council_four")}
+    workflows = {
+        _CANONICAL_WORKFLOW_NAME: workflow_cls(pattern=_CANONICAL_WORKFLOW_NAME),
+        _REAUTHOR_WORKFLOW_NAME: workflow_cls(pattern=_REAUTHOR_WORKFLOW_NAME),
+    }
     return config_cls(roles=roles, workflows=workflows)
 
 

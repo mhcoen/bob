@@ -185,7 +185,10 @@ _ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
         },
         "synthesizer": {"adapter": "claude_code_text", "model": "opus"},
     },
-    "workflows": {"council_four": {"pattern": "council_four"}},
+    "workflows": {
+        "council_four_canonical": {"pattern": "council_four_canonical"},
+        "council_four_reauthor": {"pattern": "council_four_reauthor"},
+    },
 }
 
 

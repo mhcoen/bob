@@ -60,7 +60,9 @@ class _StubResult:
         *,
         run_id: str = "test-run-1",
         terminal: str = "done",
-        plan_text: str = "# Phase 1: Core Auth\n\n- [ ] Set up.",
+        plan_text: str = (
+            "## Phase phase_001: Core Auth\n\n- [ ] Set up.\n"
+        ),
         verdict: dict[str, Any] | None = None,
         proposals: dict[str, str] | None = None,
         brief: str = "COUNCIL BRIEF: how to author phase 1.",
@@ -161,7 +163,11 @@ class TestIsEnabled:
 class TestAuthorPhasePlan:
     def test_returns_synthesizer_plan_text(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = _StubResult(plan_text="# Phase 1: synthesized plan body")
+        body = (
+            "## Phase phase_001: synthesized plan body\n\n"
+            "- [ ] do the thing\n"
+        )
+        result = _StubResult(plan_text=body)
         with _patch_run_workflow(result):
             plan = council.author_phase_plan(
                 prompt="reference material body",
@@ -169,7 +175,7 @@ class TestAuthorPhasePlan:
                 phase_num=1,
                 project_dir=tmp_path,
             )
-        assert plan == "# Phase 1: synthesized plan body"
+        assert plan == body.strip()
 
     def test_passes_canonical_question_for_phase_num(self, tmp_path):
         captured: dict[str, Any] = {}
@@ -208,13 +214,16 @@ class TestAuthorPhasePlan:
         assert inputs["ledger_slice"] == ""
         assert inputs["design_context"] == ""
 
-    def test_invokes_council_four_workflow_by_name(self, tmp_path):
+    def test_invokes_council_four_canonical_workflow_by_name(self, tmp_path):
+        # Canonical-mode plan authoring routes through the
+        # workflow-split name landed in orchestra ee44ba5; reauthor
+        # mode routes through council_four_reauthor instead.
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
             council.author_phase_plan(
                 prompt="p", system="s", phase_num=1, project_dir=tmp_path
             )
-        assert captured["args"][0] == "council_four"
+        assert captured["args"][0] == "council_four_canonical"
 
     def test_data_root_under_audits_council(self, tmp_path):
         captured: dict[str, Any] = {}
@@ -333,6 +342,99 @@ class TestAuthorPhasePlanFailureModes:
 
 
 # --------------------------------------------------------------------
+# Canonical-mode markdown format validator (Slice D regression)
+# --------------------------------------------------------------------
+
+
+class TestCanonicalPlanFormatValidator:
+    def test_passes_on_valid_plan(self) -> None:
+        body = (
+            "## Phase phase_001: Setup\n\n"
+            "- [ ] Initialize package\n"
+            "- [ ] Add smoke test\n\n"
+            "## Phase phase_002: Tests\n\n"
+            "- [ ] Add unit tests\n"
+        )
+        # No raise.
+        council._validate_canonical_plan_markdown(body)
+
+    def test_passes_on_single_phase_single_task(self) -> None:
+        body = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
+        council._validate_canonical_plan_markdown(body)
+
+    def test_rejects_zero_tasks_total(self) -> None:
+        body = (
+            "## Phase phase_001: Setup\n\n"
+            "Some narrative prose, no tasks.\n\n"
+            "## Phase phase_002: Tests\n\n"
+            "More prose without a checklist.\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError, match="zero `- \\[ \\]` task lines"
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_rejects_phase_with_no_tasks(self) -> None:
+        body = (
+            "## Phase phase_001: Setup\n\n"
+            "- [ ] Initialize package\n\n"
+            "## Phase phase_002: Tests\n\n"
+            "Narrative prose, no tasks for this phase.\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError, match="phase_002"
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_rejects_no_phase_headers(self) -> None:
+        body = (
+            "# fswatch-run\n\n"
+            "Pure prose project description with - [ ] dummy task.\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError, match="no `## Phase phase_NNN"
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_rejects_old_pre_slice_c_header_form(self) -> None:
+        # Pre-Slice C plans used `# Phase 1: ...`; the strict validator
+        # treats those as no-phase-header (they fail the regex).
+        body = "# Phase 1: legacy form\n\n- [ ] task\n"
+        with pytest.raises(
+            council.CanonicalPlanFormatError, match="no `## Phase phase_NNN"
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_atomicity_validation_failure_does_not_write_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """The author_phase_plan caller writes PLAN.md from the
+        returned text. A CanonicalPlanFormatError raise means
+        author_phase_plan never returned, so the caller never
+        wrote PLAN.md. This test verifies the contract by
+        asserting the raise propagates and PLAN.md does not
+        appear in the project dir.
+        """
+        bad_plan = (
+            "## Phase phase_001: Setup\n\n"
+            "Narrative prose with no checklist tasks.\n"
+        )
+        result = _StubResult(plan_text=bad_plan)
+        with _patch_run_workflow(result):
+            with pytest.raises(council.CanonicalPlanFormatError):
+                council.author_phase_plan(
+                    prompt="p",
+                    system="s",
+                    phase_num=1,
+                    project_dir=tmp_path,
+                )
+        # PLAN.md is written by the upstream caller (planner.save_plan);
+        # author_phase_plan does not touch the file. The raise
+        # propagates and PLAN.md remains absent.
+        assert not (tmp_path / "PLAN.md").exists()
+
+
+# --------------------------------------------------------------------
 # Config resolution
 # --------------------------------------------------------------------
 
@@ -354,8 +456,16 @@ class TestConfigResolution:
             "synthesizer",
         ):
             assert role in cfg.roles, role
-        assert "council_four" in cfg.workflows
-        assert cfg.workflows["council_four"].pattern == "council_four"
+        assert "council_four_canonical" in cfg.workflows
+        assert (
+            cfg.workflows["council_four_canonical"].pattern
+            == "council_four_canonical"
+        )
+        assert "council_four_reauthor" in cfg.workflows
+        assert (
+            cfg.workflows["council_four_reauthor"].pattern
+            == "council_four_reauthor"
+        )
 
     def test_fallback_proposers_pairwise_distinct(self, tmp_path):
         """Cross-model diversity at the proposer layer is what the
@@ -418,7 +528,10 @@ class TestConfigResolution:
                     "model": "sonnet",
                 },
             },
-            "workflows": {"council_four": {"pattern": "council_four"}},
+            "workflows": {
+                "council_four_canonical": {"pattern": "council_four_canonical"},
+                "council_four_reauthor": {"pattern": "council_four_reauthor"},
+            },
         }
         (orchestra_dir / "config.json").write_text(json.dumps(config))
         captured: dict[str, Any] = {}
@@ -522,7 +635,14 @@ class TestInitWritesOrchestraConfig:
             "proposer_deepseek",
             "synthesizer",
         }
-        assert cfg["workflows"]["council_four"]["pattern"] == "council_four"
+        assert (
+            cfg["workflows"]["council_four_canonical"]["pattern"]
+            == "council_four_canonical"
+        )
+        assert (
+            cfg["workflows"]["council_four_reauthor"]["pattern"]
+            == "council_four_reauthor"
+        )
 
     def test_init_does_not_overwrite_existing_orchestra_config(
         self, tmp_path, monkeypatch
