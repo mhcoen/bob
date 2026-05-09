@@ -17,12 +17,14 @@ from duplo.platforms.schema import PlatformProfile, ScaffoldFile, register
 
 _RUN_SH = """\
 #!/bin/bash
-# Create venv (if missing), install in editable mode, and run.
+# Create venv (if missing), install in editable mode with dev deps,
+# and run.
 # Usage: ./run.sh [args...]
 #
 # This script is the ONLY way to run the project. It guarantees:
 #   1. A venv exists at .venv/
-#   2. The package is installed in editable mode (pip install -e .)
+#   2. The package + every declared dev dep is installed in editable
+#      mode (pip install -e '.[dev]')
 #   3. The CLI entry point is available
 #
 # Pass arguments through to the CLI:
@@ -41,8 +43,13 @@ if [[ ! -d "$VENV_DIR" ]]; then
     python3 -m venv "$VENV_DIR"
 fi
 
-# Editable install (fast no-op if already installed and unchanged).
-"$PIP" install -e ".[dev]" --quiet 2>/dev/null || "$PIP" install -e . --quiet
+# Editable install with dev deps. Fail loudly if anything is wrong:
+# previously this fell back to `pip install -e .` on dev-install
+# failure and suppressed stderr, which silently shipped a venv
+# missing pytest-xdist / pytest-timeout / ruff. The downstream
+# pytest invocation then failed with `unrecognized arguments: -n`
+# and burned retries that could not fix it.
+"$PIP" install -e ".[dev]" --quiet
 
 # Run via python -m so it works even if entry point scripts
 # have not been regenerated yet.
