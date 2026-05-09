@@ -7,6 +7,22 @@ files from :attr:`PlatformProfile.scaffold_files` and appends
 All writes are idempotent: existing files are not overwritten
 (the profile is the initial source of truth; once the file
 exists, the developer owns it).
+
+Template variables expanded in BOTH file paths and content:
+
+  - ``{project_name}``: the PyPI distribution name (may contain
+    hyphens; legal in PEP 503).
+  - ``{package_name}``: the Python identifier form (hyphens
+    replaced with underscores). MUST be used everywhere a Python
+    module identifier is required: package directory names,
+    ``[project.scripts]`` value module paths,
+    ``[tool.setuptools.packages.find].include``, and
+    ``run.sh``'s ``python -m`` invocation.
+
+Splitting these is what prevents the canonical-mode consistency
+validator and the Python-identifier validator from firing on
+freshly-scaffolded projects whose distribution name contains a
+hyphen.
 """
 
 from __future__ import annotations
@@ -15,6 +31,22 @@ import stat
 from pathlib import Path
 
 from duplo.platforms.schema import PlatformProfile
+
+
+def project_name_to_package_name(project_name: str) -> str:
+    """Return the Python-identifier form of a distribution name.
+
+    Replaces hyphens with underscores. PyPI distribution names are
+    PEP 503-normalized to allow hyphens, dots, and case variations;
+    Python module identifiers (PEP 8 package-and-module-names)
+    require letters, digits, and underscores only.
+
+    Examples:
+        ``fswatch-run-smoke`` -> ``fswatch_run_smoke``
+        ``my-cool-cli``       -> ``my_cool_cli``
+        ``already_clean``     -> ``already_clean``
+    """
+    return project_name.replace("-", "_")
 
 
 def write_scaffold(
@@ -28,15 +60,17 @@ def write_scaffold(
     For each profile:
 
     1. Writes each :class:`ScaffoldFile` to *target_dir*,
-       expanding ``{project_name}`` in content.  Files that
-       already exist are **skipped** (not overwritten).
+       expanding ``{project_name}`` and ``{package_name}`` in BOTH
+       the file path AND its content.  Files that already exist
+       are **skipped** (not overwritten).
 
     2. Appends any ``gitignore_entries`` to *target_dir*/.gitignore
        that are not already present.
 
     Args:
         profiles: Resolved platform profiles (may be empty).
-        project_name: Project name for template expansion.
+        project_name: Project name for template expansion (PyPI
+            distribution name; may contain hyphens).
         target_dir: Project root directory.
 
     Returns:
@@ -46,13 +80,21 @@ def write_scaffold(
     root = Path(target_dir).resolve()
     written: list[Path] = []
 
+    package_name = project_name_to_package_name(project_name)
+
+    def _expand(s: str) -> str:
+        return s.replace("{project_name}", project_name).replace(
+            "{package_name}", package_name
+        )
+
     for profile in profiles:
         for sf in profile.scaffold_files:
-            dest = root / sf.path
+            expanded_path = _expand(sf.path)
+            dest = root / expanded_path
             if dest.exists():
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            content = sf.content.replace("{project_name}", project_name)
+            content = _expand(sf.content)
             dest.write_text(content, encoding="utf-8")
             if sf.executable:
                 dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)

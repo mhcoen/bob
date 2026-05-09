@@ -102,16 +102,28 @@ def _strip_glob(pattern: str) -> str:
     return pattern.rstrip("*").rstrip(".")
 
 
+_RUNSH_BOOTSTRAP_MODULES = frozenset({"venv", "pip", "ensurepip", "build"})
+
+
 def _extract_runsh_module(run_sh_text: str) -> str | None:
-    """Find the module the run.sh invokes via ``python -m``."""
-    match = re.search(
+    """Find the project module run.sh invokes via ``python -m``.
+
+    Skips stdlib bootstrap invocations (``python3 -m venv``,
+    ``python -m pip``, etc.) so they cannot pose as the project's
+    module. Returns the module from the LAST non-bootstrap match,
+    matching the convention that run.sh's bootstrap setup happens
+    early and the project invocation is the final command.
+    """
+    matches: list[str] = re.findall(
         r'-m\s+([A-Za-z0-9_\-][A-Za-z0-9_\-.]*)',
         run_sh_text,
     )
-    if not match:
-        return None
-    candidate = match.group(1)
-    return candidate.split(".", 1)[0]
+    for raw in reversed(matches):
+        candidate = raw.split(".", 1)[0]
+        if candidate in _RUNSH_BOOTSTRAP_MODULES:
+            continue
+        return candidate
+    return None
 
 
 def validate_spec_pyproject_runsh_consistency(project_dir: Path) -> None:
