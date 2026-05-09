@@ -167,6 +167,24 @@ tooling (pytest auto-discovery, mypy, ruff isort sorting). The
 synthesizer should fail-closed on this, the same shape it
 fails-closed on lineage violations.
 
+Phase H1 envelope is owned by the runtime.
+
+Do NOT author a top-level H1 phase heading of the form
+`# <project_name> — Phase N: <title>`. The runtime owns the
+PLAN.md envelope and will render that heading itself from its
+roadmap state. Author only the inner
+`## Phase phase_NNN: <title>` heading (using your supplied
+`required_phase_id`) and the task body. Any H1 phase heading
+you write will be stripped and replaced; do not waste tokens
+on it.
+
+This pairs with the per-call ownership boundary noted under
+required_phase_id: phase ordinals (the integer N) and phase
+identifiers (the `phase_NNN` string) are both execution metadata
+that the runtime owns. The synthesizer owns semantic content —
+task text, ordering, rationale, acceptance criteria — not the
+envelope around it.
+
 Place the verdict JSON in a fenced ```json ... ``` code block at
 the END of your response, after the plan body. The object
 inside that fence must conform to this shape exactly:

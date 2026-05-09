@@ -349,6 +349,34 @@ def test_canonical_synthesizer_template_validates_python_package_identifiers() -
     assert "importlib.import_module" in body
 
 
+def test_canonical_synthesizer_template_forbids_h1_phase_heading() -> None:
+    """The canonical synthesizer template MUST instruct the
+    synthesizer NOT to author a `# <project> — Phase N: <title>`
+    H1 heading. The runtime (Duplo) owns the PLAN.md envelope
+    via strip-and-render, so any model-authored H1 is overwritten;
+    the instruction makes the contract explicit so the synthesizer
+    does not waste tokens on a heading that gets stripped. Pinned
+    so a future template edit cannot silently restore the
+    synthesizer's authority over the H1 envelope.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text()
+    body_lower = body.lower()
+    assert "do not author" in body_lower
+    assert "h1 phase heading" in body_lower
+    assert "stripped and replaced" in body_lower
+    # The forbidden envelope shape is named explicitly.
+    assert "# <project_name> — Phase N:" in body or (
+        "<project_name>" in body and "Phase N" in body
+    )
+
+
 def test_canonical_proposer_template_uses_required_phase_id() -> None:
     """The shared proposer template instructs proposers to use
     required_phase_id verbatim when present in the brief. Reauthor
