@@ -146,6 +146,27 @@ canonical failure mode this discipline prevents: the first task
 to run pytest fails with `unrecognized arguments: -n` and retries
 cannot fix it (the venv contents do not change between retries).
 
+Validate Python package identifiers.
+
+Before authoring tasks that depend on Python package imports,
+every Python package name in the project's pyproject.toml MUST be
+a valid Python identifier (PEP 8 package-and-module-names rule:
+letters, digits, underscores; must start with a letter or
+underscore; no hyphens; no spaces). Packages relevant to this
+check include `[project.scripts]` module paths,
+`[tool.setuptools.packages.find].include` entries, and any package
+directory the plan would import.
+
+If a package name violates this rule, your `verdict.decision`
+MUST be `"reframe"` and your `verdict.feedback` MUST name the
+offending package(s) and explain that the package name needs to
+be corrected before plan authoring can proceed. Do NOT plan
+around an illegal package name with `importlib.import_module`
+workarounds; that produces fragile code and breaks standard
+tooling (pytest auto-discovery, mypy, ruff isort sorting). The
+synthesizer should fail-closed on this, the same shape it
+fails-closed on lineage violations.
+
 Place the verdict JSON in a fenced ```json ... ``` code block at
 the END of your response, after the plan body. The object
 inside that fence must conform to this shape exactly:

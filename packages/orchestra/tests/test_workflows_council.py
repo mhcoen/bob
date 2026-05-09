@@ -323,6 +323,32 @@ def test_canonical_synthesizer_template_requires_toolchain_discipline() -> None:
     assert "pytest-xdist" in body  # the canonical failure-mode example
 
 
+def test_canonical_synthesizer_template_validates_python_package_identifiers() -> None:
+    """The canonical synthesizer template MUST instruct the
+    synthesizer to fail-closed when a Python package name in the
+    project's pyproject.toml is not a valid Python identifier
+    (e.g., contains hyphens). The intended behavior is to set
+    verdict.decision to "reframe" and surface the offending
+    package(s) in feedback, not paper over the issue with
+    importlib.import_module workarounds. Pinned so a future
+    template edit cannot silently drop the validation rule.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text()
+    body_lower = body.lower()
+    assert "valid python identifier" in body_lower
+    assert "PEP 8" in body
+    assert '"reframe"' in body or "'reframe'" in body
+    assert "no hyphens" in body_lower
+    assert "importlib.import_module" in body
+
+
 def test_canonical_proposer_template_uses_required_phase_id() -> None:
     """The shared proposer template instructs proposers to use
     required_phase_id verbatim when present in the brief. Reauthor
