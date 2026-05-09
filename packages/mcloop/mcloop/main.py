@@ -49,6 +49,10 @@ from mcloop.checks import (
 from mcloop.claude_md_sync import handle_sync, reconcile_pending
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.conftest_guard import ensure_conftest_guard
+from mcloop.dep_validator import (
+    MissingDependenciesError,
+    validate_project_dependencies,
+)
 from mcloop.errors import (
     _check_errors_json,
     _insert_bugs_section,
@@ -812,6 +816,33 @@ def run_loop(
                         "is disabled for this run"
                     ),
                 )
+
+    # ---- Pre-flight: project dependencies declared but not installed ----
+    # ensure_pytest_optimizations() above mutates pyproject.toml to add
+    # pytest-xdist + pytest-timeout; declaring them does not install
+    # them. If the project venv was provisioned earlier or by a run.sh
+    # that fell back to a non-dev install, the first pytest invocation
+    # later in the loop fails with "unrecognized arguments: -n" and
+    # burns retries that cannot succeed (the venv contents do not
+    # change between retries). Catch the mismatch here and fail fast.
+    try:
+        validate_project_dependencies(project_dir)
+    except MissingDependenciesError as exc:
+        print(formatting.system_msg(f"Pre-flight: {exc}"), flush=True)
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=time.monotonic() - run_start_mono,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="failure",
+            failure_detail=f"Missing project dependencies: {exc}",
+        )
+        return RunStatus(
+            "failure", detail=f"Missing project dependencies: {exc}"
+        )
 
     def _ledger_settle(task_label: str, outcome: TaskOutcome) -> None:
         """Plan Ledger Slice D per-task settle hook.
