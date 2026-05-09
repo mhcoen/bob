@@ -193,33 +193,100 @@ class CanonicalPlanFormatError(ValueError):
     """
 
 
-# Canonical-mode plan body parsing: same regex Duplo's reauthor
-# parser uses for the phase header (Slice C convention shared
-# across modes), plus a permissive task-line detector that
-# accepts the unchecked ``- [ ]`` form mcloop iterates over.
+# Canonical-mode plan body parsing. The header regex is permissive
+# enough to detect any `## Phase <id>:` form (so the validator can
+# tell users what they got wrong); a separate strict regex enforces
+# the canonical phase_NNN form. Slice C's reauthor parser uses the
+# permissive regex too -- shared across modes for cross-mode
+# consistency.
 _CANONICAL_PHASE_HEADER_RE = re.compile(
     r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
 )
 _CANONICAL_TASK_LINE_RE = re.compile(r"^\s*-\s+\[\s*\]\s+\S")
+_STRICT_PHASE_ID_RE = re.compile(r"^phase_\d{3,}$")
 
 
-def _validate_canonical_plan_markdown(plan_body: str) -> None:
-    """Fail-closed check that ``plan_body`` is McLoop-executable.
+def _phase_id_numeric_suffix(phase_id: str) -> int | None:
+    """Return the integer suffix of a strict ``phase_NNN`` id, or None
+    when the id is not in the strict form.
 
-    Invariants:
+    The validator's monotonic-order check (Check 6) compares phase ids
+    by their numeric suffix; strings like ``phase_001`` and
+    ``phase_002`` are ordered numerically, not lexicographically.
+    """
+    match = _STRICT_PHASE_ID_RE.match(phase_id)
+    if match is None:
+        return None
+    return int(phase_id[len("phase_") :])
 
-      - The plan body MUST contain at least one phase header in the
-        Slice C ``## Phase phase_NNN: title`` form.
-      - Each phase section (the lines between consecutive phase
-        headers, or from the final header to EOF) MUST contain at
-        least one unchecked ``- [ ]`` task line.
-      - The total number of unchecked task lines across the plan
-        body MUST be greater than zero.
 
-    Raises :class:`CanonicalPlanFormatError` with a message naming
-    every offending phase. All violations are accumulated; one raise
-    surfaces the full picture so the synthesizer (or a debugging
-    human) sees what to fix in one error message.
+def compute_required_phase_id(plan_path: Path) -> str:
+    """Compute the next phase_id Duplo will demand for canonical
+    synthesis against ``plan_path``.
+
+    Reads the existing PLAN.md (if present), extracts every
+    ``## Phase phase_NNN:`` header, and returns
+    ``f"phase_{(highest_NNN + 1):03d}"``. When PLAN.md is absent or
+    has no recognized phase headers, returns ``"phase_001"``.
+
+    Codex's safe rule (per the directive that landed alongside this
+    helper): use ``highest + 1``, NOT the smallest gap. A PLAN.md
+    containing ``phase_001`` and ``phase_003`` returns
+    ``"phase_004"``, not ``"phase_002"``. This avoids accidentally
+    re-using an id that an earlier failed run wrote and then rolled
+    back; gap-filling would let stale lineage state coexist with
+    new entries under the same identifier.
+    """
+    if not plan_path.is_file():
+        return "phase_001"
+    text = plan_path.read_text(encoding="utf-8")
+    highest = 0
+    for line in text.splitlines():
+        match = _CANONICAL_PHASE_HEADER_RE.match(line)
+        if match is None:
+            continue
+        suffix = _phase_id_numeric_suffix(match.group("id"))
+        if suffix is None:
+            continue
+        if suffix > highest:
+            highest = suffix
+    return f"phase_{highest + 1:03d}"
+
+
+def _validate_canonical_plan_markdown(
+    plan_body: str,
+    *,
+    required_phase_id: str | None = None,
+) -> None:
+    """Fail-closed check that ``plan_body`` is McLoop-executable AND
+    uses the supplied ``required_phase_id``.
+
+    Invariants enforced:
+
+      Check 1: the plan body has at least one
+        ``## Phase phase_NNN: title`` header (permissive regex).
+
+      Check 2: each phase section (the lines between consecutive
+        phase headers, or from the final header to EOF) has at
+        least one unchecked ``- [ ]`` task line, AND the total
+        across the plan body is greater than zero.
+
+      Check 3: every phase header's phase_id matches the strict
+        canonical form ``^phase_\\d{3,}$``. Headers like
+        ``## Phase Phase 1: ...`` or ``## Phase phase1: ...`` are
+        rejected.
+
+      Check 4: phase_ids are unique within the plan body.
+
+      Check 5: when ``required_phase_id`` is supplied, the plan
+        body MUST contain a phase header using exactly that id.
+
+      Check 6: phase_ids are monotonically increasing in document
+        order by their numeric suffix.
+
+    All violations are accumulated; one raise surfaces the full
+    picture so the synthesizer (or a debugging human) sees what to
+    fix in one error message.
     """
     lines = plan_body.splitlines()
     headers: list[tuple[int, str, str]] = []
@@ -239,6 +306,8 @@ def _validate_canonical_plan_markdown(plan_body: str) -> None:
 
     errors: list[str] = []
     total_tasks = 0
+
+    # Check 2 (per-phase tasks) + Check 1 task total accumulator.
     for idx, (line_idx, phase_id, title) in enumerate(headers):
         next_line_idx = (
             headers[idx + 1][0] if idx + 1 < len(headers) else len(lines)
@@ -261,6 +330,64 @@ def _validate_canonical_plan_markdown(plan_body: str) -> None:
             "requires executable checklist tasks (the Slice D smoke "
             "regression case)",
         )
+
+    # Check 3: strict phase_id format.
+    nonstrict = [pid for _, pid, _ in headers if not _STRICT_PHASE_ID_RE.match(pid)]
+    if nonstrict:
+        errors.append(
+            "phase header(s) with non-canonical phase_id (must match "
+            "`^phase_\\d{3,}$`): " + ", ".join(repr(pid) for pid in nonstrict)
+        )
+
+    # Check 4: uniqueness.
+    seen: dict[str, int] = {}
+    duplicates: set[str] = set()
+    for _, pid, _ in headers:
+        seen[pid] = seen.get(pid, 0) + 1
+        if seen[pid] > 1:
+            duplicates.add(pid)
+    if duplicates:
+        errors.append(
+            "duplicate phase_id(s) in synthesized plan body: "
+            + ", ".join(sorted(repr(pid) for pid in duplicates))
+        )
+
+    # Check 5: required_phase_id present when supplied.
+    if required_phase_id is not None:
+        actual_ids = [pid for _, pid, _ in headers]
+        if required_phase_id not in actual_ids:
+            errors.append(
+                f"required_phase_id {required_phase_id!r} not present in "
+                "synthesized plan body; synthesizer emitted "
+                f"{actual_ids!r} instead. The runtime computes the "
+                "phase_id deterministically from the existing PLAN.md; "
+                "the synthesizer must use it verbatim."
+            )
+
+    # Check 6: monotonic order by numeric suffix (skip when any id is
+    # non-strict; the Check 3 message will already be on the error
+    # list, and pretending we know an order over malformed ids would
+    # produce confusing error messages).
+    suffixes: list[int] = []
+    have_all_strict = True
+    for _, pid, _ in headers:
+        s = _phase_id_numeric_suffix(pid)
+        if s is None:
+            have_all_strict = False
+            break
+        suffixes.append(s)
+    if have_all_strict:
+        out_of_order = [
+            (headers[i][1], headers[i + 1][1])
+            for i in range(len(suffixes) - 1)
+            if suffixes[i] >= suffixes[i + 1]
+        ]
+        if out_of_order:
+            errors.append(
+                "phase_ids out of order in document (must be strictly "
+                "monotonically increasing): "
+                + ", ".join(f"{a!r} -> {b!r}" for a, b in out_of_order)
+            )
 
     if errors:
         raise CanonicalPlanFormatError("; ".join(errors))
@@ -350,11 +477,20 @@ def author_phase_plan(
         f"Author the Phase {phase_num} plan from the reference "
         "material above."
     )
+    # Compute required_phase_id deterministically from the existing
+    # PLAN.md (Codex's safe rule: highest+1, NOT the smallest gap).
+    # The synthesizer is told to use this id verbatim; the canonical
+    # validator re-checks post-synthesis. See the
+    # "Per-call model authority is the wrong ownership boundary"
+    # section in orchestra/design/synthesizer-output-contract.md.
+    plan_path = project_dir / "PLAN.md"
+    required_phase_id = compute_required_phase_id(plan_path)
     inputs: dict[str, Any] = {
         "state": state_text,
         "question": question,
         "ledger_slice": "",
         "design_context": "",
+        "required_phase_id": required_phase_id,
     }
 
     audits_root = project_dir / ".duplo" / "audits" / "council"
@@ -413,11 +549,16 @@ def author_phase_plan(
 
     # Canonical-mode format validator: the McLoop consumer expects
     # phase headers in `## Phase phase_NNN: title` form and at least
-    # one `- [ ]` task line per phase. Audit dir is already written
-    # for debugging; PLAN.md is NOT written by author_phase_plan
-    # itself (the caller in duplo.planner does that), so a raise
-    # here means PLAN.md stays untouched.
-    _validate_canonical_plan_markdown(plan_text)
+    # one `- [ ]` task line per phase. The validator also enforces
+    # the required_phase_id constraint computed above (Check 5),
+    # phase_id uniqueness (Check 4), strict format (Check 3), and
+    # monotonic order (Check 6). Audit dir is already written for
+    # debugging; PLAN.md is NOT written by author_phase_plan itself
+    # (the caller in duplo.planner does that), so a raise here
+    # means PLAN.md stays untouched.
+    _validate_canonical_plan_markdown(
+        plan_text, required_phase_id=required_phase_id
+    )
 
     return plan_text
 

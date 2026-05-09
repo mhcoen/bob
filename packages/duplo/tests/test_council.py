@@ -346,6 +346,103 @@ class TestAuthorPhasePlanFailureModes:
 # --------------------------------------------------------------------
 
 
+class TestComputeRequiredPhaseId:
+    """Duplo computes required_phase_id deterministically from the
+    existing PLAN.md (highest phase_NNN + 1, zero-padded, NOT the
+    smallest gap). Codex's safe rule; see the
+    "Per-call model authority is the wrong ownership boundary"
+    section in orchestra/design/synthesizer-output-contract.md.
+    """
+
+    def test_no_plan_md_returns_phase_001(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        assert council.compute_required_phase_id(plan_path) == "phase_001"
+
+    def test_one_prior_phase_returns_phase_002(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text("## Phase phase_001: First\n\n- [ ] x\n")
+        assert council.compute_required_phase_id(plan_path) == "phase_002"
+
+    def test_four_prior_phases_returns_phase_005(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "## Phase phase_001: A\n\n- [ ] a\n\n"
+            "## Phase phase_002: B\n\n- [ ] b\n\n"
+            "## Phase phase_003: C\n\n- [ ] c\n\n"
+            "## Phase phase_004: D\n\n- [ ] d\n"
+        )
+        assert council.compute_required_phase_id(plan_path) == "phase_005"
+
+    def test_gap_uses_highest_plus_one_not_gap(self, tmp_path: Path) -> None:
+        # PLAN.md contains phase_001 and phase_003. Required is
+        # phase_004 (highest + 1), NOT the gap at phase_002. Codex's
+        # explicit rule: gap-filling would let stale lineage state
+        # coexist with new entries under the same identifier.
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "## Phase phase_001: A\n\n- [ ] a\n\n"
+            "## Phase phase_003: C\n\n- [ ] c\n"
+        )
+        assert council.compute_required_phase_id(plan_path) == "phase_004"
+
+    def test_non_strict_phase_ids_ignored(self, tmp_path: Path) -> None:
+        # Phase ids that don't match the strict phase_NNN form do not
+        # contribute to the highest-plus-one calculation.
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "## Phase phase_007: ignored-numeric-too-small\n\n- [ ] a\n\n"
+            "## Phase legacy_thing: not-strict\n\n- [ ] b\n"
+        )
+        # Strict ids: phase_007. Non-strict: legacy_thing (skipped).
+        # Result: phase_008.
+        assert council.compute_required_phase_id(plan_path) == "phase_008"
+
+    def test_zero_padding_three_digits(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text("## Phase phase_007: First\n\n- [ ] x\n")
+        # +1 = 8, formatted as phase_008.
+        assert council.compute_required_phase_id(plan_path) == "phase_008"
+
+
+class TestRequiredPhaseIdInjection:
+    """author_phase_plan computes required_phase_id and threads it
+    into the council inputs alongside state / question / ledger_slice
+    / design_context. Pinned so a future refactor cannot drop the
+    field silently."""
+
+    def test_inputs_dict_carries_required_phase_id(
+        self, tmp_path: Path
+    ) -> None:
+        captured: dict[str, Any] = {}
+        with _patch_run_workflow(_StubResult(), captured=captured):
+            council.author_phase_plan(
+                prompt="p", system="s", phase_num=1, project_dir=tmp_path
+            )
+        inputs = captured["args"][1]
+        assert "required_phase_id" in inputs
+        assert inputs["required_phase_id"] == "phase_001"
+
+    def test_required_phase_id_increments_with_existing_plan(
+        self, tmp_path: Path
+    ) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text("## Phase phase_001: First\n\n- [ ] x\n")
+
+        # _StubResult default returns phase_001 — but the validator
+        # now requires phase_002 (since PLAN.md already has phase_001).
+        # Provide a stub plan that satisfies the new constraint.
+        body = (
+            "## Phase phase_002: Second\n\n- [ ] do the thing\n"
+        )
+        captured: dict[str, Any] = {}
+        with _patch_run_workflow(_StubResult(plan_text=body), captured=captured):
+            council.author_phase_plan(
+                prompt="p", system="s", phase_num=2, project_dir=tmp_path
+            )
+        inputs = captured["args"][1]
+        assert inputs["required_phase_id"] == "phase_002"
+
+
 class TestCanonicalPlanFormatValidator:
     def test_passes_on_valid_plan(self) -> None:
         body = (
@@ -356,6 +453,97 @@ class TestCanonicalPlanFormatValidator:
             "- [ ] Add unit tests\n"
         )
         # No raise.
+        council._validate_canonical_plan_markdown(body)
+
+    def test_passes_with_required_phase_id_match(self) -> None:
+        body = "## Phase phase_003: Third\n\n- [ ] task\n"
+        council._validate_canonical_plan_markdown(
+            body, required_phase_id="phase_003"
+        )
+
+    def test_check5_rejects_required_phase_id_mismatch(self) -> None:
+        body = "## Phase phase_001: First\n\n- [ ] task\n"
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match=r"required_phase_id 'phase_002' not present",
+        ):
+            council._validate_canonical_plan_markdown(
+                body, required_phase_id="phase_002"
+            )
+
+    def test_check5_passes_when_required_id_present_among_multiple(
+        self,
+    ) -> None:
+        # Plan body has multiple phases; required_phase_id need only be
+        # one of them (the synthesizer's authoring of THIS invocation's
+        # new phase is the load-bearing one).
+        body = (
+            "## Phase phase_002: Second\n\n- [ ] a\n\n"
+            "## Phase phase_003: Third\n\n- [ ] b\n"
+        )
+        council._validate_canonical_plan_markdown(
+            body, required_phase_id="phase_002"
+        )
+
+    def test_check3_rejects_non_strict_phase_id(self) -> None:
+        body = "## Phase phase1: First\n\n- [ ] task\n"
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match="non-canonical phase_id",
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_check3_rejects_under_three_digit_suffix(self) -> None:
+        body = "## Phase phase_1: First\n\n- [ ] task\n"
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match="non-canonical phase_id",
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_check4_rejects_duplicate_phase_id(self) -> None:
+        body = (
+            "## Phase phase_001: First\n\n- [ ] a\n\n"
+            "## Phase phase_001: Duplicate\n\n- [ ] b\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match="duplicate phase_id",
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_check4_names_all_duplicates(self) -> None:
+        body = (
+            "## Phase phase_001: A\n\n- [ ] a\n\n"
+            "## Phase phase_001: B\n\n- [ ] b\n\n"
+            "## Phase phase_002: C\n\n- [ ] c\n\n"
+            "## Phase phase_002: D\n\n- [ ] d\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match="phase_001.*phase_002|phase_002.*phase_001",
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_check6_rejects_out_of_order_phase_ids(self) -> None:
+        body = (
+            "## Phase phase_001: A\n\n- [ ] a\n\n"
+            "## Phase phase_003: C\n\n- [ ] c\n\n"
+            "## Phase phase_002: B\n\n- [ ] b\n"
+        )
+        with pytest.raises(
+            council.CanonicalPlanFormatError,
+            match="out of order",
+        ):
+            council._validate_canonical_plan_markdown(body)
+
+    def test_check6_passes_when_strictly_increasing(self) -> None:
+        body = (
+            "## Phase phase_001: A\n\n- [ ] a\n\n"
+            "## Phase phase_002: B\n\n- [ ] b\n\n"
+            "## Phase phase_005: C\n\n- [ ] c\n"
+        )
+        # Gaps in numbering are fine; only out-of-order is rejected.
         council._validate_canonical_plan_markdown(body)
 
     def test_passes_on_single_phase_single_task(self) -> None:
