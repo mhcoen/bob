@@ -153,6 +153,76 @@ output failures that established the JSON-vs-markdown lesson),
 plus the Slice D smoke that surfaced the workflow-boundary
 lesson.
 
+## Per-call model authority is the wrong ownership boundary
+
+A second smoke (Slice D follow-up after the workflow split landed)
+surfaced a related but deeper structural lesson. The canonical
+synthesizer, invoked once per phase across a multi-phase build,
+produced `phase_001` for both the first AND second invocation,
+then `phase_002` / `phase_003` / `phase_004` for the rest. The
+re-author lineage validator caught the duplicate at `phase_001`
+and McLoop hard-stopped on `lineage_invalid` — the closed loop
+fired correctly — but the upstream cause was the synthesizer
+authoring a phase identifier each time without context about
+prior invocations.
+
+The lesson: per-call model authority over persistent identifiers
+is the wrong ownership boundary. The model proposes semantic
+content; the model does NOT author execution/ledger facts.
+
+Semantic content (the model's proper authority):
+
+  - Task text. Acceptance criteria phrasing. Ordering suggestions.
+    Risk notes. Rationale. Disagreements. Rejected options.
+    Verdict prose.
+
+Execution/ledger facts (Duplo's and Plan Ledger's authority,
+NOT the model's):
+
+  - Phase IDs (and any zero-padded numeric identifiers).
+  - Lineage IDs and per-phase lineage transitions.
+  - Append positions in PLAN.md.
+  - Prior plan IDs (lineage validator's input).
+  - Canonical object identity across re-authoring.
+  - Ledger timestamps and event ordering.
+  - Threshold-crossing state.
+  - Re-authorization provenance (which crossing fired which run).
+
+The pattern Duplo and Plan Ledger now follow:
+
+  1. The model proposes semantic content.
+  2. Duplo wraps it in deterministic structure (phase_id,
+     lineage envelope, append location, source-phase
+     provenance).
+  3. The validator checks both the local fragment the model
+     emitted and the accumulated document on disk.
+  4. McLoop consumes only validated canonical structure.
+
+Concretely for canonical-mode synthesis: Duplo computes
+`required_phase_id` deterministically from the existing
+PLAN.md (highest `phase_NNN` plus one, zero-padded; or
+`phase_001` when no PLAN.md exists). The framer surfaces it
+as a constraint in the council brief. The proposer template
+instructs all four proposers to use it verbatim. The
+synthesizer template instructs verbatim use as well. Duplo's
+canonical-format validator enforces the constraint
+post-synthesis: the synthesized phase header MUST use exactly
+the supplied `required_phase_id`, all phase_ids in the body
+MUST be unique, and they MUST be monotonically increasing.
+
+This is the same lesson as the canonical/reauthor workflow
+split: don't ask the model to maintain protocol state by
+prose. The earlier split moved the workflow boundary from
+prompt-implied to file-explicit; this move pushes the
+identifier boundary from model-authored to runtime-computed.
+Both are instances of the broader rule: state the runtime
+needs to consume belongs to the runtime, not the model.
+
+References: ee44ba5 + e5d72f5 (the canonical/reauthor split
+that landed structural enforcement at the workflow boundary)
+plus the Slice D follow-up smoke that produced the
+phase-id-coordination lesson.
+
 ## References
 
 The F1 / F2 / T1+T2 / F2.5a sequence in the orchestra Phase 2

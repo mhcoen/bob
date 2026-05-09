@@ -67,13 +67,30 @@ Two structural rules, both load-bearing:
 
        ## Phase <phase_id>: <human title>
 
-     The phase_id matches `[A-Za-z0-9_]+`; use phase_001,
-     phase_002, etc. for first-time ids. Do not change letter
-     case or insert spaces; the consumer's parser is strict.
-     Headers carry no embedded lineage metadata. The Slice C
-     re-author workflow tracks lineage in JSON; the canonical
-     workflow does not need lineage at all because there is no
-     prior plan to track against.
+     The phase_id for the phase you are authoring is supplied in
+     the council brief as `required_phase_id` (a string of the
+     form `phase_NNN`, e.g., `phase_001`). Use that value
+     VERBATIM in your phase header. Do not invent your own
+     phase_id. Do not increment from prior plan content. Do not
+     change the format. The runtime computes this deterministically
+     from the existing PLAN.md; the consumer's canonical-format
+     validator rejects any other phase_id and surfaces both the
+     required value and the value you wrote.
+
+     Phase identifiers are execution/ledger facts owned by Duplo,
+     not synthesizer choices. The model proposes semantic content
+     (task text, ordering, rationale); Duplo wraps it in a
+     deterministic identifier envelope. See
+     `orchestra/design/synthesizer-output-contract.md` for the
+     ownership-boundary discussion.
+
+     Phase header format: do not change letter case or insert
+     spaces; the consumer's parser is strict
+     (`^## Phase phase_\d{3,}: <title>$`). Headers carry no
+     embedded lineage metadata. The Slice C re-author workflow
+     tracks lineage in JSON; the canonical workflow does not need
+     lineage at all because there is no prior plan to track
+     against.
 
   2. Each phase MUST contain at least one unchecked checklist
      task line of the form

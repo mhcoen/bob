@@ -6,6 +6,7 @@ workflow council_four_canonical
   external_input question text
   external_input ledger_slice text
   external_input design_context text
+  external_input required_phase_id text
 
   max_total_steps 30
 
@@ -32,7 +33,7 @@ workflow council_four_canonical
     initial ""
 
   role framer
-    prompt template "templates/council_framer.md" with state, question, ledger_slice, design_context
+    prompt template "templates/council_framer_canonical.md" with state, question, ledger_slice, design_context, required_phase_id
 
   role proposer_code
     prompt template "templates/council_proposer.md" with council_brief
@@ -52,7 +53,7 @@ workflow council_four_canonical
   state frame
     actor model m_framer
     role framer
-    reads state, question, ledger_slice, design_context
+    reads state, question, ledger_slice, design_context, required_phase_id
     writes council_brief text
     on complete fan_out [propose_code, propose_codex, propose_kimi, propose_deepseek] join synthesize on error stop
     on error => stop

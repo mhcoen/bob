@@ -256,6 +256,66 @@ def test_council_four_canonical_workflow_loads() -> None:
     )
 
 
+def test_canonical_workflow_takes_required_phase_id_input() -> None:
+    """The canonical workflow MUST declare required_phase_id as an
+    external input. Duplo computes the phase_id deterministically
+    from the existing PLAN.md and injects it as a constraint;
+    the council brief surfaces it for proposers and the
+    synthesizer. See the "Per-call model authority is the wrong
+    ownership boundary" section in
+    orchestra/design/synthesizer-output-contract.md.
+    """
+    path = resolve_workflow_path("council_four_canonical", project_dir=None)
+    workflow = load_workflow(path, _pre_load_registry())
+    external_input_names = {ei.name for ei in workflow.external_inputs}
+    assert external_input_names == {
+        "state",
+        "question",
+        "ledger_slice",
+        "design_context",
+        "required_phase_id",
+    }
+
+
+def test_canonical_synthesizer_template_uses_required_phase_id() -> None:
+    """The canonical synthesizer template MUST instruct verbatim
+    use of required_phase_id (replacing the prior 'use phase_001,
+    phase_002, etc. for first-time ids' guidance which gave the
+    synthesizer authority over identifier choice). Pinned so a
+    future template edit cannot silently re-grant that authority.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text()
+    assert "required_phase_id" in body
+    assert "VERBATIM" in body
+    # The prior wording must not return.
+    assert "use phase_001, phase_002, etc. for first-time ids" not in body
+
+
+def test_canonical_proposer_template_uses_required_phase_id() -> None:
+    """The shared proposer template instructs proposers to use
+    required_phase_id verbatim when present in the brief. Reauthor
+    mode does not surface required_phase_id in its brief; the
+    instruction only fires in canonical mode.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_proposer.md"
+    )
+    body = template_path.read_text()
+    assert "required_phase_id" in body
+    assert "verbatim" in body.lower()
+
+
 def test_council_four_reauthor_workflow_loads() -> None:
     path = resolve_workflow_path("council_four_reauthor", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
