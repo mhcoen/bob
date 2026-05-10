@@ -321,40 +321,90 @@ class TestRender:
 
 
 class TestSanitizePlanArtifact:
-    def test_clean_text_passes_through(self) -> None:
+    def test_clean_text_passes_through_with_no_extraction(self) -> None:
         text = "# proj — Phase 0: T\n## Phase phase_001: s\nbody\n"
-        assert sanitize_plan_artifact(text) == text
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert plan_text == text
+        assert extracted is None
 
-    def test_verdict_with_decision_key_rejects(self) -> None:
+    def test_trailing_verdict_extracted(self) -> None:
+        """The documented synthesizer contract: plan body followed
+        by a single trailing fenced verdict JSON. Sanitizer extracts
+        the verdict and returns the plan body without the fence."""
         text = textwrap.dedent(
             """\
             # proj — Phase 0: T
             ## Phase phase_001: s
 
-            body
+            body content
 
             ```json
             {"decision": "accept", "feedback": "ok"}
             ```
             """
         )
-        with pytest.raises(PlanArtifactRejected, match="decision"):
-            sanitize_plan_artifact(text)
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert extracted == {"decision": "accept", "feedback": "ok"}
+        # Plan body is preserved minus the fence.
+        assert "## Phase phase_001: s" in plan_text
+        assert "body content" in plan_text
+        assert "```json" not in plan_text
+        assert "decision" not in plan_text
 
-    def test_verdict_with_lineage_key_rejects(self) -> None:
+    def test_trailing_verdict_with_lineage_key_extracted(self) -> None:
         text = textwrap.dedent(
             """\
+            body
             ```json
             {"lineage": {"phases": []}}
             ```
             """
         )
-        with pytest.raises(PlanArtifactRejected, match="lineage"):
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert extracted == {"lineage": {"phases": []}}
+        assert "```json" not in plan_text
+
+    def test_mid_body_verdict_rejects(self) -> None:
+        """A verdict-shaped fenced block sitting MID-BODY (not
+        trailing) is the original failure mode: an embedded verdict
+        that would corrupt PLAN.md. Reject."""
+        text = textwrap.dedent(
+            """\
+            body before
+
+            ```json
+            {"decision": "accept"}
+            ```
+
+            body after
+            """
+        )
+        with pytest.raises(PlanArtifactRejected, match="NOT the\\s+trailing"):
+            sanitize_plan_artifact(text)
+
+    def test_multiple_verdict_blocks_reject(self) -> None:
+        """Two verdict-shaped fenced blocks in one response is
+        ambiguous; reject rather than guessing which is canonical."""
+        text = textwrap.dedent(
+            """\
+            ```json
+            {"decision": "accept"}
+            ```
+
+            ```json
+            {"lineage": {"phases": []}}
+            ```
+            """
+        )
+        with pytest.raises(
+            PlanArtifactRejected, match="2 fenced 'json' blocks"
+        ):
             sanitize_plan_artifact(text)
 
     def test_non_verdict_json_passes_through(self) -> None:
         """A fenced JSON block with non-verdict shape is not the
-        contract violation we're catching; pass it through."""
+        contract violation we're catching; pass it through with no
+        extraction."""
         text = textwrap.dedent(
             """\
             example config:
@@ -364,7 +414,9 @@ class TestSanitizePlanArtifact:
             ```
             """
         )
-        assert sanitize_plan_artifact(text) == text
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert plan_text == text
+        assert extracted is None
 
     def test_fenced_python_passes_through(self) -> None:
         text = textwrap.dedent(
@@ -374,24 +426,34 @@ class TestSanitizePlanArtifact:
             ```
             """
         )
-        assert sanitize_plan_artifact(text) == text
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert plan_text == text
+        assert extracted is None
 
     def test_fenced_bash_passes_through(self) -> None:
         text = "```bash\nls -la\n```\n"
-        assert sanitize_plan_artifact(text) == text
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert plan_text == text
+        assert extracted is None
 
     def test_malformed_json_passes_through(self) -> None:
         """A fenced ``json`` block whose contents don't decode is
         ignored. The user can fix the typo; we won't reject what we
         can't classify."""
         text = "```json\nnot { valid json\n```\n"
-        assert sanitize_plan_artifact(text) == text
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert plan_text == text
+        assert extracted is None
 
-    def test_multiple_blocks_first_violator_rejects(self) -> None:
+    def test_non_verdict_block_then_trailing_verdict(self) -> None:
+        """A non-verdict fenced JSON block earlier (e.g., a config
+        example) followed by a trailing verdict block. The non-
+        verdict block is passed through; the trailing verdict is
+        extracted."""
         text = textwrap.dedent(
             """\
             ```json
-            {"name": "ok"}
+            {"name": "fswatch"}
             ```
 
             ```json
@@ -399,8 +461,11 @@ class TestSanitizePlanArtifact:
             ```
             """
         )
-        with pytest.raises(PlanArtifactRejected):
-            sanitize_plan_artifact(text)
+        plan_text, extracted = sanitize_plan_artifact(text)
+        assert extracted == {"decision": "accept"}
+        assert '{"name": "fswatch"}' in plan_text
+        # Trailing verdict fence is gone.
+        assert '"decision": "accept"' not in plan_text
 
 
 # ---------------------------------------------------------------------

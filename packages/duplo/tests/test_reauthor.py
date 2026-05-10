@@ -25,6 +25,7 @@ Coverage targets after the JSON-sidecar refactor:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -1886,7 +1887,10 @@ class TestReauthorPlan:
         passes and amplified into the fswatch-run-smoke corruption
         shape. sanitize_plan_artifact in plan_document rejects this;
         reauthor_plan wraps the rejection in a
-        ReauthorError('plan_artifact_contained_verdict_json...')."""
+        ReauthorError('plan_artifact_contained_verdict_json...').
+        Mid-body verdicts (not the documented trailing-fence shape)
+        are still rejected; trailing-verdict shape is the canonical
+        case and is exercised by the sibling success test below."""
         from bob_tools.ledger import Storage
 
         from duplo.reauthor import ReauthorError
@@ -1900,7 +1904,8 @@ class TestReauthorPlan:
         original_plan_text = plan_path.read_text()
 
         # Synth output has a verdict-shaped fenced JSON block in the
-        # plan body — the contract violation.
+        # MIDDLE of the plan body (non-whitespace content follows
+        # it). That violates the trailing-fence contract.
         plan_text_with_verdict = (
             "# proj — Phase 0: env\n"
             "## Phase phase_001: First\n\n"
@@ -1908,6 +1913,8 @@ class TestReauthorPlan:
             "```json\n"
             '{"decision": "accept", "lineage": {"phases": []}}\n'
             "```\n"
+            "\n"
+            "more body text after the verdict fence\n"
         )
         verdict = {
             "decision": "accept",
@@ -1967,6 +1974,188 @@ class TestReauthorPlan:
 
         # Atomicity: PLAN.md unchanged, no new events, no
         # plan_reauthored event.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_reauthor_accepts_trailing_verdict_fence_canonical_shape(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The canonical synthesizer output: plan body followed by a
+        single trailing fenced ``json`` verdict block. The text
+        adapter captures the full response into the plan artifact;
+        sanitize_plan_artifact extracts the trailing verdict and
+        returns the plan body without the fence. Reauthor reconciles
+        the extracted verdict against the judge_verdict artifact
+        (they match) and proceeds. Regression for FIX A."""
+        from bob_tools.ledger import EventType, Storage
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001"])
+
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
+        }
+        plan_body = (
+            "# proj — Phase 0: env\n"
+            "## Phase phase_001: phase_001 title\n\n"
+            "- [ ] do phase_001 thing\n"
+        )
+        # The full text adapter response: plan body + trailing
+        # fenced verdict.
+        plan_artifact_value = (
+            plan_body
+            + "\n"
+            + "```json\n"
+            + json.dumps(verdict, sort_keys=True)
+            + "\n"
+            + "```\n"
+        )
+
+        from duplo import reauthor as reauthor_mod
+
+        class _FakeArtifactView:
+            def __init__(self, value: Any) -> None:
+                self.value = value
+
+        class _FakeResult:
+            terminal = "done"
+            run_id = "fake-run"
+            artifacts = {
+                "plan": _FakeArtifactView(plan_artifact_value),
+                "judge_verdict": _FakeArtifactView(verdict),
+            }
+
+        def fake_run_workflow(*args: Any, **kwargs: Any) -> Any:
+            return _FakeResult()
+
+        import orchestra
+
+        monkeypatch.setattr(orchestra, "run_workflow", fake_run_workflow)
+        monkeypatch.setattr(
+            reauthor_mod,
+            "_resolve_orchestra_config",
+            lambda council, project_dir: object(),
+        )
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        # Reauthor succeeded end-to-end: PLAN.md was rewritten
+        # (preserve carried the prior phase forward), lifecycle
+        # events fired.
+        new_text = plan_path.read_text()
+        assert "## Phase phase_001:" in new_text
+        # The trailing verdict fence must NOT appear in the rewritten
+        # PLAN.md — sanitize stripped it before assembly.
+        assert "```json" not in new_text
+        assert '"decision": "accept"' not in new_text
+        # plan_reauthored event was emitted.
+        events = list(Storage(ledger_dir, writer_id="probe").read_all())
+        assert any(e.type is EventType.PLAN_REAUTHORED for e in events)
+        assert result.plan_reauthored_event_id
+
+    def test_reauthor_rejects_when_extracted_verdict_disagrees_with_artifact(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When the trailing-fenced verdict in the plan artifact
+        disagrees with orchestra's judge_verdict artifact value, the
+        two parsers don't agree on the model output. Fail closed
+        with reason 'plan_artifact_verdict_mismatch' rather than
+        silently picking one."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor import ReauthorError
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001"])
+        original_plan_text = plan_path.read_text()
+
+        artifact_verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
+        }
+        embedded_verdict = {
+            "decision": "reframe",
+            "feedback": "different",
+        }
+        plan_artifact_value = (
+            "# proj — Phase 0: env\n"
+            "## Phase phase_001: First\n\n- [ ] x\n\n"
+            "```json\n"
+            + json.dumps(embedded_verdict)
+            + "\n"
+            + "```\n"
+        )
+
+        from duplo import reauthor as reauthor_mod
+
+        class _FakeArtifactView:
+            def __init__(self, value: Any) -> None:
+                self.value = value
+
+        class _FakeResult:
+            terminal = "done"
+            run_id = "fake-run"
+            artifacts = {
+                "plan": _FakeArtifactView(plan_artifact_value),
+                "judge_verdict": _FakeArtifactView(artifact_verdict),
+            }
+
+        def fake_run_workflow(*args: Any, **kwargs: Any) -> Any:
+            return _FakeResult()
+
+        import orchestra
+
+        monkeypatch.setattr(orchestra, "run_workflow", fake_run_workflow)
+        monkeypatch.setattr(
+            reauthor_mod,
+            "_resolve_orchestra_config",
+            lambda council, project_dir: object(),
+        )
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(
+            ReauthorError, match="plan_artifact_verdict_mismatch"
+        ):
+            reauthor_mod.reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+
         assert plan_path.read_text() == original_plan_text
         events_after = list(
             Storage(ledger_dir, writer_id="probe").read_all()

@@ -51,6 +51,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from duplo.reauthor_phase_ids import _HEADER_RE as _H2_PHASE_HEADER_RE
 
@@ -368,48 +369,101 @@ def render(plan: Plan) -> str:
 # ---------------------------------------------------------------------
 
 
-def sanitize_plan_artifact(text: str) -> str:
-    """Reject a plan artifact that contains a fenced ``json`` block
-    decoding to a verdict-shaped object.
+def sanitize_plan_artifact(
+    text: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """Split-and-extract a trailing fenced verdict JSON, or reject.
 
-    The synthesizer's contract is to emit the council verdict in the
-    judge_verdict artifact, not embedded in the plan body. A plan
-    artifact carrying a verdict-shaped JSON block is a model error
-    that must surface as a hard pause: stripping the block silently
-    would mask the error; passing it through would corrupt PLAN.md.
+    The reauthor synthesizer template instructs the model to emit
+    its response in two parts: the plan body (markdown) followed by
+    a single fenced ``json`` code block carrying the verdict. The
+    text adapter captures the entire response into the plan
+    artifact, so the verdict text appears INSIDE the plan artifact
+    even though orchestra also surfaces a parsed verdict via the
+    judge_verdict artifact. This sanitizer reconciles the two
+    representations:
 
-    Returns ``text`` unchanged when no verdict-shaped block is
-    present. Other fenced code blocks (Python, bash, JSON without
-    verdict shape) are accepted untouched — the rejection is
-    conservative and targets only the specific contract violation.
+      - When the plan artifact ends in a single trailing fenced
+        ``json`` block decoding to a verdict-shaped object, return
+        ``(plan_text_without_fence, extracted_verdict)``. Caller
+        reconciles the extracted verdict against orchestra's
+        judge_verdict artifact (they should match; mismatch is a
+        named error worth surfacing).
+      - When the plan artifact has no fenced ``json`` block (or
+        none of them is verdict-shaped), return ``(text, None)``.
+      - When a verdict-shaped fenced block sits MID-BODY (not
+        trailing), raise :class:`PlanArtifactRejected`. This is the
+        original failure mode: a verdict block embedded inside the
+        plan body would corrupt PLAN.md across reauthor passes.
+      - When MULTIPLE verdict-shaped fenced blocks are present,
+        raise :class:`PlanArtifactRejected`. Ambiguous: which one
+        is the "trailing" verdict?
+
+    Other fenced code blocks (Python, bash, JSON without verdict
+    shape) are passed through untouched.
+
+    Returns
+    -------
+    tuple[str, dict | None]
+        ``(plan_text, extracted_verdict)``. The verdict is None
+        when no extraction occurred; otherwise it is the decoded
+        JSON object from the trailing fenced block.
 
     Raises
     ------
     PlanArtifactRejected
-        When at least one fenced ``json`` block decodes to a JSON
-        object containing the key ``"decision"`` or ``"lineage"``.
+        When the plan artifact's verdict-shaped JSON shape is not
+        the documented trailing-fenced-verdict shape.
     """
+    verdict_blocks: list[tuple[re.Match[str], dict[str, Any]]] = []
     for match in _FENCED_JSON_BLOCK_RE.finditer(text):
         body = match.group("body")
         try:
             decoded = json.loads(body)
         except (json.JSONDecodeError, ValueError):
-            # Malformed JSON inside a fenced block isn't necessarily
-            # a verdict; leave it alone. validate_structure flags
-            # this in the assembled plan if it survives.
+            # Malformed JSON inside a fenced block isn't a verdict;
+            # leave it alone. validate_structure flags it in the
+            # assembled plan if the block survives there.
             continue
         if not isinstance(decoded, dict):
             continue
-        offending = sorted(_VERDICT_SHAPE_KEYS & decoded.keys())
-        if offending:
-            raise PlanArtifactRejected(
-                "plan artifact contains a fenced 'json' block "
-                f"decoding to an object with verdict-shaped key(s) "
-                f"{offending}; the synthesizer must emit the verdict "
-                "in the judge_verdict artifact, not inside the plan "
-                "body"
-            )
-    return text
+        if _VERDICT_SHAPE_KEYS & decoded.keys():
+            verdict_blocks.append((match, decoded))
+
+    if not verdict_blocks:
+        return (text, None)
+
+    if len(verdict_blocks) > 1:
+        positions = ", ".join(
+            f"line ~{text.count(chr(10), 0, m.start()) + 1}"
+            for m, _ in verdict_blocks
+        )
+        raise PlanArtifactRejected(
+            "plan artifact contains "
+            f"{len(verdict_blocks)} fenced 'json' blocks decoding to "
+            f"verdict-shaped objects (at {positions}); the documented "
+            "synthesizer contract is exactly ONE trailing fenced "
+            "verdict block, not multiple"
+        )
+
+    match, decoded = verdict_blocks[0]
+    # "Trailing" means: only whitespace follows the closing fence.
+    # The match.end() points at the position just past the closing
+    # ``` line. Anything non-whitespace after that disqualifies the
+    # block as the trailing verdict.
+    trailing = text[match.end():]
+    if trailing.strip():
+        raise PlanArtifactRejected(
+            "plan artifact contains a verdict-shaped fenced 'json' "
+            f"block at offset {match.start()} that is NOT the "
+            "trailing element of the response; non-whitespace "
+            f"content follows it ({trailing.lstrip()[:80]!r}). The "
+            "documented synthesizer contract requires the verdict "
+            "fence at the END of the response"
+        )
+
+    plan_text_without_fence = text[: match.start()].rstrip() + "\n"
+    return (plan_text_without_fence, decoded)
 
 
 # ---------------------------------------------------------------------

@@ -1037,22 +1037,27 @@ def _invoke_council_for_reauthor(
     if not plan_text:
         raise ReauthorError("council_four_reauthor produced an empty plan")
 
-    # Plan-artifact contract: the synthesizer emits the council
-    # verdict in the judge_verdict artifact, NOT inside the plan
-    # body. A plan artifact carrying a verdict-shaped fenced JSON
-    # block is a model error that must surface as a hard pause:
-    # stripping the block silently would mask the error; passing it
-    # through would corrupt PLAN.md and accumulate across reauthor
-    # passes (the failure mode the fswatch-run-smoke fixture
-    # exhibited).
+    # Plan-artifact contract: the synthesizer template instructs
+    # the model to emit its response in two parts — the plan body
+    # (markdown) followed by a single trailing fenced ``json`` block
+    # carrying the verdict. The text adapter captures the entire
+    # response into the plan artifact, so the verdict text appears
+    # INSIDE the plan artifact even though orchestra also surfaces
+    # a parsed verdict via the judge_verdict artifact. The sanitizer
+    # extracts the trailing fenced verdict (if present) and returns
+    # the plan body without it; we reconcile the extraction against
+    # orchestra's judge_verdict artifact to surface model-output
+    # errors that would otherwise corrupt PLAN.md or the lineage
+    # sidecar.
     try:
-        plan_text = sanitize_plan_artifact(plan_text)
+        plan_text, extracted_verdict = sanitize_plan_artifact(plan_text)
     except PlanArtifactRejected as exc:
         raise ReauthorError(
             "plan_artifact_contained_verdict_json: "
             f"council_four_reauthor's plan artifact carried a "
-            f"fenced 'json' block decoding to a verdict-shaped "
-            f"object. Underlying error: {exc}"
+            f"fenced 'json' block in a shape that does not match the "
+            "documented trailing-fenced-verdict contract. "
+            f"Underlying error: {exc}"
         ) from exc
 
     verdict_view = result.artifacts.get("judge_verdict")
@@ -1064,6 +1069,23 @@ def _invoke_council_for_reauthor(
             "sidecar"
         )
     verdict: dict[str, Any] = dict(verdict_view.value)
+
+    # Reconcile the extracted trailing-fenced verdict (if any)
+    # against orchestra's parsed judge_verdict artifact. They should
+    # be byte-equivalent JSON objects: orchestra extracts the
+    # verdict via its own parser; this sanitizer extracts the same
+    # fence via plan_document. If they disagree, the model emitted
+    # something the two parsers disagree on — better to fail closed
+    # than to silently pick one.
+    if extracted_verdict is not None and extracted_verdict != verdict:
+        raise ReauthorError(
+            "plan_artifact_verdict_mismatch: the trailing fenced "
+            "verdict extracted from the plan artifact does not "
+            "equal the judge_verdict artifact value. This points "
+            "to a parser disagreement on the model's output and is "
+            "treated as a model error."
+        )
+
     return plan_text + "\n", verdict
 
 
