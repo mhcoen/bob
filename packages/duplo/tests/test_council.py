@@ -758,13 +758,20 @@ class TestPlannerCouncilBranch:
         assert mock_council.call_count == 0
 
     def test_planner_uses_council_when_enabled(self, monkeypatch):
+        """Confirm the council branch is exercised when the env var is
+        set. The council's H1 phase heading gets stripped-and-rendered
+        per the new envelope contract; assert against the council's
+        body content (which survives the strip) rather than against
+        the council's H1 (which Duplo overwrites)."""
         monkeypatch.setenv("DUPLO_USE_COUNCIL", "1")
         monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
         with (
             patch("duplo.planner.query") as mock_query,
             patch(
                 "duplo.planner.council.author_phase_plan",
-                return_value="# Council Phase 1",
+                return_value=(
+                    "# Council Phase 1\n\n- [ ] task-from-council\n"
+                ),
             ) as mock_council,
         ):
             result = generate_phase_plan(
@@ -774,7 +781,9 @@ class TestPlannerCouncilBranch:
             )
         assert mock_council.call_count == 1
         assert mock_query.call_count == 0
-        assert "Council Phase 1" in result
+        # The council's H1 is stripped; Duplo prepends its canonical.
+        # The council's body content survives.
+        assert "- [ ] task-from-council" in result
 
     def test_planner_council_receives_phase_num(self, monkeypatch):
         monkeypatch.setenv("DUPLO_USE_COUNCIL", "1")

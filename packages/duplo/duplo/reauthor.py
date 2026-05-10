@@ -33,6 +33,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from duplo.reauthor_assemble import (
+    assemble_reauthored_plan,
+    normalize_lineage_for_preservation,
+    parse_plan_sections,
+)
 from duplo.reauthor_phase_ids import (
     LineageDiff,
     LineageValidationError,
@@ -154,6 +159,11 @@ def reauthor_plan(
 
     plan_text_old = plan_path.read_text(encoding="utf-8")
     old_phases = parse_plan_phases(plan_text_old)
+    # Parse the prior plan into sections too, keyed by phase_id.
+    # The assembly path uses these to preserve unchanged phase
+    # markdown verbatim when the synthesizer's output covers only
+    # the changed phases.
+    prior_preamble, prior_sections = parse_plan_sections(plan_text_old)
 
     storage_writer_id = allocate_writer_id(prefix="duplo-reauthor")
     storage = Storage(ledger_dir, writer_id=storage_writer_id)
@@ -212,21 +222,48 @@ def reauthor_plan(
             "the re-author path requires the JSON lineage sidecar"
         )
 
-    # Validate the synthesizer's output before emitting any events.
-    # Validation failures must NOT leave a partial event sequence on
-    # disk.
-    new_phases = parse_plan_phases(new_plan_text)
-    validate_lineage(
-        (p.id for p in old_phases),
-        (p.id for p in new_phases),
-        lineage_obj,
+    # Preserve-by-default assembly. The synthesizer authors changed
+    # phase content and non-preserve lineage intent; Duplo wraps the
+    # output in the deterministic envelope.
+    #
+    # Codex's framing on why this lives in Duplo, not the prompt:
+    # the same anti-pattern as required_phase_id and the H1
+    # ordinal — protocol metadata (here: which prior phases survive
+    # unchanged) belongs to the runtime, not the model. Asking the
+    # synthesizer to repeat unchanged phases verbatim and to emit
+    # preserve entries for them keeps the model in the ownership
+    # loop and fails closed when the model emits only the changed
+    # phase.
+    _, synth_sections = parse_plan_sections(new_plan_text)
+    prior_ids = [p.id for p in old_phases]
+    normalized_lineage = normalize_lineage_for_preservation(
+        prior_ids, lineage_obj
     )
-    diff = compute_lineage_diff(lineage_obj)
+    assembled_plan_text = assemble_reauthored_plan(
+        prior_preamble=prior_preamble,
+        prior_sections=prior_sections,
+        synth_sections=synth_sections,
+        normalized_lineage=normalized_lineage,
+    )
+
+    # Validate the assembled plan + normalized lineage before
+    # emitting any events. Fail-closed semantics are preserved:
+    # contradictions (preserve+supersede on the same id, unknown
+    # 'from' priors, missing/extra plan headers vs lineage) still
+    # raise; normalization only fills in preserve-defaults for
+    # unaccounted priors, never repairs explicit contradictions.
+    new_phases = parse_plan_phases(assembled_plan_text)
+    validate_lineage(
+        prior_ids,
+        (p.id for p in new_phases),
+        normalized_lineage,
+    )
+    diff = compute_lineage_diff(normalized_lineage)
 
     git_snapshot = _capture_git_snapshot(project_dir)
 
     from_plan_commit = _git_head_sha(project_dir)
-    out_path.write_text(new_plan_text, encoding="utf-8")
+    out_path.write_text(assembled_plan_text, encoding="utf-8")
     to_plan_commit = _git_head_sha(project_dir)
 
     lifecycle_event_ids = _emit_lifecycle_events(
@@ -256,7 +293,7 @@ def reauthor_plan(
 
     return ReauthorResult(
         new_plan_path=out_path,
-        new_plan_text=new_plan_text,
+        new_plan_text=assembled_plan_text,
         lineage_diff=diff,
         lifecycle_event_ids=lifecycle_event_ids,
         plan_reauthored_event_id=plan_reauthored_event_id,

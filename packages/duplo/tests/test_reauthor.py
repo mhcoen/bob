@@ -731,10 +731,24 @@ class TestReauthorPlan:
             project_dir=tmp_path,
         )
 
-        # The fake invoke returns the plan text exactly as supplied
-        # (preserves trailing newline). The reauthor path writes that
-        # to disk verbatim.
-        assert plan_path.read_text() == new_plan
+        # Preserve-by-default assembly: Duplo wraps the synthesizer's
+        # output in the deterministic envelope. The PRESERVED phase's
+        # markdown comes from the prior plan verbatim (the synthesizer's
+        # reproduction of phase_001 is discarded — preserve means
+        # preserve, not "model rewrites it again"); the SUPERSEDED
+        # phase's markdown comes from the synthesizer's new section.
+        assembled = plan_path.read_text()
+        # Prior phase_001 content survives.
+        assert "## Phase phase_001: phase_001 title" in assembled
+        assert "- [ ] do phase_001 thing" in assembled
+        # The synthesizer's reproduction of phase_001 was discarded.
+        assert "(preserved)" not in assembled
+        assert "- [ ] retained" not in assembled
+        # The new phase_002b section came from synth.
+        assert "## Phase phase_002b: Refactored phase_002" in assembled
+        assert "- [ ] new work" in assembled
+        # And the prior phase_002 content was replaced.
+        assert "- [ ] do phase_002 thing" not in assembled
 
         assert result.lineage_diff.superseded == [
             ("phase_002", "phase_002b")
@@ -984,6 +998,351 @@ class TestReauthorPlan:
                 crossing_event_id="00000000-0000-7000-8000-000000000000",
                 project_dir=tmp_path,
             )
+
+    # ---- preserve-by-default reauthor assembly (the directive's bug) ----
+
+    def test_partial_synthesizer_output_is_preserved_by_runtime(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Synthesizer returns ONLY the changed phase (phase_002b
+        supersedes phase_002), with lineage that names only that
+        change. Prior plan has phase_001 through phase_005.
+
+        Without runtime-side preservation, validate_lineage would
+        reject (4 priors unaccounted) and the run would fail closed
+        without progress.
+
+        With preserve-by-default assembly, Duplo:
+          - Adds preserve entries for phase_001/003/004/005 to lineage
+          - Preserves their sections from prior PLAN.md verbatim
+          - Substitutes phase_002b for phase_002 at the same position
+          - Writes a full PLAN.md
+        """
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir,
+            plan_phases=[
+                "phase_001",
+                "phase_002",
+                "phase_003",
+                "phase_004",
+                "phase_005",
+            ],
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path,
+            [
+                "phase_001",
+                "phase_002",
+                "phase_003",
+                "phase_004",
+                "phase_005",
+            ],
+        )
+
+        # Synthesizer returns ONLY phase_002b.
+        partial_plan = (
+            "## Phase phase_002b: Refactored phase_002\n\n"
+            "- [ ] new b work\n"
+        )
+        # Lineage accounts ONLY for phase_002. The other priors are
+        # left for Duplo to preserve.
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {
+                        "id": "phase_002b",
+                        "action": "supersede",
+                        "from": ["phase_002"],
+                    }
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, partial_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        # Assembled PLAN.md has all 5 prior ids represented (4
+        # preserved from prior + phase_002b in place of phase_002).
+        text = plan_path.read_text()
+        assert "## Phase phase_001: phase_001 title" in text
+        assert "## Phase phase_002:" not in text  # superseded
+        assert "## Phase phase_002b: Refactored phase_002" in text
+        assert "## Phase phase_003: phase_003 title" in text
+        assert "## Phase phase_004: phase_004 title" in text
+        assert "## Phase phase_005: phase_005 title" in text
+
+        # Order matches prior order with phase_002 replaced.
+        idxs = [
+            text.find(f"## Phase {pid}:")
+            for pid in (
+                "phase_001",
+                "phase_002b",
+                "phase_003",
+                "phase_004",
+                "phase_005",
+            )
+        ]
+        assert idxs == sorted(idxs)
+
+        # Preserved phase content survives verbatim from prior.
+        assert "- [ ] do phase_001 thing" in text
+        assert "- [ ] do phase_003 thing" in text
+        # Synthesized phase_002b content lands.
+        assert "- [ ] new b work" in text
+
+        # Lineage diff reflects only the synthesizer's actions
+        # (preserves are not lifecycle events).
+        assert result.lineage_diff.superseded == [
+            ("phase_002", "phase_002b")
+        ]
+        assert result.lineage_diff.abandoned == []
+
+        # Single phase_superseded event emitted (one per consumed
+        # prior); no events for the four preserves.
+        reader = Storage(ledger_dir, writer_id="probe")
+        all_events = reader.read_all()
+        reauthor_events = [
+            e
+            for e in all_events
+            if e.writer_id.startswith("duplo-reauthor")
+        ]
+        from bob_tools.ledger import EventType
+
+        types = [e.type for e in reauthor_events]
+        assert types == [
+            EventType.PHASE_SUPERSEDED,
+            EventType.PLAN_REAUTHORED,
+        ]
+
+    def test_contradictory_lineage_still_raises_after_normalization(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Normalization fills in preserve-defaults; it does NOT
+        repair explicit contradictions. A lineage that names the
+        same prior id under both ``preserve`` and ``supersede.from``
+        still raises, with no write to PLAN.md and no events emitted.
+        """
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001", "phase_002"])
+        original_plan_text = plan_path.read_text()
+
+        synth_plan = (
+            "## Phase phase_001: First\n\n- [ ] preserved a\n\n"
+            "## Phase phase_002b: Refactored\n\n- [ ] new b\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    # Both preserve AND supersede.from name phase_001.
+                    {"id": "phase_001", "action": "preserve"},
+                    {
+                        "id": "phase_002b",
+                        "action": "supersede",
+                        "from": ["phase_001", "phase_002"],
+                    },
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, synth_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(LineageValidationError):
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_full_plan_reauthor_path_still_works(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Backward compat: a synthesizer that DOES emit the full
+        plan plus fully-accounting lineage still produces a valid
+        re-author. Normalization is a no-op when no priors are
+        unaccounted; assembly walks priors and emits replaced /
+        preserved sections per lineage."""
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002", "phase_003"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_002", "phase_003"]
+        )
+
+        # Synthesizer writes the FULL plan: preserves 1 and 3,
+        # supersedes 2.
+        full_plan = (
+            "## Phase phase_001: First\n\n- [ ] keep a\n\n"
+            "## Phase phase_002b: Refactored Second\n\n- [ ] new b\n\n"
+            "## Phase phase_003: Third\n\n- [ ] keep c\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {"id": "phase_001", "action": "preserve"},
+                    {
+                        "id": "phase_002b",
+                        "action": "supersede",
+                        "from": ["phase_002"],
+                    },
+                    {"id": "phase_003", "action": "preserve"},
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, full_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        text = plan_path.read_text()
+        assert "## Phase phase_001:" in text
+        assert "## Phase phase_002:" not in text
+        assert "## Phase phase_002b:" in text
+        assert "## Phase phase_003:" in text
+        # Preserved sections come from PRIOR (not synth's reproduction).
+        assert "- [ ] do phase_001 thing" in text
+        assert "- [ ] do phase_003 thing" in text
+        # Synth's reproductions are discarded (preserve = preserve).
+        assert "- [ ] keep a" not in text
+        assert "- [ ] keep c" not in text
+        # Synth's supersede content lands.
+        assert "- [ ] new b" in text
+
+        assert result.lineage_diff.superseded == [
+            ("phase_002", "phase_002b")
+        ]
+
+        reader = Storage(ledger_dir, writer_id="probe")
+        from bob_tools.ledger import EventType
+
+        all_events = reader.read_all()
+        reauthor_events = [
+            e
+            for e in all_events
+            if e.writer_id.startswith("duplo-reauthor")
+        ]
+        types = [e.type for e in reauthor_events]
+        assert types == [
+            EventType.PHASE_SUPERSEDED,
+            EventType.PLAN_REAUTHORED,
+        ]
+
+    def test_synth_section_missing_for_lineage_target_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Lineage names a supersede target that the synthesizer
+        didn't write a section for. Assembly fails before write."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor_assemble import ReauthorAssemblyError
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001", "phase_002"])
+        original_plan_text = plan_path.read_text()
+
+        # Synthesizer's body has no section at all.
+        empty_plan = ""
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {
+                        "id": "phase_002b",
+                        "action": "supersede",
+                        "from": ["phase_002"],
+                    }
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, empty_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(ReauthorAssemblyError, match="phase_002b"):
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
 
 
 # ---------------------------------------------------------------------
