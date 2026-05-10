@@ -47,6 +47,24 @@ declared in SPEC.md to pick up site changes, re-extracts features
 from the updated content, and appends tasks to the plan for anything
 that was missed.
 
+## Test setup
+
+Duplo's tests import `orchestra` and `bob_tools`, which are sibling
+repos cloned into `/Users/mhcoen/proj/orchestra` and
+`/Users/mhcoen/proj/bob-tools`. They are not on PyPI; install them
+editable into Duplo's venv before running pytest:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e /Users/mhcoen/proj/orchestra
+.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
+.venv/bin/pip install -e '.[dev]'
+```
+
+After this, `pytest -q` from the repo root works without any
+`PYTHONPATH=` prefix. Editable installs propagate source changes
+in the sibling repos automatically.
+
 ## Getting started
 
 New projects follow three steps: create SPEC.md with `duplo init`,
