@@ -177,6 +177,24 @@ clearly enough for a person to follow, McLoop can execute it.
 pip install mcloop
 ```
 
+## Test setup
+
+McLoop's tests import `orchestra`, `bob_tools`, and `duplo`
+(`auto_reauthor` lazily imports `duplo.reauthor`). All three are
+sibling repos, not on PyPI; install them editable into McLoop's
+venv before running pytest:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e /Users/mhcoen/proj/orchestra
+.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
+.venv/bin/pip install -e /Users/mhcoen/proj/duplo
+.venv/bin/pip install -e '.[dev]'
+```
+
+After this, `pytest -q` from the repo root works without any
+`PYTHONPATH=` prefix.
+
 ## Quickstart
 
 ```bash
@@ -1283,6 +1301,14 @@ leave `bug_verify` out of the project config (or explicitly set
 `"pattern": "direct"`); the direct bug-verify path remains the
 working default.
 
+Note that orchestra's `orchestra run <workflow.orc>` CLI is
+restricted to mock, human, and shell workflows; packaged workflows
+that use `agent` actors or built-in transforms must go through the
+verb surface or the library API. Mcloop uses the library API
+(`from orchestra import run_workflow`) and is unaffected, but it is
+worth knowing if you are exploring orchestra workflows directly
+from a shell.
+
 ### Cost and latency
 
 Multi-role patterns multiply the per-edit token usage and wall
@@ -1675,21 +1701,27 @@ Prompts and model outputs may be persisted in several places McLoop
 writes during a run:
 
 - per-task transcript logs under the configured `log_dir` (default
-  `logs/`)
-- `.mcloop/active-pid` while a session is running
-- `.mcloop/runs/latest.json` and dated run summaries
-- the JSONL run log (`log.jsonl` under the orchestra run directory)
-  when the orchestra wrapper is in use
-- live process listings (`ps` output) while the inner CLI is
-  running, because the prompt is part of the legacy direct path's
-  command line
+  `logs/`), which capture the full subprocess stdout/stderr
+- `.mcloop/active-pid` while a session is running, which carries
+  the full command line (including the prompt for the direct path)
+- when the direct path is active, the prompt also appears in live
+  process listings (`ps` output) for the duration of the inner CLI
+  invocation. The orchestra-backed path pipes prompts via stdin and
+  does not expose them through `ps`.
+- when the orchestra wrapper is in use, the JSONL run log
+  (`log.jsonl` under the orchestra run directory) records state
+  envelopes and adapter outputs for resume. The orchestra run
+  directory is created with mode 0700 and prompt-source snapshots
+  are written with mode 0600.
+
+McLoop's own run summaries at `.mcloop/runs/latest.json` and the
+dated archives record task labels, outcomes, elapsed times, model
+names, commit hashes, and changed-file lists. They do not contain
+prompt or model-output content.
 
 Do not run McLoop against codebases containing live credentials,
 customer data, or other sensitive material without first reviewing
-what gets persisted and where. The orchestra-backed path snapshots
-prompt-source files into the run directory so resume reads from
-there rather than the live filesystem; that snapshot is also
-unprotected at the OS level.
+what gets persisted and where.
 
 ## Development
 
