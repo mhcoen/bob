@@ -145,6 +145,37 @@ The phase_id matches `[A-Za-z0-9_]+`. Do not change letter case
 or insert spaces; the consumer's parser is strict. Headers carry
 no embedded lineage metadata. Plan markdown stays simple.
 
+Phase ids are runtime-supplied, not synthesizer-chosen.
+
+The state block prefix lists the prior plan's phase ids
+verbatim and supplies an explicit "Next available phase id"
+value. Use those values directly:
+
+  - For preserve / supersede.from / split.from / merge.from /
+    abandoned, the id MUST be one of the prior plan ids listed
+    in the state block. Do NOT invent ancestor ids; the
+    validator rejects unknown 'from' references and treats it
+    as a fail-closed lineage error. If you think a prior phase
+    should be referenced but it is not in the state block's
+    list, the prior plan does not contain it — pick a different
+    ancestor or treat the change as a "new" entry instead.
+
+  - For supersede / split / merge / new entry ids (the new ids
+    you introduce), START at the state block's "Next available
+    phase id" and increment from there: next, next+1, next+2,
+    .... NEVER reuse a prior id; the validator rejects
+    collisions. The runtime supplies this value because the
+    prior plan may have gaps from earlier reauthor runs that
+    consumed intermediate ids — sequential guessing from the
+    smallest visible prior id will collide with the holes. Use
+    the runtime-supplied start verbatim.
+
+This is the same discipline canonical mode applies via
+required_phase_id: protocol metadata is owned by the runtime,
+not the model. The state block is your source of truth for
+phase identifiers; do not compute them from inspection of the
+plan markdown.
+
 Preserve-by-default: the runtime owns the deterministic envelope.
 
 Author ONLY the changed/new phase content and the non-preserve

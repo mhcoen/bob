@@ -408,6 +408,63 @@ def test_canonical_synthesizer_template_forbids_h1_phase_heading() -> None:
     )
 
 
+def test_reauthor_synthesizer_template_phase_ids_runtime_supplied() -> None:
+    """The reauthor synthesizer template MUST instruct the
+    synthesizer that phase ids are runtime-supplied: prior ids are
+    listed verbatim in the state block, and new ids start at the
+    runtime-supplied 'Next available phase id' value. This mirrors
+    canonical mode's required_phase_id discipline. Pinned so a
+    future template edit cannot silently re-grant the synthesizer
+    authority over phase identifier choice (which collided with
+    existing prior ids when the prior plan had gaps from earlier
+    reauthor runs)."""
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_reauthor.md"
+    )
+    body = template_path.read_text()
+    body_lower = body.lower()
+    # The new section header is present.
+    assert "runtime-supplied, not synthesizer-chosen" in body_lower
+    # The runtime-supplied start id is named.
+    assert "Next available phase id" in body
+    # The state-block prior list is the source of truth for ancestor ids.
+    assert "do not invent ancestor ids" in body_lower
+    # Collisions with prior ids are explicitly forbidden.
+    assert "never reuse a prior id" in body_lower
+    # The discipline is tied back to canonical's required_phase_id pattern.
+    assert "required_phase_id" in body
+
+
+def test_reauthor_synthesizer_template_renders_under_str_format() -> None:
+    """The reauthor template is consumed via str.format() with the
+    five council fields. Any single-brace example JSON in the
+    template body would crash format() with KeyError. Pinned so a
+    future template edit cannot reintroduce unescaped braces."""
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_reauthor.md"
+    )
+    body = template_path.read_text()
+    rendered = body.format(
+        council_brief="X",
+        proposal_code="X",
+        proposal_codex="X",
+        proposal_kimi="X",
+        proposal_deepseek="X",
+    )
+    # Substitutions occurred; rendered output is non-trivial.
+    assert "{council_brief}" not in rendered
+    assert "{proposal_code}" not in rendered
+    assert len(rendered) > 1000
+
+
 def test_canonical_proposer_template_uses_required_phase_id() -> None:
     """The shared proposer template instructs proposers to use
     required_phase_id verbatim when present in the brief. Reauthor
