@@ -429,6 +429,32 @@ def test_assemble_new_appends_at_end() -> None:
     assert [u.phase_id for u in assembled.units] == ["phase_001", "phase_002"]
 
 
+def test_assemble_raises_on_duplicate_synth_phase_id() -> None:
+    """The council might emit two ``## Phase phase_010: ...`` units
+    in one synthesis. Last-write-wins on the dict would silently
+    drop the first unit's body, and validate_structure on the
+    assembled plan couldn't see the duplicate because only one
+    survives. Catch the duplicate at synth_by_id construction time
+    so the model-output error is visible."""
+    prior = _plan(_unit("phase_001", "A"))
+    dup_a = _unit("phase_010", "First", body="- [ ] first body\n")
+    dup_b = _unit("phase_010", "Second", body="- [ ] second body\n")
+    lineage = {
+        "phases": [
+            {"id": "phase_001", "action": "preserve"},
+            {"id": "phase_010", "action": "new"},
+        ]
+    }
+    with pytest.raises(
+        ReauthorAssemblyError, match="duplicate phase id 'phase_010'"
+    ):
+        assemble_reauthored_plan(
+            prior_plan=prior,
+            synth_units=[dup_a, dup_b],
+            normalized_lineage=lineage,
+        )
+
+
 def test_assemble_raises_when_lineage_references_missing_synth_unit() -> None:
     """Lineage declares phase_002b supersedes phase_002, but the
     synthesizer didn't write a unit for phase_002b. Assembly fails

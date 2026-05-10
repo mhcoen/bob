@@ -2,6 +2,56 @@
 
 ## Follow-ups
 
+### Corrupt prior PLAN.md cannot self-heal through reauthor — 2026-05-10
+
+duplo/duplo/plan_document.py:parse_plan is strict about the
+canonical PLAN.md structure (H1 envelope + H2 phase header pairs as
+units; no intervening text; one H2 per H1; no embedded fenced
+verdict JSON inside unit bodies). Prior plans that violate the
+contract — whether from earlier reauthor passes that ran before
+the structural-ownership fix landed, manual edits, or any other
+source — fail at the parser boundary.
+
+Cause: the new parser enforces invariants the old H2-only parser
+silently tolerated.
+
+Consequence: re-running mcloop on a corrupt PLAN.md raises
+ReauthorError("prior PLAN.md ... cannot be parsed as a canonical
+plan document: ...") at the start of reauthor_plan. The reauthor
+flow does not attempt to rewrite the corrupt prior; it pauses for
+manual intervention rather than amplifying the corruption across
+another pass.
+
+Recovery options:
+
+  1. Roll back to a known-good PLAN.md commit. The fastest path
+     when one is available. Example for the fswatch-run-smoke
+     fixture: ``git -C /Users/mhcoen/proj/experiments checkout
+     <commit-with-clean-PLAN> -- fswatch-run-smoke/PLAN.md``.
+  2. Manually rewrite PLAN.md to canonical structure. Each phase
+     becomes one unit:
+
+         # <project> — Phase N: <human title>
+         ## Phase phase_NNN: <human title>
+
+         <body>
+
+     No intervening text between the H1 and H2; H1 ordinals are
+     contiguous starting at 0; phase_id matches /[A-Za-z0-9_]+/;
+     verdict JSON does not appear anywhere in unit bodies.
+  3. (Future) Run a one-shot duplo CLI command that rewrites a
+     structurally-corrupt plan into canonical form against a
+     supplied lineage. Surfaced as a separate todo below.
+
+### [todo] duplo plan repair CLI — 2026-05-10
+
+A ``duplo plan repair --in PLAN.md --out PLAN.md`` command would
+take a structurally-corrupt prior plan plus a target lineage (or
+an inferred lineage from the existing H2 ids) and produce a
+canonical PLAN.md. Out of scope for the structural-ownership fix
+that introduced plan_document; surfaced here as a follow-up so a
+future change picks it up.
+
 ### [todo] Migrate mcloop's checklist.py check-off path to plan_document — 2026-05-10
 
 Duplo's plan_document module owns the canonical PLAN.md structural

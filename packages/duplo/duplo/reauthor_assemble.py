@@ -229,6 +229,18 @@ def assemble_reauthored_plan(
 
     synth_by_id: dict[str, PhaseUnit] = {}
     for unit in synth_units:
+        if unit.phase_id in synth_by_id:
+            # Last-write-wins on the dict would silently drop the
+            # earlier unit's body; validate_structure on the
+            # assembled plan can't see the duplicate because only
+            # one survives. Surface the violation here, before any
+            # downstream layer has a chance to mask it.
+            raise ReauthorAssemblyError(
+                "synthesized plan has duplicate phase id "
+                f"{unit.phase_id!r}; the council emitted two units "
+                "for the same phase id, which is a model output "
+                "error"
+            )
         synth_by_id[unit.phase_id] = unit
 
     abandoned_ids: set[str] = set()
