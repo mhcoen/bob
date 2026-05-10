@@ -186,18 +186,23 @@ def reauthor_plan(
     # authoring so it consults the lineage-preservation discipline in
     # the council_synthesizer template.
     crossing_summary = _crossing_summary(crossing)
+    next_available_phase_id = _next_available_phase_id_from_priors(old_phases)
     question = (
         "Re-author the plan in light of the following triggering "
         f"threshold crossing: {crossing_summary}. Preserve phase ids "
         "from the prior plan where the phase remains valid; introduce "
-        "new ids for derived phases. Declare lineage in the verdict "
-        "JSON's 'lineage' object (NOT in the markdown). Each plan "
-        "header gets one phases[] entry with an action from "
-        "{preserve, supersede, split, merge, new}; supersede/split/"
-        "merge entries name their predecessors in 'from'. Drop a "
-        "prior phase entirely by listing it in lineage.abandoned. "
-        "See the council_synthesizer template's phase-id and lineage "
-        "discipline section for the schema and per-action constraints."
+        f"new ids for derived phases STARTING AT {next_available_phase_id} "
+        "(the runtime computes this; the prior plan's ids are listed "
+        "in the state block — do NOT pick an id from that list). "
+        "Declare lineage in the verdict JSON's 'lineage' object (NOT "
+        "in the markdown). Each plan header gets one phases[] entry "
+        "with an action from {preserve, supersede, split, merge, new}; "
+        "supersede/split/merge entries name their predecessors in "
+        "'from' (the predecessors MUST be ids from the prior plan's "
+        "list — do NOT invent ancestor ids). Drop a prior phase "
+        "entirely by listing it in lineage.abandoned. See the "
+        "council_synthesizer template's phase-id and lineage discipline "
+        "section for the schema and per-action constraints."
     )
 
     state_blob = _build_state_blob(plan_text_old, old_phases, state)
@@ -689,6 +694,36 @@ def _extract_plan_text_design_context(
 # ---------------------------------------------------------------------
 
 
+def _next_available_phase_id_from_priors(
+    old_phases: list[ParsedHeader],
+) -> str:
+    """Highest-suffix + 1, three-digit zero-padded ``phase_NNN``.
+
+    Mirrors duplo.council.compute_required_phase_id's safe rule
+    (highest + 1, not the smallest gap). When there are no prior
+    phases, returns ``"phase_001"``.
+
+    Reauthor's reason for needing this is exactly the canonical
+    mode's reason for required_phase_id: synthesizers cannot be
+    trusted to compute a non-colliding new id from inspection of
+    the prior plan, especially when that plan has gaps from
+    earlier reauthor runs that consumed intermediate ids. A run
+    where the prior is ``phase_001`` plus ``phase_006-009`` (gap
+    where ``phase_002-005`` were superseded) saw the synthesizer
+    pick ``phase_006-009`` as "new" ids — colliding with the
+    existing priors — because it had assumed sequential numbering.
+    Injecting the start value explicitly removes the guess.
+    """
+    highest = 0
+    for phase in old_phases:
+        suffix = phase.id.removeprefix("phase_")
+        if suffix.isdigit():
+            n = int(suffix)
+            if n > highest:
+                highest = n
+    return f"phase_{highest + 1:03d}"
+
+
 def _build_state_blob(
     plan_text: str, old_phases: list[ParsedHeader], state: Any
 ) -> str:
@@ -698,6 +733,15 @@ def _build_state_blob(
     parsed phase ids (so the synthesizer can reason about preserved
     vs new ids without re-parsing the markdown). The plan text
     itself is the primary substrate.
+
+    The summary is followed by an explicit ``next available phase
+    id`` value the synthesizer MUST use as the starting point for
+    new ids (supersede / split / merge / new). This mirrors the
+    canonical-mode required_phase_id contract: protocol metadata
+    is owned by the runtime, not the model. A synthesizer that
+    ignores the supplied value and picks colliding ids will be
+    rejected by validate_lineage; the explicit value reduces the
+    error rate by removing the need to guess.
     """
     summary_lines: list[str] = ["Phase ids in the prior plan:"]
     if old_phases:
@@ -708,6 +752,19 @@ def _build_state_blob(
             "  - (none recognized; this is a fresh-id labeling pass "
             "on a pre-Slice C plan)"
         )
+
+    next_id = _next_available_phase_id_from_priors(old_phases)
+    summary_lines.append("")
+    summary_lines.append(
+        "Next available phase id (use VERBATIM as the starting "
+        f"point for any new ids you introduce): {next_id}"
+    )
+    summary_lines.append(
+        "When introducing multiple new ids in one re-author pass, "
+        "increment from this start (e.g., next, next+1, next+2). "
+        "NEVER reuse an id that already appears in the prior plan "
+        "list above; the validator rejects collisions."
+    )
 
     return (
         "Existing PLAN.md:\n"

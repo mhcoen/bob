@@ -1548,3 +1548,111 @@ def test_parsed_header_shape() -> None:
     assert h.id == "phase_001"
     assert h.title == "t"
     assert h.header_line_index == 0
+
+
+# ---------------------------------------------------------------------
+# next-available phase id helper + state-blob enrichment
+# ---------------------------------------------------------------------
+
+
+class TestNextAvailablePhaseIdFromPriors:
+    """Mirrors duplo.council.compute_required_phase_id's safe rule
+    (highest + 1, NOT the smallest gap). Reauthor needs this to
+    inject an explicit start value into the synthesizer brief so
+    the model doesn't have to guess; gap-filled prior plans were
+    making it pick colliding ids."""
+
+    def test_no_priors_returns_phase_001(self) -> None:
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        assert _next_available_phase_id_from_priors([]) == "phase_001"
+
+    def test_single_prior_returns_next(self) -> None:
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        priors = [ParsedHeader(id="phase_001", title="t", header_line_index=0)]
+        assert _next_available_phase_id_from_priors(priors) == "phase_002"
+
+    def test_contiguous_returns_max_plus_one(self) -> None:
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        priors = [
+            ParsedHeader(id=f"phase_{i:03d}", title="t", header_line_index=i)
+            for i in range(1, 6)
+        ]
+        assert _next_available_phase_id_from_priors(priors) == "phase_006"
+
+    def test_gap_returns_highest_plus_one_not_gap(self) -> None:
+        """The actual scenario from the smoke fixture: prior plan
+        had phase_001 + phase_006-009 (gap at 002-005 from earlier
+        reauthor runs). The next-available value MUST be phase_010,
+        NOT phase_002 (the smallest gap)."""
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        priors = [
+            ParsedHeader(id="phase_001", title="a", header_line_index=0),
+            ParsedHeader(id="phase_006", title="b", header_line_index=1),
+            ParsedHeader(id="phase_007", title="c", header_line_index=2),
+            ParsedHeader(id="phase_008", title="d", header_line_index=3),
+            ParsedHeader(id="phase_009", title="e", header_line_index=4),
+        ]
+        assert _next_available_phase_id_from_priors(priors) == "phase_010"
+
+    def test_non_strict_ids_skipped_from_max(self) -> None:
+        """Ids that don't match phase_NNN don't participate in the
+        max computation. ``phase_xyz`` is ignored; ``phase_004``
+        sets the max."""
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        priors = [
+            ParsedHeader(id="phase_004", title="a", header_line_index=0),
+            ParsedHeader(id="phase_xyz", title="b", header_line_index=1),
+        ]
+        assert _next_available_phase_id_from_priors(priors) == "phase_005"
+
+    def test_zero_padding(self) -> None:
+        from duplo.reauthor import _next_available_phase_id_from_priors
+
+        priors = [
+            ParsedHeader(id="phase_099", title="t", header_line_index=0),
+        ]
+        # 100 is no longer 3-digit-needs-padding but the format
+        # specifier is :03d so 100 stays as phase_100.
+        assert _next_available_phase_id_from_priors(priors) == "phase_100"
+
+
+class TestStateBlobIncludesNextAvailableId:
+    """The state blob carries the prior phase id list AND an
+    explicit ``Next available phase id`` value. The synthesizer
+    template instructs the model to use the supplied value
+    verbatim; this test pins that the runtime actually surfaces
+    it."""
+
+    def test_state_blob_lists_priors_and_next_available(self) -> None:
+        from duplo.reauthor import _build_state_blob
+
+        plan_text = (
+            "## Phase phase_001: Scaffold\n- [ ] x\n"
+            "## Phase phase_006: After-gap\n- [ ] y\n"
+        )
+        priors = [
+            ParsedHeader(id="phase_001", title="Scaffold", header_line_index=0),
+            ParsedHeader(id="phase_006", title="After-gap", header_line_index=2),
+        ]
+        blob = _build_state_blob(plan_text, priors, state=None)
+        # Prior list is present.
+        assert "phase_001: Scaffold" in blob
+        assert "phase_006: After-gap" in blob
+        # Next-available is computed from highest+1 (gap is NOT
+        # filled — the smoke-fixture bug case).
+        assert "Next available phase id" in blob
+        assert "phase_007" in blob
+        # The "use VERBATIM" instruction is present.
+        assert "VERBATIM" in blob
+
+    def test_state_blob_no_priors_starts_at_phase_001(self) -> None:
+        from duplo.reauthor import _build_state_blob
+
+        blob = _build_state_blob("", [], state=None)
+        assert "Next available phase id" in blob
+        assert "phase_001" in blob
