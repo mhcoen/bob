@@ -27,12 +27,39 @@ def _write_pyproject(project_dir: Path, body: str) -> None:
     (project_dir / "pyproject.toml").write_text(body, encoding="utf-8")
 
 
-def _write_runsh(project_dir: Path, executable: bool = True) -> None:
+def _write_runsh(
+    project_dir: Path,
+    executable: bool = True,
+    *,
+    with_test_arm: bool = True,
+) -> None:
+    """Write a run.sh stub.
+
+    With ``with_test_arm=True`` (default), the script contains the
+    canonical duplo-shaped ``if [[ "${1:-}" == "test" ]]`` arm, so
+    BC3's resolver picks it up. With ``with_test_arm=False``, the
+    script is a generic argument forwarder with no test handling —
+    BC3's resolver should reject it and fall through to
+    ``.venv/bin/pytest``.
+    """
     run_sh = project_dir / "run.sh"
-    run_sh.write_text(
-        '#!/bin/bash\nset -euo pipefail\necho "test runner"\n',
-        encoding="utf-8",
-    )
+    if with_test_arm:
+        body = (
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            'if [[ "${1:-}" == "test" ]]; then\n'
+            "    shift\n"
+            '    exec ".venv/bin/pytest" "$@"\n'
+            "fi\n"
+            'echo "default"\n'
+        )
+    else:
+        body = (
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            'exec ".venv/bin/python" -m mypkg "$@"\n'
+        )
+    run_sh.write_text(body, encoding="utf-8")
     if executable:
         run_sh.chmod(0o755)
 
@@ -136,6 +163,127 @@ def test_runsh_returns_none_when_present_but_not_executable(tmp_path: Path) -> N
     assert _runsh_test_available(tmp_path) is None
 
 
+# ---- run.sh test-arm detection (the bug fix) -----------------------
+
+
+def _write_runsh_with_body(
+    project_dir: Path, body: str, executable: bool = True
+) -> None:
+    run_sh = project_dir / "run.sh"
+    run_sh.write_text(body, encoding="utf-8")
+    if executable:
+        run_sh.chmod(0o755)
+
+
+def test_runsh_skips_generic_forwarder(tmp_path: Path) -> None:
+    """The duplo-pre-2f6593f scaffold (and other generic forwarders)
+    must NOT be treated as having a test subcommand. The body just
+    forwards $@ to the package; ``./run.sh test`` would invoke the
+    package's __main__ which doesn't know what 'test' means."""
+    _write_runsh(tmp_path, with_test_arm=False)
+    assert _runsh_test_available(tmp_path) is None
+
+
+def test_runsh_picks_double_bracket_if_arm(tmp_path: Path) -> None:
+    """``if [[ "${1:-}" == "test" ]]`` is the canonical duplo-shape
+    test arm."""
+    _write_runsh_with_body(
+        tmp_path,
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        'if [[ "${1:-}" == "test" ]]; then\n'
+        "    shift\n"
+        '    exec "$PYTEST" "$@"\n'
+        "fi\n"
+        'exec "$PYTHON" -m pkg "$@"\n',
+    )
+    assert _runsh_test_available(tmp_path) == "./run.sh test"
+
+
+def test_runsh_picks_single_bracket_if_arm(tmp_path: Path) -> None:
+    """``if [ "$1" = "test" ]`` (POSIX shape) is also valid."""
+    _write_runsh_with_body(
+        tmp_path,
+        "#!/bin/sh\n"
+        'if [ "$1" = "test" ]; then\n'
+        "    shift\n"
+        "    exec pytest \"$@\"\n"
+        "fi\n",
+    )
+    assert _runsh_test_available(tmp_path) == "./run.sh test"
+
+
+def test_runsh_picks_elif_test_arm(tmp_path: Path) -> None:
+    """``elif`` branches comparing $1 to "test" also count."""
+    _write_runsh_with_body(
+        tmp_path,
+        "#!/bin/bash\n"
+        'if [[ "$1" == "build" ]]; then\n'
+        "    exec make build\n"
+        'elif [[ "$1" == "test" ]]; then\n'
+        "    shift\n"
+        "    exec pytest \"$@\"\n"
+        "fi\n",
+    )
+    assert _runsh_test_available(tmp_path) == "./run.sh test"
+
+
+def test_runsh_picks_case_arm(tmp_path: Path) -> None:
+    """``case "$1" in test) ... ;; esac`` shape."""
+    _write_runsh_with_body(
+        tmp_path,
+        "#!/bin/bash\n"
+        'case "${1:-}" in\n'
+        "    build)\n"
+        "        exec make build\n"
+        "        ;;\n"
+        "    test)\n"
+        "        shift\n"
+        "        exec pytest \"$@\"\n"
+        "        ;;\n"
+        "    *)\n"
+        "        exec python -m pkg \"$@\"\n"
+        "        ;;\n"
+        "esac\n",
+    )
+    assert _runsh_test_available(tmp_path) == "./run.sh test"
+
+
+def test_runsh_rejects_comment_mentioning_test(tmp_path: Path) -> None:
+    """A comment containing ``./run.sh test`` (e.g., a Usage docstring)
+    must NOT count as test support. The detection must require an
+    EXECUTABLE branch, not just text mentioning the subcommand."""
+    _write_runsh_with_body(
+        tmp_path,
+        "#!/bin/bash\n"
+        "# Usage:\n"
+        "#   ./run.sh test    Run the suite (DOCUMENTED but not implemented)\n"
+        "set -euo pipefail\n"
+        'exec "$PYTHON" -m pkg "$@"\n',
+    )
+    assert _runsh_test_available(tmp_path) is None
+
+
+def test_runsh_rejects_word_test_in_echo(tmp_path: Path) -> None:
+    """``echo "tests"`` or ``echo "test runner"`` does not constitute
+    a test arm. The runner should fall through."""
+    _write_runsh_with_body(
+        tmp_path,
+        '#!/bin/bash\necho "test runner output"\n',
+    )
+    assert _runsh_test_available(tmp_path) is None
+
+
+def test_runsh_rejects_test_only_inside_string(tmp_path: Path) -> None:
+    """A printed message that mentions test is not a test arm."""
+    _write_runsh_with_body(
+        tmp_path,
+        '#!/bin/bash\n'
+        'echo "Pass test as an arg to invoke the test runner"\n',
+    )
+    assert _runsh_test_available(tmp_path) is None
+
+
 # ---------------------------------------------------------------------
 # _venv_pytest_available
 # ---------------------------------------------------------------------
@@ -202,6 +350,31 @@ def test_venv_pytest_wins_over_bare_pytest(tmp_path: Path) -> None:
 def test_falls_back_to_bare_pytest(tmp_path: Path) -> None:
     with patch("mcloop.test_runner.shutil.which", return_value="/usr/bin/pytest"):
         assert resolve_test_command(tmp_path) == "pytest"
+
+
+def test_resolve_skips_generic_forwarder_runsh_for_venv_pytest(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: a project with a generic-forwarder run.sh AND
+    ``.venv/bin/pytest`` resolves to the venv pytest, NOT
+    ``./run.sh test``. This is the scenario that bit the
+    fswatch-run-smoke fixture: BC3's old detector picked
+    ``./run.sh test``, which executed the package stub and burned
+    mcloop retries deterministically."""
+    _write_runsh(tmp_path, with_test_arm=False)
+    _write_venv_pytest(tmp_path)
+    expected = str(tmp_path / ".venv" / "bin" / "pytest")
+    assert resolve_test_command(tmp_path) == expected
+
+
+def test_resolve_picks_runsh_test_when_arm_is_present(
+    tmp_path: Path,
+) -> None:
+    """Inverse of the above: when run.sh DOES have a real test arm,
+    BC3 prefers it over .venv/bin/pytest."""
+    _write_runsh(tmp_path, with_test_arm=True)
+    _write_venv_pytest(tmp_path)
+    assert resolve_test_command(tmp_path) == "./run.sh test"
 
 
 def test_raises_when_no_fallback_available(tmp_path: Path) -> None:

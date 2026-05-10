@@ -23,6 +23,7 @@ fix any of them.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tomllib
 from pathlib import Path
@@ -63,10 +64,95 @@ def _read_declared_test_command(project_dir: Path) -> str | None:
     return None
 
 
+# Recognize an explicit test-subcommand branch in run.sh. We intentionally
+# reject "run.sh exists and is executable" as sufficient: many run.sh
+# scripts are generic argument forwarders (``"$PYTHON" -m <pkg> "$@"``)
+# that pass "test" through to the project's CLI, which usually doesn't
+# know what "test" means and exits non-zero. mcloop's check phase then
+# burns three retries deterministically.
+#
+# Two recognized shapes (whichever appears non-comment in the script):
+#
+#   1. if/elif comparing $1 (or ${1:-}, etc.) to the literal "test":
+#         if [[ "${1:-}" == "test" ]]
+#         if [ "$1" = "test" ]
+#         elif [[ "$1" = test ]]
+#
+#   2. case arm starting with ``test)`` at the start of a line:
+#         case "${1:-}" in
+#             test)
+#                 ...
+#                 ;;
+#         esac
+#
+# Anything in a comment line (``#``-prefixed after stripping leading
+# whitespace) is excluded so usage strings like ``# ./run.sh test ...``
+# do not pose as support.
+_RUNSH_TEST_IF_RE = re.compile(
+    r"""
+    \b(?:if|elif)\b      # if or elif keyword
+    \s+
+    \[\[?                # [ or [[
+    \s*
+    "?                   # optional opening quote
+    \$\{?1[^"}\s]*\}?    # $1 or ${1...}
+    "?                   # optional closing quote
+    \s*
+    (?:==|=)             # equality
+    \s*
+    "?                   # optional opening quote on rhs
+    test
+    "?                   # optional closing quote on rhs
+    \b
+    """,
+    re.VERBOSE,
+)
+
+_RUNSH_TEST_CASE_ARM_RE = re.compile(r"^\s*test\)", re.MULTILINE)
+
+
+def _strip_shell_comment_lines(text: str) -> str:
+    """Drop whole-line shell comments. Inline comments after a command
+    on the same line are uncommon and rarely contain test-arm patterns;
+    we leave them in place rather than parse shell quoting properly."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def _runsh_has_test_branch(text: str) -> bool:
+    """Return True iff ``text`` (the body of run.sh) has a recognizable
+    executable test-subcommand branch (if/elif on $1 == "test", or a
+    case arm starting with ``test)``)."""
+    code = _strip_shell_comment_lines(text)
+    if _RUNSH_TEST_IF_RE.search(code):
+        return True
+    if _RUNSH_TEST_CASE_ARM_RE.search(code):
+        return True
+    return False
+
+
 def _runsh_test_available(project_dir: Path) -> str | None:
-    """Return ``"./run.sh test"`` if run.sh exists and is executable."""
+    """Return ``"./run.sh test"`` only if run.sh has a real test branch.
+
+    Existence + executable bit is necessary but NOT sufficient. The
+    function inspects the script's body for an explicit
+    test-subcommand handling branch (see ``_RUNSH_TEST_IF_RE`` and
+    ``_RUNSH_TEST_CASE_ARM_RE``). Generic argument forwarders like::
+
+        "$PYTHON" -m <pkg> "$@"
+
+    return ``None`` so the resolver falls through to
+    ``.venv/bin/pytest``.
+    """
     run_sh = project_dir / "run.sh"
-    if run_sh.is_file() and os.access(run_sh, os.X_OK):
+    if not (run_sh.is_file() and os.access(run_sh, os.X_OK)):
+        return None
+    try:
+        text = run_sh.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if _runsh_has_test_branch(text):
         return "./run.sh test"
     return None
 
