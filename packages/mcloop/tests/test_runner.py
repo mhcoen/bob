@@ -1950,6 +1950,19 @@ def test_warn_unknown_model_known_codex(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_warn_unknown_model_known_codex_gpt_5_5(capsys):
+    """gpt-5.5 is in active production use (bound to proposer_codex
+    in duplo's _FALLBACK_ROLE_BINDINGS) and must not trigger a
+    spurious 'model not recognized' warning when invoked directly
+    via mcloop's codex runner. Pinned so a future _KNOWN_MODELS
+    edit cannot silently drop it from the codex set."""
+    from mcloop.runner import _KNOWN_MODELS, warn_unknown_model
+
+    assert "gpt-5.5" in _KNOWN_MODELS["codex"]
+    warn_unknown_model("codex", "gpt-5.5")
+    assert capsys.readouterr().out == ""
+
+
 def test_warn_unknown_model_none_cli(capsys):
     """No warning when CLI has no known models."""
     from mcloop.runner import warn_unknown_model
