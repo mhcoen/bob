@@ -177,6 +177,44 @@ class RunStatus:
         return self.status == "success"
 
 
+# Phrases the synthesizer commonly uses to author tasks that are
+# read-only by design (capture a baseline, verify a property, record
+# state without changing files). Such tasks legitimately produce no
+# file changes and shouldn't be penalized when post-task checks fail
+# for reasons orthogonal to the task itself (e.g., a Phase 0 task
+# running before any tests exist). Match is case-insensitive substring;
+# false positives are mostly benign because the post-task check has
+# already failed, so the alternative path was a terminal failure
+# anyway.
+_READONLY_TASK_PHRASES: tuple[str, ...] = (
+    "do not modify",
+    "do not change",
+    "do not edit",
+    "without modifying",
+    "without changing",
+    "without editing",
+    "read-only",
+    "read only",
+    "capture baseline",
+    "capture pre-edit",
+    "record exit code",
+    "record stdout",
+    "verify and record",
+    "no file changes",
+    "without making any changes",
+)
+
+
+def _is_readonly_task(task_text: str) -> bool:
+    """Return True iff the task description signals it's a deliberate
+    no-op. Used by the no-op-with-failing-checks branch in the task
+    loop to distinguish "deliberate read-only task" (accept) from
+    "editor was supposed to make changes but didn't" (terminal
+    failure)."""
+    text = task_text.lower()
+    return any(phrase in text for phrase in _READONLY_TASK_PHRASES)
+
+
 def main() -> None:
     import atexit
     import traceback
@@ -1482,7 +1520,41 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    # No-op + checks fail: terminal failure (no retry).
+                    # No-op + checks fail: distinguish "deliberately
+                    # read-only task" from "editor failed to make required
+                    # changes". The synthesizer can author tasks that are
+                    # by design no-ops (e.g., "capture baseline by running
+                    # ./run.sh --help; do not modify any files"); for
+                    # those, expecting checks to pass is wrong because
+                    # the surrounding project state hasn't been built
+                    # yet (no tests, stub CLI, etc.). The text heuristic
+                    # catches the common phrasings the synthesizer uses
+                    # for read-only tasks.
+                    if _is_readonly_task(task.text):
+                        check_off(active_file, task)
+                        elapsed = _format_elapsed(
+                            time.monotonic() - task_start,
+                        )
+                        completed.append(f"{label}) {task.text}")
+                        print(
+                            formatting.system_msg(
+                                "Task is a read-only no-op by design"
+                                " (text says do-not-modify or capture-"
+                                "baseline); treating as success despite"
+                                f" failing checks: {noop_check.command}"
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            formatting.task_complete(label, elapsed),
+                            flush=True,
+                        )
+                        ctx.add(label, task.text, elapsed, result.output)
+                        success = True
+                        break
+                    # No-op + checks fail + task wasn't read-only by
+                    # design: editor was supposed to make changes but
+                    # didn't. Terminal failure (no retry).
                     last_error = (
                         "Session produced no file changes."
                         f" Checks failing: {noop_check.command}\n" + _tail(noop_check.output, 30)
