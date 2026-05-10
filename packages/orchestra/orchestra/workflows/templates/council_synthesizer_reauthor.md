@@ -151,7 +151,7 @@ Author ONLY the changed/new phase content and the non-preserve
 lineage intent. Unchanged prior phases are preserved by Duplo's
 runtime, automatically. You do not need to repeat unchanged phase
 bodies in your plan output, and you do not need to write
-`{ "action": "preserve" }` entries for unchanged priors. Duplo
+`{{ "action": "preserve" }}` entries for unchanged priors. Duplo
 parses the prior PLAN.md, normalizes the lineage you submit by
 adding preserve entries for any prior id you did not consume, and
 assembles the final PLAN.md from preserved-prior sections plus
