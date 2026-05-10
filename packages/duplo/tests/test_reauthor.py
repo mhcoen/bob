@@ -54,6 +54,35 @@ needs_bob_tools = pytest.mark.skipif(
 )
 
 
+def _wrap_synth_plan(text: str) -> str:
+    """Prepend a canonical H1 envelope before every ``## Phase ...``
+    line in ``text``.
+
+    Reauthor's synthesizer template requires phases to be wrapped in
+    H1 envelopes (``# {project} — Phase N: {title}``); the
+    plan_document parser rejects bare H2s. Pre-plan_document tests
+    used H2-only synth fixtures; this helper migrates them by
+    prepending a canonical H1 before each H2 in source order.
+
+    The H1 ordinal here is irrelevant — assembly's renderer assigns
+    ordinals by final position in the assembled plan, so any value
+    here is renumbered when the prior plan and synth are stitched
+    together.
+    """
+    import re
+
+    h2_re = re.compile(r"^(##\s+Phase\s+(\S+):.*)$", re.MULTILINE)
+    counter = [0]
+
+    def repl(match: "re.Match[str]") -> str:
+        pid = match.group(2)
+        idx = counter[0]
+        counter[0] += 1
+        return f"# proj — Phase {idx}: {pid} envelope\n{match.group(1)}"
+
+    return h2_re.sub(repl, text)
+
+
 # ---------------------------------------------------------------------
 # Phase-header parser
 # ---------------------------------------------------------------------
@@ -651,7 +680,8 @@ class TestReauthorPlan:
 
     def _write_old_plan(self, plan_path: Path, phase_ids: list[str]) -> None:
         body_lines: list[str] = []
-        for pid in phase_ids:
+        for ordinal, pid in enumerate(phase_ids):
+            body_lines.append(f"# proj — Phase {ordinal}: {pid} envelope")
             body_lines.append(f"## Phase {pid}: {pid} title")
             body_lines.append("")
             body_lines.append(f"- [ ] do {pid} thing")
@@ -694,7 +724,7 @@ class TestReauthorPlan:
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
-        new_plan = (
+        new_plan = _wrap_synth_plan(
             "## Phase phase_001: Phase phase_001 title (preserved)\n"
             "\n"
             "- [ ] retained\n"
@@ -787,7 +817,7 @@ class TestReauthorPlan:
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
-        new_plan = (
+        new_plan = _wrap_synth_plan(
             "## Phase phase_001: Phase phase_001 title (preserved)\n"
             "\n"
             "- [ ] retained\n"
@@ -860,7 +890,9 @@ class TestReauthorPlan:
 
         # Synthesizer claims a brand-new id is "preserved"; the
         # validator catches the mismatch with the prior plan.
-        bad_plan = "## Phase phase_002: New phase\n\n- [ ] x\n"
+        bad_plan = _wrap_synth_plan(
+            "## Phase phase_002: New phase\n\n- [ ] x\n"
+        )
         bad_verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -907,7 +939,9 @@ class TestReauthorPlan:
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
 
-        new_plan = "## Phase phase_001: Preserved\n\n- [ ] x\n"
+        new_plan = _wrap_synth_plan(
+            "## Phase phase_001: Preserved\n\n- [ ] x\n"
+        )
         verdict_no_lineage = {
             "decision": "accept",
             "feedback": "ok",
@@ -945,7 +979,9 @@ class TestReauthorPlan:
         ledger_dir = tmp_path / "ledger"
         ledger_dir.mkdir(parents=True)
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text("## Phase phase_001: x\n\n- [ ] x\n")
+        plan_path.write_text(
+            "# proj — Phase 0: env\n## Phase phase_001: x\n\n- [ ] x\n"
+        )
 
         with pytest.raises(ReauthorError, match="not found"):
             reauthor_plan(
@@ -971,7 +1007,9 @@ class TestReauthorPlan:
             run_id="seed",
         )
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text("## Phase p1: x\n\n- [ ] x\n")
+        plan_path.write_text(
+            "# proj — Phase 0: env\n## Phase p1: x\n\n- [ ] x\n"
+        )
 
         with pytest.raises(ReauthorError, match="threshold_crossed"):
             reauthor_plan(
@@ -1046,7 +1084,7 @@ class TestReauthorPlan:
         )
 
         # Synthesizer returns ONLY phase_002b.
-        partial_plan = (
+        partial_plan = _wrap_synth_plan(
             "## Phase phase_002b: Refactored phase_002\n\n"
             "- [ ] new b work\n"
         )
@@ -1152,7 +1190,7 @@ class TestReauthorPlan:
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
         original_plan_text = plan_path.read_text()
 
-        synth_plan = (
+        synth_plan = _wrap_synth_plan(
             "## Phase phase_001: First\n\n- [ ] preserved a\n\n"
             "## Phase phase_002b: Refactored\n\n- [ ] new b\n"
         )
@@ -1219,7 +1257,7 @@ class TestReauthorPlan:
 
         # Synthesizer writes the FULL plan: preserves 1 and 3,
         # supersedes 2.
-        full_plan = (
+        full_plan = _wrap_synth_plan(
             "## Phase phase_001: First\n\n- [ ] keep a\n\n"
             "## Phase phase_002b: Refactored Second\n\n- [ ] new b\n\n"
             "## Phase phase_003: Third\n\n- [ ] keep c\n"
@@ -1312,7 +1350,7 @@ class TestReauthorPlan:
 
         def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
             captured["question"] = kwargs["question"]
-            text = (
+            text = _wrap_synth_plan(
                 "## Phase phase_002b: Refactored\n\n- [ ] new b\n"
             )
             verdict = {
@@ -1412,8 +1450,10 @@ class TestReauthorPlan:
         def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
             captured["question"] = kwargs["question"]
             return (
-                "## Phase phase_001: First\n\n- [ ] x\n\n"
-                "## Phase phase_002: Second\n\n- [ ] y\n",
+                _wrap_synth_plan(
+                    "## Phase phase_001: First\n\n- [ ] x\n\n"
+                    "## Phase phase_002: Second\n\n- [ ] y\n",
+                ),
                 {
                     "decision": "accept",
                     "feedback": "ok",
@@ -1538,7 +1578,7 @@ class TestReauthorPlan:
         self._write_old_plan(plan_path, prior_phase_ids)
         original_plan_text = plan_path.read_text()
 
-        synth_plan = (
+        synth_plan = _wrap_synth_plan(
             "## Phase phase_006: Refactored\n\n- [ ] new\n\n"
             "## Phase phase_007: Refactored\n\n- [ ] new\n\n"
             "## Phase phase_008: Refactored\n\n- [ ] new\n\n"
@@ -1629,7 +1669,7 @@ class TestReauthorPlan:
         self._write_old_plan(plan_path, prior_phase_ids)
         original_plan_text = plan_path.read_text()
 
-        synth_plan = (
+        synth_plan = _wrap_synth_plan(
             "## Phase phase_010: Derived from history\n\n- [ ] x\n"
         )
         verdict = {
@@ -1698,7 +1738,9 @@ class TestReauthorPlan:
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, prior_phase_ids)
 
-        synth_plan = "## Phase phase_010: Refactored\n\n- [ ] new b\n"
+        synth_plan = _wrap_synth_plan(
+            "## Phase phase_010: Refactored\n\n- [ ] new b\n"
+        )
         verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -1793,7 +1835,9 @@ class TestReauthorPlan:
         self._write_old_plan(plan_path, prior_ids)
         original_plan_text = plan_path.read_text()
 
-        synth_plan = "## Phase phase_010: Refactor\n\n- [ ] x\n"
+        synth_plan = _wrap_synth_plan(
+            "## Phase phase_010: Refactor\n\n- [ ] x\n"
+        )
         verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -1826,6 +1870,164 @@ class TestReauthorPlan:
         )
         assert len(events_after) == len(events_before)
 
+    # -----------------------------------------------------------------
+    # Plan-document structural integration (regression for the
+    # fswatch-run-smoke corruption shape)
+    # -----------------------------------------------------------------
+
+    def test_reauthor_rejects_synth_plan_carrying_verdict_json(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The synthesizer occasionally embeds a fenced JSON verdict
+        block inside the plan artifact alongside the verdict
+        artifact. That landed verbatim in PLAN.md across reauthor
+        passes and amplified into the fswatch-run-smoke corruption
+        shape. sanitize_plan_artifact in plan_document rejects this;
+        reauthor_plan wraps the rejection in a
+        ReauthorError('plan_artifact_contained_verdict_json...')."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor import ReauthorError
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001"])
+        original_plan_text = plan_path.read_text()
+
+        # Synth output has a verdict-shaped fenced JSON block in the
+        # plan body — the contract violation.
+        plan_text_with_verdict = (
+            "# proj — Phase 0: env\n"
+            "## Phase phase_001: First\n\n"
+            "- [ ] task\n\n"
+            "```json\n"
+            '{"decision": "accept", "lineage": {"phases": []}}\n'
+            "```\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
+        }
+        # Patch _invoke_council_for_reauthor at the layer ABOVE
+        # sanitize so the sanitize call inside it can fire. Using
+        # the stock _patch_council that bypasses sanitize would mask
+        # the contract.
+        from duplo import reauthor as reauthor_mod
+
+        class _FakeArtifactView:
+            def __init__(self, value: Any) -> None:
+                self.value = value
+
+        class _FakeResult:
+            terminal = "done"
+            run_id = "fake-run"
+            artifacts = {
+                "plan": _FakeArtifactView(plan_text_with_verdict),
+                "judge_verdict": _FakeArtifactView(verdict),
+            }
+
+        def fake_run_workflow(*args: Any, **kwargs: Any) -> Any:
+            return _FakeResult()
+
+        # The real _invoke_council_for_reauthor calls
+        # orchestra.run_workflow + sanitize_plan_artifact. Patching
+        # run_workflow exercises the sanitize step. Patch
+        # _resolve_orchestra_config too so it doesn't error trying
+        # to load real config in tmp_path.
+        import orchestra
+
+        monkeypatch.setattr(orchestra, "run_workflow", fake_run_workflow)
+        monkeypatch.setattr(
+            reauthor_mod,
+            "_resolve_orchestra_config",
+            lambda council, project_dir: object(),
+        )
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(
+            ReauthorError, match="plan_artifact_contained_verdict_json"
+        ):
+            reauthor_mod.reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+
+        # Atomicity: PLAN.md unchanged, no new events, no
+        # plan_reauthored event.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_reauthor_rejects_corrupt_prior_plan(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Prior PLAN.md has the fswatch-run-smoke corruption shape:
+        one H1 envelope under which sit multiple H2 sections plus
+        embedded fenced JSON verdict blocks. The new strict parser
+        rejects it at the boundary; reauthor_plan wraps the
+        ParseError in ReauthorError so mcloop sees a clear pause
+        reason rather than amplifying corruption across passes."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor import ReauthorError
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        # The corruption shape: one H1 envelope, multiple H2s, plus
+        # embedded verdict JSON.
+        plan_path.write_text(
+            "# proj — Phase 1: Watch and run\n"
+            "## Phase phase_018: First subsection\n\n"
+            "- [ ] task\n\n"
+            "## Phase phase_015: Second subsection\n\n"
+            "- [ ] task\n\n"
+            "## Phase phase_019: Third subsection\n\n"
+            "- [ ] task\n",
+            encoding="utf-8",
+        )
+        original_plan_text = plan_path.read_text()
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(
+            ReauthorError, match="cannot be parsed as a canonical plan document"
+        ):
+            from duplo.reauthor import reauthor_plan
+
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+        # Atomicity preserved.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
 
 # ---------------------------------------------------------------------
 # ledger_slice + design_context shape
@@ -1840,7 +2042,7 @@ def _captured_invoke(captured: dict[str, str]) -> Any:
     def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
         captured["ledger_slice"] = kwargs["ledger_slice_md"]
         captured["design_context"] = kwargs["design_context_md"]
-        plan_text = (
+        plan_text = _wrap_synth_plan(
             "## Phase phase_001: Phase phase_001 title (preserved)\n"
             "\n"
             "- [ ] x\n"
@@ -1919,6 +2121,7 @@ class TestLedgerSliceShape:
 
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text(
+            "# proj — Phase 0: env\n"
             "## Phase phase_001: Phase phase_001 title\n\n- [ ] x\n"
         )
 
@@ -1998,6 +2201,7 @@ class TestLedgerSliceShape:
 
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text(
+            "# proj — Phase 0: env\n"
             "## Phase phase_001: Phase phase_001 title\n"
             "\n"
             "## Constraints\n"

@@ -1,5 +1,34 @@
 # Notes
 
+## Follow-ups
+
+### [todo] Migrate mcloop's checklist.py check-off path to plan_document — 2026-05-10
+
+Duplo's plan_document module owns the canonical PLAN.md structural
+contract (H1 envelope + H2 phase header pairs as units, deterministic
+render, sanitize / validate_structure invariants). mcloop's
+checklist.py still walks PLAN.md with its own H2-only regex
+(STAGE_RE in mcloop/checklist.py line 12) when checking off completed
+tasks. The duplication is benign as long as both regexes agree, but
+the canonical structural ownership lives in plan_document and
+checklist.py should consume it rather than re-implement structural
+parsing.
+
+Out of scope for the plan-document fix that introduced
+plan_document. Surface here as a follow-up so a future change picks
+it up. Touch points:
+
+  - mcloop/checklist.py L~12: STAGE_RE definition.
+  - mcloop callers of STAGE_RE (parse_plan, find_next_task, etc.).
+  - Add a duplo dependency to mcloop's existing pyproject extras
+    (or import from a shared vendored module) before swapping.
+
+The migration is structurally safe (plan_document's parser is a
+strict superset of STAGE_RE's matches: anything STAGE_RE accepted
+either parses cleanly into a Plan or raises ParseError on a
+genuinely corrupt structure). Schedule alongside the next time
+mcloop touches checklist.py.
+
 ## Observations
 
 ### [BUGS.md#5] claude_cli.py retry logic already in place — 2026-04-19

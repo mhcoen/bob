@@ -17,20 +17,28 @@ This module owns the deterministic envelope. The contract becomes:
     phase content or for emitting preserve entries.
 
   - Duplo (this module) parses the prior PLAN.md into per-phase
-    markdown sections, normalizes the synthesizer's lineage by
-    adding a ``preserve`` entry for every prior id the synthesizer
-    did not explicitly consume, and assembles the final PLAN.md
-    from preserved-prior sections plus synthesized changed/new
-    sections.
+    units, normalizes the synthesizer's lineage by adding a
+    ``preserve`` entry for every prior id the synthesizer did not
+    explicitly consume, and assembles the final plan from preserved
+    prior units plus synthesized changed/new units.
 
   - ``validate_lineage`` continues to run after normalization, on
     the ASSEMBLED plan's headers vs. the normalized lineage.
     Contradictions still raise; the validator is not weakened.
 
-  - The deterministic unit is the pair ``(preserved phase section,
+  - The deterministic unit is the pair ``(preserved phase unit,
     preserved lineage entry)``. Adding preserve entries to lineage
     while writing the synthesizer's partial plan is forbidden — the
-    sections must be preserved alongside the lineage.
+    units must be preserved alongside the lineage.
+
+Structural ownership note. The H1 envelope + H2 phase header pair
+that defines a phase unit is owned by :mod:`duplo.plan_document`.
+This module never concatenates H1 lines by hand; it produces a
+:class:`~duplo.plan_document.Plan` via :func:`assemble_reauthored_plan`
+and lets the renderer write the structural metadata. That is the
+only path that emits H1 envelopes: assembly cannot leave a stale
+"Phase 2" H1 above a substituted ``phase_010`` H2 because render
+derives every H1 ordinal from the final unit position.
 
 See the module-level tests in ``tests/test_reauthor_assemble.py``
 for the contract pinned in code.
@@ -39,88 +47,56 @@ for the contract pinned in code.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
-from duplo.reauthor_phase_ids import _HEADER_RE
+from duplo.plan_document import (
+    PhaseUnit,
+    Plan,
+    parse_plan,
+)
 
 
-@dataclass(frozen=True)
-class PhaseSection:
-    """A phase's full markdown content keyed by ``phase_id``.
-
-    ``text`` is the section body verbatim from PLAN.md, starting at
-    the ``## Phase <id>: <title>`` header line and continuing through
-    every following line up to (but NOT including) the next phase
-    header or end of file. The text always ends with at least one
-    newline so concatenation produces well-formed markdown.
-    """
-
-    id: str
-    title: str
-    text: str
+# Backwards-compatible alias. ``PhaseSection`` was the per-phase shape
+# used before plan_document took structural ownership; the new shape is
+# :class:`PhaseUnit`, which adds the H1 envelope. External callers that
+# imported ``PhaseSection`` from this module continue to work, but the
+# ``text`` field they may have read is no longer present — body and
+# headers are split into separate fields.
+PhaseSection = PhaseUnit
 
 
 class ReauthorAssemblyError(RuntimeError):
     """Raised when section/lineage assembly cannot produce a valid PLAN.md.
 
-    Distinct from :class:`duplo.reauthor_phase_ids.LineageValidationError`:
-    that one fires when validate_lineage rejects the (prior, new,
-    lineage) tuple. This one fires when assembly itself fails: e.g.,
-    the synthesizer's lineage references a new phase id (supersede /
-    split / merge / new) but the synthesizer's plan body has no
-    section for that id.
+    Distinct from :class:`duplo.reauthor_phase_ids.LineageValidationError`
+    (synthesizer lineage contract) and from
+    :class:`duplo.plan_document.StructuralValidationError` (assembled
+    plan structural invariants). This one fires when assembly's own
+    rules cannot be satisfied: e.g., the lineage names a new phase id
+    (supersede / split / merge / new) but the synthesizer's plan body
+    has no unit for that id.
     """
 
 
-def parse_plan_sections(plan_text: str) -> tuple[str, list[PhaseSection]]:
-    """Split PLAN.md into ``(preamble, sections)``.
+def parse_plan_sections(
+    plan_text: str,
+) -> tuple[str, list[PhaseUnit]]:
+    """Thin wrapper around :func:`duplo.plan_document.parse_plan`.
 
-    A section starts at every ``## Phase <id>: <title>`` line and
-    ends at the line BEFORE the next phase header or at end of file.
-    Section text always ends with a newline so concatenation
-    produces valid markdown.
-
-    The preamble is everything before the first phase header. For
-    canonical-mode plans this includes the project-name H1 envelope,
-    project description, and the Phase 0 H1 if present. The preamble
-    is preserved verbatim by ``assemble_reauthored_plan``.
-
-    Lines that look like phase headers but use a non-Slice-C id form
-    (e.g., ``## Phase 1: Foo``) are NOT recognized and become content
-    of whatever section they fall in. The Slice C contract requires
-    ``phase_NNN``-shaped ids; pre-Slice-C plans should not be passed
-    here.
+    Returns ``(preamble, units)`` so existing callers that expected
+    a ``(preamble, sections)`` tuple keep working. The list element
+    type is now :class:`PhaseUnit`; the ``text`` attribute the old
+    PhaseSection carried (full ``## Phase ...`` line + body) is split
+    into ``phase_id``, ``h2_title``, and ``body``. The plan-document
+    parser is strict: missing H2 under an H1, multiple H2s under one
+    H1, or non-whitespace text between H1 and H2 raises
+    :class:`~duplo.plan_document.ParseError`. The fswatch-run-smoke
+    corruption shape (one H1 with several H2s + embedded verdict
+    JSON) fails fast at this boundary rather than silently
+    accumulating across reauthor passes.
     """
-    lines = plan_text.splitlines(keepends=True)
-
-    header_indices: list[int] = []
-    headers: list[tuple[str, str]] = []
-    for i, line in enumerate(lines):
-        match = _HEADER_RE.match(line)
-        if match is not None:
-            header_indices.append(i)
-            headers.append((match.group("id"), match.group("title")))
-
-    if not header_indices:
-        return ("".join(lines), [])
-
-    preamble = "".join(lines[: header_indices[0]])
-
-    sections: list[PhaseSection] = []
-    for slot, (start_idx, (sid, stitle)) in enumerate(
-        zip(header_indices, headers, strict=True)
-    ):
-        end_idx = (
-            header_indices[slot + 1]
-            if slot + 1 < len(header_indices)
-            else len(lines)
-        )
-        body = "".join(lines[start_idx:end_idx])
-        if not body.endswith("\n"):
-            body = body + "\n"
-        sections.append(PhaseSection(id=sid, title=stitle, text=body))
-    return (preamble, sections)
+    plan = parse_plan(plan_text)
+    return (plan.preamble, list(plan.units))
 
 
 def _consumed_prior_ids(
@@ -213,51 +189,47 @@ _NEW_ID_ACTIONS = frozenset(["supersede", "split", "merge", "new"])
 
 
 def assemble_reauthored_plan(
-    prior_preamble: str,
-    prior_sections: list[PhaseSection],
-    synth_sections: list[PhaseSection],
+    prior_plan: Plan,
+    synth_units: Iterable[PhaseUnit],
     normalized_lineage: Mapping[str, Any],
-) -> str:
-    """Build the full re-authored PLAN.md from preserved + new sections.
+) -> Plan:
+    """Build the re-authored :class:`Plan` from preserved + new units.
 
-    Walks ``prior_sections`` in order:
+    Walks ``prior_plan.units`` in order and, for each prior unit:
 
-      - If the prior id is in ``abandoned``, skip it.
-      - If the prior id is consumed by supersede / split / merge,
-        substitute the synthesized section(s) that took its place at
+      - If its phase_id is in ``abandoned``, the unit is dropped.
+      - If its phase_id is consumed by a supersede / split / merge,
+        the synthesized unit(s) that took its place are emitted at
         this position. Merge targets emit at the position of their
-        FIRST source prior; later sources of the same merge skip.
-      - Otherwise (preserve), emit the prior section verbatim.
+        FIRST source prior; later sources of the same merge are
+        skipped. Splits emit every branch at the prior position.
+      - Otherwise (preserve, explicit or default), the prior unit
+        is emitted verbatim.
 
-    After the walk, any ``"new"`` lineage entries (no prior id
-    consumed) are appended at the end in synthesizer-declared order.
+    After the walk, every ``"new"`` lineage entry (no prior id
+    consumed) is appended at the end in synthesizer-declared order.
 
-    Raises ``ReauthorAssemblyError`` when:
+    The returned Plan inherits ``project_name`` and ``preamble`` from
+    ``prior_plan``. H1 ordinals are NOT stored on the Plan; they are
+    derived by :func:`~duplo.plan_document.render` from each unit's
+    final position. Substituting a unit therefore renumbers every
+    downstream H1 deterministically.
 
-      - A new id named by lineage as supersede / split / merge / new
-        has no matching ``## Phase <new_id>: ...`` section in the
-        synthesized plan.
-      - A new id is referenced by multiple non-split actions targeting
-        the same prior position (validate_lineage catches this too,
-        but assembly's own detection produces a clearer error).
-
-    The preamble is emitted verbatim from ``prior_preamble``. The
-    re-authored plan inherits the prior plan's project-level header
-    block; reauthor mode does not regenerate it.
+    Raises
+    ------
+    ReauthorAssemblyError
+        When a new id named by lineage as supersede / split / merge /
+        new has no matching unit in ``synth_units``. The synthesizer
+        declared the lineage intent without authoring the unit body.
     """
-    prior_by_id: dict[str, PhaseSection] = {
-        section.id: section for section in prior_sections
-    }
-    if len(prior_by_id) != len(prior_sections):
-        # The prior plan parser shouldn't produce duplicates, but
-        # surface a clear error rather than silently merging.
+    if len({u.phase_id for u in prior_plan.units}) != len(prior_plan.units):
         raise ReauthorAssemblyError(
             "prior plan has duplicate phase ids; refusing to assemble"
         )
 
-    synth_by_id: dict[str, PhaseSection] = {
-        section.id: section for section in synth_sections
-    }
+    synth_by_id: dict[str, PhaseUnit] = {}
+    for unit in synth_units:
+        synth_by_id[unit.phase_id] = unit
 
     abandoned_ids: set[str] = set()
     for entry in normalized_lineage.get("abandoned") or []:
@@ -266,8 +238,6 @@ def assemble_reauthored_plan(
             if isinstance(aid, str):
                 abandoned_ids.add(aid)
 
-    # Per-prior-id, the list of new ids that should appear at that
-    # prior's position (in lineage-declared order).
     replacement_at_prior: dict[str, list[str]] = {}
     consumed_priors: set[str] = set()
     new_phase_ids: list[str] = []
@@ -300,12 +270,10 @@ def assemble_reauthored_plan(
                     consumed_priors.add(fid)
         elif action == "new":
             new_phase_ids.append(new_id)
-        # preserve: no replacement; the prior's section at that
+        # preserve: no replacement; the prior's unit at that
         # position remains.
 
-    # Verify every new id named by lineage has a synthesized section.
-    missing_sections: list[str] = []
-    seen_ids_used: set[str] = set()
+    missing_units: list[str] = []
     for entry in normalized_lineage.get("phases") or []:
         if not isinstance(entry, Mapping):
             continue
@@ -313,45 +281,42 @@ def assemble_reauthored_plan(
         new_id = entry.get("id")
         if action in _NEW_ID_ACTIONS and isinstance(new_id, str):
             if new_id not in synth_by_id:
-                missing_sections.append(new_id)
-            else:
-                seen_ids_used.add(new_id)
-    if missing_sections:
+                missing_units.append(new_id)
+    if missing_units:
         raise ReauthorAssemblyError(
-            "synthesized plan is missing section(s) for lineage-declared "
-            f"new id(s): {', '.join(sorted(set(missing_sections)))}"
+            "synthesized plan is missing unit(s) for lineage-declared "
+            f"new id(s): {', '.join(sorted(set(missing_units)))}"
         )
 
-    parts: list[str] = []
-    if prior_preamble:
-        parts.append(prior_preamble)
-
+    out_units: list[PhaseUnit] = []
     emitted_merge_targets: set[str] = set()
-    for prior in prior_sections:
-        pid = prior.id
+    for prior in prior_plan.units:
+        pid = prior.phase_id
         if pid in abandoned_ids:
             continue
         if pid in consumed_priors:
             for new_id in replacement_at_prior.get(pid, []):
                 if new_id in emitted_merge_targets:
                     continue
-                parts.append(synth_by_id[new_id].text)
+                out_units.append(synth_by_id[new_id])
                 if merge_first_source.get(new_id) == pid:
                     emitted_merge_targets.add(new_id)
             continue
-        # Preserved or absent from lineage entirely (which
-        # normalize_lineage_for_preservation already covered as a
-        # preserve default).
-        parts.append(prior.text)
+        out_units.append(prior)
 
     for new_id in new_phase_ids:
-        parts.append(synth_by_id[new_id].text)
+        out_units.append(synth_by_id[new_id])
 
-    return "".join(parts)
+    return Plan(
+        project_name=prior_plan.project_name,
+        preamble=prior_plan.preamble,
+        units=tuple(out_units),
+    )
 
 
 __all__ = [
     "PhaseSection",
+    "PhaseUnit",
     "ReauthorAssemblyError",
     "assemble_reauthored_plan",
     "normalize_lineage_for_preservation",

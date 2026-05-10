@@ -2,14 +2,16 @@
 
 Pin the contract:
   - parse_plan_sections splits PLAN.md into preamble + per-phase
-    sections keyed by phase_id.
+    units via :mod:`duplo.plan_document`. Bare H2 sections without
+    H1 envelopes raise; the canonical structure has each H2 wrapped
+    in an H1 envelope.
   - normalize_lineage_for_preservation adds preserve-default entries
     for prior ids the synthesizer didn't touch, without disturbing
     the synthesizer's explicit non-preserve declarations.
-  - assemble_reauthored_plan walks prior phases in order and emits
-    each one verbatim (preserve), replaces with synth section
-    (supersede / split / merge), or skips (abandoned). New phases
-    append at the end.
+  - assemble_reauthored_plan walks prior units in order and emits
+    each one verbatim (preserve), replaces with synth unit (supersede
+    / split / merge), or skips (abandoned). New phases append at the
+    end. Returns a :class:`Plan`; render emits the canonical text.
 
 These tests exercise the assembly module in isolation. The
 integration tests in test_reauthor.py check the same contract
@@ -22,6 +24,12 @@ from typing import Any
 
 import pytest
 
+from duplo.plan_document import (
+    ParseError,
+    PhaseUnit,
+    Plan,
+    render,
+)
 from duplo.reauthor_assemble import (
     PhaseSection,
     ReauthorAssemblyError,
@@ -32,7 +40,7 @@ from duplo.reauthor_assemble import (
 
 
 # ----------------------------------------------------------------------
-# parse_plan_sections
+# parse_plan_sections (thin wrapper around plan_document.parse_plan)
 # ----------------------------------------------------------------------
 
 
@@ -49,55 +57,59 @@ def test_parse_sections_no_phase_headers_is_all_preamble() -> None:
     assert sections == []
 
 
-def test_parse_sections_single_phase() -> None:
+def test_parse_sections_single_phase_with_envelope() -> None:
     text = (
-        "# Project\n\n"
-        "## Phase phase_001: First\n\n"
+        "# proj\n\n"
+        "# proj — Phase 0: Title\n"
+        "## Phase phase_001: First\n"
+        "\n"
         "- [ ] do thing\n"
     )
     preamble, sections = parse_plan_sections(text)
-    assert preamble == "# Project\n\n"
+    assert preamble == "# proj\n\n"
     assert len(sections) == 1
-    assert sections[0].id == "phase_001"
-    assert sections[0].title == "First"
-    assert sections[0].text == "## Phase phase_001: First\n\n- [ ] do thing\n"
+    assert sections[0].phase_id == "phase_001"
+    assert sections[0].h2_title == "First"
+    assert sections[0].h1_envelope == "Title"
+    assert "- [ ] do thing" in sections[0].body
 
 
-def test_parse_sections_multiple_phases() -> None:
+def test_parse_sections_multiple_phases_with_envelopes() -> None:
     text = (
         "preamble\n\n"
-        "## Phase phase_001: A\n\n"
-        "- [ ] a-task\n\n"
-        "## Phase phase_002: B\n\n"
-        "- [ ] b-task\n\n"
-        "## Phase phase_003: C\n\n"
+        "# proj — Phase 0: A\n"
+        "## Phase phase_001: A title\n"
+        "\n"
+        "- [ ] a-task\n"
+        "\n"
+        "# proj — Phase 1: B\n"
+        "## Phase phase_002: B title\n"
+        "\n"
+        "- [ ] b-task\n"
+        "\n"
+        "# proj — Phase 2: C\n"
+        "## Phase phase_003: C title\n"
+        "\n"
         "- [ ] c-task\n"
     )
     preamble, sections = parse_plan_sections(text)
     assert preamble == "preamble\n\n"
-    assert [s.id for s in sections] == ["phase_001", "phase_002", "phase_003"]
-    # Each section ends with newline; concatenation reconstructs the body.
-    assert sections[0].text.startswith("## Phase phase_001: A\n")
-    assert sections[1].text.startswith("## Phase phase_002: B\n")
-    assert sections[2].text.startswith("## Phase phase_003: C\n")
-    # Section text always ends with a newline.
-    for s in sections:
-        assert s.text.endswith("\n")
+    assert [s.phase_id for s in sections] == [
+        "phase_001",
+        "phase_002",
+        "phase_003",
+    ]
+    assert [s.h1_envelope for s in sections] == ["A", "B", "C"]
 
 
-def test_parse_sections_concatenation_round_trips() -> None:
-    """preamble + sum(section.text) == original text (modulo trailing
-    newline normalization)."""
-    text = (
-        "header\n\n"
-        "## Phase phase_001: A\n"
-        "- [ ] a\n"
-        "## Phase phase_002: B\n"
-        "- [ ] b\n"
-    )
-    preamble, sections = parse_plan_sections(text)
-    rebuilt = preamble + "".join(s.text for s in sections)
-    assert rebuilt == text
+def test_parse_sections_bare_h2_without_envelope_raises() -> None:
+    """The plan_document parser is strict: every H2 must sit under
+    an H1 envelope. Reauthor's old H2-only parser is gone; bare H2
+    inputs (left over from pre-canonical plans) raise rather than
+    being silently misinterpreted."""
+    text = "## Phase phase_001: bare\n- [ ] task\n"
+    with pytest.raises(ParseError):
+        parse_plan_sections(text)
 
 
 # ----------------------------------------------------------------------
@@ -108,7 +120,13 @@ def test_parse_sections_concatenation_round_trips() -> None:
 def test_normalize_adds_preserve_for_each_unaccounted_prior() -> None:
     """The bug case: synthesizer's lineage covers only phase_002, the
     other priors must be preserved by default."""
-    prior_ids = ["phase_001", "phase_002", "phase_003", "phase_004", "phase_005"]
+    prior_ids = [
+        "phase_001",
+        "phase_002",
+        "phase_003",
+        "phase_004",
+        "phase_005",
+    ]
     lineage = {
         "phases": [
             {
@@ -140,7 +158,9 @@ def test_normalize_does_not_duplicate_explicit_preserve() -> None:
     }
     out = normalize_lineage_for_preservation(prior_ids, lineage)
     preserve_count = sum(
-        1 for e in out["phases"] if e["action"] == "preserve" and e["id"] == "phase_001"
+        1
+        for e in out["phases"]
+        if e["action"] == "preserve" and e["id"] == "phase_001"
     )
     assert preserve_count == 1
 
@@ -164,22 +184,14 @@ def test_normalize_skips_priors_in_split_from() -> None:
     prior_ids = ["phase_001", "phase_002"]
     lineage = {
         "phases": [
-            {
-                "id": "phase_002a",
-                "action": "split",
-                "from": ["phase_002"],
-            },
-            {
-                "id": "phase_002b",
-                "action": "split",
-                "from": ["phase_002"],
-            },
+            {"id": "phase_002a", "action": "split", "from": ["phase_002"]},
+            {"id": "phase_002b", "action": "split", "from": ["phase_002"]},
         ]
     }
     out = normalize_lineage_for_preservation(prior_ids, lineage)
     pids_actions = [(e["id"], e["action"]) for e in out["phases"]]
-    assert ("phase_002", "preserve") not in pids_actions
     assert ("phase_001", "preserve") in pids_actions
+    assert ("phase_002", "preserve") not in pids_actions  # consumed by split
 
 
 def test_normalize_skips_priors_in_merge_from() -> None:
@@ -195,8 +207,10 @@ def test_normalize_skips_priors_in_merge_from() -> None:
     }
     out = normalize_lineage_for_preservation(prior_ids, lineage)
     pids_actions = [(e["id"], e["action"]) for e in out["phases"]]
+    # phase_001 and phase_002 consumed by merge, not preserve-defaulted.
     assert ("phase_001", "preserve") not in pids_actions
     assert ("phase_002", "preserve") not in pids_actions
+    # phase_003 untouched, gets preserve default.
     assert ("phase_003", "preserve") in pids_actions
 
 
@@ -219,45 +233,75 @@ def test_normalize_does_not_mutate_input() -> None:
     assert original == {"phases": []}
 
 
+def test_phase_section_alias_points_to_phase_unit() -> None:
+    """PhaseSection is a backward-compat alias for PhaseUnit so
+    callers that imported the old name continue to work."""
+    assert PhaseSection is PhaseUnit
+
+
 # ----------------------------------------------------------------------
-# assemble_reauthored_plan
+# assemble_reauthored_plan (operates on Plan + PhaseUnit)
 # ----------------------------------------------------------------------
 
 
-def _section(pid: str, title: str, body_line: str = "- [ ] task") -> PhaseSection:
-    return PhaseSection(
-        id=pid,
-        title=title,
-        text=f"## Phase {pid}: {title}\n\n{body_line}\n\n",
+def _unit(
+    phase_id: str,
+    h2_title: str = "title",
+    body: str = "- [ ] task\n",
+    h1_envelope: str | None = None,
+) -> PhaseUnit:
+    return PhaseUnit(
+        h1_envelope=h1_envelope or h2_title,
+        phase_id=phase_id,
+        h2_title=h2_title,
+        body=body,
     )
 
 
-def test_assemble_preserve_emits_prior_section_verbatim() -> None:
-    prior = [_section("phase_001", "A"), _section("phase_002", "B")]
+def _plan(*units: PhaseUnit, preamble: str = "") -> Plan:
+    return Plan(
+        project_name="proj",
+        preamble=preamble,
+        units=tuple(units),
+    )
+
+
+def test_assemble_preserve_keeps_units_intact() -> None:
+    prior = _plan(
+        _unit("phase_001", "A"),
+        _unit("phase_002", "B"),
+        preamble="header\n\n",
+    )
     lineage = {
         "phases": [
             {"id": "phase_001", "action": "preserve"},
             {"id": "phase_002", "action": "preserve"},
         ]
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="header\n\n",
-        prior_sections=prior,
-        synth_sections=[],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=(),
         normalized_lineage=lineage,
     )
-    assert out.startswith("header\n\n")
-    assert prior[0].text in out
-    assert prior[1].text in out
+    assert assembled.units == prior.units
+    text = render(assembled)
+    assert text.startswith("header\n\n")
+    # Both H1 envelopes present.
+    assert "Phase 0: A" in text
+    assert "Phase 1: B" in text
 
 
-def test_assemble_supersede_replaces_at_prior_position() -> None:
-    prior = [
-        _section("phase_001", "A", "- [ ] a-task"),
-        _section("phase_002", "B", "- [ ] b-task"),
-        _section("phase_003", "C", "- [ ] c-task"),
-    ]
-    new_section = _section("phase_002b", "Refactored", "- [ ] new b")
+def test_assemble_supersede_replaces_h1_and_h2_at_prior_position() -> None:
+    """Supersede replaces the WHOLE unit (H1 envelope + H2 phase
+    header + body), so the H1 ordinal of the new unit follows from
+    its position in the assembled plan. The renderer renumbers
+    ordinals deterministically."""
+    prior = _plan(
+        _unit("phase_001", "A"),
+        _unit("phase_002", "B-old"),
+        _unit("phase_003", "C"),
+    )
+    new_unit = _unit("phase_002b", "B-new", body="- [ ] new b\n")
     lineage = {
         "phases": [
             {"id": "phase_002b", "action": "supersede", "from": ["phase_002"]},
@@ -265,26 +309,35 @@ def test_assemble_supersede_replaces_at_prior_position() -> None:
             {"id": "phase_003", "action": "preserve"},
         ]
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior,
-        synth_sections=[new_section],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=[new_unit],
         normalized_lineage=lineage,
     )
-    # Order: phase_001, phase_002b (in place of phase_002), phase_003.
-    idx_001 = out.find("## Phase phase_001:")
-    idx_002b = out.find("## Phase phase_002b:")
-    idx_003 = out.find("## Phase phase_003:")
-    assert idx_001 < idx_002b < idx_003
-    assert "## Phase phase_002:" not in out
-    assert "- [ ] b-task" not in out
-    assert "- [ ] new b" in out
+    assert [u.phase_id for u in assembled.units] == [
+        "phase_001",
+        "phase_002b",
+        "phase_003",
+    ]
+    text = render(assembled)
+    # H1 ordinals follow the new positions, not the old ones.
+    assert "Phase 0: A" in text
+    assert "Phase 1: B-new" in text
+    assert "Phase 2: C" in text
+    # The replaced unit's H2 and body are gone.
+    assert "## Phase phase_002:" not in text
+    assert "## Phase phase_002b: B-new" in text
+    assert "- [ ] new b" in text
 
 
 def test_assemble_split_emits_all_branches_at_prior_position() -> None:
-    prior = [_section("phase_001", "A"), _section("phase_002", "B"), _section("phase_003", "C")]
-    branch_a = _section("phase_002a", "Split A")
-    branch_b = _section("phase_002b", "Split B")
+    prior = _plan(
+        _unit("phase_001", "A"),
+        _unit("phase_002", "B"),
+        _unit("phase_003", "C"),
+    )
+    branch_a = _unit("phase_002a", "Split A")
+    branch_b = _unit("phase_002b", "Split B")
     lineage = {
         "phases": [
             {"id": "phase_002a", "action": "split", "from": ["phase_002"]},
@@ -293,28 +346,28 @@ def test_assemble_split_emits_all_branches_at_prior_position() -> None:
             {"id": "phase_003", "action": "preserve"},
         ]
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior,
-        synth_sections=[branch_a, branch_b],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=[branch_a, branch_b],
         normalized_lineage=lineage,
     )
-    idx_001 = out.find("## Phase phase_001:")
-    idx_002a = out.find("## Phase phase_002a:")
-    idx_002b = out.find("## Phase phase_002b:")
-    idx_003 = out.find("## Phase phase_003:")
-    assert idx_001 < idx_002a < idx_003
-    assert idx_001 < idx_002b < idx_003
-    assert "## Phase phase_002:" not in out
+    assert [u.phase_id for u in assembled.units] == [
+        "phase_001",
+        "phase_002a",
+        "phase_002b",
+        "phase_003",
+    ]
+    text = render(assembled)
+    assert "## Phase phase_002:" not in text
 
 
 def test_assemble_merge_emits_target_at_first_source_position() -> None:
-    prior = [
-        _section("phase_001", "A"),
-        _section("phase_002", "B"),
-        _section("phase_003", "C"),
-    ]
-    merged = _section("phase_merged", "Merged")
+    prior = _plan(
+        _unit("phase_001", "A"),
+        _unit("phase_002", "B"),
+        _unit("phase_003", "C"),
+    )
+    merged = _unit("phase_merged", "Merged")
     lineage = {
         "phases": [
             {
@@ -325,89 +378,142 @@ def test_assemble_merge_emits_target_at_first_source_position() -> None:
             {"id": "phase_003", "action": "preserve"},
         ]
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior,
-        synth_sections=[merged],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=[merged],
         normalized_lineage=lineage,
     )
-    # phase_merged appears at phase_001's position; phase_002 is gone;
-    # phase_003 follows.
-    assert out.count("## Phase phase_merged:") == 1
-    idx_merged = out.find("## Phase phase_merged:")
-    idx_003 = out.find("## Phase phase_003:")
-    assert idx_merged < idx_003
-    assert "## Phase phase_001:" not in out
-    assert "## Phase phase_002:" not in out
+    assert [u.phase_id for u in assembled.units] == [
+        "phase_merged",
+        "phase_003",
+    ]
 
 
-def test_assemble_abandoned_skips_prior_section() -> None:
-    prior = [_section("phase_001", "A"), _section("phase_002", "B")]
+def test_assemble_abandoned_skips_unit_including_h1() -> None:
+    """Abandoned removes BOTH the H1 envelope AND the H2 phase
+    header. The old assembly path operated on H2-only sections;
+    leaving a stale H1 envelope above an abandoned phase was the
+    fswatch-run-smoke corruption shape this fix exists to prevent."""
+    prior = _plan(_unit("phase_001", "A"), _unit("phase_002", "B"))
     lineage = {
         "phases": [{"id": "phase_001", "action": "preserve"}],
         "abandoned": [{"id": "phase_002", "reason": "out of scope"}],
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior,
-        synth_sections=[],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=(),
         normalized_lineage=lineage,
     )
-    assert "## Phase phase_001:" in out
-    assert "## Phase phase_002:" not in out
+    assert [u.phase_id for u in assembled.units] == ["phase_001"]
+    text = render(assembled)
+    # No trace of phase_002 in either H1 or H2 form.
+    assert "phase_002" not in text
+    # Only one H1 envelope (Phase 0: A).
+    assert text.count("# proj — Phase ") == 1
 
 
 def test_assemble_new_appends_at_end() -> None:
-    prior = [_section("phase_001", "A")]
-    new_section = _section("phase_002", "New work")
+    prior = _plan(_unit("phase_001", "A"))
+    new_unit = _unit("phase_002", "New work")
     lineage = {
         "phases": [
             {"id": "phase_001", "action": "preserve"},
             {"id": "phase_002", "action": "new"},
         ]
     }
-    out = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior,
-        synth_sections=[new_section],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=[new_unit],
         normalized_lineage=lineage,
     )
-    idx_001 = out.find("## Phase phase_001:")
-    idx_002 = out.find("## Phase phase_002:")
-    assert idx_001 < idx_002
+    assert [u.phase_id for u in assembled.units] == ["phase_001", "phase_002"]
 
 
-def test_assemble_raises_when_lineage_references_missing_synth_section() -> None:
+def test_assemble_raises_when_lineage_references_missing_synth_unit() -> None:
     """Lineage declares phase_002b supersedes phase_002, but the
-    synthesizer didn't write a section for phase_002b. Assembly
-    fails fast."""
-    prior = [_section("phase_001", "A"), _section("phase_002", "B")]
+    synthesizer didn't write a unit for phase_002b. Assembly fails
+    fast with ReauthorAssemblyError."""
+    prior = _plan(_unit("phase_001", "A"), _unit("phase_002", "B"))
     lineage = {
         "phases": [
             {"id": "phase_002b", "action": "supersede", "from": ["phase_002"]},
             {"id": "phase_001", "action": "preserve"},
         ]
     }
-    with pytest.raises(ReauthorAssemblyError) as ei:
+    with pytest.raises(ReauthorAssemblyError, match="phase_002b"):
         assemble_reauthored_plan(
-            prior_preamble="",
-            prior_sections=prior,
-            synth_sections=[],  # no section for phase_002b
+            prior_plan=prior,
+            synth_units=(),  # no unit for phase_002b
             normalized_lineage=lineage,
         )
-    assert "phase_002b" in str(ei.value)
 
 
-def test_assemble_preamble_is_emitted_first() -> None:
-    prior = [_section("phase_001", "A")]
+def test_assemble_preamble_carries_through() -> None:
+    prior = _plan(
+        _unit("phase_001", "A"),
+        preamble="# Project\n\nDescription.\n\n",
+    )
     lineage = {"phases": [{"id": "phase_001", "action": "preserve"}]}
-    out = assemble_reauthored_plan(
-        prior_preamble="# Project\n\nDescription.\n\n",
-        prior_sections=prior,
-        synth_sections=[],
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=(),
         normalized_lineage=lineage,
     )
-    assert out.startswith("# Project\n\nDescription.\n\n")
+    assert assembled.preamble == "# Project\n\nDescription.\n\n"
+
+
+def test_assemble_project_name_carries_through() -> None:
+    """The assembled Plan inherits project_name from the prior plan;
+    the renderer uses it to emit consistent H1 envelopes across the
+    re-authored output."""
+    prior = _plan(_unit("phase_001", "A"))
+    prior = Plan(
+        project_name="my-special-project",
+        preamble=prior.preamble,
+        units=prior.units,
+    )
+    lineage = {"phases": [{"id": "phase_001", "action": "preserve"}]}
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=(),
+        normalized_lineage=lineage,
+    )
+    assert assembled.project_name == "my-special-project"
+    text = render(assembled)
+    assert "# my-special-project — Phase 0: A" in text
+
+
+def test_assemble_renumbers_h1_ordinals_after_substitution() -> None:
+    """Substituting a unit between two preserved units leaves the
+    surrounding units' positions unchanged. The renderer assigns H1
+    ordinals 0, 1, 2 by position; the new unit's H1 takes ordinal 1
+    automatically."""
+    prior = _plan(
+        _unit("phase_001", "A"),
+        _unit("phase_002", "B-old"),
+        _unit("phase_003", "C"),
+    )
+    new_unit = _unit("phase_002b", "B-new")
+    lineage = {
+        "phases": [
+            {"id": "phase_002b", "action": "supersede", "from": ["phase_002"]},
+        ]
+    }
+    normalized = normalize_lineage_for_preservation(
+        ["phase_001", "phase_002", "phase_003"], lineage
+    )
+    assembled = assemble_reauthored_plan(
+        prior_plan=prior,
+        synth_units=[new_unit],
+        normalized_lineage=normalized,
+    )
+    text = render(assembled)
+    # Three H1 envelopes, ordinals 0/1/2 by position.
+    assert "Phase 0: A" in text
+    assert "Phase 1: B-new" in text
+    assert "Phase 2: C" in text
+    # No leftover stale "Phase 1: B-old".
+    assert "B-old" not in text
 
 
 # ----------------------------------------------------------------------
@@ -416,28 +522,31 @@ def test_assemble_preamble_is_emitted_first() -> None:
 
 
 def test_bug_scenario_partial_synth_with_normalized_lineage_assembles() -> None:
-    """Reproduce the failure from the directive:
-
-      prior = phase_001..phase_005, synthesizer wrote ONLY phase_002b
-      with lineage {phases: [{id: phase_002b, action: supersede,
-      from: [phase_002]}]}.
-
-    With normalize + assemble, the result has all 5 phases (4
-    preserved + phase_002b in place of phase_002) and lineage
-    accounts for every prior."""
+    """Reproduce the directive's bug case: prior plan has 5 phases,
+    synthesizer wrote ONLY phase_002b with lineage {phases: [{id:
+    phase_002b, action: supersede, from: [phase_002]}]}. With
+    normalize + assemble, the result has all 5 phases (4 preserved +
+    phase_002b in place of phase_002) and lineage accounts for every
+    prior. H1 envelopes are present and renumbered to match new
+    positions."""
     prior_text = (
-        "## Phase phase_001: First\n- [ ] a\n"
-        "## Phase phase_002: Second\n- [ ] b\n"
-        "## Phase phase_003: Third\n- [ ] c\n"
-        "## Phase phase_004: Fourth\n- [ ] d\n"
-        "## Phase phase_005: Fifth\n- [ ] e\n"
+        "# proj — Phase 0: First\n## Phase phase_001: F\n- [ ] a\n"
+        "# proj — Phase 1: Second\n## Phase phase_002: S\n- [ ] b\n"
+        "# proj — Phase 2: Third\n## Phase phase_003: T\n- [ ] c\n"
+        "# proj — Phase 3: Fourth\n## Phase phase_004: Fo\n- [ ] d\n"
+        "# proj — Phase 4: Fifth\n## Phase phase_005: Fi\n- [ ] e\n"
     )
-    _, prior_sections = parse_plan_sections(prior_text)
+    preamble, prior_units = parse_plan_sections(prior_text)
+    prior_plan = Plan(
+        project_name="proj", preamble=preamble, units=tuple(prior_units)
+    )
 
     synth_text = (
-        "## Phase phase_002b: Refactored Second\n- [ ] new b\n"
+        "# proj — Phase 0: Refactored\n"
+        "## Phase phase_002b: Refactored Second\n"
+        "- [ ] new b\n"
     )
-    _, synth_sections = parse_plan_sections(synth_text)
+    _, synth_units = parse_plan_sections(synth_text)
 
     synth_lineage = {
         "phases": [
@@ -448,36 +557,28 @@ def test_bug_scenario_partial_synth_with_normalized_lineage_assembles() -> None:
             }
         ]
     }
-    prior_ids = [s.id for s in prior_sections]
+    prior_ids = [u.phase_id for u in prior_units]
     normalized = normalize_lineage_for_preservation(prior_ids, synth_lineage)
     assembled = assemble_reauthored_plan(
-        prior_preamble="",
-        prior_sections=prior_sections,
-        synth_sections=synth_sections,
+        prior_plan=prior_plan,
+        synth_units=synth_units,
         normalized_lineage=normalized,
     )
+    assembled_text = render(assembled)
 
     # All 5 prior ids represented (4 preserved + phase_002b in
-    # place of phase_002).
-    assert "## Phase phase_001:" in assembled
-    assert "## Phase phase_002:" not in assembled  # superseded
-    assert "## Phase phase_002b:" in assembled
-    assert "## Phase phase_003:" in assembled
-    assert "## Phase phase_004:" in assembled
-    assert "## Phase phase_005:" in assembled
+    # place of phase_002), with H1 envelopes at the canonical
+    # positions.
+    assert "## Phase phase_001:" in assembled_text
+    assert "## Phase phase_002:" not in assembled_text  # superseded
+    assert "## Phase phase_002b:" in assembled_text
+    assert "## Phase phase_003:" in assembled_text
+    assert "## Phase phase_004:" in assembled_text
+    assert "## Phase phase_005:" in assembled_text
 
-    # Order matches prior order with phase_002 replaced.
-    indices = [
-        assembled.find(f"## Phase {pid}:")
-        for pid in (
-            "phase_001",
-            "phase_002b",
-            "phase_003",
-            "phase_004",
-            "phase_005",
-        )
-    ]
-    assert indices == sorted(indices)
+    # H1 ordinals follow the new positions (0..4, contiguous).
+    for ordinal in range(5):
+        assert f"# proj — Phase {ordinal}:" in assembled_text
 
     # Lineage now accounts for every prior id.
     accounted: set[str] = set()

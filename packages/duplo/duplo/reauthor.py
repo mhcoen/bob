@@ -33,10 +33,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from duplo.plan_document import (
+    PlanArtifactRejected,
+    parse_plan,
+    render,
+    sanitize_plan_artifact,
+    validate_structure,
+)
 from duplo.reauthor_assemble import (
     assemble_reauthored_plan,
     normalize_lineage_for_preservation,
-    parse_plan_sections,
 )
 from duplo.reauthor_phase_ids import (
     LineageDiff,
@@ -171,11 +177,23 @@ def reauthor_plan(
 
     plan_text_old = plan_path.read_text(encoding="utf-8")
     old_phases = parse_plan_phases(plan_text_old)
-    # Parse the prior plan into sections too, keyed by phase_id.
-    # The assembly path uses these to preserve unchanged phase
-    # markdown verbatim when the synthesizer's output covers only
-    # the changed phases.
-    prior_preamble, prior_sections = parse_plan_sections(plan_text_old)
+    # Parse the prior plan structurally. plan_document.parse_plan is
+    # strict: H1 envelope + H2 phase header pairs as units, with
+    # ParseError on missing or duplicate H2s under one H1 envelope or
+    # non-whitespace text between them. The assembly path walks this
+    # Plan's units to preserve unchanged phases verbatim and substitute
+    # changed/new units in place. A structurally corrupt prior raises
+    # at parse rather than getting amplified across reauthor passes.
+    try:
+        prior_plan = parse_plan(plan_text_old)
+    except Exception as exc:
+        raise ReauthorError(
+            f"prior PLAN.md at {plan_path} cannot be parsed as a "
+            f"canonical plan document: {exc}. The reauthor path "
+            "requires a structurally valid prior plan; manual repair "
+            "or rollback to a known-good commit is needed before "
+            "reauthor can proceed."
+        ) from exc
 
     storage_writer_id = allocate_writer_id(prefix="duplo-reauthor")
     storage = Storage(ledger_dir, writer_id=storage_writer_id)
@@ -271,7 +289,14 @@ def reauthor_plan(
     # preserve entries for them keeps the model in the ownership
     # loop and fails closed when the model emits only the changed
     # phase.
-    _, synth_sections = parse_plan_sections(new_plan_text)
+    #
+    # The plan_document layer (sanitize -> parse -> render) owns the
+    # H1 envelope + H2 phase header structural contract. Assembly
+    # produces a Plan and renders it; the renderer is the only path
+    # that emits H1 lines, so substitutions automatically renumber
+    # downstream H1 ordinals and H1 stale-vs-H2 mismatches are
+    # impossible by construction.
+    synth_plan = parse_plan(new_plan_text)
     prior_ids = [p.id for p in old_phases]
     next_new_phase_id_floor = _next_available_phase_id_from_priors(old_phases)
 
@@ -290,10 +315,9 @@ def reauthor_plan(
     normalized_lineage = normalize_lineage_for_preservation(
         prior_ids, lineage_obj
     )
-    assembled_plan_text = assemble_reauthored_plan(
-        prior_preamble=prior_preamble,
-        prior_sections=prior_sections,
-        synth_sections=synth_sections,
+    assembled_plan = assemble_reauthored_plan(
+        prior_plan=prior_plan,
+        synth_units=synth_plan.units,
         normalized_lineage=normalized_lineage,
     )
 
@@ -303,12 +327,23 @@ def reauthor_plan(
     # 'from' priors, missing/extra plan headers vs lineage) still
     # raise; normalization only fills in preserve-defaults for
     # unaccounted priors, never repairs explicit contradictions.
-    new_phases = parse_plan_phases(assembled_plan_text)
+    # validate_lineage runs against the assembled Plan's unit ids
+    # (no need to re-parse markdown since the structural model
+    # already gives us the ids directly).
     validate_lineage(
         prior_ids,
-        (p.id for p in new_phases),
+        (u.phase_id for u in assembled_plan.units),
         normalized_lineage,
     )
+
+    # Structural validation on the assembled Plan: catch stray
+    # H1-shaped lines in unit bodies and embedded verdict JSON that
+    # survived sanitize. validate_lineage above caught
+    # lineage-vs-id contradictions; this layer catches H1+H2-aware
+    # invariants validate_lineage's H2-only parser cannot see.
+    validate_structure(assembled_plan)
+
+    assembled_plan_text = render(assembled_plan)
     diff = compute_lineage_diff(normalized_lineage)
 
     git_snapshot = _capture_git_snapshot(project_dir)
@@ -1001,6 +1036,24 @@ def _invoke_council_for_reauthor(
     plan_text: str = plan_view.value.strip()
     if not plan_text:
         raise ReauthorError("council_four_reauthor produced an empty plan")
+
+    # Plan-artifact contract: the synthesizer emits the council
+    # verdict in the judge_verdict artifact, NOT inside the plan
+    # body. A plan artifact carrying a verdict-shaped fenced JSON
+    # block is a model error that must surface as a hard pause:
+    # stripping the block silently would mask the error; passing it
+    # through would corrupt PLAN.md and accumulate across reauthor
+    # passes (the failure mode the fswatch-run-smoke fixture
+    # exhibited).
+    try:
+        plan_text = sanitize_plan_artifact(plan_text)
+    except PlanArtifactRejected as exc:
+        raise ReauthorError(
+            "plan_artifact_contained_verdict_json: "
+            f"council_four_reauthor's plan artifact carried a "
+            f"fenced 'json' block decoding to a verdict-shaped "
+            f"object. Underlying error: {exc}"
+        ) from exc
 
     verdict_view = result.artifacts.get("judge_verdict")
     if verdict_view is None or not isinstance(verdict_view.value, dict):
