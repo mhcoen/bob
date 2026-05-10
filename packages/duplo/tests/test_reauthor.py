@@ -2709,3 +2709,34 @@ class TestValidateLineageStructural:
             ]
         }
         _validate_lineage_structural(prior, floor, lineage)
+
+
+# ---------------------------------------------------------------------
+# PlanArtifactError exception class
+# ---------------------------------------------------------------------
+
+
+class TestPlanArtifactError:
+    def test_is_subclass_of_reauthor_error(self) -> None:
+        """PlanArtifactError MUST be a subclass of ReauthorError so
+        callers (notably mcloop's auto_reauthor) that catch
+        ReauthorError continue to do the right thing during the
+        transition. mcloop's specific handler matches the subclass
+        first to surface the distinct 'plan_artifact_invalid' pause
+        reason; falling back to the generic ReauthorError handler is
+        the safe default."""
+        from duplo.reauthor import PlanArtifactError, ReauthorError
+
+        assert issubclass(PlanArtifactError, ReauthorError)
+        # Instantiation works the same as the parent.
+        err = PlanArtifactError("test")
+        assert isinstance(err, ReauthorError)
+        assert str(err) == "test"
+
+    def test_is_exported_from_module(self) -> None:
+        """The exception is in __all__ so static analysis and
+        public-API consumers can find it without resorting to
+        private-name imports."""
+        import duplo.reauthor as reauthor_mod
+
+        assert "PlanArtifactError" in reauthor_mod.__all__

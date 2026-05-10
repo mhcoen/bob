@@ -62,6 +62,28 @@ class ReauthorError(RuntimeError):
     """
 
 
+class PlanArtifactError(ReauthorError):
+    """Raised when the synthesizer's plan artifact violates the
+    plan-artifact contract.
+
+    Subclass of :class:`ReauthorError` so callers that catch
+    ``ReauthorError`` continue to do the right thing, but distinct
+    enough that mcloop's HardStop layer can surface a specific
+    pause reason (``plan_artifact_invalid``) instead of folding the
+    failure into the generic ``reauthor_failed`` bucket.
+
+    Failure modes covered:
+
+      - The plan body contains a fenced ``json`` block in a shape
+        that is not the documented trailing-fenced-verdict shape
+        (mid-body, multiple blocks, etc.). See
+        :func:`duplo.plan_document.sanitize_plan_artifact`.
+      - The trailing fenced verdict extracted from the plan
+        artifact does not equal orchestra's judge_verdict artifact
+        value (parser disagreement on the model's output).
+    """
+
+
 _LEDGER_DIR_DEFAULT_NAME = ".duplo/ledger"
 
 
@@ -1052,7 +1074,7 @@ def _invoke_council_for_reauthor(
     try:
         plan_text, extracted_verdict = sanitize_plan_artifact(plan_text)
     except PlanArtifactRejected as exc:
-        raise ReauthorError(
+        raise PlanArtifactError(
             "plan_artifact_contained_verdict_json: "
             f"council_four_reauthor's plan artifact carried a "
             f"fenced 'json' block in a shape that does not match the "
@@ -1078,7 +1100,7 @@ def _invoke_council_for_reauthor(
     # something the two parsers disagree on — better to fail closed
     # than to silently pick one.
     if extracted_verdict is not None and extracted_verdict != verdict:
-        raise ReauthorError(
+        raise PlanArtifactError(
             "plan_artifact_verdict_mismatch: the trailing fenced "
             "verdict extracted from the plan artifact does not "
             "equal the judge_verdict artifact value. This points "
@@ -1327,6 +1349,7 @@ def _plan_sha256(text: str) -> str:
 
 __all__ = [
     "LineageValidationError",
+    "PlanArtifactError",
     "ReauthorError",
     "ReauthorResult",
     "default_ledger_dir",
