@@ -176,6 +176,30 @@ class TestUnattributableCommit:
         b = _eval([ev])
         assert a == b
 
+    def test_unattributed_plan_artifact_does_not_fire(self) -> None:
+        """An unattributed commit_landed whose change_class is
+        plan_artifact (e.g., Duplo's PLAN.md write outside a
+        reauthor flow, or a manual PLAN.md edit committed without
+        phase attribution) IS the plan being refreshed, not
+        execution work that escaped the plan. Rule 1 must not fire
+        and recommend a plan-wide reauthor of the plan that just
+        landed. Mirrors rule 7's existing plan_artifact exclusion;
+        this test pins that the asymmetry between the two rules
+        has been closed by the shared
+        _is_unaccounted_execution_commit predicate."""
+        ev = _make(
+            EventType.COMMIT_LANDED,
+            _commit_payload(
+                attributed_phase_id=None,
+                change_class=CommitChangeClass.PLAN_ARTIFACT,
+            ),
+        )
+        crossings = _eval([ev])
+        assert all(
+            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
+            for c in crossings
+        )
+
 
 # ---------------------------------------------------------------------
 # Rule 2: phase_abandoned

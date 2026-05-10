@@ -144,13 +144,27 @@ def _is_after_since(event_id: str, since: str | None) -> bool:
     return since is None or event_id > since
 
 
-def _is_exploratory_commit(event: Event) -> bool:
-    """Predicate for rule 7's count.
+def _is_unaccounted_execution_commit(event: Event) -> bool:
+    """Shared predicate for rule 1 (unattributable_commit) and rule 7
+    (exploratory_count_exceeded).
 
-    An exploratory commit is a ``commit_landed`` event with no
-    attributed phase whose ``change_class`` is not ``plan_artifact``.
-    Plan-artifact commits are explicitly out of scope: they are the
-    plan being refreshed, not exploratory work that escaped it.
+    An unaccounted execution commit is a ``commit_landed`` event with
+    no attributed phase whose ``change_class`` is not ``plan_artifact``.
+    The two exclusions are deliberate:
+
+      - attributed_phase_id is None: the commit didn't land under any
+        phase the plan defined, so the plan didn't anticipate it.
+      - change_class != plan_artifact: a plan-artifact commit (Duplo
+        writing PLAN.md, a manual plan edit, etc.) IS the plan being
+        refreshed, not execution work that escaped it. Treating it as
+        unattributable would loop a reauthor into reauthoring the
+        plan that just landed.
+
+    Rule 1 and rule 7 historically diverged on the second exclusion:
+    rule 1 fired on every unattributed commit, rule 7 already excluded
+    plan_artifact. The asymmetry meant a manual PLAN.md edit committed
+    without phase attribution fired rule 1 and recommended
+    reauthor_plan, which is a false positive.
     """
     if event.type is not EventType.COMMIT_LANDED:
         return False
@@ -160,6 +174,16 @@ def _is_exploratory_commit(event: Event) -> bool:
     if payload.get("change_class") == CommitChangeClass.PLAN_ARTIFACT.value:
         return False
     return True
+
+
+def _is_exploratory_commit(event: Event) -> bool:
+    """Predicate for rule 7's count.
+
+    Aliases :func:`_is_unaccounted_execution_commit`. Kept under its
+    rule-7-specific name for readability at the call site; the
+    underlying definition is shared with rule 1.
+    """
+    return _is_unaccounted_execution_commit(event)
 
 
 def _short_sha(commit: str | None) -> str:
@@ -178,11 +202,14 @@ def _evaluate_unattributable_commit(
 ) -> list[ThresholdCrossing]:
     out: list[ThresholdCrossing] = []
     for ev in sorted_events:
-        if ev.type is not EventType.COMMIT_LANDED:
-            continue
         if not _is_after_since(ev.event_id, since):
             continue
-        if ev.payload.get("attributed_phase_id") is not None:
+        # Shared predicate with rule 7: ignore commits that lack
+        # attribution but ARE the plan being refreshed
+        # (change_class=plan_artifact). A manual PLAN.md edit
+        # committed without phase attribution must not cascade
+        # into a plan-wide reauthor of the plan that just landed.
+        if not _is_unaccounted_execution_commit(ev):
             continue
         commit = _short_sha(ev.payload.get("commit"))
         out.append(
