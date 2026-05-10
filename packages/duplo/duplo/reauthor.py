@@ -90,6 +90,7 @@ def reauthor_plan(
     council_config_path: Path | None = None,
     run_id: str | None = None,
     project_dir: Path | None = None,
+    target_phase_id: str | None = None,
 ) -> ReauthorResult:
     """Drive a re-authoring of ``plan_path`` against the Plan Ledger.
 
@@ -118,6 +119,17 @@ def reauthor_plan(
     project_dir
         The project the plan applies to. Defaults to the parent of
         ``plan_path``.
+    target_phase_id
+        Optional phase id to scope the re-author to. When supplied,
+        the council brief tells the synthesizer that only this
+        phase (and its lineage successors) are in scope; unchanged
+        priors are preserved by the runtime via the existing
+        preserve-by-default assembly. When None, the synthesizer
+        re-authors plan-wide. Used by mcloop's ``auto_reauthor`` to
+        honor the ``recommended_action == reauthor_phase`` scope on
+        crossings whose triggering event identifies a specific
+        phase, instead of escalating every phase-scoped crossing
+        into a plan-wide synthesis.
 
     Returns
     -------
@@ -187,9 +199,29 @@ def reauthor_plan(
     # the council_synthesizer template.
     crossing_summary = _crossing_summary(crossing)
     next_available_phase_id = _next_available_phase_id_from_priors(old_phases)
+    if target_phase_id is not None:
+        if target_phase_id not in {p.id for p in old_phases}:
+            raise ReauthorError(
+                f"target_phase_id {target_phase_id!r} is not a current "
+                f"prior plan id; current prior plan ids: "
+                f"{[p.id for p in old_phases]}"
+            )
+        scope_clause = (
+            f"SCOPE: this re-author is phase-scoped to {target_phase_id!r}. "
+            "Author changes for this phase only (and any phase you derive "
+            "from it via supersede/split/merge or any genuinely new phase "
+            "you must introduce alongside it). All other prior phases "
+            "MUST be left as preserve; do not touch their content. "
+            "Duplo's preserve-by-default assembly will carry the "
+            "unchanged priors forward verbatim. "
+        )
+    else:
+        scope_clause = ""
     question = (
         "Re-author the plan in light of the following triggering "
-        f"threshold crossing: {crossing_summary}. Preserve phase ids "
+        f"threshold crossing: {crossing_summary}. "
+        + scope_clause
+        + "Preserve phase ids "
         "from the prior plan where the phase remains valid; introduce "
         f"new ids for derived phases STARTING AT {next_available_phase_id} "
         "(the runtime computes this; the prior plan's ids are listed "

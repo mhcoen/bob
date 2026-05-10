@@ -1286,6 +1286,163 @@ class TestReauthorPlan:
             EventType.PLAN_REAUTHORED,
         ]
 
+    def test_target_phase_id_threads_into_council_question(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When reauthor_plan is called with target_phase_id, the
+        council brief carries an explicit scope clause naming the
+        target. The synthesizer is told the re-author is
+        phase-scoped and unchanged priors must be preserved. Used
+        by mcloop's auto_reauthor to honor recommended_action ==
+        reauthor_phase without escalating to plan-wide synthesis."""
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002", "phase_003"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_002", "phase_003"]
+        )
+
+        captured: dict[str, Any] = {}
+
+        from duplo import reauthor
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured["question"] = kwargs["question"]
+            text = (
+                "## Phase phase_002b: Refactored\n\n- [ ] new b\n"
+            )
+            verdict = {
+                "decision": "accept",
+                "feedback": "ok",
+                "agreements": [],
+                "disagreements": [],
+                "rejected_options": [],
+                "lineage": {
+                    "phases": [
+                        {
+                            "id": "phase_002b",
+                            "action": "supersede",
+                            "from": ["phase_002"],
+                        },
+                    ]
+                },
+            }
+            return text, verdict
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        from duplo.reauthor import reauthor_plan
+
+        reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+            target_phase_id="phase_002",
+        )
+
+        question = captured["question"]
+        assert "SCOPE" in question
+        assert "phase_002" in question
+        assert "preserve" in question.lower()
+
+    def test_target_phase_id_unknown_raises_reauthor_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """target_phase_id MUST refer to a current prior plan id.
+        An unknown id is a caller error and raises ReauthorError
+        (not LineageValidationError) before the council is invoked."""
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001", "phase_002"])
+
+        from duplo import reauthor
+
+        def fake_invoke_should_not_run(**kwargs: Any) -> Any:
+            raise AssertionError("council should not be invoked")
+
+        monkeypatch.setattr(
+            reauthor,
+            "_invoke_council_for_reauthor",
+            fake_invoke_should_not_run,
+        )
+
+        from duplo.reauthor import ReauthorError, reauthor_plan
+
+        with pytest.raises(ReauthorError, match="phase_999"):
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+                target_phase_id="phase_999",
+            )
+
+    def test_default_target_phase_id_omits_scope_clause(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Backward compat: when target_phase_id is None (the
+        default and the existing behavior), the question contains
+        no scope clause and the synthesizer authors plan-wide as
+        before."""
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001", "phase_002"])
+
+        captured: dict[str, Any] = {}
+
+        from duplo import reauthor
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured["question"] = kwargs["question"]
+            return (
+                "## Phase phase_001: First\n\n- [ ] x\n\n"
+                "## Phase phase_002: Second\n\n- [ ] y\n",
+                {
+                    "decision": "accept",
+                    "feedback": "ok",
+                    "agreements": [],
+                    "disagreements": [],
+                    "rejected_options": [],
+                    "lineage": {
+                        "phases": [
+                            {"id": "phase_001", "action": "preserve"},
+                            {"id": "phase_002", "action": "preserve"},
+                        ]
+                    },
+                },
+            )
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        from duplo.reauthor import reauthor_plan
+
+        reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+        assert "SCOPE" not in captured["question"]
+
     def test_synth_section_missing_for_lineage_target_raises(
         self,
         tmp_path: Path,
