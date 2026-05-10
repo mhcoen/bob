@@ -38,9 +38,10 @@ def _safe_read_json(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+    return dict(loaded) if isinstance(loaded, dict) else {}
 
 
 def save_product(
@@ -131,7 +132,7 @@ def derive_app_name(
             data["product_name"] = existing
             _ensure_duplo_dir(target_dir)
             path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        return existing
+        return str(existing)
 
     app_name = ""
 
@@ -390,7 +391,8 @@ def advance_phase(
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return 1
-    current = data.get("current_phase", 0)
+    current_raw = data.get("current_phase", 0)
+    current = int(current_raw) if isinstance(current_raw, int | float) else 0
     data["current_phase"] = current + 1
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return current + 1
@@ -550,7 +552,8 @@ def _merge_duplicate_group(
     # Remove all members except the best from the feature list.
     remove_names = name_set - {best["name"]}
     features[:] = [f for f in features if f["name"] not in remove_names]
-    return best["name"]
+    best_name = best["name"]
+    return str(best_name) if best_name else None
 
 
 def _propagate_implemented_status(features: list[dict]) -> list[str]:
@@ -1092,7 +1095,8 @@ def load_sources(
     """
     path = (Path(target_dir) / DUPLO_JSON).resolve()
     data = _safe_read_json(path)
-    return data.get("sources", [])
+    sources = data.get("sources", [])
+    return list(sources) if isinstance(sources, list) else []
 
 
 EXAMPLES_DIR = ".duplo/examples"
@@ -1361,6 +1365,9 @@ def append_to_bugs_section(
             break
 
     if bugs_start is not None:
+        # bugs_end is set by the scan above whenever bugs_start is;
+        # the type checker can't see that cross-iteration link.
+        assert bugs_end is not None
         # Build maps of existing task keys → line indices, split by
         # checked vs unchecked so we can implement reopen-in-place.
         # Each entry is indexed by BOTH its fix-tag and body text

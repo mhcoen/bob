@@ -122,16 +122,16 @@ def _nearest_heading(tag: Tag) -> str:
     """Find the nearest preceding heading text for *tag*."""
     for sibling in tag.previous_siblings:
         if isinstance(sibling, Tag) and re.match(r"^h[1-6]$", sibling.name):
-            return sibling.get_text(separator=" ").strip()
+            return str(sibling.get_text(separator=" ")).strip()
     parent = tag.parent
     if parent and isinstance(parent, Tag):
         for sibling in parent.previous_siblings:
             if isinstance(sibling, Tag) and re.match(r"^h[1-6]$", sibling.name):
-                return sibling.get_text(separator=" ").strip()
+                return str(sibling.get_text(separator=" ")).strip()
         if parent.name == "div" or parent.name == "section":
             heading = parent.find(re.compile(r"^h[1-6]$"))
             if heading and isinstance(heading, Tag):
-                return heading.get_text(separator=" ").strip()
+                return str(heading.get_text(separator=" ")).strip()
     return ""
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 from duplo.claude_cli import query
 from duplo.parsing import strip_fences
@@ -125,7 +126,7 @@ def _parse_roadmap(raw: str) -> list[dict]:
     if not isinstance(data, list):
         return []
 
-    roadmap = []
+    roadmap: list[dict[str, Any]] = []
     for item in data:
         if not isinstance(item, dict):
             continue

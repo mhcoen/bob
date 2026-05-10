@@ -221,7 +221,7 @@ def _dhash(image: Image.Image, size: int = 8) -> int:
     Each bit in the returned integer indicates whether a pixel is brighter than
     the one to its right.
     """
-    resized = image.convert("L").resize((size + 1, size), Image.LANCZOS)
+    resized = image.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS)
     pixels = list(resized.tobytes())
     width = size + 1
     bits = 0

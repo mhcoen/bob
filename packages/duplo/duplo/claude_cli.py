@@ -7,7 +7,9 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 _DOT_INTERVAL_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.5
@@ -34,7 +36,9 @@ def _drain_stream(stream, sink: list[str]) -> None:
         pass
 
 
-def _with_retry(func, *args, **kwargs):
+def _with_retry(
+    func: Callable[..., str], *args: Any, **kwargs: Any
+) -> str:
     """Call ``func`` with up to ``_MAX_ATTEMPTS`` attempts on ClaudeCliError.
 
     Sleeps ``_RETRY_SLEEP_SECONDS`` between attempts and prints a progress

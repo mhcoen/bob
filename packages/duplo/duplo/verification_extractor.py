@@ -163,4 +163,5 @@ def load_frame_descriptions(
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
-    return data.get("frame_descriptions", [])
+    frames = data.get("frame_descriptions", [])
+    return list(frames) if isinstance(frames, list) else []

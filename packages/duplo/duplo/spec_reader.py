@@ -948,14 +948,14 @@ def validate_for_run(spec: ProductSpec) -> ValidationResult:
             "No source URL or reference file declared. Add a URL to ## Sources or files to ref/."
         )
 
-    for entry in spec.dropped_sources:
+    for source_entry in spec.dropped_sources:
         errors.append(
-            f"Source URL {entry.url} in ## Sources has no role: field. "
+            f"Source URL {source_entry.url} in ## Sources has no role: field. "
             "Required values: product-reference, docs, counter-example."
         )
-    for entry in spec.dropped_references:
+    for reference_entry in spec.dropped_references:
         errors.append(
-            f"Reference {entry.path} in ## References has no role: field. "
+            f"Reference {reference_entry.path} in ## References has no role: field. "
             "Required values: visual-target, behavioral-target, docs, counter-example, ignore."
         )
 

@@ -140,9 +140,9 @@ def _detect_language(tag: Tag) -> str:
         classes = classes.split()
     for cls in classes:
         if cls.startswith("language-"):
-            return cls[len("language-") :]
+            return str(cls[len("language-") :])
         if cls.startswith("lang-"):
-            return cls[len("lang-") :]
+            return str(cls[len("lang-") :])
     return ""
 
 

@@ -80,9 +80,10 @@ def load_hashes(directory: Path | str = ".") -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+    return dict(loaded) if isinstance(loaded, dict) else {}
 
 
 def save_hashes(
