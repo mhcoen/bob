@@ -18,35 +18,77 @@ but is needed across two or more lives here.
 
 ## Threshold rules
 
-`bob_tools.ledger.thresholds` ships seven rules at
-`severity=trigger_reauthor`:
+`bob_tools.ledger.thresholds` ships seven rules. The evaluator's
+job is to classify ledger events as no-op or "the plan needs
+re-authoring"; the actual re-authoring belongs to Slice C in
+`duplo.reauthor`. All seven rules ship at
+`severity=trigger_reauthor` (the lower `annotate` level is reserved
+for future rules that may legitimately log without recommending a
+re-author).
 
-| Rule | Trigger | Action |
-|---|---|---|
-| `unattributable_commit` | `commit_landed` with `attributed_phase_id == None` | `reauthor_plan` |
-| `phase_abandoned` | a `phase_abandoned` event | `reauthor_phase` |
-| `phase_superseded` | a `phase_superseded` event | `reauthor_phase` |
-| `phase_topology_changed` | a `phase_split` or `phase_merged` event | `reauthor_phase` |
-| `invariant_declared` | a new invariant on the projected `PlanState` | `reauthor_plan` |
-| `assumption_falsified` | an `assumption_falsified` event | `reauthor_phase` |
-| `exploratory_count_exceeded` | exploratory-commit count crosses `exploratory_commit_limit` (default 5) | `reauthor_plan` |
+The set is intentionally conservative per Slice B's design: false
+positives desensitize, false negatives miss the window. Each rule
+fires on an explicit triggering event rather than a heuristic.
 
-An exploratory commit is a `commit_landed` with no
-`attributed_phase_id` whose `change_class` is not `plan_artifact`;
-plan-refresh commits are out of scope by construction.
+**`unattributable_commit`** — a `commit_landed` event arrives with
+no `attributed_phase_id`. Slice A's projector routes such commits
+into `findings_unattributed`; this rule fires when that list
+grows. The commit is execution work the plan does not account
+for. Recommended action: `reauthor_plan`.
 
-The first six rules fire once per evidence event. The seventh
-fires once at the limit-crossing transition. The `since` cursor
-(event_id of the most recent `plan_reauthored`) gates re-firing:
-only crossings whose evidence has `event_id > since` are emitted,
-and for the count rule the threshold must be crossed *after*
-`since` (a log already over the limit at the cursor does not
-re-fire).
+**`phase_abandoned`** — fires on a `phase_abandoned` event. The
+event itself is the trigger: a phase the project no longer pursues
+invalidates whatever the plan said about reaching its outcome.
+Recommended action: `reauthor_phase`.
 
-Severity `annotate` and action `log_only` are reserved for future
-rules; nothing currently emits them. Consumers can disable
-individual rules per-environment via `ThresholdParams.enabled_rules`
-without code changes.
+**`phase_superseded`** — fires on a `phase_superseded` event. Same
+shape as `phase_abandoned`; the supersession event records that an
+earlier phase has been replaced by a successor, and the plan must
+reflect that structurally. Recommended action: `reauthor_phase`.
+
+**`phase_topology_changed`** — fires on `phase_split` or
+`phase_merged`. A topology change is its own class of
+plan-invalidating event: the original decomposition has been
+judged wrong (too coarse if split, too fine if merged), and phase
+boundaries need to be redrawn. Recommended action:
+`reauthor_phase`.
+
+**`invariant_declared`** — fires when the projector surfaces a new
+invariant on `PlanState`. New correctness invariants typically
+reframe what "done" means for adjacent phases, so prior phases
+authored without them in view may need revision. Recommended
+action: `reauthor_plan`.
+
+**`assumption_falsified`** — fires on an `assumption_falsified`
+event. The case it catches is "next planned phase depends on
+assumption falsified by execution": the phase that relied on the
+assumption has lost its foundation. Recommended action:
+`reauthor_phase`.
+
+**`exploratory_count_exceeded`** — fires when the running count of
+*exploratory* commits crosses `exploratory_commit_limit` (default
+5, configurable). An exploratory commit is a `commit_landed` with
+no `attributed_phase_id` whose `change_class` is not
+`plan_artifact`; plan-refresh commits are out of scope by
+construction. Recommended action: `reauthor_plan`.
+
+The split between `reauthor_phase` and `reauthor_plan` follows the
+scope of the evidence. Phase-scoped events (abandoned, superseded,
+topology, assumption falsified) recommend `reauthor_phase`;
+cross-cutting signals (uncovered commits, new invariants)
+recommend `reauthor_plan`. Both currently route through the same
+`auto_reauthor` → `duplo.reauthor.reauthor_plan` call site, so the
+choice is denormalized for future use rather than acted on today.
+
+The `since` cursor (event_id of the most recent `plan_reauthored`)
+gates re-firing: only crossings whose evidence has
+`event_id > since` are emitted, and for the count rule the
+threshold must be crossed *after* `since` (a log already over the
+limit at the cursor does not re-fire). Each successful re-author
+implicitly resets the slice for the next pass.
+
+Consumers can disable individual rules per-environment via
+`ThresholdParams.enabled_rules` without code changes.
 
 ## Layout
 
