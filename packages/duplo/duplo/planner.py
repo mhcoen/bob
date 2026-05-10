@@ -139,17 +139,52 @@ _FENCE_RE = re.compile(
 
 _H1_HEADING_RE = re.compile(r"^# \S")
 
-# Matches any H1 line whose text contains "Phase <N>:" regardless of
-# the surrounding separator (em-dash, en-dash, hyphen-minus, or none),
-# trailing whitespace, or capitalization. Used by _ensure_h1_heading to
-# strip model-authored phase H1s before Duplo renders the canonical
-# heading, and by validate_h1_ordinal_sequence to extract ordinals
-# from the on-disk PLAN.md.
+# Any markdown heading (any depth) followed by content. Used as the
+# preamble boundary in _ensure_h1_heading: lines before the first
+# heading are LLM commentary or separator noise (`Here is the plan:`,
+# `---`); lines from the first heading onward are real content.
+# Slice C's inner `## Phase phase_NNN:` qualifies as a heading and
+# anchors content even when it sits above a stray H1.
+_ANY_HEADING_RE = re.compile(r"^#+\s+\S")
+
+# Strip and validate use SEPARATE regex constants. Codex's framing:
+# "The symmetry is a concern, not a virtue here. Strip and validation
+# have different jobs. Sharing the same permissive regex means both
+# can agree on the wrong interpretation."
 #
-# Be permissive on the strip; be exact on the render. False positives
-# on strip are fine (Duplo renders the canonical H1 anyway); false
-# negatives leave duplicate H1s in PLAN.md.
-_PHASE_H1_RE = re.compile(r"^# .*?\bPhase\s+(\d+)\s*:", re.IGNORECASE)
+# Strip pattern: superset of mcloop's checklist.py STAGE_RE
+# (^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b, IGNORECASE). Whatever mcloop
+# would parse as a phase/stage header, Duplo MUST also recognize and
+# remove. False positives are fine; false negatives leave duplicate
+# headings that mcloop sees but Duplo missed, which fail mcloop's
+# duplicate-Phase/Stage check at parse time.
+#
+# Catches every shape mcloop matches:
+#   - any heading level (^#+), not just H1 (catches ## Phase 3, ### Stage 5)
+#   - "Phase N" or "Stage N" anywhere in the heading text
+#   - no colon required after the digit (catches `# Phase 3 Glob filtering`)
+#   - lowercase, uppercase, or mixed-case (re.IGNORECASE)
+#   - any separator before the keyword: em-dash, en-dash, hyphen-minus,
+#     or none
+#
+# Critically does NOT catch the inner Slice C semantic header
+# `## Phase phase_NNN: title`: the `phase_001` token has no
+# whitespace between "phase" and the digit (the underscore breaks
+# the `phase\s+\d+` pattern), so Slice C headers survive the strip.
+_PHASE_H1_STRIP_RE = re.compile(
+    r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE
+)
+
+# Validate pattern: STRICT match of the canonical envelope shape Duplo
+# renders. This is the regex used by validate_h1_ordinal_sequence to
+# extract ordinals from PLAN.md for the source-of-truth check. False
+# positives here would let prose H1s like
+# `# Background: Phase 1 introduced filtering` be counted as phase
+# ordinals, breaking validation against actual roadmap state.
+#
+# Matches exactly what _ensure_h1_heading prepends: single-hash, em-dash
+# separator, "Phase " (capitalized), digit, colon-space, trailing title.
+_PHASE_H1_VALIDATE_RE = re.compile(r"^# .+? — Phase (\d+): .+$")
 
 
 def _strip_fences(text: str) -> str:
@@ -224,19 +259,28 @@ def _ensure_h1_heading(
     """
     lines = content.splitlines(keepends=True)
 
-    # Step 1: strip leading non-H1 commentary up to the first H1.
-    first_h1_idx: int | None = None
+    # Step 1: strip leading non-heading commentary up to the first
+    # markdown heading of ANY depth. The boundary is "first heading"
+    # rather than "first H1" because the synthesizer's body, under
+    # the new contract, contains a Slice C `## Phase phase_NNN:` H2
+    # as its first heading. Treating any-depth heading as the
+    # boundary keeps that H2 as content while still stripping
+    # LLM commentary preambles (`Here is the plan:`, `---`).
+    first_heading_idx: int | None = None
     for i, line in enumerate(lines):
-        if _H1_HEADING_RE.match(line):
-            first_h1_idx = i
+        if _ANY_HEADING_RE.match(line):
+            first_heading_idx = i
             break
-    if first_h1_idx is not None:
-        lines = lines[first_h1_idx:]
+    if first_heading_idx is not None:
+        lines = lines[first_heading_idx:]
 
-    # Step 2: drop every "# X — Phase N: ..." H1 line from the body.
+    # Step 2: drop every phase/stage heading mcloop would parse as a
+    # section header (any heading level containing "Phase N" or
+    # "Stage N", with or without colon, in any case). The strip
+    # regex is a superset of mcloop's checklist.py STAGE_RE.
     cleaned: list[str] = []
     for line in lines:
-        if _PHASE_H1_RE.match(line.rstrip("\n")):
+        if _PHASE_H1_STRIP_RE.match(line.rstrip("\n")):
             continue
         cleaned.append(line)
 
@@ -254,37 +298,67 @@ class CanonicalH1OrdinalError(RuntimeError):
     """Raised when PLAN.md's H1 phase ordinals violate the expected sequence."""
 
 
-def validate_h1_ordinal_sequence(plan_text: str) -> None:
-    """Check H1 phase ordinals form a contiguous monotonic sequence.
+def validate_h1_ordinal_sequence(
+    plan_text: str,
+    expected_ordinals: list[int] | None = None,
+) -> None:
+    """Validate H1 phase ordinals against the source-of-truth.
 
-    Extracts every ``# <prefix> — Phase (\\d+): <rest>`` H1 line in
-    document order and validates the sequence is exactly
-    ``[K, K+1, K+2, ...]`` for some non-negative starting K.
+    Extracts every canonical-envelope H1 line (strict match against
+    ``_PHASE_H1_VALIDATE_RE``: single-hash, em-dash separator, "Phase ",
+    digit, colon-space, trailing title) in document order. Validation
+    has two modes:
 
-    Catches:
-      - Duplicate ordinals (e.g. ``[0, 1, 3, 3, 4]``).
-      - Gap-skip ordinals (e.g. ``[0, 1, 3, 4]``).
-      - Out-of-order ordinals (e.g. ``[0, 2, 1]``).
+    1. ``expected_ordinals`` is provided: the observed sequence MUST
+       equal it exactly. This is the source-of-truth check Duplo's
+       roadmap state can drive — pipeline accumulates the list of
+       ordinals it has emitted across save_plan calls and passes it
+       in. Catches any drift (duplicate, gap, out-of-order, wrong
+       starting ordinal, missing phase, extra phase) in a single
+       comparison.
+
+    2. ``expected_ordinals`` is None: the observed sequence MUST be
+       contiguous and monotonic ``[K, K+1, ..., K+N-1]`` for some
+       non-negative starting K. Backward-compatible fallback for
+       callers that don't yet have roadmap state to drive the
+       check.
+
+    The strict extraction regex deliberately excludes prose H1s like
+    ``# Background: Phase 1 introduced filtering``: those are content,
+    not envelope. Strip-time treats them as false-positive noise to
+    remove; validation-time treats them as not-a-phase-heading.
 
     Raises ``CanonicalH1OrdinalError`` naming the observed sequence
-    and the expected sequence on any mismatch. Returns silently
-    when the sequence is valid OR when no H1 phase headings are
+    and the expected sequence on any mismatch. Returns silently when
+    the sequence is valid OR when no canonical H1 phase headings are
     present (the validator is no-op for plans that have not yet
     received their first canonical H1).
     """
     ordinals: list[int] = []
     for raw_line in plan_text.splitlines():
-        match = _PHASE_H1_RE.match(raw_line)
+        match = _PHASE_H1_VALIDATE_RE.match(raw_line)
         if match:
             ordinals.append(int(match.group(1)))
     if not ordinals:
         return
-    expected = list(range(ordinals[0], ordinals[0] + len(ordinals)))
-    if ordinals == expected:
+
+    if expected_ordinals is not None:
+        if ordinals == expected_ordinals:
+            return
+        raise CanonicalH1OrdinalError(
+            "PLAN.md H1 phase ordinal sequence does not match the "
+            "source-of-truth from Duplo's roadmap state. "
+            f"Observed: {ordinals}. Expected: {expected_ordinals}."
+        )
+
+    expected_contig = list(
+        range(ordinals[0], ordinals[0] + len(ordinals))
+    )
+    if ordinals == expected_contig:
         return
     raise CanonicalH1OrdinalError(
         "PLAN.md H1 phase ordinal sequence is not contiguous and "
-        f"monotonic. Observed: {ordinals}. Expected: {expected}."
+        f"monotonic. Observed: {ordinals}. Expected: {expected_contig}."
     )
 
 
@@ -597,6 +671,7 @@ def save_plan(
     content: str,
     *,
     target_dir: Path | str = ".",
+    expected_h1_ordinals: list[int] | None = None,
 ) -> Path:
     """Write *content* to ``PLAN.md`` in *target_dir*.
 
@@ -607,6 +682,14 @@ def save_plan(
     (e.g. from an LLM) includes one, the heading is stripped and any
     tasks that were under it are kept above. ``## Bugs`` is an mcloop
     convention that duplo does not emit.
+
+    ``expected_h1_ordinals`` (when provided) is the source-of-truth list
+    of phase ordinals Duplo's roadmap has emitted across all save_plan
+    calls in this run, in document order. Forwarded to
+    ``validate_h1_ordinal_sequence`` for an exact-match check against
+    the accumulated PLAN.md. When None, the validator falls back to
+    the internal contiguity check (backward-compatible path for
+    callers that don't track roadmap state explicitly).
 
     Returns the path.
     """
@@ -621,13 +704,17 @@ def save_plan(
 
     # H1 ordinal sequence check on the FULL accumulated PLAN.md
     # (after Duplo's strip-and-render in _ensure_h1_heading has run
-    # on the per-phase content). Catches duplicate, gap-skip, and
-    # out-of-order ordinals BEFORE writing so a violation leaves
-    # PLAN.md untouched. The check is a no-op when no H1 phase
-    # headings are present (e.g., during a pre-canonical scaffold
-    # write where the body has not yet been wrapped in the
+    # on the per-phase content). When ``expected_h1_ordinals`` is
+    # provided, the check is exact-match against Duplo's roadmap
+    # state. When None, falls back to internal contiguity.
+    # Either path raises BEFORE writing so a violation leaves
+    # PLAN.md untouched. The check is a no-op when no canonical
+    # H1 phase headings are present (e.g., during a pre-canonical
+    # scaffold write where the body has not yet been wrapped in the
     # ``# <project> — Phase N: <title>`` envelope).
-    validate_h1_ordinal_sequence(accumulated)
+    validate_h1_ordinal_sequence(
+        accumulated, expected_ordinals=expected_h1_ordinals
+    )
 
     path.write_text(accumulated, encoding="utf-8")
     return path

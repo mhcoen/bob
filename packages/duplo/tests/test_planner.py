@@ -990,6 +990,51 @@ class TestSavePlan:
         assert path.parent == tmp_path.resolve()
 
 
+class TestStripValidateRegexSplit:
+    """Defect 1 / Defect 3: strip and validate use SEPARATE regexes.
+
+    Strip is permissive (false positives benign — Duplo prepends
+    canonical anyway). Validate is strict (only the canonical envelope
+    Duplo renders counts as a phase H1; prose like
+    `# Background: Phase 1 introduced filtering` is content, not
+    envelope). The two regex constants encode different intents.
+    """
+
+    PROSE_H1 = "# Background: Phase 1 introduced filtering\n"
+
+    def test_strip_catches_prose_h1_false_positive(self):
+        """Synthesizer wrote a prose H1 mid-body that mentions
+        ``Phase N``. Strip removes it (acceptable false positive
+        because Duplo prepends the canonical envelope anyway)."""
+        body = (
+            "## Phase phase_001: real header\n\n"
+            f"{self.PROSE_H1}"
+            "\n- [ ] Real task\n"
+        )
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        assert "Background" not in result
+        assert "## Phase phase_001:" in result
+        assert "- [ ] Real task" in result
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_validator_does_not_count_prose_h1_false_positive(self):
+        """The same prose H1, if it ended up in PLAN.md somehow
+        (e.g., a body that did NOT pass through Duplo's strip),
+        does NOT count as a phase ordinal in validation. The
+        canonical-envelope-only validator regex excludes it."""
+        text = (
+            "# App — Phase 0: Real\n\n"
+            "## Phase phase_001: real semantic header\n\n"
+            f"{self.PROSE_H1}"
+            "\n- [ ] task\n\n"
+            "# App — Phase 1: Real\n"
+        )
+        # Despite the prose H1 mentioning "Phase 1", the validator
+        # only counts the two canonical envelope H1s [0, 1] which
+        # are contiguous.
+        validate_h1_ordinal_sequence(text)
+
+
 class TestValidateH1OrdinalSequence:
     """H1 phase ordinal sequence must be contiguous and monotonic.
 
@@ -1083,6 +1128,259 @@ class TestValidateH1OrdinalSequence:
             "# App — Phase 1: B\n"
         )
         validate_h1_ordinal_sequence(text)
+
+    # --------- Defect 2: expected_ordinals source-of-truth check --
+
+    def test_validator_with_expected_passes_on_match(self):
+        text = (
+            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
+        )
+        validate_h1_ordinal_sequence(text, expected_ordinals=[0, 1, 2])
+
+    def test_validator_with_expected_fails_on_mismatch(self):
+        """Plan has ordinals [0, 1, 2, 4] but Duplo's roadmap state
+        emitted [0, 1, 2, 3]. Source-of-truth match fails. Error
+        names BOTH observed and expected sequences."""
+        text = (
+            "# App — Phase 0: A\n# App — Phase 1: B\n"
+            "# App — Phase 2: C\n# App — Phase 4: D\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError) as ei:
+            validate_h1_ordinal_sequence(
+                text, expected_ordinals=[0, 1, 2, 3]
+            )
+        msg = str(ei.value)
+        assert "[0, 1, 2, 4]" in msg
+        assert "[0, 1, 2, 3]" in msg
+        assert "source-of-truth" in msg.lower()
+
+    def test_validator_with_expected_fails_on_missing_phase(self):
+        """Plan has only [0, 1] but roadmap emitted [0, 1, 2].
+        Source-of-truth match fails (missing phase 2)."""
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n"
+        with pytest.raises(CanonicalH1OrdinalError):
+            validate_h1_ordinal_sequence(
+                text, expected_ordinals=[0, 1, 2]
+            )
+
+    def test_validator_with_expected_fails_on_extra_phase(self):
+        """Plan has [0, 1, 2] but roadmap emitted [0, 1].
+        Source-of-truth match fails (extra phase)."""
+        text = (
+            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError):
+            validate_h1_ordinal_sequence(
+                text, expected_ordinals=[0, 1]
+            )
+
+    def test_validator_with_expected_fails_on_wrong_starting_ordinal(self):
+        """Roadmap emitted [3, 4, 5] (Phase 0/1/2 already complete
+        in a prior run); plan was rendered with [0, 1, 2]. Wrong
+        starting ordinal."""
+        text = (
+            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
+        )
+        with pytest.raises(CanonicalH1OrdinalError):
+            validate_h1_ordinal_sequence(
+                text, expected_ordinals=[3, 4, 5]
+            )
+
+    def test_validator_without_expected_falls_back_to_contiguity(self):
+        """Backward-compatible: callers that don't provide
+        expected_ordinals get the internal-contiguity check
+        (passes on [0, 1, 2], fails on [0, 1, 3])."""
+        good = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
+        validate_h1_ordinal_sequence(good)  # no expected_ordinals
+        bad = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 3: D\n"
+        with pytest.raises(CanonicalH1OrdinalError):
+            validate_h1_ordinal_sequence(bad)
+
+
+class TestStripIsSupersetOfMcloopParser:
+    """Defect 5: Duplo's strip regex must be a SUPERSET of mcloop's
+    checklist.py STAGE_RE
+    (^#+\\s+.*?\\b(?:stage|phase)\\s+(\\d+)\\b, IGNORECASE).
+    Whatever mcloop matches as a phase/stage header, Duplo MUST
+    also recognize and strip — otherwise an unstripped wrong H1
+    survives the body, Duplo prepends its canonical H1, mcloop
+    sees both and fires duplicate-Phase.
+    """
+
+    def test_strip_removes_h1_phase_no_colon(self):
+        """`# Phase 3 Glob filtering` — no colon after digit.
+        Codex's example #1."""
+        body = "# Phase 3 Glob filtering\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        assert "Glob filtering" not in result
+        assert "Phase 3" not in result
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_strip_removes_h2_phase(self):
+        """`## Phase 3` — H2, no colon. Codex's example #2."""
+        body = "## Phase 3\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        # The H2 must be stripped because mcloop would parse it
+        # as a stage header.
+        assert "## Phase 3" not in result
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_strip_removes_h3_stage(self):
+        """`### Stage 5: Cleanup` — H3, "Stage" keyword."""
+        body = "### Stage 5: Cleanup\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        assert "Stage 5" not in result
+        assert "Cleanup" not in result
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_strip_removes_lowercase_stage(self):
+        """`# stage 4 — Foo` — lowercase 'stage' keyword."""
+        body = "# stage 4 — Foo\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        assert "stage 4" not in result
+        assert "Foo" not in result
+        assert result.startswith("# App — Phase 1: Core")
+
+    def test_strip_removes_phase_with_no_title(self):
+        """`# Phase 7` — bare. mcloop would parse as stage 7."""
+        body = "# Phase 7\n\n- [ ] Task\n"
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        # The bare phase header is stripped.
+        result_lines = result.splitlines()
+        # The only "Phase" line is Duplo's canonical envelope.
+        phase_lines = [
+            ln
+            for ln in result_lines
+            if "Phase" in ln and ln.startswith("# ")
+        ]
+        assert len(phase_lines) == 1
+        assert phase_lines[0].startswith("# App — Phase 1: Core")
+
+    def test_strip_preserves_slice_c_semantic_header(self):
+        """The Slice C semantic header `## Phase phase_NNN: title`
+        MUST survive. The `phase_001` token has no whitespace
+        between "phase" and the digit (the underscore breaks the
+        `\\bphase\\s+\\d+\\b` pattern), so Slice C headers are
+        invisible to mcloop's STAGE_RE and to Duplo's strip."""
+        body = (
+            "## Phase phase_003: Glob filtering\n\n- [ ] Task\n"
+        )
+        result = _ensure_h1_heading(body, "App", 1, "Core")
+        assert "## Phase phase_003: Glob filtering" in result
+        assert result.startswith("# App — Phase 1: Core")
+
+
+class TestSavePlanAcceptsExpectedOrdinals:
+    """Defect 2 (continued): save_plan forwards expected_h1_ordinals
+    to the validator, raising on source-of-truth mismatch BEFORE
+    writing (atomicity preserved)."""
+
+    def test_save_plan_passes_with_matching_expected(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(
+            "# App — Phase 0: A\n\n- [ ] a\n",
+            encoding="utf-8",
+        )
+        save_plan(
+            "# App — Phase 1: B\n\n- [ ] b\n",
+            target_dir=tmp_path,
+            expected_h1_ordinals=[0, 1],
+        )
+        text = plan_path.read_text(encoding="utf-8")
+        assert "Phase 0: A" in text
+        assert "Phase 1: B" in text
+
+    def test_save_plan_raises_on_expected_mismatch(self, tmp_path: Path):
+        plan_path = tmp_path / _PLAN_FILENAME
+        original = "# App — Phase 0: A\n\n- [ ] a\n"
+        plan_path.write_text(original, encoding="utf-8")
+        with pytest.raises(CanonicalH1OrdinalError):
+            save_plan(
+                "# App — Phase 2: Skipped\n\n- [ ] x\n",
+                target_dir=tmp_path,
+                expected_h1_ordinals=[0, 1],
+            )
+        # Atomicity: the file is unchanged.
+        assert plan_path.read_text(encoding="utf-8") == original
+
+
+class TestStripAndRenderEndToEnd:
+    """Defect 4: codex's exact integration test shape.
+
+    Mock the council/query call to return synthesizer output with
+    a fabricated wrong H1 (`# App — Phase 3: Wrong`) while calling
+    generate_phase_plan(..., phase_number=2, ...). After save_plan
+    on phases 0 and 1 already exist, the final PLAN.md MUST contain
+    H1 ordinals [0, 1, 2] and zero "Wrong" content.
+    """
+
+    def test_synthesizer_wrong_ordinal_corrected_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        # Seed PLAN.md with phases 0 and 1.
+        seed = (
+            "# App — Phase 0: Scaffold\n\n- [ ] Phase 0 task\n\n"
+            "# App — Phase 1: Core\n\n- [ ] Phase 1 task\n"
+        )
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(seed, encoding="utf-8")
+
+        # Synthesizer returns body with a wrong H1 that disagrees
+        # with the ordinal Duplo's roadmap state asks for.
+        wrong_body = (
+            "# App — Phase 3: Wrong\n"
+            "\n"
+            "- [ ] Phase 2 real task\n"
+        )
+
+        # Drive generate_phase_plan with phase_number=2.
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "scope to polish",
+            "features": [],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=wrong_body):
+            content = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=phase,
+                project_name="App",
+            )
+
+        # Strip-and-render: synthesizer's wrong H1 is gone, Duplo's
+        # canonical H1 is rendered with the roadmap-supplied ordinal 2.
+        assert "Phase 3: Wrong" not in content
+        assert "Phase 3" not in content
+        assert content.startswith("# App — Phase 2: Polish")
+        assert "- [ ] Phase 2 real task" in content
+
+        # Now save_plan with expected_h1_ordinals from the roadmap.
+        save_plan(
+            content,
+            target_dir=tmp_path,
+            expected_h1_ordinals=[0, 1, 2],
+        )
+
+        # Final PLAN.md has the correct ordinal sequence and zero
+        # trace of the synthesizer's wrong H1.
+        final = plan_path.read_text(encoding="utf-8")
+        h1_lines = [
+            ln for ln in final.splitlines() if ln.startswith("# ")
+        ]
+        ordinals = []
+        for ln in h1_lines:
+            m = re.search(r"Phase (\d+):", ln)
+            if m:
+                ordinals.append(int(m.group(1)))
+        assert ordinals == [0, 1, 2]
+        assert "Wrong" not in final
+        assert "Phase 3" not in final
+
+
+
 
 
 class TestSavePlanH1OrdinalValidation:
