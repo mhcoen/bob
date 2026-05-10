@@ -9,10 +9,11 @@ import sys as _mcloop_sys
 import traceback as _mcloop_traceback
 from datetime import datetime as _mcloop_datetime, timezone as _mcloop_tz
 from pathlib import Path as _mcloop_Path
+from typing import Any
 
 
 class _McloopState:
-    _providers = []
+    _providers: list[Any] = []
     _last_action = ""
 
     @classmethod

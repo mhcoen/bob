@@ -23,6 +23,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from typing import Literal, cast
 from pathlib import Path
 
 from duplo.appshot import capture_appshot
@@ -407,6 +408,12 @@ def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
     print(f"\nScraping {len(sources)} declared source(s) \u2026")
     for source in sources:
         print(f"  Fetching {source.url} (depth={source.scrape}) \u2026")
+        # source.scrape is validated to one of {"deep", "shallow",
+        # "none"} on parse (see spec_reader). Cast to satisfy the
+        # Literal-typed parameter.
+        scrape_depth = cast(
+            Literal["deep", "shallow", "none"], source.scrape
+        )
         try:
             (
                 scraped_text,
@@ -414,7 +421,7 @@ def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
                 doc_structures,
                 page_records,
                 source_raw_pages,
-            ) = fetch_site(source.url, scrape_depth=source.scrape)
+            ) = fetch_site(source.url, scrape_depth=scrape_depth)
         except Exception as exc:
             print(f"  Failed to fetch {source.url}: {exc}")
             continue
@@ -1052,11 +1059,15 @@ def _rescrape_product_url(
             design = extract_design(design_input)
             if design.colors or design.fonts or design.layout:
                 spec_path = Path.cwd() / "SPEC.md"
-                existing = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
+                existing_spec_text = (
+                    spec_path.read_text(encoding="utf-8")
+                    if spec_path.exists()
+                    else ""
+                )
                 body = format_design_block(design)
                 if body:
-                    modified = update_design_autogen(existing, body)
-                    if modified != existing:
+                    modified = update_design_autogen(existing_spec_text, body)
+                    if modified != existing_spec_text:
                         spec_path.write_text(modified, encoding="utf-8")
                     else:
                         record_failure(
@@ -1258,6 +1269,9 @@ def _subsequent_run() -> None:
     product_ref_raw_pages: dict[str, str] = {}
     spec_sources = scrapeable_sources(spec) if spec else []
     if spec_sources:
+        # spec_sources is non-empty only when spec was non-None
+        # (the `if spec else []` branch above). Narrow for mypy.
+        assert spec is not None
         scrape_result = _scrape_declared_sources(spec)
         scraped_text = scrape_result.combined_text
         _persist_scrape_result(scrape_result)
@@ -1658,9 +1672,12 @@ def _subsequent_run() -> None:
                 if spec:
                     spec_vtasks = format_contracts_as_verification(spec)
                 if spec_vtasks:
+                    # spec_vtasks is non-empty only when format_contracts
+                    # was called with a non-None spec.
+                    assert spec is not None
                     content = content.rstrip() + "\n" + spec_vtasks
                     print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
-            saved = save_plan(content)
+            saved_plan_path = save_plan(content)
             # Accumulate files introduced by this phase so the next
             # generate_phase_plan() call can instruct the LLM not to
             # recreate or redefine them.
@@ -1678,7 +1695,7 @@ def _subsequent_run() -> None:
             )
             break
         saved_count += 1
-        print(f"{phase_label_i} plan saved to {saved}")
+        print(f"{phase_label_i} plan saved to {saved_plan_path}")
 
     if saved_count == total_phases:
         print(f"\nPlan ready for all {total_phases} phases.")

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Literal
 
 from duplo.claude_cli import ClaudeCliError
 from duplo.diagnostics import record_failure
@@ -166,6 +167,11 @@ def run_init(args: argparse.Namespace) -> None:
         _run_description(args, from_description)
         _write_orchestra_council_config(Path.cwd())
         return
+    # Reached only when BOTH url and from_description are non-None;
+    # the three preceding branches handled the other cases. Narrow
+    # for mypy.
+    assert url is not None
+    assert from_description is not None
     _run_combined(args, url, from_description)
     _write_orchestra_council_config(Path.cwd())
 
@@ -354,7 +360,9 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
         sys.exit(1)
 
     canonical = canonicalize_url(url)
-    scrape_depth = "deep" if deep else "shallow"
+    scrape_depth: Literal["deep", "shallow", "none"] = (
+        "deep" if deep else "shallow"
+    )
     depth_label = "deep scrape" if deep else "shallow scrape"
 
     try:
@@ -627,7 +635,9 @@ def _run_combined(args: argparse.Namespace, url: str, path_arg: str) -> None:
         source_label = path_arg
 
     canonical = canonicalize_url(url)
-    scrape_depth = "deep" if deep else "shallow"
+    scrape_depth: Literal["deep", "shallow", "none"] = (
+        "deep" if deep else "shallow"
+    )
     depth_label = "deep scrape" if deep else "shallow scrape"
 
     try:
