@@ -402,9 +402,21 @@ def emit_task_lifecycle_events(
         current HEAD.
       - failure (success=False, not abandoned): emit ``test_failed``
         with the outcome's summary and failure_kind.
-      - abandoned: emit ``phase_abandoned`` when the task maps to a
-        phase, otherwise emit a ``finding_observed`` with the
-        abandoned reason (no phase_id to abandon).
+      - abandoned: emit ``test_failed`` carrying the task's
+        phase_id (when present) and the abandoned reason. When the
+        task has no phase_id, emit ``finding_observed`` instead.
+
+    Slice D originally emitted ``phase_abandoned`` for abandoned
+    tasks with a phase_id, but that conflated execution-time
+    failures (a single task exhausting max_retries) with
+    project-level abandonment (a phase the team has stopped
+    pursuing). The bob_tools threshold rule on phase_abandoned then
+    fired ``reauthor_phase`` for what was actually a stuck task,
+    burning council cycles on a problem reauthor cannot solve.
+    ``phase_abandoned`` is now reserved for explicit project-level
+    decisions; mcloop emits ``test_failed`` with
+    failure_kind="max_retries_exceeded" (or whatever the caller set
+    in ``outcome.failure_kind``) for retry-exhaustion.
 
     Per the Slice D Q5 resolution: McLoop emits ``test_failed`` for
     evidence; ``assumption_falsified`` is NOT auto-derived from a
@@ -415,7 +427,6 @@ def emit_task_lifecycle_events(
     from bob_tools.ledger.events import (
         make_commit_landed_payload,
         make_finding_observed_payload,
-        make_phase_abandoned_payload,
         make_test_failed_payload,
     )
 
@@ -424,10 +435,13 @@ def emit_task_lifecycle_events(
     if outcome.abandoned:
         if phase_id is not None:
             ev = storage.append(
-                event_type=EventType.PHASE_ABANDONED,
-                payload=make_phase_abandoned_payload(
+                event_type=EventType.TEST_FAILED,
+                payload=make_test_failed_payload(
+                    test_id=task_label,
                     phase_id=phase_id,
-                    reason=outcome.summary or "abandoned by mcloop",
+                    failure_kind=outcome.failure_kind or "task_abandoned",
+                    summary=outcome.summary or "abandoned by mcloop",
+                    transcript_ref=outcome.transcript_ref,
                 ),
                 run_id=run_id,
                 git=git,

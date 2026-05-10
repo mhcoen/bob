@@ -287,9 +287,16 @@ class TestEmitTaskLifecycleEvents:
         assert failed[0].payload["phase_id"] == "phase_002"
         assert failed[0].payload["failure_kind"] == "pytest"
 
-    def test_abandoned_with_phase_id_emits_phase_abandoned(
+    def test_abandoned_with_phase_id_emits_test_failed_not_phase_abandoned(
         self, tmp_path: Path
     ) -> None:
+        """Retry-exhaustion is execution evidence, not project-level
+        abandonment. Slice D originally emitted phase_abandoned here
+        and the bob_tools threshold rule on phase_abandoned would
+        recommend reauthor_phase, amplifying a stuck task into a
+        council cycle. The fix routes the abandoned-with-phase-id
+        branch through test_failed instead, leaving phase_abandoned
+        for explicit project-level decisions."""
         from bob_tools.ledger import EventType
 
         from mcloop.ledger_emit import emit_task_lifecycle_events
@@ -299,6 +306,7 @@ class TestEmitTaskLifecycleEvents:
         outcome = TaskOutcome(
             success=False,
             abandoned=True,
+            failure_kind="max_retries_exceeded",
             summary="max retries exceeded",
             changed_files=(),
         )
@@ -312,10 +320,53 @@ class TestEmitTaskLifecycleEvents:
         )
         assert len(ids) == 1
         events = storage.read_all()
+
+        # Negative: phase_abandoned was NOT emitted.
         abandoned = [e for e in events if e.type is EventType.PHASE_ABANDONED]
-        assert len(abandoned) == 1
-        assert abandoned[0].payload["phase_id"] == "phase_003"
-        assert "max retries" in abandoned[0].payload["reason"]
+        assert abandoned == []
+
+        # Positive: a test_failed carrying the phase_id and the
+        # caller-supplied failure_kind was emitted.
+        failed = [e for e in events if e.type is EventType.TEST_FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["test_id"] == "task-009"
+        assert failed[0].payload["phase_id"] == "phase_003"
+        assert failed[0].payload["failure_kind"] == "max_retries_exceeded"
+        assert "max retries" in failed[0].payload["summary"]
+
+    def test_abandoned_with_phase_id_default_failure_kind_is_task_abandoned(
+        self, tmp_path: Path
+    ) -> None:
+        """When the caller didn't set failure_kind on the outcome,
+        the emitter falls back to 'task_abandoned' (rather than the
+        non-abandoned default 'task_failed') so the failure_kind
+        still distinguishes retry-exhaustion from a single-attempt
+        task failure."""
+        from bob_tools.ledger import EventType
+
+        from mcloop.ledger_emit import emit_task_lifecycle_events
+
+        ledger_dir = tmp_path / "ledger"
+        storage = self._open_storage(ledger_dir)
+        outcome = TaskOutcome(
+            success=False,
+            abandoned=True,
+            summary="abandoned without explicit failure_kind",
+            changed_files=(),
+        )
+        ids = emit_task_lifecycle_events(
+            storage=storage,
+            task_label="task-010",
+            phase_id="phase_004",
+            outcome=outcome,
+            project_dir=tmp_path,
+            run_id="test-run-005",
+        )
+        assert len(ids) == 1
+        events = storage.read_all()
+        failed = [e for e in events if e.type is EventType.TEST_FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["failure_kind"] == "task_abandoned"
 
     def test_abandoned_without_phase_id_emits_finding_observed(
         self, tmp_path: Path
