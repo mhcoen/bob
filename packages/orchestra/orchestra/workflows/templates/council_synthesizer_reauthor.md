@@ -145,6 +145,31 @@ The phase_id matches `[A-Za-z0-9_]+`. Do not change letter case
 or insert spaces; the consumer's parser is strict. Headers carry
 no embedded lineage metadata. Plan markdown stays simple.
 
+Preserve-by-default: the runtime owns the deterministic envelope.
+
+Author ONLY the changed/new phase content and the non-preserve
+lineage intent. Unchanged prior phases are preserved by Duplo's
+runtime, automatically. You do not need to repeat unchanged phase
+bodies in your plan output, and you do not need to write
+`{ "action": "preserve" }` entries for unchanged priors. Duplo
+parses the prior PLAN.md, normalizes the lineage you submit by
+adding preserve entries for any prior id you did not consume, and
+assembles the final PLAN.md from preserved-prior sections plus
+your changed/new sections. Repeating a preserved phase verbatim
+does not harm correctness, but the runtime ignores your
+reproduction and emits the prior section instead — preserve means
+"carry forward the prior section verbatim", not "rewrite it".
+
+Author lineage entries explicitly for these cases only:
+
+  - supersede / split / merge: when a phase REPLACES one or more
+    prior phases.
+  - new: when a phase did not exist in the prior plan.
+  - abandoned: when a prior phase is dropped entirely.
+
+You may still author preserve entries explicitly if you find it
+clearer; they are accepted but not required.
+
 Lineage is declared in the verdict JSON's `lineage` object, not in
 the markdown. Declaring lineage in JSON instead of in the prose
 removes the ambiguity that lets a synthesizer write a preserved id
@@ -153,9 +178,8 @@ a new id with no claim at all. The runtime parses the JSON, applies
 a strict semantic check, and rejects on mismatch. There is no
 inference path; what the JSON says is what the ledger records.
 
-The `lineage.phases` array has ONE entry for every phase header in
-the plan body, in any order. Each entry has an `id` matching the
-header and an `action` from this enum:
+Each `lineage.phases` entry you author has an `id` matching the
+header you wrote in the plan body and an `action` from this enum:
 
   preserve   The phase is carried forward unchanged from the prior
              plan. The id MUST exist in the prior plan. NO `from`
@@ -186,17 +210,22 @@ prior plan phases the new plan drops entirely. Each entry has an
 must NOT appear elsewhere in `lineage.phases` (neither as the id of
 a preserved phase nor as a `from` entry of any action).
 
-The consumer enforces these invariants and fails closed on any
-violation:
+The consumer enforces these invariants AFTER preserve-by-default
+normalization and fails closed on any violation:
 
-  - The set of ids on plan headers equals the set of `lineage.phases`
-    ids exactly. No unmentioned headers; no phantom entries.
-  - All ids within `lineage.phases` are unique.
+  - The set of ids on plan headers (in the assembled PLAN.md, not
+    just your output) equals the set of `lineage.phases` ids
+    exactly. No unmentioned headers; no phantom entries.
+  - All ids within `lineage.phases` are unique (after the runtime
+    adds preserve defaults).
   - Per-action constraints above hold.
   - Every prior plan phase id appears EXACTLY ONCE across the
-    union of: preserved ids, `from` entries of supersede/split/
-    merge entries, and `abandoned` ids. No missing prior id; no
-    double-claim.
+    union of: preserved ids (which you may declare or which the
+    runtime fills in), `from` entries of supersede/split/merge
+    entries, and `abandoned` ids. No missing prior id; no
+    double-claim. Contradictions you author (e.g., the same prior
+    id named under both `preserve` and `supersede.from`) are NOT
+    silently repaired; the validator rejects.
   - No preserved id appears in any `from` list.
 
 For fresh authoring (the council brief contains no ledger_slice
