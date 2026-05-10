@@ -19,23 +19,26 @@ _RUN_SH = """\
 #!/bin/bash
 # Create venv (if missing), install in editable mode with dev deps,
 # and run.
-# Usage: ./run.sh [args...]
+# Usage:
+#   ./run.sh [args...]      Forward args to the CLI entry point.
+#   ./run.sh test [args...] Run the project's test suite via
+#                           .venv/bin/pytest. Extra args (filters,
+#                           -k, -x, etc.) are forwarded to pytest.
 #
 # This script is the ONLY way to run the project. It guarantees:
 #   1. A venv exists at .venv/
 #   2. The package + every declared dev dep is installed in editable
 #      mode (pip install -e '.[dev]')
 #   3. The CLI entry point is available
-#
-# Pass arguments through to the CLI:
-#   ./run.sh --help
-#   ./run.sh convert input.csv
+#   4. `./run.sh test` is recognized as the test-runner subcommand
+#      (mcloop's BC3 test_runner resolver picks this up).
 
 set -euo pipefail
 
 VENV_DIR=".venv"
 PYTHON="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
+PYTEST="$VENV_DIR/bin/pytest"
 
 # Create venv if it does not exist.
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -51,11 +54,24 @@ fi
 # and burned retries that could not fix it.
 "$PIP" install -e ".[dev]" --quiet
 
+# Test subcommand: dispatch to pytest with any forwarded args.
+# Anchored at $1 == "test" (literal subcommand) so a CLI flag
+# that happens to contain "test" still falls through to the
+# regular forwarder. Without this branch, ./run.sh test would
+# forward "test" to the package's __main__, which is an
+# argument the CLI doesn't understand; mcloop's check phase
+# treats that exit code as a test failure and retries
+# pointlessly.
+if [[ "${1:-}" == "test" ]]; then
+    shift
+    exec "$PYTEST" "$@"
+fi
+
 # Run via python -m so it works even if entry point scripts
 # have not been regenerated yet. The argument is the Python
 # identifier form of the project name (hyphens replaced with
 # underscores), matching the on-disk package directory.
-"$PYTHON" -m {package_name} "$@"
+exec "$PYTHON" -m {package_name} "$@"
 """
 
 # ---------------------------------------------------------------------------

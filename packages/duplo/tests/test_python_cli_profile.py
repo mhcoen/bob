@@ -135,6 +135,36 @@ class TestRunShScaffoldTemplate:
         content = _get_run_sh_scaffold().content
         assert "set -euo pipefail" in content
 
+    def test_template_has_test_subcommand_arm(self):
+        """``./run.sh test`` MUST dispatch to ``.venv/bin/pytest``,
+        not forward "test" to the package as a CLI arg. Without a
+        test-arm, mcloop's BC3 resolver picks ``./run.sh test`` (run.sh
+        exists and is executable) and the resulting invocation runs
+        the scaffolded ``__main__.py`` stub, which exits non-zero on
+        any arg other than ``--help`` and burns mcloop's check-phase
+        retries deterministically."""
+        content = _get_run_sh_scaffold().content
+        # The literal arm structure mcloop's resolver detects.
+        assert '"${1:-}" == "test"' in content
+        # The test arm dispatches to pytest from the project venv.
+        assert '"$PYTEST"' in content or "/bin/pytest" in content
+        # PYTEST variable is defined.
+        assert 'PYTEST="$VENV_DIR/bin/pytest"' in content
+        # The arm shifts before exec so extra args forward to pytest.
+        for line in content.splitlines():
+            if '"${1:-}" == "test"' in line:
+                # The arm's body should contain a shift + exec pytest.
+                # Find the closing fi for the arm.
+                pass
+        assert "shift" in content
+
+    def test_template_normal_cli_dispatch_unchanged(self):
+        """Non-test invocations still forward to ``python -m
+        {package_name}``. The test-arm is a guard at the top of the
+        dispatch; it does not replace the regular CLI forwarder."""
+        content = _get_run_sh_scaffold().content
+        assert '"$PYTHON" -m {package_name} "$@"' in content
+
 
 class TestPyprojectWrittenByScaffold:
     def test_write_scaffold_emits_pyproject_with_pytest_config(self, tmp_path: Path):
@@ -171,6 +201,43 @@ class TestRunShWrittenByScaffold:
         for line in text.splitlines():
             if "install -e" in line:
                 assert "||" not in line, line
+
+    def test_write_scaffold_run_sh_dispatches_test_to_pytest(
+        self, tmp_path: Path
+    ):
+        """Rendered run.sh has a literal test-subcommand arm that
+        execs .venv/bin/pytest with forwarded args."""
+        write_scaffold([_get_profile()], "myapp", target_dir=tmp_path)
+        text = (tmp_path / "run.sh").read_text(encoding="utf-8")
+        assert '"${1:-}" == "test"' in text
+        assert 'PYTEST="$VENV_DIR/bin/pytest"' in text
+        assert 'exec "$PYTEST" "$@"' in text
+
+    def test_write_scaffold_run_sh_forwards_normal_cli_to_package(
+        self, tmp_path: Path
+    ):
+        """The test-arm is a guard at the top; non-test invocations
+        still exec ``python -m <package_name>`` with ``"$@"``. The
+        package_name placeholder is template-expanded to the
+        underscore-form identifier (myapp -> myapp here)."""
+        write_scaffold([_get_profile()], "myapp", target_dir=tmp_path)
+        text = (tmp_path / "run.sh").read_text(encoding="utf-8")
+        assert 'exec "$PYTHON" -m myapp "$@"' in text
+        # The {package_name} placeholder must have been substituted.
+        assert "{package_name}" not in text
+
+    def test_write_scaffold_run_sh_test_arm_uses_underscore_package(
+        self, tmp_path: Path
+    ):
+        """For a hyphenated project name, the package module
+        invoked at the bottom uses the underscore form, but the
+        test arm dispatches to pytest (no package reference)."""
+        write_scaffold([_get_profile()], "fswatch-run-smoke", target_dir=tmp_path)
+        text = (tmp_path / "run.sh").read_text(encoding="utf-8")
+        # Test arm references pytest, not the package.
+        assert 'exec "$PYTEST" "$@"' in text
+        # Bottom forwarder uses underscore-form package name.
+        assert 'exec "$PYTHON" -m fswatch_run_smoke "$@"' in text
 
 
 # ---------------------------------------------------------------------
