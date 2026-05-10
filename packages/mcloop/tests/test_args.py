@@ -8296,7 +8296,15 @@ def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, cap
 
 
 def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
-    """Full suite pass at stage boundary runs build and sends stage-complete notification."""
+    """Default-mode run advances across two phases without exiting.
+
+    Updated for the phase-transition contract: when the full suite +
+    build pass at a stage boundary AND ``stop_after_stage`` is False,
+    the loop advances to the next phase rather than breaking. Build
+    runs at each boundary (so twice for two stages), audit runs once
+    at the end after all phases complete, and the summary's
+    ``completed_stage`` is the last phase processed.
+    """
     plan = tmp_path / "PLAN.md"
     plan.write_text(
         "# Plan\n\n"
@@ -8348,21 +8356,95 @@ def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
     ):
         run_loop(plan)
 
-    # Build should run after full suite passes
-    mock_build.assert_called_once()
-    # Audit should NOT run at stage boundary (only at end of run)
-    mock_audit.assert_not_called()
-    # Stage-complete notification should be sent
+    # Build runs at each stage boundary. With two stages, two builds.
+    assert mock_build.call_count == 2
+    # Audit runs once at the end (no_audit not set; loop advanced
+    # through both phases and reached next_phase is None).
+    mock_audit.assert_called_once()
     notify_messages = [str(c) for c in mock_notify.call_args_list]
-    assert any("Stage 1: Setup" in m and "complete" in m for m in notify_messages)
-    # No failure notification
+    # Advancing across the boundary calls notify("Starting Stage 2:
+    # Build").
+    assert any(
+        "Starting" in m and "Stage 2: Build" in m for m in notify_messages
+    )
+    # Final "All tasks completed!" notification fires after audit.
+    assert any("All tasks completed" in m for m in notify_messages)
+    # No failure notification.
     assert not any("red repo" in m for m in notify_messages)
-    # Summary should include completed_stage
+    # Summary's completed_stage is the LAST phase processed.
     mock_summary.assert_called_once()
     _, kwargs = mock_summary.call_args
-    assert kwargs.get("completed_stage") == "Stage 1: Setup"
+    assert kwargs.get("completed_stage") == "Stage 2: Build"
     captured = capsys.readouterr()
     assert "Full test suite passed" in captured.out
+    # The advancing path prints the "Advancing to <next_phase>"
+    # marker between stage 1 and stage 2.
+    assert "Advancing to Stage 2: Build" in captured.out
+
+
+def test_default_mode_advances_across_phases_without_exiting(tmp_path, capsys):
+    """Per the phase-transition fix: in default mode (no
+    --stop-after-stage), the loop advances at each phase boundary
+    rather than breaking. The outer ``while True`` re-parses
+    CURRENT_PLAN.md (refreshed by transition_phase) and picks up
+    the next phase's tasks. The run only exits when transition_phase
+    returns None (all phases done)."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        "# Plan\n\n"
+        "## Stage 1: First\n\n"
+        "- [ ] Task one\n\n"
+        "## Stage 2: Second\n\n"
+        "- [ ] Task two\n\n"
+        "## Stage 3: Third\n\n"
+        "- [ ] Task three\n"
+    )
+    (tmp_path / ".git").mkdir()
+
+    result = MagicMock()
+    result.success = True
+    result.output = "done"
+    result.exit_code = 0
+
+    check_result = MagicMock()
+    check_result.passed = True
+
+    with (
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["foo.py"]),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.handle_sync"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_task", return_value=result),
+        patch("mcloop.main.run_checks", return_value=check_result),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main._reinject_wrappers"),
+        patch(
+            "mcloop.main._run_build",
+            return_value=BuildResult(ran=True, passed=True, command="make"),
+        ) as mock_build,
+        patch("mcloop.main._print_summary") as mock_summary,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle") as mock_audit,
+    ):
+        result = run_loop(plan)
+
+    # Three stages -> three full-suite + build invocations.
+    assert mock_build.call_count == 3
+    # Audit runs once after all phases complete.
+    mock_audit.assert_called_once()
+    # The advancing prints land between phases.
+    captured = capsys.readouterr()
+    assert "Advancing to Stage 2: Second" in captured.out
+    assert "Advancing to Stage 3: Third" in captured.out
+    # Final summary's completed_stage is the LAST phase.
+    _, kwargs = mock_summary.call_args
+    assert kwargs.get("completed_stage") == "Stage 3: Third"
 
 
 def test_full_suite_pass_at_end_of_run_proceeds_normally(tmp_path, capsys):
@@ -10050,7 +10132,12 @@ def test_stop_after_stage_prints_stop_reason(tmp_path, capsys):
 
 
 def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
-    """Normal stage completion (no --stop-after-stage) uses generic message."""
+    """Default-mode multi-stage runs DO NOT exit at the first stage
+    boundary — the loop advances to the next phase. Updated for the
+    phase-transition contract: ``Stage 1: Core complete. Run mcloop
+    again to start ...`` is a ``--stop-after-stage`` message; in
+    default mode the run processes all stages and ends with
+    "All tasks completed!"."""
     plan = tmp_path / "PLAN.md"
     plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
     (tmp_path / ".git").mkdir()
@@ -10084,9 +10171,11 @@ def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
 
     assert result.ok
     captured = capsys.readouterr()
-    # Should have the completed-phase message (split-plan phrasing)
-    assert "Stage 1: Core complete" in captured.out
-    assert "Run mcloop again" in captured.out
+    # The loop advanced to Stage 2 instead of exiting at boundary.
+    assert "Advancing to Stage 2: Extra" in captured.out
+    # The OLD "Run mcloop again" message belongs to --stop-after-stage;
+    # default mode must not print it.
+    assert "Run mcloop again" not in captured.out
 
 
 def test_run_summary_stop_after_one_terminal_status(tmp_path):

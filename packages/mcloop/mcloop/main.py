@@ -1140,15 +1140,29 @@ def run_loop(
                 terminal_failure = f"Build failed at phase boundary: {build_result.command}"
                 break
 
-            # Transition to next phase. Every phase boundary ends the
-            # run; the user re-runs mcloop to start the next phase.
+            # Transition to next phase. Default behavior: advance and
+            # continue the outer loop, which re-parses CURRENT_PLAN.md
+            # at the top of the next iteration and picks up the
+            # refreshed phase tasks. ``--stop-after-stage`` overrides
+            # to break at the boundary; ``next_phase is None`` means
+            # all phases are complete and the post-loop audit/summary
+            # path runs.
             completed_phase = active_phase_name
             next_phase = transition_phase(master_path, current_plan_path)
             completed_stage = completed_phase
-            if next_phase is not None and stop_after_stage:
+            if next_phase is None:
+                break
+            if stop_after_stage:
                 stopped_early = "stage"
                 active_phase_name = next_phase
-            break
+                break
+            active_phase_name = next_phase
+            print(
+                formatting.system_msg(f"Advancing to {next_phase}"),
+                flush=True,
+            )
+            notify(f"Starting {next_phase}")
+            continue
 
         if task is None:
             break
@@ -2002,11 +2016,16 @@ def run_loop(
     _checkpoint(project_dir)
     total = time.monotonic() - run_start
     _phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
-    _stop_reason = (
-        success_msg
-        if (stopped_early == "stage" or _phase_done_more_remain) and success_msg
-        else ""
-    )
+    # Use success_msg as the summary's stop_reason whenever it is
+    # set. Under the phase-transition contract, success_msg may be
+    # "All tasks completed!" (loop advanced through every phase and
+    # exited via next_phase is None) OR "<phase> complete. Run mcloop
+    # again..." (--stop-after-stage / phase_done_more_remain). In all
+    # cases we want the message to appear verbatim in the summary
+    # rather than letting _print_summary fall back to the "Run mcloop
+    # again for the next stage" template — which is wrong when the
+    # run actually finished every stage.
+    _stop_reason = success_msg or ""
     _print_summary(
         completed,
         failed_task,
