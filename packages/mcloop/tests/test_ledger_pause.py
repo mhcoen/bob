@@ -155,6 +155,13 @@ class _FakeReauthorError(Exception):
     pass
 
 
+class _FakePlanArtifactError(_FakeReauthorError):
+    """Mirror duplo.reauthor.PlanArtifactError's inheritance shape:
+    subclass of ReauthorError. mcloop must catch this before the
+    generic ReauthorError handler, otherwise the more-specific
+    plan_artifact_invalid pause reason is lost to reauthor_failed."""
+
+
 @needs_bob_tools
 class TestAutoReauthorFailureModes:
     def _decision(self) -> PauseDecision:
@@ -289,6 +296,83 @@ class TestAutoReauthorFailureModes:
             project_dir=tmp_path,
         )
         assert result is sentinel
+
+    def test_plan_artifact_error_hard_stops_with_plan_artifact_invalid(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A duplo.reauthor.PlanArtifactError must surface as a
+        HardStop with reason 'plan_artifact_invalid', distinct from
+        the generic 'reauthor_failed' bucket. The handler MUST
+        match the subclass before the generic ReauthorError handler;
+        if the order is wrong the more-specific reason is lost."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        fake_mod.PlanArtifactError = _FakePlanArtifactError  # type: ignore[attr-defined]
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakePlanArtifactError(
+                "plan_artifact_contained_verdict_json: trailing fence not present"
+            )
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        assert exc_info.value.reason == "plan_artifact_invalid"
+        assert "trailing-fenced-verdict" in exc_info.value.detail or (
+            "trailing fence" in exc_info.value.detail
+        )
+
+    def test_older_duplo_without_plan_artifact_error_falls_back(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Older duplo installations don't export PlanArtifactError.
+        mcloop must still import cleanly and treat any ReauthorError
+        as the generic 'reauthor_failed' bucket. This pins the
+        guarded import in ledger_pause.auto_reauthor."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        # NO PlanArtifactError attribute on this fake module.
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakeReauthorError("plain reauthor failure")
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        # The generic reauthor_failed bucket still catches it; the
+        # plan-artifact branch was an inactive sentinel and didn't
+        # interfere with the regular flow.
+        assert exc_info.value.reason == "reauthor_failed"
 
 
 # ---------------------------------------------------------------------

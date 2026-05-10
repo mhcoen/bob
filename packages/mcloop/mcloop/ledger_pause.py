@@ -257,7 +257,11 @@ def auto_reauthor(
       and continues.
     """
     try:
-        from duplo.reauthor import LineageValidationError, ReauthorError, reauthor_plan
+        from duplo.reauthor import (
+            LineageValidationError,
+            ReauthorError,
+            reauthor_plan,
+        )
     except ImportError as exc:
         raise HardStop(
             reason="reauthor_unavailable",
@@ -267,6 +271,18 @@ def auto_reauthor(
                 "MCLOOP_NO_AUTO_REAUTHOR=1) to continue without auto-reauthor."
             ),
         ) from exc
+
+    # PlanArtifactError is a duplo-side subclass of ReauthorError.
+    # It might not exist on older duplo installations; guard the
+    # import so this module still imports cleanly there. When the
+    # symbol is absent, fall back to a sentinel that the except
+    # clauses below cannot catch (so the generic ReauthorError
+    # handler picks up the failure as before).
+    try:
+        from duplo.reauthor import PlanArtifactError as _PlanArtifactError
+    except ImportError:
+        class _PlanArtifactError(Exception):  # type: ignore[no-redef]
+            """Sentinel for older duplo installs that lack PlanArtifactError."""
 
     # Honor decision.recommended_action. Phase-scoped recommendations
     # MUST NOT be silently widened to plan-wide synthesis; that
@@ -309,6 +325,23 @@ def auto_reauthor(
                 f"duplo's lineage validator rejected the synthesized plan: "
                 f"{exc}. PLAN.md is unchanged; the threshold crossing "
                 f"({decision.crossing_event_id}) is on the ledger."
+            ),
+        ) from exc
+    except _PlanArtifactError as exc:
+        # MUST be caught before the generic ReauthorError handler
+        # below, since PlanArtifactError is a subclass of
+        # ReauthorError. The plan-artifact contract is a model
+        # output error (not a reauthor implementation failure); it
+        # gets a distinct pause reason so the operator knows
+        # whether to retry the model or fix the runtime.
+        raise HardStop(
+            reason="plan_artifact_invalid",
+            detail=(
+                f"duplo's reauthor rejected the plan artifact: "
+                f"{exc}. PLAN.md is unchanged; the threshold "
+                f"crossing ({decision.crossing_event_id}) is on the "
+                "ledger. The synthesizer's plan output did not "
+                "satisfy the trailing-fenced-verdict contract."
             ),
         ) from exc
     except ReauthorError as exc:
