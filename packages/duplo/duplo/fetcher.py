@@ -11,8 +11,9 @@ from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
+from duplo._bs4_helpers import str_attr
 from duplo.diagnostics import record_failure
 from duplo.doc_examples import CodeExample, extract_code_examples
 from duplo.doc_tables import DocStructures, extract_doc_structures
@@ -87,11 +88,13 @@ def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
     soup = BeautifulSoup(html, "lxml")
     links: list[tuple[str, str]] = []
     for tag in soup.find_all("a", href=True):
-        href = tag["href"].strip()
+        if not isinstance(tag, Tag):
+            continue
+        href = str_attr(tag, "href").strip()
         if not href or href.startswith(("#", "mailto:", "javascript:")):
             continue
         absolute = urljoin(base_url, href).split("#")[0]
-        anchor = tag.get_text(separator=" ").strip()
+        anchor = str(tag.get_text(separator=" ")).strip()
         links.append((absolute, anchor))
     return links
 
@@ -319,31 +322,41 @@ def extract_media_urls(html: str, base_url: str) -> tuple[list[str], list[str]]:
 
     # Video sources
     for tag in soup.find_all("video"):
-        src = tag.get("src", "")
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src")
         if src:
             _add(src, videos)
-        poster = tag.get("poster", "")
+        poster = str_attr(tag, "poster")
         if poster:
             _add(poster, images)
     for tag in soup.find_all("source"):
-        src = tag.get("src", "")
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src")
         if not src:
             continue
-        media_type = tag.get("type", "")
+        media_type = str_attr(tag, "type")
         if "video" in media_type or any(src.lower().endswith(e) for e in _VIDEO_EXTS):
             _add(src, videos)
 
     # Images (skip tiny icons, data URIs, SVGs)
     for tag in soup.find_all("img"):
-        src = tag.get("src", "") or tag.get("data-src", "")
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src") or str_attr(tag, "data-src")
         if not src or src.startswith("data:"):
             continue
         if src.lower().endswith(".svg"):
             continue
         _add(src, images)
     for tag in soup.find_all("picture"):
+        if not isinstance(tag, Tag):
+            continue
         for source in tag.find_all("source"):
-            srcset = source.get("srcset", "")
+            if not isinstance(source, Tag):
+                continue
+            srcset = str_attr(source, "srcset")
             if srcset:
                 # Take the first URL from srcset
                 first = srcset.split(",")[0].strip().split()[0]

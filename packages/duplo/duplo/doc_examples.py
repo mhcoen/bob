@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from bs4 import BeautifulSoup, Tag
 
+from duplo._bs4_helpers import class_list
+
 # Labels that indicate input/request content (checked case-insensitively).
 _INPUT_LABELS = re.compile(
     r"\b(input|request|usage|example|command|query|code|sample|syntax)\b",
@@ -135,14 +137,11 @@ def _find_code_blocks(soup: BeautifulSoup) -> list[tuple[str, str, str]]:
 
 def _detect_language(tag: Tag) -> str:
     """Detect language from a tag's class attribute (e.g. ``language-python``)."""
-    classes = tag.get("class", [])
-    if isinstance(classes, str):
-        classes = classes.split()
-    for cls in classes:
+    for cls in class_list(tag):
         if cls.startswith("language-"):
-            return str(cls[len("language-") :])
+            return cls[len("language-") :]
         if cls.startswith("lang-"):
-            return str(cls[len("lang-") :])
+            return cls[len("lang-") :]
     return ""
 
 

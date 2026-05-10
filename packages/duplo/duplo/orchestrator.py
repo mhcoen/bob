@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
+from duplo._bs4_helpers import str_attr
 from duplo.url_canon import canonicalize_url
 
 if TYPE_CHECKING:
@@ -50,7 +51,9 @@ def _collect_cross_origin_links(
     for page_url, html in raw_pages.items():
         soup = BeautifulSoup(html, "lxml")
         for tag in soup.find_all("a", href=True):
-            href = tag["href"].strip()
+            if not isinstance(tag, Tag):
+                continue
+            href = str_attr(tag, "href").strip()
             if not href or href.startswith(("#", "mailto:", "javascript:")):
                 continue
             absolute = urljoin(page_url, href)
