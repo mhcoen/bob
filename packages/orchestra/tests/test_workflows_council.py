@@ -323,6 +323,37 @@ def test_canonical_synthesizer_template_requires_toolchain_discipline() -> None:
     assert "pytest-xdist" in body  # the canonical failure-mode example
 
 
+def test_canonical_synthesizer_template_requires_check_green_per_task() -> None:
+    """Every modifying task MUST leave the project's check command
+    exit-zero. The synthesizer should combine setup + minimal
+    implementation + first smoke test into one atomic task when
+    the check command is test-driven and no tests exist yet.
+    Pinned so a future template edit cannot silently drop the
+    rule. The deliberate-no-op exemption ("do not modify" /
+    "capture baseline" / "read-only") must also be documented so
+    the synthesizer knows when read-only tasks are legal.
+    """
+    template_path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "templates"
+        / "council_synthesizer_canonical.md"
+    )
+    body = template_path.read_text()
+    body_lower = body.lower()
+    # Load-bearing phrases.
+    assert "exit-zero" in body_lower
+    assert "no tests collected" in body_lower or "exit 5" in body_lower
+    assert "atomic task" in body_lower
+    assert "first smoke test" in body_lower
+    # Read-only exemption documented.
+    assert "do not modify" in body_lower
+    assert "read-only" in body_lower or "read only" in body_lower
+    # The canonical failure mode named explicitly.
+    assert "dead-lock" in body_lower or "deadlock" in body_lower
+
+
 def test_canonical_synthesizer_template_validates_python_package_identifiers() -> None:
     """The canonical synthesizer template MUST instruct the
     synthesizer to fail-closed when a Python package name in the

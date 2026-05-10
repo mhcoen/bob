@@ -146,6 +146,44 @@ canonical failure mode this discipline prevents: the first task
 to run pytest fails with `unrecognized arguments: -n` and retries
 cannot fix it (the venv contents do not change between retries).
 
+Every modifying task MUST leave the project's check command
+exit-zero.
+
+mcloop runs the project's declared check command (typically
+`./run.sh test` resolving to pytest, but the resolver also
+handles ruff / mypy / `npm test` / `cargo test`) after EVERY
+modifying task and treats non-zero exit as task failure. This
+is a runtime invariant you must respect when partitioning work
+into tasks. Two patterns to avoid:
+
+  - A task that adds a new module or renames a script entry
+    point without also adding a test that exercises it. The
+    check command runs immediately after, finds zero tests
+    (pytest exit 5: "no tests collected") or fails to import
+    the module (pytest collection error), and mcloop treats
+    the task as failed. Retries cannot fix this — the project
+    state is internally consistent, the check just expects
+    something the task didn't deliver.
+
+  - A series of tasks where setup, implementation, and the
+    first test are split across separate tasks. Each
+    intermediate task leaves the project in a half-built
+    state that fails the check, dead-locking the loop before
+    it reaches the test-adding task.
+
+The fix is granularity: combine setup + minimal implementation +
+first smoke test into ONE atomic task when the check command is
+test-driven and there are no tests yet. After that one task,
+later tasks can split work freely because each one runs against
+a project state where the check command is already green.
+
+A task that is read-only by design (capture a baseline; verify a
+property without modifying files) is exempt from this rule:
+mcloop's runtime detects the "do not modify" / "capture
+baseline" / "read-only" wording and accepts the no-op as
+success even when checks fail. Use that wording explicitly in
+the task text when authoring a deliberate-no-op task.
+
 Validate Python package identifiers.
 
 Before authoring tasks that depend on Python package imports,
