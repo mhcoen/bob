@@ -289,3 +289,208 @@ class TestAutoReauthorFailureModes:
             project_dir=tmp_path,
         )
         assert result is sentinel
+
+
+# ---------------------------------------------------------------------
+# Phase-scoped reauthor: target_phase_id threading and scope_unavailable
+# ---------------------------------------------------------------------
+
+
+class _CapturingFakeReauthorModule:
+    """Fixture that installs a fake duplo.reauthor on sys.modules and
+    captures the kwargs every reauthor_plan call receives. Used by
+    the phase-scoping tests to assert auto_reauthor passes
+    target_phase_id through to duplo (or refuses to invoke duplo at
+    all when scope is unavailable)."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.return_value: Any = object()
+
+    def install(self) -> None:
+        import sys
+        import types
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        fake_mod.reauthor_plan = self._fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+    def _fake_reauthor_plan(self, **kwargs: Any) -> Any:
+        self.calls.append(dict(kwargs))
+        return self.return_value
+
+
+@needs_bob_tools
+class TestAutoReauthorPhaseScoping:
+    def test_phase_scoped_decision_passes_target_phase_id(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from mcloop import ledger_pause
+
+        fake = _CapturingFakeReauthorModule()
+        fake.install()
+
+        decision = PauseDecision(
+            crossing_event_id="00000000-0000-7000-8000-000000000001",
+            rule_id="phase_superseded",
+            recommended_action="reauthor_phase",
+            summary="phase_002 superseded by phase_003",
+            target_phase_id="phase_002",
+        )
+        result = ledger_pause.auto_reauthor(
+            decision=decision,
+            plan_path=tmp_path / "PLAN.md",
+            ledger_dir=tmp_path / "ledger",
+            project_dir=tmp_path,
+        )
+        assert result is fake.return_value
+        assert len(fake.calls) == 1
+        assert fake.calls[0]["target_phase_id"] == "phase_002"
+
+    def test_phase_scoped_without_target_hard_stops(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """recommended_action=reauthor_phase but the crossing's
+        triggering event has no extractable phase_id (e.g.,
+        assumption_falsified). Must fail closed with
+        scope_unavailable rather than escalate to plan-wide
+        synthesis."""
+        from mcloop import ledger_pause
+
+        fake = _CapturingFakeReauthorModule()
+        fake.install()
+
+        decision = PauseDecision(
+            crossing_event_id="00000000-0000-7000-8000-000000000002",
+            rule_id="assumption_falsified",
+            recommended_action="reauthor_phase",
+            summary="assumption A1 falsified",
+            target_phase_id=None,
+        )
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=decision,
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        assert exc_info.value.reason == "scope_unavailable"
+        assert "assumption_falsified" in exc_info.value.detail
+        # duplo was not invoked.
+        assert fake.calls == []
+
+    def test_plan_scoped_decision_passes_none_target_phase_id(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Plan-scoped crossings (unattributable_commit,
+        invariant_declared, exploratory_count_exceeded) call
+        reauthor_plan with target_phase_id=None even when the
+        decision happens to carry one (it shouldn't, but be
+        defensive)."""
+        from mcloop import ledger_pause
+
+        fake = _CapturingFakeReauthorModule()
+        fake.install()
+
+        decision = PauseDecision(
+            crossing_event_id="00000000-0000-7000-8000-000000000003",
+            rule_id="unattributable_commit",
+            recommended_action="reauthor_plan",
+            summary="ad hoc commit broke phase attribution",
+            target_phase_id=None,
+        )
+        ledger_pause.auto_reauthor(
+            decision=decision,
+            plan_path=tmp_path / "PLAN.md",
+            ledger_dir=tmp_path / "ledger",
+            project_dir=tmp_path,
+        )
+        assert len(fake.calls) == 1
+        assert fake.calls[0]["target_phase_id"] is None
+
+
+# ---------------------------------------------------------------------
+# _extract_target_phase_id unit tests (no bob_tools dependency)
+# ---------------------------------------------------------------------
+
+
+class _StubEvent:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+
+class TestExtractTargetPhaseId:
+    """Unit-level coverage of the helper that walks a crossing's
+    triggering events and pulls out a phase_id when present."""
+
+    def test_returns_phase_id_from_first_triggering_event(self) -> None:
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_superseded",
+            "triggering_event_ids": ["e1", "e2"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent({"phase_id": "phase_002"}),
+            "e2": _StubEvent({"phase_id": "phase_005"}),
+        }
+        assert _extract_target_phase_id(crossing, events) == "phase_002"
+
+    def test_skips_events_without_phase_id(self) -> None:
+        """Some triggering events (assumption_falsified) have no
+        phase_id in their payload. The helper walks past them and
+        returns the first phase_id it does find. If no triggering
+        event carries one, returns None."""
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_topology_changed",
+            "triggering_event_ids": ["e1", "e2"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent({"assumption_id": "a1"}),  # no phase_id
+            "e2": _StubEvent({"phase_id": "phase_007"}),
+        }
+        assert _extract_target_phase_id(crossing, events) == "phase_007"
+
+    def test_returns_none_when_no_triggering_carries_phase_id(self) -> None:
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "assumption_falsified",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {"e1": _StubEvent({"assumption_id": "a1"})}
+        assert _extract_target_phase_id(crossing, events) is None
+
+    def test_returns_none_on_empty_triggering_list(self) -> None:
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_superseded",
+            "triggering_event_ids": [],
+            "summary": "x",
+        }
+        assert _extract_target_phase_id(crossing, {}) is None
+
+    def test_skips_unknown_event_ids(self) -> None:
+        """If a triggering id isn't in events_by_id (shouldn't
+        happen but be defensive), skip it instead of raising."""
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_superseded",
+            "triggering_event_ids": ["missing-id", "e2"],
+            "summary": "x",
+        }
+        events = {"e2": _StubEvent({"phase_id": "phase_009"})}
+        assert _extract_target_phase_id(crossing, events) == "phase_009"

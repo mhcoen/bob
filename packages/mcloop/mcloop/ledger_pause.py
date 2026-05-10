@@ -57,12 +57,24 @@ class PauseDecision:
     ``recommended_action`` are denormalized from the crossing
     payload so callers can route on action without re-fetching the
     event.
+
+    ``target_phase_id`` carries the phase_id from the crossing's
+    triggering event when one can be extracted (phase_superseded,
+    phase_split, phase_merged, phase_abandoned). For plan-scoped
+    rules and rules whose triggering event has no phase_id (e.g.,
+    assumption_falsified, whose ledger payload carries an
+    assumption_id rather than a phase_id), the field is None and
+    ``auto_reauthor`` decides what to do based on the action
+    severity. Used by ``auto_reauthor`` to honor
+    ``recommended_action == reauthor_phase`` without escalating to
+    plan-wide synthesis.
     """
 
     crossing_event_id: str
     rule_id: str
     recommended_action: str
     summary: str
+    target_phase_id: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -134,12 +146,50 @@ def evaluate_and_maybe_pause(
         )
         if recommended_action not in _REAUTHOR_ACTIONS:
             continue
+        target_phase_id = _extract_target_phase_id(
+            payload, by_id
+        ) if recommended_action == "reauthor_phase" else None
         return PauseDecision(
             crossing_event_id=ev.event_id,
             rule_id=rule_id_str,
             recommended_action=recommended_action,
             summary=payload.get("summary", ""),
+            target_phase_id=target_phase_id,
         )
+    return None
+
+
+def _extract_target_phase_id(
+    crossing_payload: dict[str, Any],
+    events_by_id: dict[str, Any],
+) -> str | None:
+    """Walk the crossing's triggering events and return a phase_id
+    if one of them carries it.
+
+    Phase-scoped triggering events (phase_abandoned, phase_superseded,
+    phase_split, phase_merged) carry the affected phase_id directly
+    in their payload. assumption_falsified does NOT carry a phase_id
+    in its payload (it carries an assumption_id, which the projector
+    resolves separately); for that case this returns None and the
+    auto_reauthor caller falls back to a fail-closed
+    ``scope_unavailable`` HardStop rather than escalating to a
+    plan-wide reauthor.
+
+    Returns the first phase_id found across the triggering events
+    in payload order. Multi-phase crossings are rare; the first id
+    is sufficient for scoping the reauthor brief, and the
+    structural validator on Duplo's side enforces that the brief's
+    derivative ids stay within the prior id set.
+    """
+    triggering_ids = crossing_payload.get("triggering_event_ids") or []
+    for trig_id in triggering_ids:
+        trig = events_by_id.get(trig_id)
+        if trig is None:
+            continue
+        trig_payload = getattr(trig, "payload", None) or {}
+        pid = trig_payload.get("phase_id")
+        if isinstance(pid, str) and pid:
+            return pid
     return None
 
 
@@ -218,12 +268,39 @@ def auto_reauthor(
             ),
         ) from exc
 
+    # Honor decision.recommended_action. Phase-scoped recommendations
+    # MUST NOT be silently widened to plan-wide synthesis; that
+    # amplifies a single phase change into a council pass over every
+    # prior id and is exactly the failure mode lineage_invalid pauses
+    # surface. When the crossing's triggering event identifies a
+    # specific phase, scope the reauthor to that phase. Otherwise
+    # fail closed: a phase-scoped recommendation without an
+    # extractable target phase_id is better paused for human review
+    # than escalated.
+    target_phase_id: str | None = None
+    if decision.recommended_action == "reauthor_phase":
+        if decision.target_phase_id is None:
+            raise HardStop(
+                reason="scope_unavailable",
+                detail=(
+                    f"recommended_action={decision.recommended_action!r} on "
+                    f"rule {decision.rule_id!r} but the crossing's "
+                    "triggering event has no extractable phase_id "
+                    "(assumption_falsified payloads carry assumption_id, "
+                    "not phase_id). Refusing to widen the scope to a "
+                    "plan-wide reauthor; pausing for manual review. "
+                    f"Crossing event: {decision.crossing_event_id}."
+                ),
+            )
+        target_phase_id = decision.target_phase_id
+
     try:
         return reauthor_plan(
             plan_path=plan_path,
             ledger_dir=ledger_dir,
             crossing_event_id=decision.crossing_event_id,
             project_dir=project_dir,
+            target_phase_id=target_phase_id,
         )
     except LineageValidationError as exc:
         raise HardStop(
