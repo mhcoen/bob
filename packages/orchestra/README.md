@@ -232,6 +232,21 @@ Install:
 pip install -e '.[dev]'
 ```
 
+## Test setup
+
+Orchestra's tests import `bob_tools` (sibling repo at
+`/Users/mhcoen/proj/bob-tools`, not on PyPI). Install it editable
+into Orchestra's venv before running pytest:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
+.venv/bin/pip install -e '.[dev]'
+```
+
+After this, `pytest -q` from the repo root works without any
+`PYTHONPATH=` prefix.
+
 Create `~/.orchestra/config.json`:
 
 ```json
