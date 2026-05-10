@@ -241,6 +241,20 @@ def reauthor_plan(
     # phase.
     _, synth_sections = parse_plan_sections(new_plan_text)
     prior_ids = [p.id for p in old_phases]
+    next_new_phase_id_floor = _next_available_phase_id_from_priors(old_phases)
+
+    # Structural lineage check on the synthesizer's RAW output.
+    # Runs before normalize_lineage_for_preservation so the error
+    # surface reports what the model wrote, not values the runtime
+    # filled in. validate_lineage below covers the full Slice C
+    # contract; this earlier layer raises with explicit messages
+    # naming the floor and current prior id list, so the synthesizer
+    # (or the human watching the smoke pipeline) sees an actionable
+    # diagnosis instead of a generic "id collides with prior plan".
+    _validate_lineage_structural(
+        prior_ids, next_new_phase_id_floor, lineage_obj
+    )
+
     normalized_lineage = normalize_lineage_for_preservation(
         prior_ids, lineage_obj
     )
@@ -722,6 +736,129 @@ def _next_available_phase_id_from_priors(
             if n > highest:
                 highest = n
     return f"phase_{highest + 1:03d}"
+
+
+_NEW_ID_ACTIONS_STRUCTURAL = frozenset(
+    ["supersede", "split", "merge", "new"]
+)
+_FROM_BEARING_ACTIONS_STRUCTURAL = frozenset(["supersede", "split", "merge"])
+_STRICT_PHASE_ID_RE = re.compile(r"^phase_(\d{3,})$")
+
+
+def _phase_id_strict_suffix(pid: str) -> int | None:
+    """Return the numeric suffix of a strict ``phase_NNN`` id, else None.
+
+    Mirrors :func:`duplo.council.compute_required_phase_id`'s strict-id
+    helper: only ids matching the canonical zero-padded form
+    participate in the floor comparison. Non-strict ids (legacy
+    free-form names from pre-Slice C plans, or label-style ids the
+    synthesizer might invent) are ignored by the floor check; the
+    collision-with-prior check still applies to them.
+    """
+    match = _STRICT_PHASE_ID_RE.match(pid)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _validate_lineage_structural(
+    prior_plan_ids: list[str],
+    next_new_phase_id_floor: str,
+    lineage: Any,
+) -> None:
+    """Reject reauthor lineage that collides with prior ids or sits
+    below the runtime-supplied id floor, with explicit error
+    messages.
+
+    Runs BEFORE :func:`validate_lineage` and accumulates all
+    violations into a single :class:`LineageValidationError`. The
+    Slice C contract (existing in ``validate_lineage``) catches the
+    same collisions structurally, but with generic phrasing. This
+    layer's purpose is the diagnostic: error messages name the
+    current prior id list and the floor explicitly so the
+    synthesizer (or a human operator) sees what value to use next
+    instead of having to derive it.
+
+    The smoke run that motivated this layer had a prior plan of
+    ``phase_001`` + ``phase_006-009`` and a synthesizer that emitted
+    ``phase_006-009`` as new supersede ids while citing
+    ``phase_002-005`` (historical, no longer current) in ``from``.
+    ``validate_lineage`` would still catch both, but the failure
+    message did not name the floor or the current prior id set
+    explicitly; the operator had to read the validator source to
+    derive the right next value.
+
+    Rules enforced:
+
+      - Action in {supersede, split, merge, new}: ``id`` MUST NOT be
+        in ``prior_plan_ids``. Error message names the current
+        prior id list and the floor.
+      - Action in {supersede, split, merge, new}: if ``id`` matches
+        strict ``phase_NNN`` form, its suffix MUST be >= the floor's
+        suffix. Error message names the floor.
+      - Action in {supersede, split, merge}: every ``from`` entry
+        MUST be in ``prior_plan_ids``. Error message names the
+        current prior id list.
+    """
+    if not isinstance(lineage, dict):
+        return  # validate_lineage will fail with its own message
+    phases = lineage.get("phases")
+    if not isinstance(phases, list):
+        return  # validate_lineage will fail with its own message
+
+    prior_set = set(prior_plan_ids)
+    floor_suffix = _phase_id_strict_suffix(next_new_phase_id_floor)
+    prior_repr = ", ".join(prior_plan_ids) if prior_plan_ids else "(none)"
+
+    errors: list[str] = []
+    for entry in phases:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("id")
+        action = entry.get("action")
+        from_field = entry.get("from")
+        if not isinstance(pid, str) or not pid:
+            continue
+        if action not in _NEW_ID_ACTIONS_STRUCTURAL:
+            # preserve, or unknown action — handled by validate_lineage
+            continue
+
+        if pid in prior_set:
+            errors.append(
+                f"new phase id {pid!r} (action={action!r}) collides with "
+                f"a current prior plan id; current prior plan ids: "
+                f"[{prior_repr}]; use the runtime-supplied floor "
+                f"{next_new_phase_id_floor!r} or higher for new ids"
+            )
+        elif floor_suffix is not None:
+            entry_suffix = _phase_id_strict_suffix(pid)
+            if entry_suffix is not None and entry_suffix < floor_suffix:
+                errors.append(
+                    f"new phase id {pid!r} (action={action!r}) is below "
+                    f"the runtime-supplied floor "
+                    f"{next_new_phase_id_floor!r}; use the floor or higher"
+                )
+
+        if action in _FROM_BEARING_ACTIONS_STRUCTURAL and isinstance(
+            from_field, list
+        ):
+            for fid in from_field:
+                if not isinstance(fid, str) or not fid:
+                    continue
+                if fid not in prior_set:
+                    errors.append(
+                        f"lineage entry {pid!r} (action={action!r}) names "
+                        f"{fid!r} in 'from', but it is not a current "
+                        f"prior plan id; current prior plan ids: "
+                        f"[{prior_repr}] (historical ids from earlier "
+                        f"reauthor runs are not valid 'from' references)"
+                    )
+
+    if errors:
+        raise LineageValidationError(
+            "structural lineage violations:\n  - "
+            + "\n  - ".join(errors)
+        )
 
 
 def _build_state_blob(

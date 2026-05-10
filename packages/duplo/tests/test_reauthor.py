@@ -1344,6 +1344,331 @@ class TestReauthorPlan:
         )
         assert len(events_after) == len(events_before)
 
+    # -----------------------------------------------------------------
+    # Structural lineage validator (load-bearing diagnostic layer).
+    #
+    # The smoke run that motivated these tests had a prior plan of
+    # phase_001 + phase_006-009 (gap from earlier reauthor passes).
+    # The synthesizer wrote phase_006-009 as new supersede ids
+    # (collision) and phase_002-005 in `from` (historical, not
+    # current). The structural validator catches both with explicit
+    # error messages naming the floor (phase_010) and the current
+    # prior id list, so the operator sees what to do next.
+    # -----------------------------------------------------------------
+
+    def test_structural_validator_rejects_collision_with_current_prior_id(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The exact collision case: prior ids = phase_006-009, the
+        synthesizer emits phase_006 as a new supersede id. Rejected
+        with a message naming the current prior id list and the
+        floor (phase_010). PLAN.md unchanged; no events emitted."""
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        prior_phase_ids = [
+            "phase_006",
+            "phase_007",
+            "phase_008",
+            "phase_009",
+        ]
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=prior_phase_ids
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, prior_phase_ids)
+        original_plan_text = plan_path.read_text()
+
+        synth_plan = (
+            "## Phase phase_006: Refactored\n\n- [ ] new\n\n"
+            "## Phase phase_007: Refactored\n\n- [ ] new\n\n"
+            "## Phase phase_008: Refactored\n\n- [ ] new\n\n"
+            "## Phase phase_009: Refactored\n\n- [ ] new\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {
+                        "id": "phase_006",
+                        "action": "supersede",
+                        "from": ["phase_006"],
+                    },
+                    {
+                        "id": "phase_007",
+                        "action": "supersede",
+                        "from": ["phase_007"],
+                    },
+                    {
+                        "id": "phase_008",
+                        "action": "supersede",
+                        "from": ["phase_008"],
+                    },
+                    {
+                        "id": "phase_009",
+                        "action": "supersede",
+                        "from": ["phase_009"],
+                    },
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, synth_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(LineageValidationError) as exc_info:
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+        msg = str(exc_info.value)
+        assert "phase_006" in msg
+        # Floor (highest + 1) is named.
+        assert "phase_010" in msg
+        # Current prior id list is named.
+        for pid in prior_phase_ids:
+            assert pid in msg
+
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_structural_validator_rejects_unknown_from_historical_id(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`from` references an id from an earlier reauthor's
+        history that is no longer in the current PLAN.md. Rejected
+        with a message naming the offending entry and the current
+        prior id list."""
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        prior_phase_ids = [
+            "phase_006",
+            "phase_007",
+            "phase_008",
+            "phase_009",
+        ]
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=prior_phase_ids
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, prior_phase_ids)
+        original_plan_text = plan_path.read_text()
+
+        synth_plan = (
+            "## Phase phase_010: Derived from history\n\n- [ ] x\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {
+                        "id": "phase_010",
+                        "action": "supersede",
+                        "from": ["phase_002"],  # historical, not current
+                    },
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, synth_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(LineageValidationError) as exc_info:
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+        msg = str(exc_info.value)
+        assert "phase_002" in msg
+        # Current prior id list is named.
+        for pid in prior_phase_ids:
+            assert pid in msg
+
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_structural_validator_accepts_correct_floor_and_from(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Positive: prior ids = phase_006-009, synthesizer uses
+        phase_010 with action=supersede + from=['phase_006'],
+        preserves phase_007/008/009. Reauthor accepts and writes."""
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        prior_phase_ids = [
+            "phase_006",
+            "phase_007",
+            "phase_008",
+            "phase_009",
+        ]
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=prior_phase_ids
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, prior_phase_ids)
+
+        synth_plan = "## Phase phase_010: Refactored\n\n- [ ] new b\n"
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {
+                        "id": "phase_010",
+                        "action": "supersede",
+                        "from": ["phase_006"],
+                    },
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, synth_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+        # PLAN.md was written.
+        new_text = plan_path.read_text()
+        assert "phase_010" in new_text
+        # phase_007/008/009 preserved by the runtime.
+        assert "phase_007" in new_text
+        assert "phase_008" in new_text
+        assert "phase_009" in new_text
+        # phase_006 is replaced (not preserved as a header).
+        assert "## Phase phase_006:" not in new_text
+        # Lifecycle event was emitted.
+        assert result.lifecycle_event_ids
+        events = list(Storage(ledger_dir, writer_id="probe").read_all())
+        assert any(
+            "phase_010" in repr(ev.payload) for ev in events
+        )
+
+    def test_normalize_does_not_remap_historical_to_current_ids(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """normalize_lineage_for_preservation must NOT silently map
+        historical ids to current ids. It passes them through
+        unchanged and the structural validator rejects."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor_assemble import (
+            normalize_lineage_for_preservation,
+        )
+
+        # Direct unit-level check first: pass-through, no remapping.
+        prior_ids = ["phase_006", "phase_007"]
+        synth_lineage = {
+            "phases": [
+                {
+                    "id": "phase_010",
+                    "action": "supersede",
+                    "from": ["phase_002"],  # historical id
+                }
+            ]
+        }
+        normalized = normalize_lineage_for_preservation(
+            prior_ids, synth_lineage
+        )
+        # The supersede entry's `from` is unchanged.
+        supersede = next(
+            p for p in normalized["phases"] if p.get("id") == "phase_010"
+        )
+        assert supersede["from"] == ["phase_002"]
+        # Preserve defaults are appended for unaccounted prior ids
+        # (phase_006 and phase_007), but no remapping happened.
+        preserve_ids = sorted(
+            p["id"]
+            for p in normalized["phases"]
+            if p.get("action") == "preserve"
+        )
+        assert preserve_ids == ["phase_006", "phase_007"]
+
+        # End-to-end: the historical `from` must reach the structural
+        # validator and trigger a rejection. Atomic on failure.
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=prior_ids
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, prior_ids)
+        original_plan_text = plan_path.read_text()
+
+        synth_plan = "## Phase phase_010: Refactor\n\n- [ ] x\n"
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": synth_lineage,
+        }
+        self._patch_council(monkeypatch, synth_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(LineageValidationError) as exc_info:
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+        # The historical id is named in the message.
+        assert "phase_002" in str(exc_info.value)
+
+        # Atomicity preserved on rejection.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
 
 # ---------------------------------------------------------------------
 # ledger_slice + design_context shape
@@ -1656,3 +1981,181 @@ class TestStateBlobIncludesNextAvailableId:
         blob = _build_state_blob("", [], state=None)
         assert "Next available phase id" in blob
         assert "phase_001" in blob
+
+
+# ---------------------------------------------------------------------
+# Structural lineage validator unit tests (no bob_tools dependency)
+# ---------------------------------------------------------------------
+
+
+class TestValidateLineageStructural:
+    """Direct unit-level coverage of _validate_lineage_structural.
+
+    These do not exercise the full reauthor_plan path (see the
+    @needs_bob_tools tests above for that), so they run in any
+    environment that can import duplo.reauthor."""
+
+    def test_collision_with_current_prior_id_raises_naming_floor(self) -> None:
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007", "phase_008", "phase_009"]
+        floor = "phase_010"
+        lineage = {
+            "phases": [
+                {
+                    "id": "phase_006",
+                    "action": "supersede",
+                    "from": ["phase_006"],
+                }
+            ]
+        }
+        with pytest.raises(LineageValidationError) as exc_info:
+            _validate_lineage_structural(prior, floor, lineage)
+        msg = str(exc_info.value)
+        assert "phase_006" in msg
+        assert "phase_010" in msg
+        assert "phase_007" in msg  # current prior id list rendered
+
+    def test_below_floor_raises(self) -> None:
+        """Strict phase_NNN id whose suffix is less than the floor's
+        suffix is rejected even when not colliding with any current
+        prior id."""
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007", "phase_008", "phase_009"]
+        floor = "phase_010"
+        lineage = {
+            "phases": [
+                {
+                    "id": "phase_005",  # not a prior; below floor
+                    "action": "new",
+                }
+            ]
+        }
+        with pytest.raises(LineageValidationError) as exc_info:
+            _validate_lineage_structural(prior, floor, lineage)
+        msg = str(exc_info.value)
+        assert "phase_005" in msg
+        assert "below" in msg.lower()
+        assert "phase_010" in msg
+
+    def test_unknown_from_raises(self) -> None:
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007", "phase_008", "phase_009"]
+        floor = "phase_010"
+        lineage = {
+            "phases": [
+                {
+                    "id": "phase_010",
+                    "action": "supersede",
+                    "from": ["phase_002"],  # historical, not current
+                }
+            ]
+        }
+        with pytest.raises(LineageValidationError) as exc_info:
+            _validate_lineage_structural(prior, floor, lineage)
+        msg = str(exc_info.value)
+        assert "phase_002" in msg
+        for pid in prior:
+            assert pid in msg
+
+    def test_accumulates_multiple_violations(self) -> None:
+        """All violations surface in one raise, matching the pattern
+        of validate_lineage's accumulating errors."""
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007"]
+        floor = "phase_008"
+        lineage = {
+            "phases": [
+                {
+                    "id": "phase_006",  # collision
+                    "action": "supersede",
+                    "from": ["phase_002"],  # unknown
+                },
+                {
+                    "id": "phase_005",  # below floor
+                    "action": "new",
+                },
+            ]
+        }
+        with pytest.raises(LineageValidationError) as exc_info:
+            _validate_lineage_structural(prior, floor, lineage)
+        msg = str(exc_info.value)
+        assert "phase_006" in msg  # collision
+        assert "phase_002" in msg  # unknown
+        assert "phase_005" in msg  # below floor
+
+    def test_valid_lineage_passes(self) -> None:
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007", "phase_008", "phase_009"]
+        floor = "phase_010"
+        lineage = {
+            "phases": [
+                {
+                    "id": "phase_010",
+                    "action": "supersede",
+                    "from": ["phase_006"],
+                },
+                {"id": "phase_007", "action": "preserve"},
+            ]
+        }
+        # No raise.
+        _validate_lineage_structural(prior, floor, lineage)
+
+    def test_no_priors_falls_back_to_collision_only(self) -> None:
+        """Floor is phase_001 when there are no priors. The
+        below-floor check collapses (any strict id is >= 001), so
+        only the collision rule applies (vacuously, since there are
+        no priors). New ids in any range are accepted."""
+        from duplo.reauthor import _validate_lineage_structural
+
+        lineage = {
+            "phases": [
+                {"id": "phase_001", "action": "new"},
+                {"id": "phase_999", "action": "new"},
+            ]
+        }
+        _validate_lineage_structural([], "phase_001", lineage)
+
+    def test_non_strict_id_skips_floor_check(self) -> None:
+        """An id that doesn't match strict phase_NNN form (e.g.
+        phase_002b, label-style) skips the floor check but still
+        gets the collision check."""
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007"]
+        floor = "phase_008"
+        # phase_002b is non-strict; it's also not a current prior;
+        # collision check passes; floor check skipped.
+        lineage = {
+            "phases": [{"id": "phase_002b", "action": "new"}]
+        }
+        _validate_lineage_structural(prior, floor, lineage)
+
+        # But a non-strict id that collides with a current prior is
+        # still rejected.
+        lineage = {
+            "phases": [{"id": "phase_006", "action": "new"}]
+        }
+        with pytest.raises(LineageValidationError):
+            _validate_lineage_structural(prior, floor, lineage)
+
+    def test_preserve_action_is_not_subject_to_floor_or_collision(
+        self,
+    ) -> None:
+        """preserve entries reuse prior ids by definition; the
+        structural validator only fires on supersede/split/merge/new."""
+        from duplo.reauthor import _validate_lineage_structural
+
+        prior = ["phase_006", "phase_007"]
+        floor = "phase_008"
+        lineage = {
+            "phases": [
+                {"id": "phase_006", "action": "preserve"},
+                {"id": "phase_007", "action": "preserve"},
+            ]
+        }
+        _validate_lineage_structural(prior, floor, lineage)
