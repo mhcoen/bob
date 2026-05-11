@@ -228,3 +228,65 @@ def test_validate_number_accepts_int_and_float(tmp_path):
     assert isinstance(
         spec.validate({"decision": "accept", "score": 3.14}), Valid
     )
+
+
+# --------------------------------------------------------------------
+# Validator error-string contract for downstream consumers.
+#
+# duplo.schema_classification matches validation_errors strings by
+# substring to classify failures (additional_properties,
+# missing_required, enum_mismatch, malformed_array). The shapes
+# below are the downstream contract: changing them silently breaks
+# the classifier, the bounded-retry feedback, and mcloop's
+# schema_validation_invalid pause reason. Pin them here so any
+# future edit to orchestra/schema.py that affects the wording
+# trips a named test instead of breaking a sibling repo at runtime.
+# --------------------------------------------------------------------
+
+
+def test_additional_property_error_uses_canonical_phrase(tmp_path):
+    """The additional-property error MUST contain the substring
+    'additional property not permitted'. This is what
+    duplo.schema_classification.classify_schema_failure matches on."""
+    spec = load_schema(_write_schema(tmp_path, "v.json", _TWO_BRANCH))
+    result = spec.validate({"decision": "accept", "unexpected_key": 1})
+    assert isinstance(result, Invalid)
+    assert any(
+        "additional property not permitted" in e for e in result.errors
+    )
+
+
+def test_missing_required_error_uses_canonical_phrase(tmp_path):
+    """The missing-required error MUST contain the substring
+    'required field missing'."""
+    body = json.loads(json.dumps(_TWO_BRANCH))
+    body["required"] = ["decision", "feedback"]
+    spec = load_schema(_write_schema(tmp_path, "v.json", body))
+    result = spec.validate({"decision": "accept"})
+    assert isinstance(result, Invalid)
+    assert any("required field missing" in e for e in result.errors)
+
+
+def test_enum_mismatch_error_uses_canonical_phrase(tmp_path):
+    """The enum-mismatch error MUST contain the substring
+    'is not in enum'."""
+    spec = load_schema(_write_schema(tmp_path, "v.json", _TWO_BRANCH))
+    result = spec.validate({"decision": "punt"})
+    assert isinstance(result, Invalid)
+    assert any("is not in enum" in e for e in result.errors)
+
+
+def test_malformed_array_error_uses_canonical_phrase(tmp_path):
+    """The malformed-array error (an array-typed field receiving a
+    non-array value) MUST contain the substring 'expected array,
+    got'. This is the duplo classifier's signal for the
+    malformed_array kind."""
+    body = json.loads(json.dumps(_TWO_BRANCH))
+    body["properties"]["tags"] = {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+    spec = load_schema(_write_schema(tmp_path, "v.json", body))
+    result = spec.validate({"decision": "accept", "tags": "not-an-array"})
+    assert isinstance(result, Invalid)
+    assert any("expected array, got" in e for e in result.errors)
