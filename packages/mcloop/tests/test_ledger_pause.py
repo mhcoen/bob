@@ -505,33 +505,136 @@ class TestAutoReauthorPhaseScoping:
 
 
 class _StubEvent:
-    def __init__(self, payload: dict[str, Any]) -> None:
+    def __init__(
+        self, payload: dict[str, Any], type: str = ""
+    ) -> None:
         self.payload = payload
+        self.type = type
 
 
 class TestExtractTargetPhaseId:
     """Unit-level coverage of the helper that walks a crossing's
-    triggering events and pulls out a phase_id when present."""
+    triggering events and pulls out the DERIVATIVE phase_id when
+    present.
 
-    def test_returns_phase_id_from_first_triggering_event(self) -> None:
+    The earlier implementation returned the source ``phase_id``
+    field unconditionally, which for split / merge / supersede
+    refers to the consumed (now-gone) phase. The structural
+    validator on the duplo side then rejected those targets against
+    the current prior_plan_ids, producing a self-perpetuating stuck
+    loop on any reauthor that emitted a topology change. The helper
+    now routes by event type and returns the derivative id
+    instead.
+    """
+
+    def test_returns_superseded_by_for_phase_superseded(self) -> None:
         from mcloop.ledger_pause import _extract_target_phase_id
 
         crossing = {
             "rule_id": "phase_superseded",
-            "triggering_event_ids": ["e1", "e2"],
+            "triggering_event_ids": ["e1"],
             "summary": "x",
         }
         events = {
-            "e1": _StubEvent({"phase_id": "phase_002"}),
-            "e2": _StubEvent({"phase_id": "phase_005"}),
+            "e1": _StubEvent(
+                {
+                    "phase_id": "phase_002",
+                    "superseded_by_phase_id": "phase_006",
+                    "reason": "r",
+                },
+                type="phase_superseded",
+            )
         }
-        assert _extract_target_phase_id(crossing, events) == "phase_002"
+        # Derivative (phase_006) — not the consumed source (phase_002).
+        assert _extract_target_phase_id(crossing, events) == "phase_006"
 
-    def test_skips_events_without_phase_id(self) -> None:
-        """Some triggering events (assumption_falsified) have no
-        phase_id in their payload. The helper walks past them and
-        returns the first phase_id it does find. If no triggering
-        event carries one, returns None."""
+    def test_returns_first_into_for_phase_split(self) -> None:
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_topology_changed",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent(
+                {
+                    "phase_id": "phase_005",
+                    "into_phase_ids": ["phase_006", "phase_007"],
+                    "reason": "r",
+                },
+                type="phase_split",
+            )
+        }
+        # First derivative branch. Today's stuck case: phase_005
+        # was split; consumed phase_005 must NOT be returned.
+        assert _extract_target_phase_id(crossing, events) == "phase_006"
+
+    def test_returns_into_phase_id_for_phase_merged(self) -> None:
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_topology_changed",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent(
+                {
+                    "merged_phase_ids": ["phase_003", "phase_004"],
+                    "into_phase_id": "phase_010",
+                    "reason": "r",
+                },
+                type="phase_merged",
+            )
+        }
+        # Derivative — the single new merged phase. Note the merge
+        # payload has NO source `phase_id` field; old code returned
+        # None here (silently broken). New code returns the
+        # derivative as intended.
+        assert _extract_target_phase_id(crossing, events) == "phase_010"
+
+    def test_returns_none_for_phase_abandoned(self) -> None:
+        """phase_abandoned has no derivative — the phase is gone,
+        nothing replaces it. Return None and let auto_reauthor's
+        scope_unavailable HardStop path fire."""
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "phase_abandoned",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent(
+                {"phase_id": "phase_002", "reason": "out of scope"},
+                type="phase_abandoned",
+            )
+        }
+        assert _extract_target_phase_id(crossing, events) is None
+
+    def test_returns_none_for_assumption_falsified(self) -> None:
+        """Existing behavior preserved: assumption_falsified
+        carries assumption_id not phase_id."""
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        crossing = {
+            "rule_id": "assumption_falsified",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent(
+                {"assumption_id": "a1"},
+                type="assumption_falsified",
+            )
+        }
+        assert _extract_target_phase_id(crossing, events) is None
+
+    def test_walks_multiple_events_returning_first_derivative(self) -> None:
+        """The walk continues past events that yield no derivative
+        (e.g., phase_abandoned in the same crossing as a
+        phase_superseded). Returns the first derivative found."""
         from mcloop.ledger_pause import _extract_target_phase_id
 
         crossing = {
@@ -540,21 +643,20 @@ class TestExtractTargetPhaseId:
             "summary": "x",
         }
         events = {
-            "e1": _StubEvent({"assumption_id": "a1"}),  # no phase_id
-            "e2": _StubEvent({"phase_id": "phase_007"}),
+            "e1": _StubEvent(
+                {"phase_id": "phase_001", "reason": "r"},
+                type="phase_abandoned",
+            ),  # yields None
+            "e2": _StubEvent(
+                {
+                    "phase_id": "phase_005",
+                    "superseded_by_phase_id": "phase_009",
+                    "reason": "r",
+                },
+                type="phase_superseded",
+            ),  # yields phase_009
         }
-        assert _extract_target_phase_id(crossing, events) == "phase_007"
-
-    def test_returns_none_when_no_triggering_carries_phase_id(self) -> None:
-        from mcloop.ledger_pause import _extract_target_phase_id
-
-        crossing = {
-            "rule_id": "assumption_falsified",
-            "triggering_event_ids": ["e1"],
-            "summary": "x",
-        }
-        events = {"e1": _StubEvent({"assumption_id": "a1"})}
-        assert _extract_target_phase_id(crossing, events) is None
+        assert _extract_target_phase_id(crossing, events) == "phase_009"
 
     def test_returns_none_on_empty_triggering_list(self) -> None:
         from mcloop.ledger_pause import _extract_target_phase_id
@@ -576,5 +678,44 @@ class TestExtractTargetPhaseId:
             "triggering_event_ids": ["missing-id", "e2"],
             "summary": "x",
         }
-        events = {"e2": _StubEvent({"phase_id": "phase_009"})}
+        events = {
+            "e2": _StubEvent(
+                {
+                    "phase_id": "phase_002",
+                    "superseded_by_phase_id": "phase_009",
+                    "reason": "r",
+                },
+                type="phase_superseded",
+            )
+        }
         assert _extract_target_phase_id(crossing, events) == "phase_009"
+
+    def test_handles_enum_typed_event_type(self) -> None:
+        """trig.type may be a bob_tools EventType enum value or a
+        plain string. The helper accepts both via the .value
+        normalization."""
+        from mcloop.ledger_pause import _extract_target_phase_id
+
+        class _EnumLike:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+        crossing = {
+            "rule_id": "phase_superseded",
+            "triggering_event_ids": ["e1"],
+            "summary": "x",
+        }
+        events = {
+            "e1": _StubEvent(
+                {
+                    "phase_id": "phase_002",
+                    "superseded_by_phase_id": "phase_008",
+                    "reason": "r",
+                },
+                type="",
+            )
+        }
+        # Replace the str type with an enum-like value to test
+        # the .value-aware normalization.
+        events["e1"].type = _EnumLike("phase_superseded")  # type: ignore[assignment]
+        assert _extract_target_phase_id(crossing, events) == "phase_008"

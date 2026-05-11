@@ -163,33 +163,96 @@ def _extract_target_phase_id(
     crossing_payload: dict[str, Any],
     events_by_id: dict[str, Any],
 ) -> str | None:
-    """Walk the crossing's triggering events and return a phase_id
-    if one of them carries it.
+    """Walk the crossing's triggering events and return the DERIVATIVE
+    phase_id of the first phase-scoped event that has one.
 
-    Phase-scoped triggering events (phase_abandoned, phase_superseded,
-    phase_split, phase_merged) carry the affected phase_id directly
-    in their payload. assumption_falsified does NOT carry a phase_id
-    in its payload (it carries an assumption_id, which the projector
-    resolves separately); for that case this returns None and the
-    auto_reauthor caller falls back to a fail-closed
-    ``scope_unavailable`` HardStop rather than escalating to a
-    plan-wide reauthor.
+    Each lifecycle event type's payload has a different shape, and
+    the "target" for a phase-scoped reauthor MUST be a phase that
+    still exists in the current plan. For events that consume a
+    phase (supersede / split / merge), the source ``phase_id`` field
+    refers to the now-gone phase; the DERIVATIVE field
+    (``superseded_by_phase_id`` / ``into_phase_ids[0]`` /
+    ``into_phase_id``) is what the reauthor should scope to.
 
-    Returns the first phase_id found across the triggering events
-    in payload order. Multi-phase crossings are rare; the first id
-    is sufficient for scoping the reauthor brief, and the
-    structural validator on Duplo's side enforces that the brief's
-    derivative ids stay within the prior id set.
+    The earlier implementation pulled ``payload.get("phase_id")``
+    unconditionally and returned the consumed source for split /
+    merge / supersede, which the structural validator then rejected
+    against the post-change prior_plan_ids — a self-perpetuating
+    stuck loop. Routing by event type returns the new phase id
+    that EXISTS in the current plan.
+
+      - phase_superseded: derivative = ``superseded_by_phase_id``.
+      - phase_split:      derivative = ``into_phase_ids[0]`` (first
+                          branch is sufficient for scoping; the
+                          structural validator enforces the rest).
+      - phase_merged:     derivative = ``into_phase_id`` (the single
+                          new merged phase).
+      - phase_abandoned:  NO derivative — the phase is gone, nothing
+                          replaces it. Return None and let
+                          auto_reauthor's scope_unavailable path fire.
+      - assumption_falsified: payload carries assumption_id not
+                          phase_id; return None (existing behavior).
+
+    Returns the first derivative found across triggering events in
+    payload order. Multi-phase crossings are rare; the first id is
+    sufficient for scoping, and the structural validator on Duplo's
+    side enforces that the assembled plan's ids stay within the
+    current prior id set.
     """
     triggering_ids = crossing_payload.get("triggering_event_ids") or []
     for trig_id in triggering_ids:
         trig = events_by_id.get(trig_id)
         if trig is None:
             continue
+        trig_type = getattr(trig, "type", None)
         trig_payload = getattr(trig, "payload", None) or {}
-        pid = trig_payload.get("phase_id")
-        if isinstance(pid, str) and pid:
-            return pid
+        # trig.type may be a bob_tools EventType enum or a plain str
+        # depending on caller / fixture. Normalize to str via .value
+        # when available, else the str() form.
+        trig_type_str = (
+            trig_type.value
+            if hasattr(trig_type, "value")
+            else str(trig_type)
+        )
+        target = _derivative_target_for_event(trig_type_str, trig_payload)
+        if target:
+            return target
+    return None
+
+
+def _derivative_target_for_event(
+    event_type: str, payload: dict[str, Any]
+) -> str | None:
+    """Map a phase-scoped lifecycle event to its derivative phase id.
+
+    Payload field names come from
+    :mod:`bob_tools.ledger.events`:
+
+      - make_phase_superseded_payload: phase_id + superseded_by_phase_id
+      - make_phase_split_payload:      phase_id + into_phase_ids (list)
+      - make_phase_merged_payload:     merged_phase_ids (list) + into_phase_id
+      - make_phase_abandoned_payload:  phase_id (only)
+
+    Returns the derivative id, or None when the event has no
+    derivative (phase_abandoned, assumption_falsified, or any event
+    type not phase-scoped). The caller (auto_reauthor) treats None
+    as scope_unavailable: better to pause for manual review than to
+    target a phase that no longer exists.
+    """
+    if event_type == "phase_superseded":
+        value = payload.get("superseded_by_phase_id")
+        return value if isinstance(value, str) and value else None
+    if event_type == "phase_split":
+        into = payload.get("into_phase_ids") or []
+        if isinstance(into, list) and into:
+            first = into[0]
+            return first if isinstance(first, str) and first else None
+        return None
+    if event_type == "phase_merged":
+        value = payload.get("into_phase_id")
+        return value if isinstance(value, str) and value else None
+    # phase_abandoned has no derivative; assumption_falsified carries
+    # no phase_id; any other type is non-phase-scoped.
     return None
 
 
