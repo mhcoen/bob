@@ -424,7 +424,27 @@ def main() -> None:
             args.investigate = True
     else:
         parser = argparse.ArgumentParser(
-            description="Duplicate an app from reference materials or a product URL.",
+            description=(
+                "Duplicate an app from reference materials or a product URL. "
+                "Without a subcommand, duplo resumes the current project or "
+                "prompts for `duplo init` if none exists."
+            ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=(
+                "subcommands:\n"
+                "  init [URL]            Initialize a new project: writes SPEC.md and ref/.\n"
+                "                        Flags: --from-description PATH, --deep, --force.\n"
+                "  fix [BUGS...]         Append bug-fix tasks to the current PLAN.md.\n"
+                "                        Flags: --file/-f PATH, --screenshot/-s,\n"
+                "                        --investigate/-i, --images PATH...\n"
+                "  investigate [BUGS...] Alias for `duplo fix --investigate`.\n"
+                "  reauthor              Re-author PLAN.md against the Plan Ledger.\n"
+                "                        Required: --crossing-event-id EVENT_ID.\n"
+                "                        Flags: --plan PATH, --ledger-dir PATH,\n"
+                "                        --out PATH, --council-config PATH.\n"
+                "\n"
+                "Run `duplo <subcommand> --help` for full per-subcommand help."
+            ),
         )
         parser.add_argument(
             "url",
