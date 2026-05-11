@@ -104,12 +104,26 @@ class ThresholdParams:
     ``enabled_rules`` selects which rules participate in this
     evaluation. The default enables every rule. Consumers can disable
     rules per-environment without changing code.
+
+    ``skip_reauthor_emitted_lifecycle_events`` controls whether the
+    lifecycle rules (phase_abandoned, phase_superseded,
+    phase_topology_changed) fire on events that reauthor itself
+    emitted. Default on. When on, events whose writer_id starts with
+    ``duplo-reauthor-`` are ignored by those rules — they are the
+    consequence of an action just taken (a reauthor that resolved a
+    topology change), not new evidence that warrants another
+    reauthor. Leaving this off would create a self-perpetuating
+    loop: every reauthor that emits a phase_split or phase_superseded
+    would trigger another phase-scoped reauthor on its own output.
+    Tests that need to exercise the rule on non-reauthor lifecycle
+    events can set this to False.
     """
 
     exploratory_commit_limit: int = 5
     enabled_rules: frozenset[ThresholdRuleId] = field(
         default_factory=lambda: ALL_RULES
     )
+    skip_reauthor_emitted_lifecycle_events: bool = True
 
 
 @dataclass(frozen=True)
@@ -192,6 +206,33 @@ def _short_sha(commit: str | None) -> str:
     return commit[:8]
 
 
+_REAUTHOR_WRITER_PREFIX = "duplo-reauthor-"
+
+
+def _is_reauthor_emitted(event: Event) -> bool:
+    """True when ``event`` was appended by a reauthor writer.
+
+    The writer_id convention from
+    :func:`bob_tools.ledger.storage.allocate_writer_id` is
+    ``<prefix>-<host>-<pid>-<tail>``. duplo's reauthor uses prefix
+    ``duplo-reauthor`` (see ``duplo/reauthor.py``'s call to
+    ``allocate_writer_id(prefix='duplo-reauthor')``), so reauthor-
+    emitted events have writer_ids starting with
+    ``duplo-reauthor-``.
+
+    Used by the lifecycle rules
+    (phase_abandoned / phase_superseded / phase_topology_changed)
+    to skip events that reauthor itself wrote — those represent the
+    consequence of an action just taken, not new evidence that
+    warrants another reauthor. Without this skip, every reauthor
+    that legitimately emits a topology change would trigger another
+    phase-scoped reauthor on its own output, creating a self-
+    perpetuating loop.
+    """
+    writer_id = getattr(event, "writer_id", "") or ""
+    return writer_id.startswith(_REAUTHOR_WRITER_PREFIX)
+
+
 # ---------------------------------------------------------------------
 # Per-rule evaluators
 # ---------------------------------------------------------------------
@@ -228,13 +269,17 @@ def _evaluate_unattributable_commit(
 
 
 def _evaluate_phase_abandoned(
-    sorted_events: Sequence[Event], since: str | None
+    sorted_events: Sequence[Event],
+    since: str | None,
+    skip_reauthor_emitted: bool = True,
 ) -> list[ThresholdCrossing]:
     out: list[ThresholdCrossing] = []
     for ev in sorted_events:
         if ev.type is not EventType.PHASE_ABANDONED:
             continue
         if not _is_after_since(ev.event_id, since):
+            continue
+        if skip_reauthor_emitted and _is_reauthor_emitted(ev):
             continue
         out.append(
             ThresholdCrossing(
@@ -253,13 +298,17 @@ def _evaluate_phase_abandoned(
 
 
 def _evaluate_phase_superseded(
-    sorted_events: Sequence[Event], since: str | None
+    sorted_events: Sequence[Event],
+    since: str | None,
+    skip_reauthor_emitted: bool = True,
 ) -> list[ThresholdCrossing]:
     out: list[ThresholdCrossing] = []
     for ev in sorted_events:
         if ev.type is not EventType.PHASE_SUPERSEDED:
             continue
         if not _is_after_since(ev.event_id, since):
+            continue
+        if skip_reauthor_emitted and _is_reauthor_emitted(ev):
             continue
         p = ev.payload
         out.append(
@@ -280,7 +329,9 @@ def _evaluate_phase_superseded(
 
 
 def _evaluate_phase_topology_changed(
-    sorted_events: Sequence[Event], since: str | None
+    sorted_events: Sequence[Event],
+    since: str | None,
+    skip_reauthor_emitted: bool = True,
 ) -> list[ThresholdCrossing]:
     out: list[ThresholdCrossing] = []
     topology_types = {EventType.PHASE_SPLIT, EventType.PHASE_MERGED}
@@ -288,6 +339,8 @@ def _evaluate_phase_topology_changed(
         if ev.type not in topology_types:
             continue
         if not _is_after_since(ev.event_id, since):
+            continue
+        if skip_reauthor_emitted and _is_reauthor_emitted(ev):
             continue
         p = ev.payload
         if ev.type is EventType.PHASE_SPLIT:
@@ -456,13 +509,24 @@ def evaluate_thresholds(
         crossings.extend(
             _evaluate_unattributable_commit(sorted_events, since)
         )
+    skip_reauthor = params.skip_reauthor_emitted_lifecycle_events
     if ThresholdRuleId.PHASE_ABANDONED in enabled:
-        crossings.extend(_evaluate_phase_abandoned(sorted_events, since))
+        crossings.extend(
+            _evaluate_phase_abandoned(
+                sorted_events, since, skip_reauthor
+            )
+        )
     if ThresholdRuleId.PHASE_SUPERSEDED in enabled:
-        crossings.extend(_evaluate_phase_superseded(sorted_events, since))
+        crossings.extend(
+            _evaluate_phase_superseded(
+                sorted_events, since, skip_reauthor
+            )
+        )
     if ThresholdRuleId.PHASE_TOPOLOGY_CHANGED in enabled:
         crossings.extend(
-            _evaluate_phase_topology_changed(sorted_events, since)
+            _evaluate_phase_topology_changed(
+                sorted_events, since, skip_reauthor
+            )
         )
     if ThresholdRuleId.INVARIANT_DECLARED in enabled:
         crossings.extend(_evaluate_invariant_declared(state, since))

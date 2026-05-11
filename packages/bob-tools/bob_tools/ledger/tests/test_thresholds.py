@@ -249,6 +249,58 @@ class TestPhaseAbandoned:
         )
         assert _eval([e1, e2]) == _eval([e1, e2])
 
+    def test_skips_reauthor_emitted_event_by_default(self) -> None:
+        """phase_abandoned events written by a reauthor writer
+        represent reauthor's own structural output, not new
+        evidence. They MUST NOT trigger another reauthor —
+        otherwise every reauthor that emits a phase_abandoned
+        amplifies into another phase-scoped reauthor on its own
+        output."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_ABANDONED,
+            make_phase_abandoned_payload(phase_id="p1", reason="r"),
+            seq=1,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval([e1, e2])
+        assert all(
+            c.rule_id is not ThresholdRuleId.PHASE_ABANDONED
+            for c in crossings
+        )
+
+    def test_config_flag_off_does_not_skip_reauthor_emitted(self) -> None:
+        """Test escape hatch: setting
+        skip_reauthor_emitted_lifecycle_events=False restores the
+        old behavior where reauthor-emitted events DO fire the
+        rule. Used by tests that need to exercise the rule on the
+        full event stream."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_ABANDONED,
+            make_phase_abandoned_payload(phase_id="p1", reason="r"),
+            seq=1,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval(
+            [e1, e2],
+            params=ThresholdParams(
+                skip_reauthor_emitted_lifecycle_events=False
+            ),
+        )
+        assert any(
+            c.rule_id is ThresholdRuleId.PHASE_ABANDONED
+            for c in crossings
+        )
+
 
 # ---------------------------------------------------------------------
 # Rule 3: phase_superseded
@@ -311,6 +363,34 @@ class TestPhaseSuperseded:
             seq=2,
         )
         assert _eval([e1, e2, e3]) == _eval([e1, e2, e3])
+
+    def test_skips_reauthor_emitted_event_by_default(self) -> None:
+        """A phase_superseded event written by reauthor is the
+        reauthor's own structural output (the supersession it just
+        executed). It must not trigger another reauthor."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p2", title="y"),
+            seq=1,
+        )
+        e3 = _make(
+            EventType.PHASE_SUPERSEDED,
+            make_phase_superseded_payload(
+                phase_id="p1", superseded_by_phase_id="p2", reason="r"
+            ),
+            seq=2,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval([e1, e2, e3])
+        assert all(
+            c.rule_id is not ThresholdRuleId.PHASE_SUPERSEDED
+            for c in crossings
+        )
 
 
 # ---------------------------------------------------------------------
@@ -402,6 +482,112 @@ class TestPhaseTopologyChanged:
             seq=1,
         )
         assert _eval([e1, e2]) == _eval([e1, e2])
+
+    def test_skips_reauthor_emitted_split_by_default(self) -> None:
+        """The stuck-state regression. Reauthor split phase_005 into
+        phase_006 + phase_007 (legitimate output). The follow-on
+        phase_topology_changed rule fired on reauthor's OWN
+        phase_split event, recommending another phase-scoped
+        reauthor on the consumed phase_005. The new behavior skips
+        events emitted by the reauthor writer so the loop
+        terminates."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="phase_005", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_SPLIT,
+            make_phase_split_payload(
+                phase_id="phase_005",
+                into_phase_ids=["phase_006", "phase_007"],
+                reason="re-author triggered by threshold crossing",
+            ),
+            seq=1,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval([e1, e2])
+        assert all(
+            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            for c in crossings
+        )
+
+    def test_skips_reauthor_emitted_merge_by_default(self) -> None:
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_MERGED,
+            make_phase_merged_payload(
+                merged_phase_ids=["p1", "p2"],
+                into_phase_id="p3",
+                reason="r",
+            ),
+            seq=1,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval([e1, e2])
+        assert all(
+            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            for c in crossings
+        )
+
+    def test_fires_on_non_reauthor_emitted_split(self) -> None:
+        """If some future caller (not reauthor) emits a phase_split
+        event, the rule should still fire. Pinned via a
+        non-duplo-reauthor writer_id."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_SPLIT,
+            make_phase_split_payload(
+                phase_id="p1",
+                into_phase_ids=["a", "b"],
+                reason="r",
+            ),
+            seq=1,
+            writer_id="mcloop-host-1234-abcd",
+        )
+        crossings = _eval([e1, e2])
+        assert any(
+            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            for c in crossings
+        )
+
+    def test_config_flag_off_fires_on_reauthor_emitted(self) -> None:
+        """skip_reauthor_emitted_lifecycle_events=False restores
+        the pre-fix behavior. Tests that need to exercise the rule
+        on reauthor output can opt out."""
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="x"),
+            seq=0,
+        )
+        e2 = _make(
+            EventType.PHASE_SPLIT,
+            make_phase_split_payload(
+                phase_id="p1",
+                into_phase_ids=["a", "b"],
+                reason="r",
+            ),
+            seq=1,
+            writer_id="duplo-reauthor-host-1234-abcd",
+        )
+        crossings = _eval(
+            [e1, e2],
+            params=ThresholdParams(
+                skip_reauthor_emitted_lifecycle_events=False
+            ),
+        )
+        assert any(
+            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            for c in crossings
+        )
 
 
 # ---------------------------------------------------------------------
