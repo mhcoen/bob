@@ -53,6 +53,13 @@ from duplo.reauthor_phase_ids import (
     parse_plan_phases,
     validate_lineage,
 )
+from duplo.schema_classification import (
+    SchemaClassification,
+    SchemaFailure,
+    SchemaFailureKind,
+    classify_schema_failure,
+    read_schema_validation_failures,
+)
 
 
 class ReauthorError(RuntimeError):
@@ -106,6 +113,50 @@ class CommitAttributionError(ReauthorError):
       - ``rationale`` is empty after strip. The synthesizer must
         explain the match.
     """
+
+
+class SchemaValidationError(ReauthorError):
+    """Raised when orchestra rejected the synthesizer's verdict
+    against the artifact schema (or when the model emitted output
+    that did not parse as JSON).
+
+    Subclass of :class:`ReauthorError`; mcloop's HardStop layer
+    surfaces this as ``schema_validation_invalid`` (distinct from
+    the generic ``reauthor_failed``, from ``plan_artifact_invalid``,
+    and from ``commit_attribution_invalid``).
+
+    The error carries a :class:`SchemaClassification` (``.classification``)
+    naming the primary failure kind and the full set of kinds present
+    across the verdict's validation errors. The retry loop in
+    :func:`reauthor_plan` shares its budget with
+    :class:`LineageValidationError`; either failure on attempt 1 burns
+    the one retry the run is allotted. Kind-specific feedback is
+    threaded into the workflow's ``previous_attempt_error`` external
+    input so the synthesizer sees a structural-named correction
+    before re-running.
+
+    Failure modes covered (classified by
+    :class:`SchemaFailureKind`):
+
+      - ``additional_properties``: the verdict carried fields the
+        schema does not declare.
+      - ``missing_required``: a required field is absent.
+      - ``enum_mismatch``: a string value is outside its enum.
+      - ``malformed_array``: an array field is not an array.
+      - ``json_parse``: the model output did not parse as JSON.
+      - ``other``: anything else (recorded but not specially named).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        classification: SchemaClassification,
+        failures: tuple[SchemaFailure, ...],
+    ) -> None:
+        super().__init__(message)
+        self.classification = classification
+        self.failures = failures
 
 
 _LEDGER_DIR_DEFAULT_NAME = ".duplo/ledger"
@@ -310,20 +361,28 @@ def reauthor_plan(
     prior_ids = [p.id for p in old_phases]
     next_new_phase_id_floor = _next_available_phase_id_from_priors(old_phases)
 
-    # Bounded retry on LineageValidationError. Structural lineage
-    # failures (synthesizer's lineage references historical phase_ids
-    # no longer in current priors) are a real recurring failure mode.
-    # The validator catches them correctly, but liveness suffers if
-    # every such failure HardStops mcloop — the user has to manually
-    # re-run until council non-determinism produces valid lineage.
-    # Retry once with named feedback before pausing.
+    # Bounded retry shared between LineageValidationError and
+    # SchemaValidationError. Both are recurring synthesizer-output
+    # failure modes that benefit from one retry with named feedback
+    # before pausing the loop:
     #
-    # Budget is one retry (max_attempts=2). Council cycles are
-    # ~12 min wall clock and 5+ model calls; a second retry is too
-    # expensive for a structural error the model has already failed
-    # once even with explicit feedback. If the model can't produce
-    # valid lineage after one retry, the structural ownership is
-    # wrong, not the model.
+    #   - LineageValidationError: structural lineage rejects, e.g.
+    #     lineage.from[] referencing historical phase_ids no longer
+    #     in current priors.
+    #   - SchemaValidationError: orchestra rejected the verdict at
+    #     schema_validation (additional properties on lineage.phases[],
+    #     missing required fields, enum miss, malformed array, or a
+    #     json-parse failure).
+    #
+    # Budget is one retry shared by both (max_attempts=2). Council
+    # cycles are ~12 min wall clock and 5+ model calls; a second
+    # retry is too expensive for a structural error the model has
+    # already failed once even with explicit feedback. If the model
+    # can't produce a valid verdict after one retry, the structural
+    # ownership is wrong, not the model. The shared budget means an
+    # attempt-1 schema failure followed by an attempt-2 lineage
+    # failure (or any other combination) raises immediately — the
+    # run does not get a third attempt.
     max_attempts = 2
     previous_attempt_error: str | None = None
     assembled_plan = None
@@ -416,6 +475,14 @@ def reauthor_plan(
                 error=exc,
                 prior_plan_ids=prior_ids,
                 next_new_phase_id_floor=next_new_phase_id_floor,
+                attempt=attempt,
+                max_attempts=max_attempts,
+            )
+        except SchemaValidationError as exc:
+            if attempt >= max_attempts:
+                raise
+            previous_attempt_error = _format_schema_feedback_for_retry(
+                error=exc,
                 attempt=attempt,
                 max_attempts=max_attempts,
             )
@@ -1159,6 +1226,94 @@ def _validate_commit_attributions(
         )
 
 
+_SCHEMA_KIND_HINTS: dict[SchemaFailureKind, str] = {
+    SchemaFailureKind.ADDITIONAL_PROPERTIES: (
+        "Remove fields the schema does not declare. Lineage entries "
+        "carry only id / action / from; commit attribution lives in "
+        "the top-level commit_attributions array, not on "
+        "lineage.phases[]. Refer to the schema enumerated in your "
+        "synthesizer brief for the complete allowed-field list."
+    ),
+    SchemaFailureKind.MISSING_REQUIRED: (
+        "Populate every required field. Common omissions: 'feedback' "
+        "(synthesizer prose), 'criteria_compliance' (one entry per "
+        "configured criterion), and the per-action 'from' list on "
+        "supersede / split / merge lineage entries."
+    ),
+    SchemaFailureKind.ENUM_MISMATCH: (
+        "Use only the documented enum values. decision must be one "
+        "of {accept, reframe, stuck}; lineage.phases[].action must "
+        "be one of {preserve, supersede, split, merge, new}. Do not "
+        "invent intermediate states (e.g. 'pending', 'tentative')."
+    ),
+    SchemaFailureKind.MALFORMED_ARRAY: (
+        "Array fields require JSON arrays. Wrap singletons in []; "
+        "do not emit a bare string where an array is required."
+    ),
+    SchemaFailureKind.JSON_PARSE: (
+        "Your prior response could not be parsed as JSON inside the "
+        "trailing ```json ... ``` fence. Emit exactly one fenced "
+        "json block at the end of your response and ensure the body "
+        "is a single well-formed JSON object."
+    ),
+    SchemaFailureKind.OTHER: (
+        "Re-read the schema your synthesizer brief enumerates and "
+        "match every field's type, required-ness, and shape."
+    ),
+}
+
+
+def _format_schema_feedback_for_retry(
+    *,
+    error: SchemaValidationError,
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    """Build the previous_attempt_error block for a schema-failure retry.
+
+    Mirrors :func:`_format_lineage_feedback_for_retry` in shape so
+    the framer template treats both retry causes uniformly. The
+    block names every classified kind (so multi-violation verdicts
+    get all hints), enumerates the raw validator error strings
+    verbatim (so the synthesizer sees what orchestra actually wrote
+    in the log), and reminds the synthesizer that the budget is one
+    retry total.
+    """
+    cls = error.classification
+    kind_lines: list[str] = []
+    seen: set[SchemaFailureKind] = set()
+    # Surface kinds in a stable order: primary first, then the rest
+    # of the present kinds. Each kind appears at most once.
+    for kind in [cls.primary, *sorted(cls.kinds, key=lambda k: k.value)]:
+        if kind in seen:
+            continue
+        seen.add(kind)
+        hint = _SCHEMA_KIND_HINTS.get(kind, _SCHEMA_KIND_HINTS[SchemaFailureKind.OTHER])
+        kind_lines.append(f"  - {kind.value}: {hint}")
+
+    raw_lines = [f"  - {e}" for e in cls.errors] or [
+        "  - (validator emitted no error strings; see audit log)"
+    ]
+
+    lines: list[str] = [
+        f"RETRY ATTEMPT {attempt + 1} of {max_attempts}",
+        "",
+        "PREVIOUS ATTEMPT'S VERDICT FAILED SCHEMA VALIDATION. The "
+        "orchestra runtime rejected the verdict JSON before lineage "
+        "or attribution checks could run. Classified kinds:",
+        *kind_lines,
+        "",
+        "Raw validator errors (verbatim from the schema_validation log "
+        "record):",
+        *raw_lines,
+        "",
+        "Regenerate the plan and verdict. Keep correct content; fix "
+        "only the named schema violations. This is the LAST retry the "
+        "run is allotted; subsequent failures fail closed.",
+    ]
+    return "\n".join(lines)
+
+
 def _format_lineage_feedback_for_retry(
     *,
     error: LineageValidationError,
@@ -1346,6 +1501,36 @@ def _invoke_council_for_reauthor(
     )
 
     if result.terminal != "done":
+        # The synthesizer state routes to its error outcome on schema
+        # validation or json-parse failure; that path produces
+        # terminal != "done" with one or more schema_validation log
+        # records carrying outcome != "valid". When those records
+        # exist, surface SchemaValidationError so the retry loop can
+        # see the classified kind and thread named feedback into
+        # previous_attempt_error. Only when the log has no such
+        # records do we fall through to the generic ReauthorError
+        # (terminal != done for some other reason, e.g. an upstream
+        # state failed before the synthesizer ran).
+        schema_failures = read_schema_validation_failures(result.log_path)
+        if schema_failures:
+            # The first failure in log order is the one the run
+            # actually terminated on; later records (if any) reflect
+            # a multi-attempt synthesizer state that retried internally
+            # before bubbling out. We classify all errors from the
+            # FIRST failure so the retry feedback names the actual
+            # blocking cause.
+            first = schema_failures[0]
+            classification = classify_schema_failure(
+                first.validation_errors, outcome=first.outcome
+            )
+            raise SchemaValidationError(
+                "council_four_reauthor terminated at schema validation "
+                f"(outcome={first.outcome!r}, "
+                f"primary_kind={classification.primary.value!r}); "
+                f"see audit at {audits_root / result.run_id}",
+                classification=classification,
+                failures=tuple(schema_failures),
+            )
         raise ReauthorError(
             "council_four_reauthor did not accept during re-author "
             f"(terminal={result.terminal!r}); see audit at "
@@ -1655,6 +1840,8 @@ __all__ = [
     "PlanArtifactError",
     "ReauthorError",
     "ReauthorResult",
+    "SchemaFailureKind",
+    "SchemaValidationError",
     "default_ledger_dir",
     "reauthor_plan",
 ]

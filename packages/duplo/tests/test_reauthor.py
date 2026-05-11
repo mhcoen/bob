@@ -3241,3 +3241,408 @@ class TestCommitAttributionsValidator:
         from duplo.reauthor import CommitAttributionError, ReauthorError
 
         assert issubclass(CommitAttributionError, ReauthorError)
+
+
+# ---------------------------------------------------------------------
+# Schema-failure classifier (Fix 2)
+#
+# The classifier maps orchestra's validation_errors strings to a
+# fixed enum so the retry feedback can name the failure kind. The
+# strings orchestra emits are stable; see orchestra/schema.py and
+# the smoke-test that pins those formats in the orchestra suite.
+# ---------------------------------------------------------------------
+
+
+class TestSchemaFailureClassifier:
+    """Unit coverage for classify_schema_failure: maps validator
+    error strings to SchemaFailureKind."""
+
+    def test_classifies_additional_properties(self) -> None:
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            [
+                "lineage.phases[3].attributed_commits: additional "
+                "property not permitted"
+            ]
+        )
+        assert result.primary is SchemaFailureKind.ADDITIONAL_PROPERTIES
+        assert SchemaFailureKind.ADDITIONAL_PROPERTIES in result.kinds
+
+    def test_classifies_enum_mismatch(self) -> None:
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            ["decision: value 'maybe' is not in enum ['accept', 'reframe', 'stuck']"]
+        )
+        assert result.primary is SchemaFailureKind.ENUM_MISMATCH
+
+    def test_classifies_missing_required(self) -> None:
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            ["feedback: required field missing"]
+        )
+        assert result.primary is SchemaFailureKind.MISSING_REQUIRED
+
+    def test_classifies_malformed_array(self) -> None:
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            ["agreements: expected array, got str"]
+        )
+        assert result.primary is SchemaFailureKind.MALFORMED_ARRAY
+
+    def test_classifies_json_parse_outcome(self) -> None:
+        """outcome='parse_error' short-circuits the per-error classifier
+        and returns JSON_PARSE regardless of the error strings (which
+        for a parse failure are jsonschema-irrelevant chunks)."""
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            ["Expecting value: line 1 column 1 (char 0)"],
+            outcome="parse_error",
+        )
+        assert result.primary is SchemaFailureKind.JSON_PARSE
+
+    def test_aggregates_multiple_kinds(self) -> None:
+        """A verdict commonly accumulates several violations of
+        different kinds; the classifier surfaces them all so the
+        retry feedback can name each."""
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            [
+                "lineage.phases[0].status: additional property not permitted",
+                "feedback: required field missing",
+                "decision: value 'maybe' is not in enum ['accept']",
+            ]
+        )
+        assert result.primary is SchemaFailureKind.ADDITIONAL_PROPERTIES
+        assert SchemaFailureKind.ADDITIONAL_PROPERTIES in result.kinds
+        assert SchemaFailureKind.MISSING_REQUIRED in result.kinds
+        assert SchemaFailureKind.ENUM_MISMATCH in result.kinds
+
+    def test_unrecognized_error_falls_back_to_other(self) -> None:
+        from duplo.schema_classification import (
+            SchemaFailureKind,
+            classify_schema_failure,
+        )
+
+        result = classify_schema_failure(
+            ["some_path: unknown structural rejection from a future schema"]
+        )
+        assert result.primary is SchemaFailureKind.OTHER
+
+    def test_read_schema_validation_failures_from_log(
+        self, tmp_path: Path
+    ) -> None:
+        """read_schema_validation_failures scans log.jsonl, surfaces
+        schema_validation records whose outcome is not 'valid', and
+        skips a truncated final line (single-fsync crash window
+        described in orchestra/log/log.py)."""
+        import json as _json
+
+        from duplo.schema_classification import (
+            read_schema_validation_failures,
+        )
+
+        log_path = tmp_path / "log.jsonl"
+        lines = [
+            _json.dumps(
+                {
+                    "ts": "2026-05-11T00:00:00.000Z",
+                    "run_id": "r1",
+                    "seq": 1,
+                    "event": "state_entry",
+                    "state_id": "synth",
+                    "attempt": 1,
+                }
+            ),
+            _json.dumps(
+                {
+                    "ts": "2026-05-11T00:00:01.000Z",
+                    "run_id": "r1",
+                    "seq": 2,
+                    "event": "schema_validation",
+                    "state_id": "synth",
+                    "attempt": 1,
+                    "artifact": "judge_verdict",
+                    "outcome": "schema_error",
+                    "decision": None,
+                    "validation_errors": [
+                        "lineage.phases[3].status: additional "
+                        "property not permitted"
+                    ],
+                    "payload_ref": None,
+                    "invocation_id": "i1",
+                }
+            ),
+            _json.dumps(
+                {
+                    "ts": "2026-05-11T00:00:02.000Z",
+                    "run_id": "r1",
+                    "seq": 3,
+                    "event": "schema_validation",
+                    "state_id": "synth",
+                    "attempt": 1,
+                    "artifact": "judge_verdict",
+                    "outcome": "valid",
+                    "decision": "accept",
+                    "validation_errors": [],
+                    "payload_ref": None,
+                    "invocation_id": "i2",
+                }
+            ),
+        ]
+        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        failures = read_schema_validation_failures(log_path)
+        assert len(failures) == 1
+        assert failures[0].outcome == "schema_error"
+        assert failures[0].state_id == "synth"
+        assert failures[0].artifact == "judge_verdict"
+        assert "additional property" in failures[0].validation_errors[0]
+
+
+# ---------------------------------------------------------------------
+# Schema-failure retry (Fix 2)
+#
+# SchemaValidationError shares the bounded-retry budget with
+# LineageValidationError. max_attempts=2 means the run gets ONE
+# retry total across both error classes. The retry feedback for
+# schema failures is kind-aware (additional_properties names the
+# lineage.phases[] / commit_attributions split, etc.).
+# ---------------------------------------------------------------------
+
+
+class TestReauthorSchemaRetry(TestReauthorPlan):
+    """End-to-end retry coverage for schema-validation failures."""
+
+    def _make_schema_error(
+        self,
+        validation_errors: list[str],
+        *,
+        outcome: str = "schema_error",
+    ) -> Any:
+        from duplo.reauthor import SchemaValidationError
+        from duplo.schema_classification import (
+            SchemaFailure,
+            classify_schema_failure,
+        )
+
+        cls = classify_schema_failure(validation_errors, outcome=outcome)
+        failure = SchemaFailure(
+            state_id="synth",
+            attempt=1,
+            outcome=outcome,
+            artifact="judge_verdict",
+            validation_errors=tuple(validation_errors),
+        )
+        return SchemaValidationError(
+            "fake schema error for test",
+            classification=cls,
+            failures=(failure,),
+        )
+
+    def test_retries_once_on_schema_validation_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """First attempt fails schema validation; runtime retries
+        once with kind-named feedback; second attempt succeeds.
+        Both attempts share the same budget that lineage failures
+        consume."""
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir,
+            plan_phases=["phase_001", "phase_006", "phase_007"],
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_006", "phase_007"]
+        )
+
+        from duplo import reauthor
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured.append(dict(kwargs))
+            attempt_num = len(captured)
+            if attempt_num == 1:
+                raise self._make_schema_error(
+                    [
+                        "lineage.phases[3].attributed_commits: "
+                        "additional property not permitted"
+                    ]
+                )
+            plan_text = _wrap_synth_plan(
+                "## Phase phase_010: Refactored from 006\n\n- [ ] y\n"
+            )
+            verdict = {
+                "decision": "accept",
+                "feedback": "ok",
+                "agreements": [],
+                "disagreements": [],
+                "rejected_options": [],
+                "lineage": {
+                    "phases": [
+                        {
+                            "id": "phase_010",
+                            "action": "supersede",
+                            "from": ["phase_006"],
+                        }
+                    ]
+                },
+            }
+            return plan_text, verdict
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        assert len(captured) == 2
+        assert captured[0].get("previous_attempt_error") is None
+        feedback = captured[1].get("previous_attempt_error")
+        assert isinstance(feedback, str) and feedback
+        # Kind name surfaces in the feedback.
+        assert "additional_properties" in feedback
+        # Raw error string is included verbatim.
+        assert "attributed_commits" in feedback
+        # Retry-attempt header present.
+        assert "RETRY ATTEMPT 2 of 2" in feedback
+        # Reauthor succeeded.
+        assert "phase_010" in plan_path.read_text()
+        assert result.plan_reauthored_event_id
+
+    def test_shared_budget_lineage_then_schema_fails_closed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Attempt 1 fails with LineageValidationError, attempt 2
+        fails with SchemaValidationError. The shared budget caps at
+        ONE retry total, so reauthor raises after the second failure.
+        No third attempt. PLAN.md unchanged."""
+        from bob_tools.ledger import Storage
+
+        from duplo.reauthor import SchemaValidationError
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir,
+            plan_phases=["phase_001", "phase_006", "phase_007"],
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_006", "phase_007"]
+        )
+        original_plan_text = plan_path.read_text()
+
+        from duplo import reauthor
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured.append(dict(kwargs))
+            attempt_num = len(captured)
+            if attempt_num == 1:
+                # Attempt 1: produces lineage with historical 'from'
+                # — _validate_lineage_structural will raise
+                # LineageValidationError after _invoke returns.
+                plan_text = _wrap_synth_plan(
+                    "## Phase phase_010: Bad\n\n- [ ] x\n"
+                )
+                verdict: dict[str, Any] = {
+                    "decision": "accept",
+                    "feedback": "ok",
+                    "agreements": [],
+                    "disagreements": [],
+                    "rejected_options": [],
+                    "lineage": {
+                        "phases": [
+                            {
+                                "id": "phase_010",
+                                "action": "supersede",
+                                "from": ["phase_002"],  # historical
+                            }
+                        ]
+                    },
+                }
+                return plan_text, verdict
+            # Attempt 2: orchestra rejects the verdict outright.
+            raise self._make_schema_error(
+                ["decision: value 'unknown' is not in enum [...]"]
+            )
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(SchemaValidationError):
+            from duplo.reauthor import reauthor_plan
+
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+
+        # Two attempts total (budget exhausted after attempt 2).
+        assert len(captured) == 2
+        # First call had no feedback; second received lineage feedback.
+        assert captured[0].get("previous_attempt_error") is None
+        assert "phase_002" in (
+            captured[1].get("previous_attempt_error") or ""
+        )
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
+
+    def test_schema_validation_error_is_exported(self) -> None:
+        """SchemaValidationError is in __all__ and subclasses
+        ReauthorError so callers catching the parent class continue
+        to do the right thing."""
+        import duplo.reauthor as reauthor_mod
+
+        assert "SchemaValidationError" in reauthor_mod.__all__
+        assert "SchemaFailureKind" in reauthor_mod.__all__
+        from duplo.reauthor import ReauthorError, SchemaValidationError
+
+        assert issubclass(SchemaValidationError, ReauthorError)
