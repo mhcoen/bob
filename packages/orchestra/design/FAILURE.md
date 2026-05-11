@@ -494,3 +494,73 @@ verification as confirmation of correct behavior, which is the
 outcome the prescription was designed to produce.
 
 ---
+
+## Pattern: Verifying end-to-end behavior at only one end of a producer/consumer contract
+
+**How the bug got created.** Code shipped a structural-ownership
+fix to duplo's reauthor pipeline that introduced a strict
+sanitizer rejecting fenced verdict JSON inside the plan artifact.
+The directive that authorized the fix named the producer/consumer
+contract explicitly: model authors plan markdown, runtime owns
+structural metadata. The fix landed correctly on the consumer
+side. The producer side (the orchestra synthesizer template that
+tells the model what to emit) still instructed the model verbatim
+to emit a fenced verdict JSON block at the end of the plan
+artifact. The two ends were both internally coherent and mutually
+incompatible: every reauthor pass would now fail-closed at
+sanitize.
+
+**How the bug failed to be caught.** When Code reported the fix
+complete, I read the consumer-side description (sanitizer
+behavior, error class, validator additions) and verified it
+matched the directive. I did not read the producer-side template
+to check whether what the model would emit was what the new
+consumer would accept. The contract has two ends; I verified one
+and declared the contract satisfied. ChatGPT's audit caught the
+mismatch by reading both ends.
+
+This is structurally identical to a related miss in the same
+batch: a separate finding about an exception class losing its
+reason at the HardStop boundary (PlanArtifactRejected wrapped as
+ReauthorError, caught generically, mapped to reason="reauthor_failed"
+so the specific token only survived in detail). I had read
+ledger_pause.py:auto_reauthor for an earlier directive in the
+same conversation. The generic except-clause was visible at that
+read. I did not connect it to the new exception class introduced
+by the structural fix.
+
+**What the correct workflow looks like.** When a fix changes one
+end of a contract, verify the other end. Concretely: read the
+artifact-producing site (template, schema, adapter) when a fix
+changes the artifact-consuming site (parser, validator,
+sanitizer), and vice versa. The verification is one or two file
+reads. The cost of skipping it is reauthor (or the equivalent
+integration path) being broken end-to-end despite passing all
+local tests.
+
+A related operational rule: when reading a status report from
+Code about a fix, identify every named boundary the fix crosses
+(exception class boundary, artifact boundary, schema boundary,
+adapter boundary) and verify both sides of each boundary. "All
+tests pass" does not cover boundaries the test suite doesn't
+span. Local invariants can both be satisfied while the
+integration fails.
+
+**What was lost.** Two reviewer rounds caught what the original
+review should have. The user noted explicitly that ChatGPT had
+to find what I missed. The directive that produced the broken
+contract was mine; the missed verification was mine. The cost
+was a follow-up relay batch and a delayed re-run of mcloop on
+the fixture.
+
+**External evidence.** ChatGPT's audit message identified all
+four findings (producer/consumer mismatch, exception-reason
+loss, corrupt fixture cannot self-heal, silent-overwrite gap in
+synth_by_id). Three of the four were directly verifiable from
+source I had already read in this conversation; the fourth
+(silent overwrite) required reading
+reauthor_assemble.py:assemble_reauthored_plan, which I had not
+read for this fix but which was inside the file the fix
+touched.
+
+---
