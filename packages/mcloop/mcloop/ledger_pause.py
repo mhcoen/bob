@@ -347,6 +347,19 @@ def auto_reauthor(
         class _PlanArtifactError(Exception):  # type: ignore[no-redef]
             """Sentinel for older duplo installs that lack PlanArtifactError."""
 
+    # CommitAttributionError is the same shape: duplo-side subclass
+    # of ReauthorError, guarded import for older duplo installs that
+    # don't expose it. mcloop surfaces it as a distinct pause reason
+    # so the operator knows the model named an unknown commit or an
+    # unknown phase in the attribution, not a generic reauthor crash.
+    try:
+        from duplo.reauthor import (
+            CommitAttributionError as _CommitAttributionError,
+        )
+    except ImportError:
+        class _CommitAttributionError(Exception):  # type: ignore[no-redef]
+            """Sentinel for older duplo installs that lack CommitAttributionError."""
+
     # Honor decision.recommended_action. Phase-scoped recommendations
     # MUST NOT be silently widened to plan-wide synthesis; that
     # amplifies a single phase change into a council pass over every
@@ -405,6 +418,23 @@ def auto_reauthor(
                 f"crossing ({decision.crossing_event_id}) is on the "
                 "ledger. The synthesizer's plan output did not "
                 "satisfy the trailing-fenced-verdict contract."
+            ),
+        ) from exc
+    except _CommitAttributionError as exc:
+        # MUST be caught before the generic ReauthorError handler
+        # below, since CommitAttributionError is a subclass of
+        # ReauthorError. The commit-attribution contract is a model
+        # output error too: the synthesizer named a commit or phase
+        # the runtime doesn't know about. Distinct pause reason so
+        # the operator can read the validator's accumulated
+        # violations directly.
+        raise HardStop(
+            reason="commit_attribution_invalid",
+            detail=(
+                f"duplo's reauthor rejected the verdict's "
+                f"commit_attributions: {exc}. PLAN.md is unchanged; "
+                f"the threshold crossing ({decision.crossing_event_id}) "
+                "is on the ledger."
             ),
         ) from exc
     except ReauthorError as exc:

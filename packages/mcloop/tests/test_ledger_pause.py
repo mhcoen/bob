@@ -162,6 +162,14 @@ class _FakePlanArtifactError(_FakeReauthorError):
     plan_artifact_invalid pause reason is lost to reauthor_failed."""
 
 
+class _FakeCommitAttributionError(_FakeReauthorError):
+    """Mirror duplo.reauthor.CommitAttributionError's inheritance
+    shape: subclass of ReauthorError. mcloop must catch this before
+    the generic ReauthorError handler, otherwise the more-specific
+    commit_attribution_invalid pause reason is lost to
+    reauthor_failed."""
+
+
 @needs_bob_tools
 class TestAutoReauthorFailureModes:
     def _decision(self) -> PauseDecision:
@@ -372,6 +380,80 @@ class TestAutoReauthorFailureModes:
         # The generic reauthor_failed bucket still catches it; the
         # plan-artifact branch was an inactive sentinel and didn't
         # interfere with the regular flow.
+        assert exc_info.value.reason == "reauthor_failed"
+
+    def test_commit_attribution_error_hard_stops_with_distinct_reason(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A duplo.reauthor.CommitAttributionError must surface as a
+        HardStop with reason 'commit_attribution_invalid', distinct
+        from 'reauthor_failed'. The handler MUST match the subclass
+        before the generic ReauthorError handler."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        fake_mod.PlanArtifactError = _FakePlanArtifactError  # type: ignore[attr-defined]
+        fake_mod.CommitAttributionError = _FakeCommitAttributionError  # type: ignore[attr-defined]
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakeCommitAttributionError(
+                "commit_attribution violations:\n  - commit_sha 'deadbee' "
+                "does not prefix-match any unattributable commit"
+            )
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        assert exc_info.value.reason == "commit_attribution_invalid"
+        assert "commit_attributions" in exc_info.value.detail
+
+    def test_older_duplo_without_commit_attribution_error_falls_back(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Older duplo installations don't export
+        CommitAttributionError. mcloop must still import cleanly
+        and treat any plain ReauthorError as 'reauthor_failed' (or
+        the existing PlanArtifactError handler if applicable). Pins
+        the guarded import."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        # NO CommitAttributionError on this fake module.
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakeReauthorError("plain reauthor failure")
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
         assert exc_info.value.reason == "reauthor_failed"
 
 
