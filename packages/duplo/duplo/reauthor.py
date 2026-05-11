@@ -36,6 +36,7 @@ from typing import Any
 from duplo.plan_document import (
     PlanArtifactRejected,
     parse_plan,
+    parse_synthesized_plan_fragment,
     render,
     sanitize_plan_artifact,
     validate_structure,
@@ -283,80 +284,102 @@ def reauthor_plan(
         council.set_config_path(str(council_config_path))
 
     council_run_id = run_id or _new_run_id()
-    new_plan_text, verdict = _invoke_council_for_reauthor(
-        council=council,
-        state_blob=state_blob,
-        question=question,
-        ledger_slice_md=ledger_slice_md,
-        design_context_md=design_context_md,
-        project_dir=project_dir,
-    )
-
-    lineage_obj = verdict.get("lineage") if isinstance(verdict, dict) else None
-    if not isinstance(lineage_obj, dict):
-        raise LineageValidationError(
-            "synthesizer verdict is missing the required 'lineage' object; "
-            "the re-author path requires the JSON lineage sidecar"
-        )
-
-    # Preserve-by-default assembly. The synthesizer authors changed
-    # phase content and non-preserve lineage intent; Duplo wraps the
-    # output in the deterministic envelope.
-    #
-    # Codex's framing on why this lives in Duplo, not the prompt:
-    # the same anti-pattern as required_phase_id and the H1
-    # ordinal — protocol metadata (here: which prior phases survive
-    # unchanged) belongs to the runtime, not the model. Asking the
-    # synthesizer to repeat unchanged phases verbatim and to emit
-    # preserve entries for them keeps the model in the ownership
-    # loop and fails closed when the model emits only the changed
-    # phase.
-    #
-    # The plan_document layer (sanitize -> parse -> render) owns the
-    # H1 envelope + H2 phase header structural contract. Assembly
-    # produces a Plan and renders it; the renderer is the only path
-    # that emits H1 lines, so substitutions automatically renumber
-    # downstream H1 ordinals and H1 stale-vs-H2 mismatches are
-    # impossible by construction.
-    synth_plan = parse_plan(new_plan_text)
     prior_ids = [p.id for p in old_phases]
     next_new_phase_id_floor = _next_available_phase_id_from_priors(old_phases)
 
-    # Structural lineage check on the synthesizer's RAW output.
-    # Runs before normalize_lineage_for_preservation so the error
-    # surface reports what the model wrote, not values the runtime
-    # filled in. validate_lineage below covers the full Slice C
-    # contract; this earlier layer raises with explicit messages
-    # naming the floor and current prior id list, so the synthesizer
-    # (or the human watching the smoke pipeline) sees an actionable
-    # diagnosis instead of a generic "id collides with prior plan".
-    _validate_lineage_structural(
-        prior_ids, next_new_phase_id_floor, lineage_obj
-    )
+    # Bounded retry on LineageValidationError. Structural lineage
+    # failures (synthesizer's lineage references historical phase_ids
+    # no longer in current priors) are a real recurring failure mode.
+    # The validator catches them correctly, but liveness suffers if
+    # every such failure HardStops mcloop — the user has to manually
+    # re-run until council non-determinism produces valid lineage.
+    # Retry once with named feedback before pausing.
+    #
+    # Budget is one retry (max_attempts=2). Council cycles are
+    # ~12 min wall clock and 5+ model calls; a second retry is too
+    # expensive for a structural error the model has already failed
+    # once even with explicit feedback. If the model can't produce
+    # valid lineage after one retry, the structural ownership is
+    # wrong, not the model.
+    max_attempts = 2
+    previous_attempt_error: str | None = None
+    assembled_plan = None
+    normalized_lineage: dict[str, Any] = {}
+    for attempt in range(1, max_attempts + 1):
+        try:
+            new_plan_text, verdict = _invoke_council_for_reauthor(
+                council=council,
+                state_blob=state_blob,
+                question=question,
+                ledger_slice_md=ledger_slice_md,
+                design_context_md=design_context_md,
+                project_dir=project_dir,
+                previous_attempt_error=previous_attempt_error,
+            )
 
-    normalized_lineage = normalize_lineage_for_preservation(
-        prior_ids, lineage_obj
-    )
-    assembled_plan = assemble_reauthored_plan(
-        prior_plan=prior_plan,
-        synth_units=synth_plan.units,
-        normalized_lineage=normalized_lineage,
-    )
+            lineage_obj = (
+                verdict.get("lineage") if isinstance(verdict, dict) else None
+            )
+            if not isinstance(lineage_obj, dict):
+                raise LineageValidationError(
+                    "synthesizer verdict is missing the required "
+                    "'lineage' object; the re-author path requires "
+                    "the JSON lineage sidecar"
+                )
 
-    # Validate the assembled plan + normalized lineage before
-    # emitting any events. Fail-closed semantics are preserved:
-    # contradictions (preserve+supersede on the same id, unknown
-    # 'from' priors, missing/extra plan headers vs lineage) still
-    # raise; normalization only fills in preserve-defaults for
-    # unaccounted priors, never repairs explicit contradictions.
-    # validate_lineage runs against the assembled Plan's unit ids
-    # (no need to re-parse markdown since the structural model
-    # already gives us the ids directly).
-    validate_lineage(
-        prior_ids,
-        (u.phase_id for u in assembled_plan.units),
-        normalized_lineage,
-    )
+            # Preserve-by-default assembly. The synthesizer authors
+            # changed phase content and non-preserve lineage intent;
+            # Duplo wraps the output in the deterministic envelope.
+            # See orchestra/design/synthesizer-output-contract.md.
+            # The plan_document layer owns the H1+H2 structural
+            # contract; assembly produces a Plan and renders it.
+            synth_plan = parse_synthesized_plan_fragment(new_plan_text)
+
+            # Structural lineage check on the synthesizer's RAW
+            # output. Runs before normalize_lineage_for_preservation
+            # so the error surface reports what the model wrote,
+            # not values the runtime filled in. Errors here include
+            # collision with current prior ids, below-floor ids,
+            # and historical 'from' references — all the cases the
+            # retry feedback can name precisely for the model.
+            _validate_lineage_structural(
+                prior_ids, next_new_phase_id_floor, lineage_obj
+            )
+
+            normalized_lineage = normalize_lineage_for_preservation(
+                prior_ids, lineage_obj
+            )
+            assembled_plan = assemble_reauthored_plan(
+                prior_plan=prior_plan,
+                synth_units=synth_plan.units,
+                normalized_lineage=normalized_lineage,
+            )
+
+            # Final lineage check on the assembled Plan + normalized
+            # lineage. Fail-closed semantics preserved: contradictions
+            # the synthesizer authors explicitly are NOT silently
+            # repaired.
+            validate_lineage(
+                prior_ids,
+                (u.phase_id for u in assembled_plan.units),
+                normalized_lineage,
+            )
+            break
+        except LineageValidationError as exc:
+            if attempt >= max_attempts:
+                raise
+            previous_attempt_error = _format_lineage_feedback_for_retry(
+                error=exc,
+                prior_plan_ids=prior_ids,
+                next_new_phase_id_floor=next_new_phase_id_floor,
+                attempt=attempt,
+                max_attempts=max_attempts,
+            )
+
+    # Loop exited normally (break on success). assembled_plan is
+    # guaranteed non-None here because the only exit-without-break
+    # path is the final-attempt raise above.
+    assert assembled_plan is not None
 
     # Structural validation on the assembled Plan: catch stray
     # H1-shaped lines in unit bodies and embedded verdict JSON that
@@ -950,6 +973,88 @@ def _validate_lineage_structural(
         )
 
 
+def _format_lineage_feedback_for_retry(
+    *,
+    error: LineageValidationError,
+    prior_plan_ids: list[str],
+    next_new_phase_id_floor: str,
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    """Format a retry-feedback block for the next council brief.
+
+    The block is injected into the workflow's
+    ``previous_attempt_error`` external input. The framer template
+    renders it verbatim at the top of the council brief so every
+    proposer and the synthesizer see the named constraints before
+    regenerating.
+
+    The block lists every violation the validator accumulated (not
+    just the first), plus the allowed-prior-id whitelist and the
+    next-available-id floor. Even when the violation is minimal, the
+    whitelist and floor are surfaced explicitly: the model should
+    always be reminded of the constraint, not just told what it got
+    wrong this time.
+    """
+    raw_message = str(error).strip()
+    # _validate_lineage_structural raises with a "structural lineage
+    # violations:\n  - <line>\n  - <line>..." shape; preserve those
+    # bullets when present, otherwise surface the raw message as one
+    # bullet so the model still sees the named cause.
+    violations: list[str] = []
+    if raw_message.startswith("structural lineage violations:"):
+        for line in raw_message.splitlines()[1:]:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                violations.append(stripped[2:].strip())
+            elif stripped:
+                # Continuation line (multi-line message); append to
+                # the most recent bullet.
+                if violations:
+                    violations[-1] += " " + stripped
+                else:
+                    violations.append(stripped)
+    else:
+        violations.append(raw_message)
+
+    prior_repr = ", ".join(prior_plan_ids) if prior_plan_ids else "(none)"
+    lines: list[str] = [
+        "RETRY ATTEMPT "
+        f"{attempt + 1} of {max_attempts}",
+        "",
+        "PREVIOUS ATTEMPT REJECTED. Reasons:",
+    ]
+    for violation in violations:
+        lines.append(f"  - {violation}")
+    lines.extend(
+        [
+            "",
+            "Allowed prior plan ids you may reference in lineage.from[] "
+            "(this is the WHITELIST; values outside this list will be "
+            "rejected by the runtime validator):",
+            f"  [{prior_repr}]",
+            "",
+            "Do not reference historical phase ids from ledger slice "
+            "events in lineage.from[]. The ledger slice may name phases "
+            "that were superseded / merged / abandoned in earlier "
+            "reauthor cycles; those are causal context only, NOT valid "
+            "'from' targets.",
+            "",
+            "next_new_phase_id_floor is "
+            f"{next_new_phase_id_floor!r}; all NEW ids you introduce "
+            "(action in {supersede, split, merge, new}) must have a "
+            "strict phase_NNN suffix >= the floor's suffix and must NOT "
+            "appear in the allowed-prior-id whitelist above.",
+            "",
+            "Regenerate the plan and verdict. The body and structure are "
+            "fine to keep where they were correct; but lineage.from[] "
+            "entries MUST come from the allowed list, and new ids MUST "
+            "respect the floor.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _build_state_blob(
     plan_text: str, old_phases: list[ParsedHeader], state: Any
 ) -> str:
@@ -1009,8 +1114,9 @@ def _invoke_council_for_reauthor(
     ledger_slice_md: str,
     design_context_md: str,
     project_dir: Path,
+    previous_attempt_error: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Run council_four with the four framer inputs populated.
+    """Run council_four with the five framer inputs populated.
 
     Returns ``(plan_text, verdict)`` where ``plan_text`` is the
     synthesizer's plan body (the ``plan`` artifact) and ``verdict``
@@ -1018,6 +1124,15 @@ def _invoke_council_for_reauthor(
     lineage sidecar the re-author consumer needs). Raises
     ``ReauthorError`` on terminal != done, missing plan artifact, or
     a verdict whose shape is not a JSON object.
+
+    When ``previous_attempt_error`` is non-None, it is threaded into
+    the workflow's ``previous_attempt_error`` external input. The
+    framer template renders it verbatim at the top of the council
+    brief so every proposer and the synthesizer see the runtime
+    validator's named constraints before regenerating. When None,
+    the input is passed as the empty string (the framer template
+    treats empty-string as "this is the first attempt; no retry
+    feedback to surface").
     """
     from orchestra import run_workflow
 
@@ -1030,6 +1145,7 @@ def _invoke_council_for_reauthor(
         "question": question,
         "ledger_slice": ledger_slice_md,
         "design_context": design_context_md,
+        "previous_attempt_error": previous_attempt_error or "",
     }
 
     audits_root = project_dir / ".duplo" / "audits" / "council"

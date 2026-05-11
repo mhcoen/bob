@@ -20,6 +20,7 @@ from duplo.plan_document import (
     PlanArtifactRejected,
     StructuralValidationError,
     parse_plan,
+    parse_synthesized_plan_fragment,
     render,
     sanitize_plan_artifact,
     units_by_id,
@@ -222,6 +223,54 @@ class TestParsePlanRejections:
             ParseError, match="uses project name 'different'"
         ):
             parse_plan(text)
+
+
+class TestParseSynthesizedPlanFragment:
+    def test_accepts_bare_h2_sections_for_reauthor_fragments(self) -> None:
+        text = (
+            "Council rationale that is not part of a phase.\n"
+            "\n"
+            "## Phase phase_006: Adopt CLI surface\n"
+            "\n"
+            "- [ ] add smoke test\n"
+            "\n"
+            "## Phase phase_007: Runtime loop\n"
+            "\n"
+            "- [ ] wire observer\n"
+        )
+        plan = parse_synthesized_plan_fragment(text)
+
+        assert plan.project_name == ""
+        assert plan.preamble.startswith("Council rationale")
+        assert [u.phase_id for u in plan.units] == ["phase_006", "phase_007"]
+        assert plan.units[0].h1_envelope == "Adopt CLI surface"
+        assert plan.units[0].h2_title == "Adopt CLI surface"
+        assert "- [ ] add smoke test" in plan.units[0].body
+        assert "- [ ] wire observer" in plan.units[1].body
+
+    def test_keeps_canonical_h1_h2_fragment_strict(self) -> None:
+        text = (
+            "# proj — Phase 0: Envelope title\n"
+            "## Phase phase_006: H2 title\n"
+            "\n"
+            "- [ ] task\n"
+        )
+        plan = parse_synthesized_plan_fragment(text)
+
+        assert plan.project_name == "proj"
+        assert plan.units[0].h1_envelope == "Envelope title"
+        assert plan.units[0].h2_title == "H2 title"
+
+    def test_canonical_fragment_with_multiple_h2s_under_one_h1_still_raises(
+        self,
+    ) -> None:
+        text = (
+            "# proj — Phase 0: Bad\n"
+            "## Phase phase_006: One\n"
+            "## Phase phase_007: Two\n"
+        )
+        with pytest.raises(ParseError, match="2 H2 phase headers"):
+            parse_synthesized_plan_fragment(text)
 
 
 class TestParsePlanPhase0Codification:

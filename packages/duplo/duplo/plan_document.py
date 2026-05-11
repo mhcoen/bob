@@ -333,6 +333,59 @@ def parse_plan(text: str) -> Plan:
     )
 
 
+def parse_synthesized_plan_fragment(text: str) -> Plan:
+    """Parse a reauthor synthesizer's changed/new phase fragment.
+
+    Prior ``PLAN.md`` parsing remains strict and requires canonical
+    H1+H2 pairs. Reauthor synthesis is a narrower input: the model
+    authors only changed/new phase content, while Duplo owns the final
+    H1 envelope and ordinal. For that model-authored fragment, accept
+    either canonical H1+H2 units or bare H2 phase sections and convert
+    the latter into :class:`PhaseUnit` objects whose H1 envelope title
+    defaults to the H2 title. The final renderer will assign the real
+    project name and ordinal after assembly.
+    """
+    lines = text.splitlines(keepends=True)
+    has_h1_envelope = any(
+        _H1_ENVELOPE_RE.match(raw.rstrip("\n").rstrip("\r")) for raw in lines
+    )
+    if has_h1_envelope:
+        return parse_plan(text)
+
+    h2_indices: list[tuple[int, re.Match[str]]] = []
+    for i, raw in enumerate(lines):
+        line = raw.rstrip("\n").rstrip("\r")
+        h2_match = _H2_PHASE_HEADER_RE.match(line)
+        if h2_match is not None:
+            h2_indices.append((i, h2_match))
+
+    if not h2_indices:
+        return Plan(project_name="", preamble=text, units=())
+
+    preamble_text = "".join(lines[: h2_indices[0][0]])
+    units: list[PhaseUnit] = []
+    for slot, (h2_idx, h2_match) in enumerate(h2_indices):
+        end_idx = (
+            h2_indices[slot + 1][0]
+            if slot + 1 < len(h2_indices)
+            else len(lines)
+        )
+        body = "".join(lines[h2_idx + 1 : end_idx])
+        if body and not body.endswith("\n"):
+            body = body + "\n"
+        title = h2_match.group("title")
+        units.append(
+            PhaseUnit(
+                h1_envelope=title,
+                phase_id=h2_match.group("id"),
+                h2_title=title,
+                body=body,
+            )
+        )
+
+    return Plan(project_name="", preamble=preamble_text, units=tuple(units))
+
+
 # ---------------------------------------------------------------------
 # Renderer
 # ---------------------------------------------------------------------
@@ -571,6 +624,7 @@ __all__ = [
     "PhaseUnit",
     "StructuralValidationError",
     "parse_plan",
+    "parse_synthesized_plan_fragment",
     "render",
     "sanitize_plan_artifact",
     "units_by_id",

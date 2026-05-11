@@ -804,6 +804,65 @@ class TestReauthorPlan:
         assert ledger_slice[1] == result.lifecycle_event_ids[0]
         assert plan_reauthored_ev.payload["trigger_event_id"] == crossing_id
 
+    def test_reauthor_accepts_bare_h2_synth_fragment(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir, plan_phases=["phase_001", "phase_002"]
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(plan_path, ["phase_001", "phase_002"])
+
+        new_plan = (
+            "The council rationale can precede the changed units.\n"
+            "\n"
+            "## Phase phase_006: Adopted CLI Surface\n"
+            "\n"
+            "- [ ] pin parser smoke\n"
+            "\n"
+            "## Phase phase_007: Runtime Loop\n"
+            "\n"
+            "- [ ] wire observer\n"
+        )
+        verdict = {
+            "decision": "accept",
+            "feedback": "ok",
+            "agreements": [],
+            "disagreements": [],
+            "rejected_options": [],
+            "lineage": {
+                "phases": [
+                    {"id": "phase_006", "action": "new"},
+                    {
+                        "id": "phase_007",
+                        "action": "supersede",
+                        "from": ["phase_002"],
+                    },
+                ]
+            },
+        }
+        self._patch_council(monkeypatch, new_plan, verdict)
+
+        from duplo.reauthor import reauthor_plan
+
+        reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        assembled = plan_path.read_text()
+        assert "## Phase phase_001: phase_001 title" in assembled
+        assert "## Phase phase_006: Adopted CLI Surface" in assembled
+        assert "## Phase phase_007: Runtime Loop" in assembled
+        assert "# proj — Phase 1: Runtime Loop" in assembled
+        assert "# proj — Phase 2: Adopted CLI Surface" in assembled
+        assert "The council rationale" not in assembled
+
     def test_abandoned_emits_phase_abandoned_with_synth_reason(
         self,
         tmp_path: Path,
@@ -2740,3 +2799,267 @@ class TestPlanArtifactError:
         import duplo.reauthor as reauthor_mod
 
         assert "PlanArtifactError" in reauthor_mod.__all__
+
+
+# ---------------------------------------------------------------------
+# Bounded retry with validator feedback
+# ---------------------------------------------------------------------
+
+
+class TestLineageFeedbackFormatter:
+    """Unit-level coverage of _format_lineage_feedback_for_retry.
+
+    The formatter renders the retry-feedback block that gets injected
+    into the next council brief. It must surface ALL violations
+    (not just the first), plus the whitelist and floor explicitly so
+    the model is reminded of the constraint regardless of which
+    specific violation tripped this attempt.
+    """
+
+    def test_lists_all_violations(self) -> None:
+        from duplo.reauthor import _format_lineage_feedback_for_retry
+
+        err = LineageValidationError(
+            "structural lineage violations:\n"
+            "  - new phase id 'phase_006' collides with prior\n"
+            "  - lineage entry 'phase_009' names 'phase_002' in 'from'\n"
+            "  - new phase id 'phase_004' is below the floor"
+        )
+        out = _format_lineage_feedback_for_retry(
+            error=err,
+            prior_plan_ids=["phase_001", "phase_006", "phase_007"],
+            next_new_phase_id_floor="phase_010",
+            attempt=1,
+            max_attempts=2,
+        )
+        assert "new phase id 'phase_006' collides" in out
+        assert "'phase_009' names 'phase_002'" in out
+        assert "'phase_004' is below the floor" in out
+
+    def test_includes_whitelist_and_floor(self) -> None:
+        """The formatter ALWAYS includes the allowed-prior-id
+        whitelist and the floor, regardless of the specific
+        violations. The model needs the constraint surfaced every
+        retry, not just told what failed this time."""
+        from duplo.reauthor import _format_lineage_feedback_for_retry
+
+        err = LineageValidationError(
+            "structural lineage violations:\n"
+            "  - one minimal violation only"
+        )
+        out = _format_lineage_feedback_for_retry(
+            error=err,
+            prior_plan_ids=["phase_001", "phase_008", "phase_006"],
+            next_new_phase_id_floor="phase_011",
+            attempt=1,
+            max_attempts=2,
+        )
+        # Whitelist appears with all ids comma-separated.
+        assert "phase_001" in out
+        assert "phase_008" in out
+        assert "phase_006" in out
+        # Floor appears with the explicit value.
+        assert "phase_011" in out
+        # Wording that surfaces the architectural reason.
+        assert "ledger slice" in out.lower()
+        assert "historical" in out.lower()
+
+    def test_handles_non_structured_error_message(self) -> None:
+        """When the error message isn't the standard 'structural
+        lineage violations:\\n  - ...' shape (e.g., a validate_lineage
+        failure without bullets), the message becomes a single
+        bullet so the model still sees the named cause."""
+        from duplo.reauthor import _format_lineage_feedback_for_retry
+
+        err = LineageValidationError(
+            "lineage.phases has duplicate id 'phase_002b'"
+        )
+        out = _format_lineage_feedback_for_retry(
+            error=err,
+            prior_plan_ids=["phase_001"],
+            next_new_phase_id_floor="phase_002",
+            attempt=1,
+            max_attempts=2,
+        )
+        assert "duplicate id 'phase_002b'" in out
+
+
+@needs_bob_tools
+class TestReauthorBoundedRetry(TestReauthorPlan):
+    """End-to-end retry coverage. Inherits from TestReauthorPlan to
+    reuse the _seed_ledger / _write_old_plan / _patch_council
+    fixture helpers."""
+
+    def test_reauthor_retries_once_on_lineage_validation_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """First synthesizer attempt produces a lineage with an
+        historical 'from' (phase_002 no longer in priors). Runtime
+        rejects via _validate_lineage_structural and retries once
+        with feedback. Second attempt produces valid lineage.
+        Reauthor completes successfully. _invoke_council_for_reauthor
+        was called TWICE; the second call received a
+        previous_attempt_error string naming the violations."""
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir,
+            plan_phases=["phase_001", "phase_006", "phase_007"],
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_006", "phase_007"]
+        )
+
+        from duplo import reauthor
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured.append(dict(kwargs))
+            attempt_num = len(captured)
+            if attempt_num == 1:
+                plan_text = _wrap_synth_plan(
+                    "## Phase phase_010: Refactored\n\n- [ ] x\n"
+                )
+                verdict: dict[str, Any] = {
+                    "decision": "accept",
+                    "feedback": "ok",
+                    "agreements": [],
+                    "disagreements": [],
+                    "rejected_options": [],
+                    "lineage": {
+                        "phases": [
+                            {
+                                "id": "phase_010",
+                                "action": "supersede",
+                                "from": ["phase_002"],  # historical
+                            }
+                        ]
+                    },
+                }
+                return plan_text, verdict
+            plan_text = _wrap_synth_plan(
+                "## Phase phase_010: Refactored from 006\n\n- [ ] y\n"
+            )
+            verdict = {
+                "decision": "accept",
+                "feedback": "ok",
+                "agreements": [],
+                "disagreements": [],
+                "rejected_options": [],
+                "lineage": {
+                    "phases": [
+                        {
+                            "id": "phase_010",
+                            "action": "supersede",
+                            "from": ["phase_006"],
+                        }
+                    ]
+                },
+            }
+            return plan_text, verdict
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        from duplo.reauthor import reauthor_plan
+
+        result = reauthor_plan(
+            plan_path=plan_path,
+            ledger_dir=ledger_dir,
+            crossing_event_id=crossing_id,
+            project_dir=tmp_path,
+        )
+
+        assert len(captured) == 2
+        # First call had no feedback.
+        assert captured[0].get("previous_attempt_error") is None
+        # Second call had feedback that names the historical id and
+        # the whitelist + floor.
+        feedback = captured[1].get("previous_attempt_error")
+        assert isinstance(feedback, str) and feedback
+        assert "phase_002" in feedback
+        assert "phase_001" in feedback
+        assert "phase_006" in feedback
+        assert "phase_007" in feedback
+        # Reauthor succeeded; assembled plan contains phase_010.
+        assert "phase_010" in plan_path.read_text()
+        assert result.plan_reauthored_event_id
+
+    def test_reauthor_fails_closed_after_one_retry(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both attempts raise LineageValidationError (synthesizer
+        keeps emitting bad lineage even with feedback). Reauthor
+        raises after exhausting retries. PLAN.md unchanged. No
+        plan_reauthored / lifecycle events emitted."""
+        from bob_tools.ledger import Storage
+
+        ledger_dir = tmp_path / "ledger"
+        crossing_id, _, _ = self._seed_ledger(
+            ledger_dir,
+            plan_phases=["phase_001", "phase_006", "phase_007"],
+        )
+        plan_path = tmp_path / "PLAN.md"
+        self._write_old_plan(
+            plan_path, ["phase_001", "phase_006", "phase_007"]
+        )
+        original_plan_text = plan_path.read_text()
+
+        from duplo import reauthor
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+            captured.append(dict(kwargs))
+            plan_text = _wrap_synth_plan(
+                "## Phase phase_010: Refactored\n\n- [ ] x\n"
+            )
+            verdict: dict[str, Any] = {
+                "decision": "accept",
+                "feedback": "ok",
+                "agreements": [],
+                "disagreements": [],
+                "rejected_options": [],
+                "lineage": {
+                    "phases": [
+                        {
+                            "id": "phase_010",
+                            "action": "supersede",
+                            "from": ["phase_002"],  # historical, always
+                        }
+                    ]
+                },
+            }
+            return plan_text, verdict
+
+        monkeypatch.setattr(
+            reauthor, "_invoke_council_for_reauthor", fake_invoke
+        )
+
+        events_before = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        with pytest.raises(LineageValidationError):
+            from duplo.reauthor import reauthor_plan
+
+            reauthor_plan(
+                plan_path=plan_path,
+                ledger_dir=ledger_dir,
+                crossing_event_id=crossing_id,
+                project_dir=tmp_path,
+            )
+
+        # Two attempts ran (the retry budget is exhausted).
+        assert len(captured) == 2
+        # Atomicity: PLAN.md unchanged, no new events.
+        assert plan_path.read_text() == original_plan_text
+        events_after = list(
+            Storage(ledger_dir, writer_id="probe").read_all()
+        )
+        assert len(events_after) == len(events_before)
