@@ -278,3 +278,30 @@ or the ledger_slice section indicates no prior phases), use
 phase_001, phase_002, etc. for first-time ids. Every entry in
 `lineage.phases` has action `new`; `lineage.abandoned` is omitted
 or empty.
+
+COMMIT ATTRIBUTION (separate from lineage).
+
+When the triggering crossing is `unattributable_commit`, the
+council is responsible for attributing the commit to its rightful
+phase. Place attribution in the verdict JSON's top-level
+`commit_attributions` array — NEVER on `lineage.phases[]` entries:
+
+  "commit_attributions": [{{
+    "commit_sha": "<short sha from the triggering slice>",
+    "phase_id":   "<id of the phase the commit belongs to>",
+    "rationale":  "<one-line prose explaining the match>"
+  }}]
+
+`lineage.phases[]` entries accept only `id`, `action`, and `from`.
+Adding `attributed_commits`, `status`, or any other field there
+will be rejected by the schema and the run will fail.
+
+Lineage answers "what happened to plan phase identity?". Commit
+attribution answers "which phase should this commit belong to?".
+Separate domains; separate JSON slots. The runtime validates each
+attribution: `commit_sha` must prefix-match an unattributable
+commit in the triggering crossing's slice; `phase_id` must be a
+current prior id or a new id you introduce in this reauthor's
+lineage; `rationale` must be non-empty. The slot is optional —
+when the triggering crossing is not unattributable_commit, omit
+`commit_attributions` or set it to an empty array.

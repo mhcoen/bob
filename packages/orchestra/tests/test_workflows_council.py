@@ -532,6 +532,176 @@ def test_reauthor_schema_keeps_lineage() -> None:
     assert lineage["required"] == ["phases"]
 
 
+# ---------------------------------------------------------------------
+# commit_attributions slot (separate from lineage)
+#
+# Today's incident: synthesizer emitted attributed_commits and status
+# on lineage.phases[3] for crossing 019e16e9-9de8-790c-84e7-5534e42b01bf.
+# additionalProperties:false on lineage.phases[] rejected the verdict
+# with no slot for commit attribution. Fix: top-level
+# commit_attributions array on both reauthor + canonical schemas.
+# ---------------------------------------------------------------------
+
+
+def _reauthor_schema() -> dict[str, Any]:
+    path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "schemas"
+        / "council_synthesis_verdict_reauthor.json"
+    )
+    return json.loads(path.read_text())
+
+
+def _canonical_schema() -> dict[str, Any]:
+    path = (
+        Path(__file__).parent.parent
+        / "orchestra"
+        / "workflows"
+        / "schemas"
+        / "council_synthesis_verdict_canonical.json"
+    )
+    return json.loads(path.read_text())
+
+
+def _base_reauthor_verdict() -> dict[str, Any]:
+    return {
+        "decision": "accept",
+        "feedback": "synthesized",
+        "agreements": ["a"],
+        "disagreements": [],
+        "rejected_options": [],
+        "criteria_compliance": [
+            {"criterion_id": "c1", "observed_value": "ok", "compliant": True}
+        ],
+        "lineage": {
+            "phases": [
+                {"id": "phase_001", "action": "preserve"},
+                {"id": "phase_002", "action": "new"},
+            ]
+        },
+    }
+
+
+def test_reauthor_schema_accepts_commit_attributions_populated() -> None:
+    """The reauthor verdict schema MUST accept verdicts that carry a
+    populated commit_attributions array alongside lineage. This is
+    the happy path the synthesizer needs when the triggering crossing
+    is unattributable_commit.
+    """
+    import jsonschema
+
+    schema = _reauthor_schema()
+    verdict = _base_reauthor_verdict()
+    verdict["commit_attributions"] = [
+        {
+            "commit_sha": "abcdef1234567",
+            "phase_id": "phase_002",
+            "rationale": "commit modifies parser introduced by phase_002",
+        }
+    ]
+    jsonschema.validate(instance=verdict, schema=schema)
+
+
+def test_reauthor_schema_rejects_unknown_fields_on_lineage_phases() -> None:
+    """Regression for crossing 019e16e9 (2026-05-09): synthesizer wrote
+    `attributed_commits` and `status` on lineage.phases[3] and the
+    verdict was rejected. The schema MUST keep additionalProperties:
+    false on lineage.phases[] items so attribution never sneaks back
+    into the lineage slot.
+    """
+    import jsonschema
+
+    schema = _reauthor_schema()
+    verdict = _base_reauthor_verdict()
+    verdict["lineage"]["phases"].append(
+        {
+            "id": "phase_003",
+            "action": "new",
+            "attributed_commits": ["abcdef1"],
+            "status": "complete",
+        }
+    )
+    with pytest.raises(jsonschema.ValidationError) as exc_info:
+        jsonschema.validate(instance=verdict, schema=schema)
+    # additionalProperties violations on lineage.phases[] entries
+    # name the unexpected key in the error message.
+    msg = str(exc_info.value.message).lower()
+    assert "additional properties" in msg or "additionalproperties" in msg
+    assert "attributed_commits" in msg or "status" in msg
+
+
+def test_commit_attributions_items_reject_missing_required_fields() -> None:
+    """Each commit_attributions item MUST carry commit_sha, phase_id,
+    and rationale. Missing any required field is a schema error.
+    """
+    import jsonschema
+
+    schema = _reauthor_schema()
+    verdict = _base_reauthor_verdict()
+    # Missing rationale.
+    verdict["commit_attributions"] = [
+        {"commit_sha": "abcdef1234567", "phase_id": "phase_002"}
+    ]
+    with pytest.raises(jsonschema.ValidationError) as exc_info:
+        jsonschema.validate(instance=verdict, schema=schema)
+    assert "rationale" in str(exc_info.value.message).lower()
+
+
+def test_commit_attributions_items_reject_additional_unknown_properties() -> None:
+    """commit_attributions items use additionalProperties:false; a
+    synthesizer that tries to smuggle a `status` or `attributed_to`
+    field through this slot must be rejected just as on lineage.
+    """
+    import jsonschema
+
+    schema = _reauthor_schema()
+    verdict = _base_reauthor_verdict()
+    verdict["commit_attributions"] = [
+        {
+            "commit_sha": "abcdef1234567",
+            "phase_id": "phase_002",
+            "rationale": "ok",
+            "status": "complete",
+        }
+    ]
+    with pytest.raises(jsonschema.ValidationError) as exc_info:
+        jsonschema.validate(instance=verdict, schema=schema)
+    msg = str(exc_info.value.message).lower()
+    assert "additional properties" in msg or "additionalproperties" in msg
+    assert "status" in msg
+
+
+def test_canonical_schema_accepts_commit_attributions_populated() -> None:
+    """Canonical mode never has prior plan ids but can still encounter
+    unattributable commits; the canonical schema carries the same
+    commit_attributions slot (without lineage) so council_four
+    canonical workflows can attribute commits the same way.
+    """
+    import jsonschema
+
+    schema = _canonical_schema()
+    verdict = {
+        "decision": "accept",
+        "feedback": "fresh authoring",
+        "agreements": ["a"],
+        "disagreements": [],
+        "rejected_options": [],
+        "criteria_compliance": [
+            {"criterion_id": "c1", "observed_value": "ok", "compliant": True}
+        ],
+        "commit_attributions": [
+            {
+                "commit_sha": "abcdef1234567",
+                "phase_id": "phase_001",
+                "rationale": "first phase introduced this file",
+            }
+        ],
+    }
+    jsonschema.validate(instance=verdict, schema=schema)
+
+
 def test_council_synthesizer_canonical_template_specifies_checklist_format() -> None:
     """The canonical synthesizer template MUST instruct McLoop-
     executable output (- [ ] task lines per phase). The Slice D
