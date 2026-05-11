@@ -4,6 +4,14 @@ that all four proposers will read independently. The brief
 normalizes the question so cross-model variance reflects model bias,
 not parser-level differences in how each proposer interpreted prose.
 
+Previous attempt feedback (empty string if this is the first
+attempt; otherwise: the runtime validator rejected a prior
+synthesizer attempt. Surface this verbatim at the TOP of your
+council brief so every proposer and the synthesizer see the named
+constraints before regenerating. The feedback names the allowed
+prior plan ids and the next-available-phase-id floor explicitly):
+{previous_attempt_error}
+
 Current state:
 {state}
 
@@ -22,17 +30,23 @@ decisions that informed the existing plan):
 
 Write a single council brief. Plain prose. Structure:
 
-1. The question, restated crisply.
-2. The current state, summarized for proposers who do not have direct
+1. If previous_attempt_error is non-empty: place the feedback at the
+   TOP of the brief verbatim, under a clear "RETRY ATTEMPT — runtime
+   validator rejected the previous synthesizer output" heading. Do
+   not paraphrase, summarize, or downweight the violations or the
+   allowed-prior-id list; the proposers and synthesizer must see the
+   exact constraints verbatim before regenerating.
+2. The question, restated crisply.
+3. The current state, summarized for proposers who do not have direct
    access to the full state document.
-3. If ledger_slice is non-empty: the execution evidence relevant to
+4. If ledger_slice is non-empty: the execution evidence relevant to
    this question. State whatever decisions or threshold crossings the
    proposers must respect.
-4. If design_context is non-empty: the prior decisions and rejected
+5. If design_context is non-empty: the prior decisions and rejected
    approaches the proposers must NOT independently rediscover.
    Explicitly enumerate which approaches were considered and rejected,
    and why.
-5. If ledger_slice OR design_context is empty: explicitly note that
+6. If ledger_slice OR design_context is empty: explicitly note that
    this is a fresh authoring (no prior execution evidence / no prior
    design decisions to respect).
 

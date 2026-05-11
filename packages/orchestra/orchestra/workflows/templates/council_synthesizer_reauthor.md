@@ -147,24 +147,38 @@ no embedded lineage metadata. Plan markdown stays simple.
 
 Phase ids are runtime-supplied, not synthesizer-chosen.
 
-The state block prefix lists the prior plan's phase ids
-verbatim and supplies an explicit "Next available phase id"
-value. Use those values directly:
+ALLOWED PRIOR PLAN IDS (whitelist; you MUST select lineage.from[]
+entries from this list only):
+
+The state block prefix lists the current prior plan's phase ids
+verbatim under "Phase ids in the prior plan:". That list is the
+hard whitelist. Any value in lineage.from[] (and any preserve /
+abandoned id) MUST be in that list. Any value NOT in that list
+will be rejected by the runtime validator and the run will fail
+closed.
+
+The ledger slice you are given as context may reference historical
+phase ids that are NO LONGER current — phases that were superseded
+or merged or abandoned by earlier reauthor cycles in the same
+session. Those ids appear in past lifecycle events for causal
+context ONLY; they are NOT valid 'from' targets. Do not pull ids
+from the ledger slice into lineage.from[]. The state block's
+prior list is authoritative; the ledger slice is narrative.
 
   - For preserve / supersede.from / split.from / merge.from /
     abandoned, the id MUST be one of the prior plan ids listed
-    in the state block. Do NOT invent ancestor ids; the
-    validator rejects unknown 'from' references and treats it
-    as a fail-closed lineage error. If you think a prior phase
-    should be referenced but it is not in the state block's
-    list, the prior plan does not contain it — pick a different
-    ancestor or treat the change as a "new" entry instead.
+    in the state block. Do NOT invent ancestor ids. Do NOT
+    reference historical ids from ledger events. If you think a
+    prior phase should be referenced but it is not in the state
+    block's list, the current plan does not contain it — pick a
+    different ancestor or treat the change as a "new" entry
+    instead.
 
   - For supersede / split / merge / new entry ids (the new ids
-    you introduce), START at the state block's "Next available
-    phase id" and increment from there: next, next+1, next+2,
-    .... NEVER reuse a prior id; the validator rejects
-    collisions. The runtime supplies this value because the
+    you introduce), START at the state block's
+    "Next available phase id" value and increment from there:
+    next, next+1, next+2, .... NEVER reuse a prior id;
+    the validator rejects collisions. The runtime supplies this value because the
     prior plan may have gaps from earlier reauthor runs that
     consumed intermediate ids — sequential guessing from the
     smallest visible prior id will collide with the holes. Use
@@ -174,7 +188,7 @@ This is the same discipline canonical mode applies via
 required_phase_id: protocol metadata is owned by the runtime,
 not the model. The state block is your source of truth for
 phase identifiers; do not compute them from inspection of the
-plan markdown.
+plan markdown or the ledger slice.
 
 Preserve-by-default: the runtime owns the deterministic envelope.
 
