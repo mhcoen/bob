@@ -85,6 +85,29 @@ class PlanArtifactError(ReauthorError):
     """
 
 
+class CommitAttributionError(ReauthorError):
+    """Raised when the synthesizer's verdict.commit_attributions
+    array violates the per-attribution contract.
+
+    Subclass of :class:`ReauthorError`; mcloop's HardStop layer
+    surfaces this as ``commit_attribution_invalid`` (distinct from
+    the generic ``reauthor_failed`` and from
+    ``plan_artifact_invalid``).
+
+    Failure modes covered (errors accumulate, one raise lists all):
+
+      - ``commit_sha`` does not prefix-match any unattributable
+        commit referenced in the triggering crossing's slice. The
+        synthesizer is naming a commit the runtime doesn't expect
+        to attribute.
+      - ``phase_id`` is not in the union of the current prior plan
+        ids and the new ids introduced in this reauthor's lineage.
+        The synthesizer is naming a phase that doesn't exist.
+      - ``rationale`` is empty after strip. The synthesizer must
+        explain the match.
+    """
+
+
 _LEDGER_DIR_DEFAULT_NAME = ".duplo/ledger"
 
 
@@ -364,6 +387,27 @@ def reauthor_plan(
                 (u.phase_id for u in assembled_plan.units),
                 normalized_lineage,
             )
+
+            # Commit-attribution check. Optional in the schema; when
+            # present, every entry must name a known unattributable
+            # commit + a phase that exists in the assembled plan.
+            # Runs after assembly so new_plan_ids includes any new
+            # phases the synthesizer introduced this pass.
+            attributions = (
+                verdict.get("commit_attributions")
+                if isinstance(verdict, dict)
+                else None
+            )
+            if isinstance(attributions, list) and attributions:
+                triggering_commits = _triggering_unattributable_commits(
+                    crossing, events
+                )
+                _validate_commit_attributions(
+                    attributions,
+                    triggering_commits,
+                    prior_ids,
+                    [u.phase_id for u in assembled_plan.units],
+                )
             break
         except LineageValidationError as exc:
             if attempt >= max_attempts:
@@ -452,6 +496,46 @@ def _find_crossing(events: Iterable[Any], crossing_event_id: str) -> Any:
         f"threshold_crossed event {crossing_event_id!r} not found in "
         "ledger"
     )
+
+
+def _triggering_unattributable_commits(
+    crossing: Any, events: Iterable[Any]
+) -> list[str]:
+    """Return the list of full commit SHAs from the unattributable
+    commit_landed events that triggered ``crossing``.
+
+    The crossing's payload carries ``triggering_event_ids``; each
+    such event is looked up in ``events``. For COMMIT_LANDED events
+    whose ``attributed_phase_id`` is None (the unattributable case
+    that fires rule 1), the ``commit`` field is collected.
+
+    When the triggering events aren't commit_landed (e.g., a
+    phase_superseded crossing), the returned list is empty — the
+    synthesizer shouldn't emit ``commit_attributions`` for non-
+    unattributable_commit crossings.
+    """
+    from bob_tools.ledger import EventType
+
+    triggering_ids = (
+        crossing.payload.get("triggering_event_ids") or []
+        if hasattr(crossing, "payload") and isinstance(crossing.payload, dict)
+        else []
+    )
+    if not triggering_ids:
+        return []
+    events_by_id = {ev.event_id: ev for ev in events}
+    out: list[str] = []
+    for trig_id in triggering_ids:
+        trig = events_by_id.get(trig_id)
+        if trig is None or trig.type is not EventType.COMMIT_LANDED:
+            continue
+        payload = getattr(trig, "payload", None) or {}
+        if payload.get("attributed_phase_id") is not None:
+            continue
+        commit = payload.get("commit")
+        if isinstance(commit, str) and commit:
+            out.append(commit)
+    return out
 
 
 def _previous_plan_reauthored_event_id(
@@ -973,6 +1057,108 @@ def _validate_lineage_structural(
         )
 
 
+def _validate_commit_attributions(
+    attributions: list[dict[str, Any]],
+    triggering_unattributable_commits: list[str],
+    prior_plan_ids: list[str],
+    new_plan_ids: list[str],
+) -> None:
+    """Reject ill-formed verdict.commit_attributions entries.
+
+    Schema validation runs upstream (orchestra) and catches shape
+    errors (wrong types, additional properties, etc.). This layer
+    checks the semantic contract:
+
+      - ``commit_sha`` MUST prefix-match an unattributable commit in
+        the triggering crossing's slice. Schema only requires a
+        7-64 char string; the runtime requires it to actually
+        identify a known unattributed commit.
+      - ``phase_id`` MUST be in (prior_plan_ids ∪ new_plan_ids).
+        The synthesizer cannot attribute a commit to a phase that
+        doesn't exist anywhere in the plan.
+      - ``rationale`` MUST be non-empty after strip. Schema requires
+        minLength=1; this re-checks defensively (whitespace-only
+        slips past minLength=1 unless trimmed).
+
+    Errors accumulate; a single :class:`CommitAttributionError`
+    lists every violation so the synthesizer (or the human
+    watching the smoke pipeline) sees the full picture, matching
+    the pattern of :func:`_validate_lineage_structural`.
+    """
+    if not attributions:
+        return
+
+    valid_phase_ids = set(prior_plan_ids) | set(new_plan_ids)
+    triggering_repr = (
+        ", ".join(triggering_unattributable_commits)
+        if triggering_unattributable_commits
+        else "(none)"
+    )
+    valid_phase_repr = (
+        ", ".join(sorted(valid_phase_ids))
+        if valid_phase_ids
+        else "(none)"
+    )
+
+    errors: list[str] = []
+    for index, entry in enumerate(attributions):
+        if not isinstance(entry, dict):
+            errors.append(
+                f"commit_attributions[{index}] is not an object"
+            )
+            continue
+        sha = entry.get("commit_sha")
+        pid = entry.get("phase_id")
+        rationale = entry.get("rationale")
+
+        if not isinstance(sha, str) or not sha:
+            errors.append(
+                f"commit_attributions[{index}].commit_sha is missing or "
+                "empty"
+            )
+        elif not any(
+            isinstance(c, str)
+            and c
+            and (c.startswith(sha) or sha.startswith(c))
+            for c in triggering_unattributable_commits
+        ):
+            errors.append(
+                f"commit_attributions[{index}].commit_sha={sha!r} does "
+                "not prefix-match any unattributable commit in the "
+                f"triggering crossing's slice; known commits: "
+                f"[{triggering_repr}]"
+            )
+
+        if not isinstance(pid, str) or not pid:
+            errors.append(
+                f"commit_attributions[{index}].phase_id is missing or "
+                "empty"
+            )
+        elif pid not in valid_phase_ids:
+            errors.append(
+                f"commit_attributions[{index}].phase_id={pid!r} is not "
+                "in the union of prior plan ids and new ids "
+                f"introduced in this reauthor's lineage; valid phase "
+                f"ids: [{valid_phase_repr}]"
+            )
+
+        if (
+            not isinstance(rationale, str)
+            or not rationale.strip()
+        ):
+            errors.append(
+                f"commit_attributions[{index}].rationale must be a "
+                "non-empty string explaining the attribution; got "
+                f"{rationale!r}"
+            )
+
+    if errors:
+        raise CommitAttributionError(
+            "commit_attribution violations:\n  - "
+            + "\n  - ".join(errors)
+        )
+
+
 def _format_lineage_feedback_for_retry(
     *,
     error: LineageValidationError,
@@ -1464,6 +1650,7 @@ def _plan_sha256(text: str) -> str:
 
 
 __all__ = [
+    "CommitAttributionError",
     "LineageValidationError",
     "PlanArtifactError",
     "ReauthorError",

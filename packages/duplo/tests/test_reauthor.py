@@ -3063,3 +3063,181 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             Storage(ledger_dir, writer_id="probe").read_all()
         )
         assert len(events_after) == len(events_before)
+
+
+# ---------------------------------------------------------------------
+# commit_attributions validator (Fix 1)
+# ---------------------------------------------------------------------
+
+
+class TestCommitAttributionsValidator:
+    """Unit-level coverage of _validate_commit_attributions.
+
+    Schema validation runs upstream (orchestra) and catches shape
+    errors. This validator enforces the semantic contract: every
+    commit_sha must prefix-match an unattributable commit in the
+    triggering crossing's slice; every phase_id must be in the
+    union of prior and new ids; rationale must be non-empty.
+    """
+
+    def test_accepts_valid_attribution(self) -> None:
+        from duplo.reauthor import _validate_commit_attributions
+
+        # No raise.
+        _validate_commit_attributions(
+            attributions=[
+                {
+                    "commit_sha": "abc1234",
+                    "phase_id": "phase_004",
+                    "rationale": "touches files added in phase_004",
+                }
+            ],
+            triggering_unattributable_commits=[
+                "abc1234def5678901234567890abcdef"
+            ],
+            prior_plan_ids=["phase_001", "phase_004"],
+            new_plan_ids=["phase_005"],
+        )
+
+    def test_rejects_unknown_commit_sha(self) -> None:
+        from duplo.reauthor import (
+            CommitAttributionError,
+            _validate_commit_attributions,
+        )
+
+        with pytest.raises(CommitAttributionError) as exc_info:
+            _validate_commit_attributions(
+                attributions=[
+                    {
+                        "commit_sha": "deadbee",
+                        "phase_id": "phase_004",
+                        "rationale": "x",
+                    }
+                ],
+                triggering_unattributable_commits=[
+                    "abc1234def5678901234567890abcdef"
+                ],
+                prior_plan_ids=["phase_001", "phase_004"],
+                new_plan_ids=[],
+            )
+        msg = str(exc_info.value)
+        assert "deadbee" in msg
+        assert "abc1234def" in msg  # known commit list named
+
+    def test_rejects_unknown_phase_id(self) -> None:
+        from duplo.reauthor import (
+            CommitAttributionError,
+            _validate_commit_attributions,
+        )
+
+        with pytest.raises(CommitAttributionError) as exc_info:
+            _validate_commit_attributions(
+                attributions=[
+                    {
+                        "commit_sha": "abc1234",
+                        "phase_id": "phase_999",
+                        "rationale": "x",
+                    }
+                ],
+                triggering_unattributable_commits=["abc1234def"],
+                prior_plan_ids=["phase_001"],
+                new_plan_ids=["phase_002"],
+            )
+        msg = str(exc_info.value)
+        assert "phase_999" in msg
+        assert "phase_001" in msg  # whitelist named
+        assert "phase_002" in msg
+
+    def test_rejects_empty_rationale(self) -> None:
+        from duplo.reauthor import (
+            CommitAttributionError,
+            _validate_commit_attributions,
+        )
+
+        with pytest.raises(CommitAttributionError, match="rationale"):
+            _validate_commit_attributions(
+                attributions=[
+                    {
+                        "commit_sha": "abc1234",
+                        "phase_id": "phase_001",
+                        "rationale": "   ",  # whitespace-only
+                    }
+                ],
+                triggering_unattributable_commits=["abc1234def"],
+                prior_plan_ids=["phase_001"],
+                new_plan_ids=[],
+            )
+
+    def test_accumulates_violations(self) -> None:
+        """All errors surface in one raise so the synthesizer or a
+        human debugger sees the full picture, matching the pattern
+        of _validate_lineage_structural."""
+        from duplo.reauthor import (
+            CommitAttributionError,
+            _validate_commit_attributions,
+        )
+
+        with pytest.raises(CommitAttributionError) as exc_info:
+            _validate_commit_attributions(
+                attributions=[
+                    {
+                        "commit_sha": "deadbee",  # unknown commit
+                        "phase_id": "phase_999",  # unknown phase
+                        "rationale": "",  # empty
+                    }
+                ],
+                triggering_unattributable_commits=["abc1234def"],
+                prior_plan_ids=["phase_001"],
+                new_plan_ids=[],
+            )
+        msg = str(exc_info.value)
+        assert "deadbee" in msg
+        assert "phase_999" in msg
+        assert "rationale" in msg
+
+    def test_empty_attributions_is_noop(self) -> None:
+        """An empty or missing commit_attributions array is a
+        no-op — the synthesizer doesn't have to emit attributions
+        unless the triggering crossing is unattributable_commit."""
+        from duplo.reauthor import _validate_commit_attributions
+
+        _validate_commit_attributions(
+            attributions=[],
+            triggering_unattributable_commits=[],
+            prior_plan_ids=["phase_001"],
+            new_plan_ids=[],
+        )
+
+    def test_prefix_match_short_sha_against_long_sha(self) -> None:
+        """The schema allows 7-64 char commit_sha. Most synthesizers
+        will pick the short form (first 7 chars). The validator
+        accepts prefix match in either direction so the synthesizer
+        can use whatever the ledger slice happens to show."""
+        from duplo.reauthor import _validate_commit_attributions
+
+        # No raise — abc1234 (7 chars) prefix-matches the full sha.
+        _validate_commit_attributions(
+            attributions=[
+                {
+                    "commit_sha": "abc1234",
+                    "phase_id": "phase_001",
+                    "rationale": "ok",
+                }
+            ],
+            triggering_unattributable_commits=[
+                "abc1234def5678901234567890abcdef0123"
+            ],
+            prior_plan_ids=["phase_001"],
+            new_plan_ids=[],
+        )
+
+    def test_is_exported(self) -> None:
+        """CommitAttributionError is in __all__ so static analysis
+        and public-API consumers can find it without resorting to
+        private-name imports."""
+        import duplo.reauthor as reauthor_mod
+
+        assert "CommitAttributionError" in reauthor_mod.__all__
+        from duplo.reauthor import CommitAttributionError, ReauthorError
+
+        assert issubclass(CommitAttributionError, ReauthorError)
