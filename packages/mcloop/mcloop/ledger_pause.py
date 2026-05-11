@@ -360,6 +360,22 @@ def auto_reauthor(
         class _CommitAttributionError(Exception):  # type: ignore[no-redef]
             """Sentinel for older duplo installs that lack CommitAttributionError."""
 
+    # SchemaValidationError is the same shape: duplo-side subclass
+    # of ReauthorError, surfaced as schema_validation_invalid when
+    # the synthesizer's verdict was rejected by orchestra's schema
+    # validator (additional_properties, missing_required,
+    # enum_mismatch, malformed_array, or json_parse). The error
+    # carries a classification.primary kind we include in the detail
+    # surface so the operator sees the named failure mode without
+    # reading the audit log.
+    try:
+        from duplo.reauthor import (
+            SchemaValidationError as _SchemaValidationError,
+        )
+    except ImportError:
+        class _SchemaValidationError(Exception):  # type: ignore[no-redef]
+            """Sentinel for older duplo installs that lack SchemaValidationError."""
+
     # Honor decision.recommended_action. Phase-scoped recommendations
     # MUST NOT be silently widened to plan-wide synthesis; that
     # amplifies a single phase change into a council pass over every
@@ -435,6 +451,29 @@ def auto_reauthor(
                 f"commit_attributions: {exc}. PLAN.md is unchanged; "
                 f"the threshold crossing ({decision.crossing_event_id}) "
                 "is on the ledger."
+            ),
+        ) from exc
+    except _SchemaValidationError as exc:
+        # MUST be caught before the generic ReauthorError handler
+        # below, since SchemaValidationError is a subclass of
+        # ReauthorError. Orchestra rejected the synthesizer's verdict
+        # at schema validation and duplo's bounded retry was unable
+        # to rescue the run (the retry budget is shared with lineage
+        # validation; one schema failure and one lineage failure
+        # exhausts the run's allotment). Distinct pause reason names
+        # the primary failure kind so the operator can read the
+        # audit log targeted at the right phase.
+        primary_kind = getattr(
+            getattr(exc, "classification", None), "primary", None
+        )
+        kind_value = getattr(primary_kind, "value", None) or "unknown"
+        raise HardStop(
+            reason="schema_validation_invalid",
+            detail=(
+                f"orchestra rejected the synthesizer's verdict at "
+                f"schema validation (primary_kind={kind_value!r}): "
+                f"{exc}. PLAN.md is unchanged; the threshold crossing "
+                f"({decision.crossing_event_id}) is on the ledger."
             ),
         ) from exc
     except ReauthorError as exc:

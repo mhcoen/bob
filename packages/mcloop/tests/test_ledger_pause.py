@@ -170,6 +170,28 @@ class _FakeCommitAttributionError(_FakeReauthorError):
     reauthor_failed."""
 
 
+class _FakeSchemaValidationError(_FakeReauthorError):
+    """Mirror duplo.reauthor.SchemaValidationError's inheritance
+    shape: subclass of ReauthorError carrying a ``classification``
+    attribute whose ``primary`` has a ``.value`` string. mcloop must
+    catch this before the generic ReauthorError handler, otherwise
+    the more-specific schema_validation_invalid pause reason is lost
+    to reauthor_failed."""
+
+    def __init__(self, message: str, *, classification: Any) -> None:
+        super().__init__(message)
+        self.classification = classification
+
+
+class _FakeClassification:
+    """Minimal stand-in for duplo's SchemaClassification. The mcloop
+    handler reads classification.primary.value only; this mirrors
+    that contract without pulling duplo into the test imports."""
+
+    def __init__(self, primary_value: str) -> None:
+        self.primary = type("Kind", (), {"value": primary_value})()
+
+
 @needs_bob_tools
 class TestAutoReauthorFailureModes:
     def _decision(self) -> PauseDecision:
@@ -439,6 +461,85 @@ class TestAutoReauthorFailureModes:
         fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
         fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
         # NO CommitAttributionError on this fake module.
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakeReauthorError("plain reauthor failure")
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        assert exc_info.value.reason == "reauthor_failed"
+
+    def test_schema_validation_error_hard_stops_with_distinct_reason(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A duplo.reauthor.SchemaValidationError must surface as a
+        HardStop with reason 'schema_validation_invalid', distinct
+        from 'reauthor_failed', 'plan_artifact_invalid', and
+        'commit_attribution_invalid'. The handler MUST match the
+        subclass before the generic ReauthorError handler. The
+        detail string MUST include the primary classification kind
+        so the operator sees which schema rule failed without
+        reading the audit log."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        fake_mod.PlanArtifactError = _FakePlanArtifactError  # type: ignore[attr-defined]
+        fake_mod.CommitAttributionError = _FakeCommitAttributionError  # type: ignore[attr-defined]
+        fake_mod.SchemaValidationError = _FakeSchemaValidationError  # type: ignore[attr-defined]
+
+        def _fake_reauthor_plan(**kwargs: Any) -> Any:
+            raise _FakeSchemaValidationError(
+                "council_four_reauthor terminated at schema validation "
+                "(primary_kind='additional_properties'); see audit at ...",
+                classification=_FakeClassification("additional_properties"),
+            )
+
+        fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
+        sys.modules["duplo"] = types.ModuleType("duplo")
+        sys.modules["duplo.reauthor"] = fake_mod
+
+        with pytest.raises(HardStop) as exc_info:
+            ledger_pause.auto_reauthor(
+                decision=self._decision(),
+                plan_path=tmp_path / "PLAN.md",
+                ledger_dir=tmp_path / "ledger",
+                project_dir=tmp_path,
+            )
+        assert exc_info.value.reason == "schema_validation_invalid"
+        assert "additional_properties" in exc_info.value.detail
+
+    def test_older_duplo_without_schema_validation_error_falls_back(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Older duplo installations don't export
+        SchemaValidationError. mcloop must still import cleanly and
+        treat any plain ReauthorError as 'reauthor_failed'. Pins
+        the guarded import for SchemaValidationError specifically."""
+        import sys
+        import types
+
+        from mcloop import ledger_pause
+
+        fake_mod = types.ModuleType("duplo.reauthor")
+        fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
+        fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
+        # NO SchemaValidationError on this fake module.
 
         def _fake_reauthor_plan(**kwargs: Any) -> Any:
             raise _FakeReauthorError("plain reauthor failure")
