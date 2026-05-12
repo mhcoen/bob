@@ -567,8 +567,12 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
             patch("duplo.pipeline.generate_phase_plan", side_effect=fake_generate) as mock_gen,
             patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
-            # Must not propagate the ClaudeCliError out of main().
-            main()
+            # Partial saves now exit with code 75 so callers can branch
+            # on resumability; the original ClaudeCliError must still not
+            # propagate.
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 75
 
         # Third call raised, so generate_phase_plan ran three times total.
         assert mock_gen.call_count == 3
@@ -580,9 +584,11 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
         out = capsys.readouterr().out
         # Failure message reports the partial save count.
         assert "plan generation failed after retries" in out
-        assert "2 of 3 phases saved to PLAN.md" in out
-        # Closing summary reports the actual saved count, not the total.
+        assert "2 of 3 phases on disk" in out
+        # Closing summary reports the actual saved count, not the total,
+        # and points the user at the resume path.
         assert "Plan ready for 2 of 3 phases." in out
+        assert "Re-run duplo to continue generation." in out
 
     def test_claude_cli_error_on_first_phase_reports_zero_saved(
         self, capsys, tmp_path, monkeypatch
@@ -619,8 +625,11 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
             patch("duplo.pipeline.generate_phase_plan", side_effect=fake_generate) as mock_gen,
             patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md") as mock_save,
         ):
-            # Must not propagate the ClaudeCliError out of main().
-            main()
+            # Partial saves (including zero saved) now exit with code 75;
+            # the original ClaudeCliError must still not propagate.
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 75
 
         # First call raised, and the loop broke before a second call.
         assert mock_gen.call_count == 1
@@ -629,8 +638,9 @@ class TestSubsequentRunPhaseLoopClaudeCliError:
 
         out = capsys.readouterr().out
         assert "plan generation failed after retries" in out
-        assert "0 of 2 phases saved to PLAN.md" in out
+        assert "0 of 2 phases on disk" in out
         assert "Plan ready for 0 of 2 phases." in out
+        assert "Re-run duplo to continue generation." in out
 
 
 class TestSubsequentRunPhaseLoopPriorFiles:

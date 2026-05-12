@@ -1298,7 +1298,7 @@ def _run_phase_generation_loop(
         except ClaudeCliError as exc:
             record_failure(
                 "pipeline:phase_generation",
-                "claude_cli",
+                "llm",
                 f"Phase {phase_number_i} plan generation failed after retries.",
                 context={
                     "phase_number": phase_number_i,
@@ -1816,88 +1816,28 @@ def _subsequent_run() -> None:
         )
         save_plan(header_content)
 
-    # Generate a plan for every phase in the roadmap and append each
-    # result to PLAN.md. mcloop will consume the phases in order.
-    total_phases = len(roadmap)
-    saved_count = 0
-    # Files the LLM has told mcloop to create in phases we have already
-    # generated this run. Passed into the next generate_phase_plan() call
-    # so later phases build on those files rather than recreating them.
-    prior_phases_files: list[str] = []
-    for idx, phase_dict in enumerate(roadmap):
-        if phases_completed == 0:
-            # First run: honour the roadmap's own phase numbers so the
-            # scaffold plan is labelled "Phase 0".
-            phase_number_i = phase_dict.get("phase", idx)
-        else:
-            # Subsequent run: continue numbering from the history so
-            # new plans never collide with already-completed phases.
-            phase_number_i = phases_completed + idx + 1
-        phase_title = phase_dict.get("title", "")
-        phase_label_i = (
-            f"Phase {phase_number_i}: {phase_title}" if phase_title else f"Phase {phase_number_i}"
-        )
-        print(f"Generating {phase_label_i} PLAN.md \u2026")
-        try:
-            content = generate_phase_plan(
-                source_url,
-                features,
-                _primary_prefs(preferences),
-                phase=phase_dict,
-                project_name=app_name,
-                phase_number=phase_number_i,
-                spec_text=spec_prompt,
-                platform_addendum=platform_addendum,
-                prior_phases_files=list(prior_phases_files),
-            )
-            # Verification tasks describe product-level behavior, so they
-            # are appended to the LAST phase: that is the only point at
-            # which all features are implemented and the cases (e.g.
-            # "type 1+1, expect 2") could plausibly pass. Appending them
-            # to Phase 0 (the scaffold) guarantees failure.
-            if idx == total_phases - 1:
-                frame_descs = load_frame_descriptions()
-                if frame_descs:
-                    print("Extracting verification cases from demo video \u2026")
-                    vcases = extract_verification_cases(frame_descs)
-                    if vcases:
-                        vtasks = format_verification_tasks(vcases)
-                        content = content.rstrip() + "\n" + vtasks
-                        print(f"  {len(vcases)} verification case(s) added.")
-                spec_vtasks = ""
-                if spec:
-                    spec_vtasks = format_contracts_as_verification(spec)
-                if spec_vtasks:
-                    # spec_vtasks is non-empty only when format_contracts
-                    # was called with a non-None spec.
-                    assert spec is not None
-                    content = content.rstrip() + "\n" + spec_vtasks
-                    print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
-            saved_plan_path = save_plan(content)
-            # Accumulate files introduced by this phase so the next
-            # generate_phase_plan() call can instruct the LLM not to
-            # recreate or redefine them.
-            prior_phases_files.extend(_extract_created_files(content))
-        except ClaudeCliError:
-            # Previously this crashed the whole pipeline and any phases
-            # already written to PLAN.md were reported as if lost. Earlier
-            # save_plan() calls persisted to disk, so stop cleanly and
-            # report how many phases made it. Use saved_count (not idx)
-            # so the count reflects phases actually persisted even if the
-            # loop structure changes later.
-            print(
-                f"Phase {phase_number_i}: plan generation failed after retries. "
-                f"{saved_count} of {total_phases} phases saved to PLAN.md."
-            )
-            break
-        saved_count += 1
-        print(f"{phase_label_i} plan saved to {saved_plan_path}")
-
-    if saved_count == total_phases:
+    saved_this_call, total_phases = _run_phase_generation_loop(
+        roadmap=roadmap,
+        start_idx=0,
+        phases_completed=phases_completed,
+        source_url=source_url,
+        features=features,
+        preferences=preferences,
+        spec=spec,
+        spec_prompt=spec_prompt,
+        platform_addendum=platform_addendum,
+        prior_phases_files=[],
+        project_name=app_name,
+    )
+    if saved_this_call == total_phases:
         print(f"\nPlan ready for all {total_phases} phases.")
+        print("Run mcloop to start building.")
     else:
-        print(f"\nPlan ready for {saved_count} of {total_phases} phases.")
-    print("Run mcloop to start building.")
+        print(
+            f"\nPlan ready for {saved_this_call} of {total_phases} phases. "
+            f"Re-run duplo to continue generation."
+        )
+        sys.exit(75)
 
 
 def _partition_features(
