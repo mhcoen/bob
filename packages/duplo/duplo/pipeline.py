@@ -1205,6 +1205,124 @@ def _extract_created_files(content: str) -> list[str]:
     return _PHASE_CREATED_FILE_RE.findall(content)
 
 
+def _observed_phase_count(plan_text: str) -> int:
+    """Count canonical-envelope H1 phase headings in *plan_text*.
+
+    Uses ``planner._PHASE_H1_VALIDATE_RE`` so an observed heading must
+    match the strict envelope shape ``# <project> -- Phase N: <title>``
+    that ``_ensure_h1_heading`` renders. Prose H1s like
+    ``# Background: Phase 1 introduced filtering`` are excluded by
+    construction (the validate regex anchors on the em-dash separator
+    and the "Phase N" prefix).
+    """
+    from duplo import planner
+    return sum(
+        1
+        for line in plan_text.splitlines()
+        if planner._PHASE_H1_VALIDATE_RE.match(line)
+    )
+
+
+def _run_phase_generation_loop(
+    *,
+    roadmap: list[dict],
+    start_idx: int,
+    phases_completed: int,
+    source_url: str,
+    features: list,
+    preferences: list,
+    spec,
+    spec_prompt: str,
+    platform_addendum: str,
+    prior_phases_files: list[str],
+    project_name: str,
+) -> tuple[int, int]:
+    """Generate phase plans for ``roadmap[start_idx:]`` and append each
+    to PLAN.md.
+
+    Returns ``(saved_this_call, total_phases)``. ``saved_this_call``
+    counts ONLY phases written by this invocation (not phases already
+    on disk before ``start_idx``). On ClaudeCliError the loop stops
+    cleanly and returns the count written so far; already-saved phases
+    on disk are untouched.
+    """
+    from duplo.claude_cli import _TIMEOUT_SECONDS
+    total_phases = len(roadmap)
+    saved_count = 0
+    for idx in range(start_idx, total_phases):
+        phase_dict = roadmap[idx]
+        if phases_completed == 0:
+            phase_number_i = phase_dict.get("phase", idx)
+        else:
+            phase_number_i = phases_completed + idx + 1
+        phase_title = phase_dict.get("title", "")
+        phase_label_i = (
+            f"Phase {phase_number_i}: {phase_title}"
+            if phase_title
+            else f"Phase {phase_number_i}"
+        )
+        print(f"Generating {phase_label_i} PLAN.md …")
+        try:
+            content = generate_phase_plan(
+                source_url,
+                features,
+                _primary_prefs(preferences),
+                phase=phase_dict,
+                project_name=project_name,
+                phase_number=phase_number_i,
+                spec_text=spec_prompt,
+                platform_addendum=platform_addendum,
+                prior_phases_files=list(prior_phases_files),
+            )
+            if idx == total_phases - 1:
+                frame_descs = load_frame_descriptions()
+                if frame_descs:
+                    print("Extracting verification cases from demo video …")
+                    vcases = extract_verification_cases(frame_descs)
+                    if vcases:
+                        vtasks = format_verification_tasks(vcases)
+                        content = content.rstrip() + "\n" + vtasks
+                        print(f"  {len(vcases)} verification case(s) added.")
+                spec_vtasks = ""
+                if spec:
+                    spec_vtasks = format_contracts_as_verification(spec)
+                if spec_vtasks:
+                    assert spec is not None
+                    content = content.rstrip() + "\n" + spec_vtasks
+                    print(
+                        f"  {len(spec.behavior_contracts)} spec "
+                        f"verification case(s) added."
+                    )
+            saved_plan_path = save_plan(content)
+            prior_phases_files.extend(_extract_created_files(content))
+        except ClaudeCliError as exc:
+            record_failure(
+                "pipeline:phase_generation",
+                "claude_cli",
+                f"Phase {phase_number_i} plan generation failed after retries.",
+                context={
+                    "phase_number": phase_number_i,
+                    "phases_saved_this_call": saved_count,
+                    "phases_already_on_disk": start_idx,
+                    "total_phases": total_phases,
+                    "claude_cli_error": str(exc),
+                    "claude_cli_timeout_seconds": _TIMEOUT_SECONDS,
+                },
+            )
+            print(
+                f"Phase {phase_number_i}: plan generation failed "
+                f"after retries. {start_idx + saved_count} of "
+                f"{total_phases} phases on disk."
+            )
+            print(f"  claude CLI error: {exc}")
+            print(f"  (claude CLI per-call timeout: {_TIMEOUT_SECONDS}s)")
+            print("  To resume, re-run: duplo")
+            return saved_count, total_phases
+        saved_count += 1
+        print(f"{phase_label_i} plan saved to {saved_plan_path}")
+    return saved_count, total_phases
+
+
 def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 
