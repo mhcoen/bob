@@ -239,7 +239,11 @@ class TestSubsequentRunResume:
 
     def test_skips_plan_generation_when_plan_exists(self, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        (tmp_path / "PLAN.md").write_text("# Phase 0: Core\n", encoding="utf-8")
+        # Canonical envelope so the resume branch sees observed == roadmap
+        # length and does not regenerate.
+        (tmp_path / "PLAN.md").write_text(
+            "# Stub — Phase 0: Core\n", encoding="utf-8"
+        )
         monkeypatch.chdir(tmp_path)
 
         with patch("duplo.pipeline.generate_phase_plan") as mock_gen:
@@ -250,7 +254,12 @@ class TestSubsequentRunResume:
 
     def test_incomplete_plan_prints_run_mcloop(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        (tmp_path / "PLAN.md").write_text("# Phase 0\n- [ ] Task\n", encoding="utf-8")
+        # Canonical envelope so observed == roadmap length; this exercises
+        # the "PLAN.md complete for current cycle but tasks unchecked"
+        # branch, not the new partial-write resume branch.
+        (tmp_path / "PLAN.md").write_text(
+            "# Stub — Phase 0: Core\n- [ ] Task\n", encoding="utf-8"
+        )
         monkeypatch.chdir(tmp_path)
 
         main()
@@ -4710,7 +4719,15 @@ class TestPhase2NotStartedRunDuplo:
         ],
     }
 
+    # PLAN.md must contain one canonical envelope per roadmap entry so
+    # the new State 2 resume branch sees observed == len(roadmap) and
+    # falls through to the "Run mcloop" path under test. The Phase 1
+    # envelope carries no tasks because current_phase=1 makes
+    # _plan_is_complete inspect that section; with no tasks present it
+    # returns False, keeping the dispatch on State 2.
     _PHASE2_PLAN = (
+        "# TestApp — Phase 1: Core\n\n"
+        "(completed earlier; recorded in history)\n\n"
         "# TestApp — Phase 2: Search & Export\n\n"
         '- [ ] Implement search [feat: "Search"]\n'
         '- [ ] Implement export [feat: "Export"]\n'

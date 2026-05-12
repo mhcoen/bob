@@ -1620,11 +1620,89 @@ def _subsequent_run() -> None:
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
         _print_feature_status(data)
 
-    # State 2: PLAN.md incomplete -> tell user to continue.
+    # State 2: PLAN.md exists. Two sub-cases:
+    #   (a) Roadmap is fully written to PLAN.md -> unchecked tasks
+    #       belong to mcloop. Tell the user to run mcloop.
+    #   (b) Roadmap has unwritten phases -> generation was interrupted
+    #       between phases on a previous duplo run; resume from the
+    #       first unwritten index.
     elif plan_path.exists():
+        plan_text = plan_path.read_text(encoding="utf-8")
+        roadmap = data.get("roadmap", [])
+        observed = _observed_phase_count(plan_text)
+
+        if roadmap and observed < len(roadmap):
+            resume_phases_completed = len(data.get("phases", []))
+            resume_prior_files = _extract_created_files(plan_text)
+
+            resume_source_url = (
+                _source_url_from_spec(spec) or data.get("source_url", "")
+            )
+            resume_features = [
+                _feature_from_dict(f) for f in data.get("features", [])
+            ]
+            resume_preferences = _load_preferences(data, spec)
+            resume_profiles = _resolve_platform_profiles(resume_preferences)
+            _announce_profiles(resume_profiles)
+
+            scaffold_notice = ""
+            if resume_phases_completed == 0 and resume_profiles:
+                written = write_scaffold(
+                    resume_profiles, app_name, target_dir=Path.cwd()
+                )
+                scaffold_notice = format_scaffold_notice(
+                    written, target_dir=Path.cwd()
+                )
+            local_md_content = _read_local_md(Path.cwd())
+            local_overrides = format_local_overrides(local_md_content)
+            if resume_profiles:
+                write_claude_md(
+                    resume_profiles,
+                    resume_preferences,
+                    app_name,
+                    local_md_content=local_md_content,
+                    target_dir=Path.cwd(),
+                )
+            resume_addendum = (
+                format_planner_system_addendum(resume_profiles)
+                + scaffold_notice
+                + local_overrides
+            )
+
+            print(
+                f"Resuming plan generation: {observed} of "
+                f"{len(roadmap)} phases already saved; continuing "
+                f"from index {observed}."
+            )
+            saved_this_call, total = _run_phase_generation_loop(
+                roadmap=roadmap,
+                start_idx=observed,
+                phases_completed=resume_phases_completed,
+                source_url=resume_source_url,
+                features=resume_features,
+                preferences=resume_preferences,
+                spec=spec,
+                spec_prompt=spec_prompt,
+                platform_addendum=resume_addendum,
+                prior_phases_files=resume_prior_files,
+                project_name=app_name,
+            )
+            all_saved = observed + saved_this_call
+            if all_saved == total:
+                print(f"\nPlan ready for all {total} phases.")
+                print("Run mcloop to start building.")
+                return
+            print(
+                f"\nPlan ready for {all_saved} of {total} phases. "
+                f"Re-run duplo to continue generation."
+            )
+            sys.exit(75)
+
         phase_num, phase_info = get_current_phase()
         phase_label = (
-            f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
+            f"Phase {phase_num}: {phase_info['title']}"
+            if phase_info
+            else f"Phase {phase_num}"
         )
         print(f"{phase_label} has uncompleted tasks in PLAN.md.")
         print("Run mcloop to continue building.")
