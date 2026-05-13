@@ -2173,7 +2173,58 @@ def _parse_args() -> argparse.Namespace:
             "override banner is silenced until the file changes"
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Parent-level loop flags configure the bare-loop action. They
+    # are ignored by every subcommand. Reject them when a subcommand
+    # is present so users don't get silent acceptance of flags that
+    # do nothing.
+    _LOOP_ONLY_FLAGS: dict[str, tuple[str, object]] = {
+        # attr_name: (cli_form, default_value)
+        "dry_run": ("--dry-run", False),
+        "max_retries": ("--max-retries", 3),
+        "model": ("--model", None),
+        "cli": ("--cli", None),
+        "fallback_model": ("--fallback-model", None),
+        "no_audit": ("--no-audit", False),
+        "reviewer": ("--reviewer", False),
+        "allow_web_tools": ("--allow-web-tools", False),
+        "stop_after_stage": ("--stop-after-stage", False),
+        "stop_after_one": ("--stop-after-one", False),
+        "timeout": ("--timeout", None),
+        "retry": ("--retry", False),
+        "no_plan_ledger": ("--no-plan-ledger", False),
+        "no_auto_reauthor": ("--no-auto-reauthor", False),
+    }
+    # Until `maintain` learns its own --cli/--model/--stop-after-one
+    # in a follow-up change, leave `maintain` outside the gate so the
+    # transitional `mcloop --cli codex maintain` form still works.
+    # `investigate` is excluded for the same transitional reason:
+    # _cmd_investigate forwards parent-level --model / --fallback-model
+    # to the spawned child mcloop process until those flags move onto
+    # the investigate subparser in a follow-up.
+    _TRANSITIONAL_PARENT_FLAG_CONSUMERS = {"maintain", "investigate"}
+    if args.command is not None and args.command not in _TRANSITIONAL_PARENT_FLAG_CONSUMERS:
+        bad: list[str] = []
+        for attr, (cli_form, default) in _LOOP_ONLY_FLAGS.items():
+            if getattr(args, attr, default) != default:
+                bad.append(cli_form)
+        # The sync/install/uninstall subparsers declare their OWN
+        # --dry-run, which is the canonical scope. argparse stores
+        # the subcommand's value at args.dry_run after dispatch, so
+        # presence of a subcommand-level --dry-run is indistinguishable
+        # from a parent-level one. Drop --dry-run from `bad` when the
+        # active subcommand legitimately supports it.
+        if args.command in ("sync", "install", "uninstall") and "--dry-run" in bad:
+            bad.remove("--dry-run")
+        if bad:
+            parser.error(
+                f"the following flags only apply to the bare-loop "
+                f"action and are not valid with subcommand "
+                f"{args.command!r}: " + ", ".join(sorted(bad))
+            )
+
+    return args
 
 
 def _cmd_ack_orchestra_override(project_dir: Path) -> None:
