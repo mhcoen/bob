@@ -4481,7 +4481,7 @@ class TestFixModeSpecContext:
         assert kwargs["counter_example_sources"][0].url == "https://bad-example.com"
 
     def test_investigate_flag_also_passes_spec_context(self, capsys, tmp_path, monkeypatch):
-        """The --investigate path also passes counter-examples and contracts."""
+        """The `duplo investigate` path also passes counter-examples and contracts."""
         from duplo.investigator import Diagnosis, InvestigationResult
 
         _write_duplo_json(tmp_path, self._BASE_DATA)
@@ -4505,7 +4505,7 @@ class TestFixModeSpecContext:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
             "sys.argv",
-            ["duplo", "fix", "--investigate", "greeting broken"],
+            ["duplo", "investigate", "greeting broken"],
         )
 
         result = InvestigationResult(

@@ -376,9 +376,10 @@ def main() -> None:
         fix_parser = argparse.ArgumentParser(
             prog=f"duplo {subcmd}",
             description=(
-                "Investigate bugs with product-level AI diagnosis."
+                "Diagnose uncertain causes — observed wrongness without "
+                "a captured crash."
                 if subcmd == "investigate"
-                else "Report bugs and append fix tasks to the current PLAN.md."
+                else "Append fix tasks to PLAN.md for known bugs or failures."
             ),
         )
         fix_parser.add_argument(
@@ -399,16 +400,6 @@ def main() -> None:
             action="store_true",
             default=False,
             help="Capture a screenshot of the running app for context.",
-        )
-        fix_parser.add_argument(
-            "--investigate",
-            "-i",
-            action="store_true",
-            default=False,
-            help=(
-                "Alias for bare `duplo fix` (which also runs investigation). "
-                "Retained for clarity and for use as `duplo investigate`."
-            ),
         )
         fix_parser.add_argument(
             "--images",
@@ -434,10 +425,12 @@ def main() -> None:
                 "subcommands:\n"
                 "  init [URL]            Initialize a new project: writes SPEC.md and ref/.\n"
                 "                        Flags: --from-description PATH, --deep, --force.\n"
-                "  fix [BUGS...]         Append bug-fix tasks to the current PLAN.md.\n"
+                "  fix [BUGS...]         Append fix tasks for known bugs/failures.\n"
                 "                        Flags: --file/-f PATH, --screenshot/-s,\n"
-                "                        --investigate/-i, --images PATH...\n"
-                "  investigate [BUGS...] Alias for `duplo fix --investigate`.\n"
+                "                        --images PATH...\n"
+                "  investigate [OBS...]  Diagnose uncertain causes (no crash needed).\n"
+                "                        Flags: --file/-f PATH, --screenshot/-s,\n"
+                "                        --images PATH...\n"
                 "  reauthor              Re-author PLAN.md against the Plan Ledger.\n"
                 "                        Required: --crossing-event-id EVENT_ID.\n"
                 "                        Flags: --plan PATH, --ledger-dir PATH,\n"
