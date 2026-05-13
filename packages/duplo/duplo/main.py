@@ -310,9 +310,7 @@ def main() -> None:
             ),
         )
         reauthor_parser.add_argument(
-            "--crossing-event-id",
-            dest="crossing_event_id",
-            required=True,
+            "crossing_event_id",
             metavar="EVENT_ID",
             help=(
                 "event_id of the threshold_crossed event that "
@@ -431,8 +429,8 @@ def main() -> None:
                 "  investigate [OBS...]  Diagnose uncertain causes (no crash needed).\n"
                 "                        Flags: --file/-f PATH, --screenshot/-s,\n"
                 "                        --images PATH...\n"
-                "  reauthor              Re-author PLAN.md against the Plan Ledger.\n"
-                "                        Required: --crossing-event-id EVENT_ID.\n"
+                "  reauthor EVENT_ID     Re-author PLAN.md against the Plan Ledger.\n"
+                "                        EVENT_ID is the threshold_crossed event id.\n"
                 "                        Flags: --plan PATH, --ledger-dir PATH,\n"
                 "                        --out PATH, --council-config PATH.\n"
                 "\n"
