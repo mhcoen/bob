@@ -205,6 +205,74 @@ def test_install_subcommand_with_file():
     assert args.file == "custom.md"
 
 
+class TestMaintainSubparserFlags:
+    """`--cli`/`--model`/`--stop-after-one` live on the maintain subparser.
+
+    The pre-subcommand spelling (parent-level position) is rejected by
+    an argv prescan before parse_args, because argparse's subparser
+    scoping silently overwrites the parent value with the subparser's
+    default and post-parse validation cannot detect the bleed.
+    """
+
+    def test_maintain_canonical_cli(self):
+        args = _parse("maintain", "--cli", "codex")
+        assert args.command == "maintain"
+        assert args.cli == "codex"
+
+    def test_maintain_canonical_model(self):
+        args = _parse("maintain", "--model", "opus")
+        assert args.command == "maintain"
+        assert args.model == "opus"
+
+    def test_maintain_canonical_stop_after_one(self):
+        args = _parse("maintain", "--stop-after-one")
+        assert args.command == "maintain"
+        assert args.stop_after_one is True
+
+    def test_maintain_no_flags_uses_defaults(self):
+        args = _parse("maintain")
+        assert args.command == "maintain"
+        assert args.cli is None
+        assert args.model is None
+        assert args.stop_after_one is False
+
+    def test_pre_subcommand_cli_rejected(self, capsys):
+        with pytest.raises(SystemExit):
+            _parse("--cli", "codex", "maintain")
+        err = capsys.readouterr().err
+        assert "--cli" in err
+        assert "maintain --cli" in err
+
+    def test_pre_subcommand_cli_equals_rejected(self, capsys):
+        with pytest.raises(SystemExit):
+            _parse("--cli=codex", "maintain")
+        err = capsys.readouterr().err
+        assert "--cli" in err
+        assert "maintain --cli" in err
+
+    def test_pre_subcommand_model_rejected(self, capsys):
+        with pytest.raises(SystemExit):
+            _parse("--model", "opus", "maintain")
+        err = capsys.readouterr().err
+        assert "--model" in err
+        assert "maintain --model" in err
+
+    def test_pre_subcommand_stop_after_one_rejected(self, capsys):
+        with pytest.raises(SystemExit):
+            _parse("--stop-after-one", "maintain")
+        err = capsys.readouterr().err
+        assert "--stop-after-one" in err
+        assert "maintain --stop-after-one" in err
+
+    def test_loop_only_flag_with_maintain_still_gated(self, capsys):
+        # Flags that did NOT move onto the maintain subparser remain
+        # loop-only; the post-parse gate fires on them (not the prescan).
+        with pytest.raises(SystemExit):
+            _parse("--max-retries", "5", "maintain")
+        err = capsys.readouterr().err
+        assert "--max-retries" in err
+
+
 def test_uninstall_subcommand_with_file():
     args = _parse("--file", "custom.md", "uninstall")
     assert args.command == "uninstall"

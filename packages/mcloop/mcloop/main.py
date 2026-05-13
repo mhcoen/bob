@@ -2070,6 +2070,34 @@ def run_loop(
     return RunStatus("success")
 
 
+def _prescan_maintain_parent_flags(argv: list[str]) -> str | None:
+    """Return a moved flag name if it appears before the literal
+    ``maintain`` token in *argv*, else ``None``.
+
+    Narrow scope by design: only the three flags moved onto the maintain
+    subparser, only the long-option forms, only when they appear BEFORE
+    the ``maintain`` subcommand. Stops at ``--`` (option separator).
+
+    The post-parse loop-flag gate cannot detect this case for these
+    flags because argparse's subparser-vs-parent scoping silently
+    overwrites the parent value with the subparser's default. Surface
+    the old pre-subcommand spelling here so the user gets a clear
+    error instead of running maintain with config/default CLI.
+    """
+    if "maintain" not in argv:
+        return None
+    maintain_idx = argv.index("maintain")
+    forbidden = {"--cli", "--model", "--stop-after-one"}
+    for i in range(maintain_idx):
+        tok = argv[i]
+        if tok == "--":
+            return None
+        flag = tok.split("=", 1)[0]
+        if flag in forbidden:
+            return flag
+    return None
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Loop: grind through a markdown checklist")
     parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
@@ -2165,7 +2193,25 @@ def _parse_args() -> argparse.Namespace:
     inv_parser.add_argument("--log", default=None, help="Path to a log file with error output")
     idea_parser = subparsers.add_parser("idea", help="Append an idea to IDEAS.md")
     idea_parser.add_argument("text", help="The idea text to record")
-    subparsers.add_parser("maintain", help="Check and enforce invariants from MAINTAIN.md")
+    maintain_parser = subparsers.add_parser(
+        "maintain", help="Check and enforce invariants from MAINTAIN.md"
+    )
+    maintain_parser.add_argument(
+        "--cli",
+        default=None,
+        choices=["claude", "codex"],
+        help="CLI backend (default: claude, or set in ~/.mcloop/config.json)",
+    )
+    maintain_parser.add_argument(
+        "--model",
+        default=None,
+        help="Model to use (e.g., opus, sonnet, gpt-5.4)",
+    )
+    maintain_parser.add_argument(
+        "--stop-after-one",
+        action="store_true",
+        help="Run exactly one maintain task then exit",
+    )
     subparsers.add_parser(
         "ack-orchestra-override",
         help=(
@@ -2173,6 +2219,12 @@ def _parse_args() -> argparse.Namespace:
             "override banner is silenced until the file changes"
         ),
     )
+    moved = _prescan_maintain_parent_flags(sys.argv[1:])
+    if moved is not None:
+        parser.error(
+            f"{moved} belongs to the maintain subcommand. "
+            f"Write `mcloop maintain {moved} ...` instead."
+        )
     args = parser.parse_args()
 
     # Parent-level loop flags configure the bare-loop action. They
@@ -2196,17 +2248,24 @@ def _parse_args() -> argparse.Namespace:
         "no_plan_ledger": ("--no-plan-ledger", False),
         "no_auto_reauthor": ("--no-auto-reauthor", False),
     }
-    # Until `maintain` learns its own --cli/--model/--stop-after-one
-    # in a follow-up change, leave `maintain` outside the gate so the
-    # transitional `mcloop --cli codex maintain` form still works.
-    # `investigate` is excluded for the same transitional reason:
-    # _cmd_investigate forwards parent-level --model / --fallback-model
-    # to the spawned child mcloop process until those flags move onto
-    # the investigate subparser in a follow-up.
-    _TRANSITIONAL_PARENT_FLAG_CONSUMERS = {"maintain", "investigate"}
+    # `investigate` is excluded transitionally: _cmd_investigate
+    # forwards parent-level --model / --fallback-model to the spawned
+    # child mcloop process until those flags move onto the investigate
+    # subparser in a follow-up.
+    _TRANSITIONAL_PARENT_FLAG_CONSUMERS = {"investigate"}
+    # Flags now declared on a subparser are owned by that subparser;
+    # the pre-subcommand spelling is rejected upstream by the argv
+    # prescan, so post-parse values for these attrs reflect the
+    # canonical (subparser-level) form and must not trip the gate.
+    _SUBPARSER_OWNED: dict[str, set[str]] = {
+        "maintain": {"cli", "model", "stop_after_one"},
+    }
     if args.command is not None and args.command not in _TRANSITIONAL_PARENT_FLAG_CONSUMERS:
+        owned = _SUBPARSER_OWNED.get(args.command, set())
         bad: list[str] = []
         for attr, (cli_form, default) in _LOOP_ONLY_FLAGS.items():
+            if attr in owned:
+                continue
             if getattr(args, attr, default) != default:
                 bad.append(cli_form)
         # The sync/install/uninstall subparsers declare their OWN
