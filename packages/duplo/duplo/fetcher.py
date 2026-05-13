@@ -32,6 +32,71 @@ class PageRecord:
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+
+# Path suffixes the fetcher will not request. The fetcher targets
+# HTML pages; binary installers, archives, audio, and the like
+# cannot contain a product narrative and previously cost a full
+# HTTP round trip before being rejected on Content-Type.
+# Suffix match is case-insensitive on the URL path (before query/
+# fragment); a URL with no recognized suffix is treated as HTML
+# because most CMS routes have no file extension.
+_NON_HTML_PATH_EXTS: frozenset[str] = frozenset({
+    # Installers / OS packages
+    ".dmg", ".exe", ".msi", ".pkg", ".deb", ".rpm", ".apk",
+    ".appimage", ".snap", ".flatpak",
+    # Archives
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz",
+    ".txz", ".7z", ".rar", ".iso", ".cab",
+    # Documents handled elsewhere or not by this fetcher
+    ".pdf", ".epub", ".mobi", ".doc", ".docx", ".xls", ".xlsx",
+    ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf",
+    # Audio
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
+    # Images / video / icons. These have their own pipeline via
+    # extract_media_urls / download_media and must not enter the
+    # HTML crawl queue.
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".bmp", ".tiff",
+    ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v",
+    # Source / data blobs not worth crawling for product narrative
+    ".json", ".xml", ".yaml", ".yml", ".toml", ".csv", ".tsv",
+    ".js", ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
+    ".eot",
+})
+
+# Path suffixes the fetcher explicitly accepts as HTML. The empty
+# string covers extensionless CMS routes (e.g. /docs/intro). Any
+# suffix not in _NON_HTML_PATH_EXTS that also isn't in this set
+# is accepted by default to avoid being overly conservative; the
+# denylist is the authoritative gate.
+_HTML_PATH_EXTS: frozenset[str] = frozenset({
+    "", ".html", ".htm", ".xhtml", ".shtml",
+    ".php", ".aspx", ".asp", ".jsp", ".cfm",
+    ".md", ".markdown",
+})
+
+
+def _path_suffix(url: str) -> str:
+    """Return the lowercased path suffix for *url*, or empty string."""
+    path = urlparse(url).path
+    # ``Path(path).suffix`` returns the final ".ext" or "" — exactly
+    # what we want. Handles trailing slashes (returns "").
+    return Path(path).suffix.lower()
+
+
+def _is_fetchable_html_url(url: str) -> bool:
+    """Return True iff *url* is plausibly an HTML page worth fetching.
+
+    Authoritative denylist on file extensions known to be binary
+    or non-HTML (see ``_NON_HTML_PATH_EXTS``). Extensionless paths
+    and explicit HTML suffixes pass; anything else also passes
+    (we are not strict about exotic CMS suffixes), so the only
+    URLs rejected are those that match the denylist.
+    """
+    suffix = _path_suffix(url)
+    if suffix in _NON_HTML_PATH_EXTS:
+        return False
+    return True
 _MIN_IMAGE_BYTES = 10_000  # skip tiny icons/favicons
 _TIMEOUT = 30.0
 _USER_AGENT = (
@@ -154,6 +219,14 @@ def fetch_site(
 
     # --- shallow: single page, no link-following ---
     if scrape_depth == "shallow":
+        if not _is_fetchable_html_url(url):
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Refusing to fetch non-HTML URL: {url}",
+                context={"url": url, "reason": "non_html_extension"},
+            )
+            return empty
         try:
             resp = httpx.get(
                 url,
@@ -173,12 +246,10 @@ def fetch_site(
 
         ct = resp.headers.get("content-type", "")
         if not _is_html_content_type(ct):
-            record_failure(
-                "fetcher:fetch_site",
-                "fetch",
-                f"Non-HTML content-type for {url}: {ct}",
-                context={"url": url, "content_type": ct},
-            )
+            # Server returned non-HTML for a URL whose suffix
+            # passed the pre-fetch filter. This is uncommon enough
+            # that callers seeing empty results can investigate;
+            # logging every occurrence drowns out real failures.
             return empty
 
         html = resp.content.decode("utf-8", errors="replace")
@@ -218,6 +289,12 @@ def fetch_site(
 
         visited.add(norm)
 
+        if not _is_fetchable_html_url(current_url):
+            # Belt and suspenders: link-discovery already filters
+            # these, but defend against future callers that enqueue
+            # URLs without going through the filter.
+            continue
+
         try:
             resp = httpx.get(
                 current_url,
@@ -237,12 +314,9 @@ def fetch_site(
 
         ct = resp.headers.get("content-type", "")
         if not _is_html_content_type(ct):
-            record_failure(
-                "fetcher:fetch_site",
-                "fetch",
-                f"Non-HTML content-type for {current_url}: {ct}",
-                context={"url": current_url, "content_type": ct},
-            )
+            # Suffix said HTML, server said otherwise; skip without
+            # noise. Network errors and parse errors continue to be
+            # logged below.
             continue
 
         html = resp.content.decode("utf-8", errors="replace")
@@ -276,6 +350,12 @@ def fetch_site(
             # Only follow same-origin links; cross-origin links are
             # recorded by the orchestrator, not fetched here.
             if not _same_origin(link_url, url):
+                continue
+            # Skip URLs whose path suffix says they are not HTML
+            # (installers, archives, media, source/data blobs).
+            # Silent skip: these are routine on product sites and
+            # would otherwise dominate the failure log.
+            if not _is_fetchable_html_url(link_url):
                 continue
             link_score = score_link(link_url, anchor)
             if link_score >= 0:
@@ -411,6 +491,14 @@ def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:
     parsed = urlparse(url)
     filename = Path(parsed.path).name
     if not filename:
+        return None, False
+    # Reject obvious binary installer / archive URLs that slipped
+    # in via media-URL extraction. Image and video URLs are
+    # whitelisted upstream by extract_media_urls against
+    # _IMAGE_EXTS / _VIDEO_EXTS, so this gate is defensive.
+    suffix = _path_suffix(url)
+    _ALLOWED_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
+    if suffix and suffix not in _ALLOWED_MEDIA_EXTS:
         return None, False
     # Avoid collisions by prefixing with domain
     domain = parsed.netloc.replace(".", "_")

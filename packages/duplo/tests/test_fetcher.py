@@ -417,6 +417,101 @@ class TestFetchSite:
         assert "https://example.com" in raw
 
 
+class TestIsFetchableHtmlUrl:
+    """Unit tests for the pre-fetch URL filter helper."""
+
+    def test_accepts_extensionless(self):
+        from duplo.fetcher import _is_fetchable_html_url
+        assert _is_fetchable_html_url("https://example.com/docs/intro")
+        assert _is_fetchable_html_url("https://example.com/")
+        assert _is_fetchable_html_url("https://example.com")
+
+    def test_accepts_html_suffixes(self):
+        from duplo.fetcher import _is_fetchable_html_url
+        for s in (".html", ".htm", ".xhtml", ".php", ".aspx", ".md"):
+            assert _is_fetchable_html_url(f"https://example.com/page{s}"), s
+
+    def test_rejects_installers(self):
+        from duplo.fetcher import _is_fetchable_html_url
+        for s in (".dmg", ".exe", ".msi", ".pkg", ".deb", ".rpm"):
+            assert not _is_fetchable_html_url(f"https://example.com/app{s}"), s
+
+    def test_rejects_archives_and_media(self):
+        from duplo.fetcher import _is_fetchable_html_url
+        # .tar.gz: Path(...).suffix returns ".gz", which is in the
+        # denylist, so this should reject correctly.
+        for s in (".zip", ".tar.gz", ".7z", ".mp3", ".png", ".svg", ".pdf"):
+            assert not _is_fetchable_html_url(f"https://example.com/x{s}"), s
+
+    def test_case_insensitive(self):
+        from duplo.fetcher import _is_fetchable_html_url
+        assert not _is_fetchable_html_url("https://example.com/App.DMG")
+        assert not _is_fetchable_html_url("https://example.com/Setup.EXE")
+
+
+class TestFetchSitePreFetchFilter:
+    """Pre-fetch path-suffix filter prevents HTTP requests for
+    URLs that obviously cannot be HTML pages."""
+
+    def _make_response(self, html: str, status_code: int = 200, url: str = "") -> MagicMock:
+        resp = MagicMock()
+        resp.content = html.encode("utf-8")
+        resp.status_code = status_code
+        resp.url = url
+        resp.headers = {"content-type": "text/html; charset=utf-8"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_shallow_rejects_binary_seed(self):
+        """Seed URL with a binary suffix returns empty without an
+        HTTP request."""
+        def fake_get(*a, **k):
+            raise AssertionError("httpx.get must not be invoked")
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, examples, structs, records, raw = fetch_site(
+                "https://example.com/installer.dmg",
+                scrape_depth="shallow",
+            )
+        assert text == ""
+        assert examples == []
+        assert records == []
+        assert raw == {}
+
+    def test_deep_link_filter_skips_binary(self):
+        """Deep crawl: a link to a .dmg in the seed page must not be
+        enqueued for fetching."""
+        seed_html = (
+            "<html><body><p>Home</p>"
+            '<a href="/downloads/app.dmg">Download Mac</a>'
+            '<a href="/downloads/app.exe">Download Windows</a>'
+            '<a href="/docs">Docs</a>'
+            "</body></html>"
+        )
+        docs_html = "<html><body><p>API reference here</p></body></html>"
+
+        fetch_calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            fetch_calls.append(url)
+            if "docs" in url:
+                return self._make_response(docs_html, url=url)
+            return self._make_response(seed_html, url=url)
+
+        with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
+            text, _examples, _structs, _records, _raw = fetch_site(
+                "https://example.com"
+            )
+
+        # The seed and the docs page are fetched; the .dmg and .exe
+        # links are filtered before they reach the HTTP layer.
+        assert not any(u.endswith(".dmg") for u in fetch_calls), fetch_calls
+        assert not any(u.endswith(".exe") for u in fetch_calls), fetch_calls
+        # Sanity: the docs link was followed normally.
+        assert any("docs" in u for u in fetch_calls), fetch_calls
+        assert "API reference here" in text
+
+
 class TestFetchSiteScrapeDepth:
     """Tests for the scrape_depth parameter."""
 
@@ -1023,22 +1118,13 @@ class TestFetchSiteFailedFetches:
         assert args[0][0] == "fetcher:fetch_site"
         assert args[0][1] == "fetch"
 
-    def test_deep_non_html_records_failure(self):
-        """Deep: non-HTML content-type calls record_failure."""
-        seed_html = '<html><body><p>Home</p><a href="/img.png">I</a></body></html>'
-
-        def fake_get(url, **kwargs):
-            if "/img.png" in url:
-                return self._make_response("bytes", url=url, content_type="image/png")
-            return self._make_response(seed_html, url=url)
-
-        with (
-            patch("duplo.fetcher.httpx.get", side_effect=fake_get),
-            patch("duplo.fetcher.record_failure") as mock_rf,
-        ):
-            fetch_site("https://example.com", scrape_depth="deep")
-        mock_rf.assert_called_once()
-        assert "Non-HTML" in mock_rf.call_args[0][2]
+    # NOTE: a previous test here asserted that a non-HTML
+    # content-type response triggered record_failure. The pre-fetch
+    # path-suffix filter (see TestFetchSitePreFetchFilter) now drops
+    # such URLs at link-discovery time, and the remaining
+    # content-type fallback for HTML-looking URLs serving non-HTML
+    # is silent by design (drowned-out log noise on rich product
+    # sites). No content-type-only failure record is expected.
 
     # -- sync invariant --
 
