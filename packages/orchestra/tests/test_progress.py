@@ -3,7 +3,7 @@
 Covers the format string, the executor's callback hook firing once
 per state_enter and once per state_exit, the api layer's wrapper
 that enriches role into adapter and model from the resolved role
-bindings, and the CLI's --quiet flag suppressing output.
+bindings, and the CLI's progress callback wiring.
 """
 
 from __future__ import annotations
@@ -435,69 +435,14 @@ def test_executor_no_callback_is_a_no_op(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------
-# CLI --quiet flag suppresses progress
+# CLI progress callback wiring
 # --------------------------------------------------------------------
-
-
-def test_cli_quiet_flag_installs_silent_reporter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``orchestra --quiet <verb>`` must replace the stderr reporter
-    with a silent one. The silent reporter, when called, writes
-    nothing to stderr."""
-    from orchestra import cli
-    from orchestra.progress import ProgressEvent as PE
-
-    # Pretend the home has a config so the verb dispatcher is
-    # reachable. The dispatcher itself is stubbed below; we only care
-    # which reporter the dispatcher receives.
-    fake_home = tmp_path / "home"
-    (fake_home / ".orchestra").mkdir(parents=True)
-    (fake_home / ".orchestra" / "config.json").write_text(
-        '{"verbs": {"ask": {"workflow": "ask_single"}}, '
-        '"roles": {"responder": {"adapter": "claude_code_text", "model": "opus"}}, '
-        '"workflows": {"ask_single": {"pattern": "ask_single"}}}'
-    )
-    monkeypatch.setenv("HOME", str(fake_home))
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
-
-    received_callback: list[Any] = []
-
-    def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None,
-        **_kwargs: Any,
-    ) -> str:
-        received_callback.append(progress_callback)
-        return "answer"
-
-    monkeypatch.setattr(cli, "run_verb", _stub_run_verb)
-
-    rc = cli.main(["--quiet", "ask", "hello"])
-    assert rc == 0
-    assert len(received_callback) == 1
-    cb = received_callback[0]
-    assert cb is not None
-    # The silent reporter, when invoked, must not raise. The callback
-    # is a true no-op; this call simply asserts it does not throw.
-    cb(
-        PE(
-            kind="state_enter",
-            state_name="x",
-            role="x",
-            adapter="a",
-            model="m",
-            index=1,
-            total=1,
-            elapsed_seconds=None,
-        )
-    )
 
 
 def test_cli_default_installs_stderr_reporter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Without ``--quiet`` the dispatcher receives a callback that
-    writes to stderr."""
+    """The CLI installs a stderr reporter for every dispatch."""
     from orchestra import cli
     from orchestra.progress import ProgressEvent as PE
 
@@ -541,59 +486,6 @@ def test_cli_default_installs_stderr_reporter(
     assert rc == 0
     err = capsys.readouterr().err
     assert "[1/1] responder (claude_code_text:opus) ... starting" in err
-
-
-def test_cli_short_quiet_flag_also_works(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``-q`` is an alias for ``--quiet``."""
-    from orchestra import cli
-
-    fake_home = tmp_path / "home"
-    (fake_home / ".orchestra").mkdir(parents=True)
-    (fake_home / ".orchestra" / "config.json").write_text(
-        '{"verbs": {"ask": {"workflow": "ask_single"}}, '
-        '"roles": {"responder": {"adapter": "claude_code_text", "model": "opus"}}, '
-        '"workflows": {"ask_single": {"pattern": "ask_single"}}}'
-    )
-    monkeypatch.setenv("HOME", str(fake_home))
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
-
-    received_callback: list[Any] = []
-
-    def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None,
-        **_kwargs: Any,
-    ) -> str:
-        received_callback.append(progress_callback)
-        return "answer"
-
-    monkeypatch.setattr(cli, "run_verb", _stub_run_verb)
-
-    rc = cli.main(["ask", "-q", "hello"])
-    assert rc == 0
-    # The dispatcher still got a callback; it is the silent variant.
-    assert received_callback[0] is not None
-
-
-def test_cli_extract_progress_flags_handles_both_forms() -> None:
-    """The extractor preserves order of non-flag args and removes
-    every occurrence of --quiet or -q regardless of position."""
-    from orchestra.cli import _extract_progress_flags
-
-    args, quiet = _extract_progress_flags(
-        ["--quiet", "ask", "what", "is", "x"]
-    )
-    assert args == ["ask", "what", "is", "x"]
-    assert quiet is True
-
-    args, quiet = _extract_progress_flags(["ask", "-q", "what", "is", "x"])
-    assert args == ["ask", "what", "is", "x"]
-    assert quiet is True
-
-    args, quiet = _extract_progress_flags(["ask", "what", "is", "x"])
-    assert args == ["ask", "what", "is", "x"]
-    assert quiet is False
 
 
 # --------------------------------------------------------------------

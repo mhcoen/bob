@@ -391,13 +391,12 @@ def _resolve_progress_callback(
     3. Otherwise: install the default ``stderr_reporter()`` so library
        calls are visible during integration and active testing.
 
-    The CLI installs its own callback up front (``stderr_reporter``
-    by default, ``silent_reporter`` for ``--quiet``) so the
-    ``user_callback is not None`` branch fires for every CLI dispatch.
-    Library callers that want suppression should pass ``quiet=True``;
-    the silent_reporter alternative still installs an event handler
-    that does nothing, which is functionally identical from the
-    reporter's perspective.
+    The CLI installs its own callback up front (``stderr_reporter``)
+    so the ``user_callback is not None`` branch fires for every CLI
+    dispatch. Library callers that want suppression should pass
+    ``quiet=True``; the silent_reporter alternative still installs
+    an event handler that does nothing, which is functionally
+    identical from the reporter's perspective.
     """
     if quiet:
         return silent_reporter()
@@ -1158,9 +1157,8 @@ def run_workflow(
     per ``state_enter`` and ``state_exit`` on stderr, plus a
     parallel-block header and per-completion lines for fan-out groups.
     Pass ``quiet=True`` to suppress, or pass an explicit
-    ``progress_callback`` to install a custom reporter. The CLI also
-    installs its own callback up front (``stderr_reporter`` by
-    default, ``silent_reporter`` for ``--quiet``).
+    ``progress_callback`` to install a custom reporter. The CLI
+    installs ``stderr_reporter`` up front for every dispatch.
     """
     if name == "council_four":
         import warnings

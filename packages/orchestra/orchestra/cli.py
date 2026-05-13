@@ -36,7 +36,7 @@ from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
 from orchestra.loader.parser import parse_workflow
 from orchestra.log import LogWriter
-from orchestra.progress import ProgressCallback, silent_reporter, stderr_reporter
+from orchestra.progress import ProgressCallback, stderr_reporter
 from orchestra.registry.registry import with_core
 from orchestra.resume import replay_log, run_resume_hooks
 from orchestra.spine import NO_INITIAL, ExternalInputDecl, Workflow
@@ -781,41 +781,10 @@ def _dispatch_verb(
     return 0
 
 
-def _extract_progress_flags(args: list[str]) -> tuple[list[str], bool]:
-    """Pull ``--quiet`` (or ``-q``) out of ``args``.
-
-    Verbs are dispatched before argparse runs so the ordinary
-    subparser machinery does not see them. We accept the quiet flag
-    anywhere in the argv tail so users can write either
-    ``orchestra --quiet council ...`` or
-    ``orchestra council --quiet ...`` without thinking about
-    positional ordering. Returns ``(remaining_args, quiet)``.
-    """
-    quiet = False
-    remaining: list[str] = []
-    for arg in args:
-        if arg in ("--quiet", "-q"):
-            quiet = True
-        else:
-            remaining.append(arg)
-    return remaining, quiet
-
-
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
-    # ``--quiet`` (or ``-q``) anywhere in the verb-style invocation
-    # suppresses per-state progress on stderr. Pull it out before
-    # the verb dispatcher inspects argv[0] so it does not get
-    # treated as a verb name. Passing ``silent_reporter()`` rather
-    # than ``None`` is intentional: downstream code (the REPL in
-    # particular) treats ``None`` as "install the default stderr
-    # reporter", so a no-op callback is the right way to express
-    # explicit suppression.
-    raw_args, quiet = _extract_progress_flags(raw_args)
-    progress_cb: ProgressCallback = (
-        silent_reporter() if quiet else stderr_reporter()
-    )
+    progress_cb: ProgressCallback = stderr_reporter()
 
     # No arguments at all: drop into the interactive REPL. The user
     # is asking to use the tool, not asking what argparse complains
