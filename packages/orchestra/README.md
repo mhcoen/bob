@@ -354,8 +354,9 @@ the longest individual child duration (parallel wall-clock), not the
 sum.
 
 Stdout still carries only the final answer so piping
-`orchestra ask "..." | something` keeps working. Pass `--quiet` (or
-`-q`) anywhere on the command line to suppress the per-state lines.
+`orchestra ask "..." | something` keeps working. The per-state
+lines always go to stderr; redirect with `2>/dev/null` when scripting
+if you want them silenced for one invocation.
 
 ### Interactive REPL
 
@@ -513,9 +514,10 @@ result = run_workflow(
 )
 ```
 
-`quiet=True` always wins over a passed `progress_callback`. The CLI
-installs its own callback up front so the CLI's `--quiet` flag and
-the library's `quiet=True` argument behave identically end-to-end.
+`quiet=True` always wins over a passed `progress_callback`. Library
+consumers control progress visibility through these two arguments;
+at the CLI level there is no flag to suppress the per-state lines
+(redirect stderr if you need a quiet pipeline).
 
 ## Configuration
 
