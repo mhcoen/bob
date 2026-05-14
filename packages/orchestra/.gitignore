@@ -14,8 +14,10 @@ logs/
 *~
 \#*\#
 .#*
+.claude/settings.local.json
 .duplo/
 .mcloop/
 .mcloop-last-audit
+.orchestra/
 BUGS.md
 .DS_Store
