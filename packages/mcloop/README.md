@@ -197,6 +197,8 @@ After this, `pytest -q` from the repo root works without any
 
 ## Quickstart
 
+Flags on the bare loop configure how that run executes:
+
 ```bash
 mcloop                    # Run (reads PLAN.md by default)
 mcloop --file other.md    # Use a different file
@@ -207,10 +209,22 @@ mcloop --cli codex        # Use Codex instead of Claude Code
 mcloop --no-audit         # Skip the post-completion bug audit
 mcloop --reviewer         # Enable background code reviewer
 mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
-mcloop --retry                # Reset failed [!] markers and retry
+mcloop --retry            # Reset failed [!] markers and retry
 mcloop --stop-after-stage # Complete current stage then exit
 mcloop --stop-after-one   # Run exactly one task then exit
 mcloop --timeout 3600     # Per-task timeout in seconds (default: 1800)
+mcloop --no-plan-ledger   # Disable Plan Ledger writes for this run
+mcloop --no-auto-reauthor # Disable automatic Plan re-author on threshold crossing
+mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
+```
+
+These bare-loop flags ONLY apply to the bare-loop action. Using one
+with an unrelated subcommand is a parser error (e.g.
+`mcloop --dry-run sync` is wrong; write `mcloop sync --dry-run`).
+
+Subcommands change what runs. Each has its own flags:
+
+```bash
 mcloop sync               # Sync PLAN.md with the codebase
 mcloop sync --dry-run     # Show sync changes without applying
 mcloop audit              # Run a standalone bug audit
@@ -218,11 +232,13 @@ mcloop investigate "crash on wake from sleep"  # Debug a specific bug
 mcloop investigate --log crash.log             # Debug from a log file
 mcloop wrap                                    # Instrument an existing project for error capture
 mcloop maintain                                # Enforce invariants from MAINTAIN.md
+mcloop maintain --cli codex                    # Run maintain with the Codex backend
+mcloop maintain --model opus --stop-after-one  # One maintain task, with model override
 mcloop idea "some thought"                     # Append a timestamped idea to IDEAS.md
 mcloop install            # Guided setup: hooks, sandbox, Telegram, permissions
 mcloop install --dry-run  # Show what install would do without changing anything
 mcloop uninstall          # Remove hooks and credentials installed by mcloop
-mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
+mcloop uninstall --dry-run                     # Preview what uninstall would remove
 ```
 
 ## Writing a PLAN.md
