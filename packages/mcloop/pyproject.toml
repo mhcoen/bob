@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcloop"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "orchestra",
     "bob-tools",
@@ -21,7 +21,7 @@ script-files = ["bin/appshot"]
 mcloop = "mcloop.main:main"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 99
 exclude = ["telegram-permission-hook.py", "pytest-of-mhcoen"]
 
