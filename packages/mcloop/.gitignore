@@ -18,5 +18,6 @@ BUGS.md
 *~
 \#*\#
 .#*
+.claude/settings.local.json
 AGENTS.md
 .DS_Store
