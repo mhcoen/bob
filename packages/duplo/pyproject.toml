@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "duplo"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "mcloop",
     "orchestra",
@@ -35,7 +35,7 @@ addopts = "-n auto"
 timeout = 60
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 99
 
 [tool.ruff.lint.per-file-ignores]
