@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bob-tools"
 version = "0.1.0"
 description = "Shared bob-level infrastructure. Slice A: Plan Ledger event schema and projector."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "jsonschema>=4.21",
 ]
@@ -26,7 +26,7 @@ include = ["bob_tools*"]
 testpaths = ["bob_tools/ledger/tests"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
@@ -34,7 +34,7 @@ select = ["E", "F", "W", "I", "B", "UP", "RUF"]
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
+python_version = "3.12"
 files = ["bob_tools"]
 exclude = ['build/', 'dist/', '\.venv/']
 
