@@ -119,7 +119,7 @@ from duplo.saver import (
     store_accepted_frames,
     write_claude_md,
 )
-from duplo.selector import select_features, select_issues  # noqa: F401  # for test patches
+from duplo.selector import select_features, select_issues  # noqa: F401
 from duplo.task_matcher import match_unannotated_tasks
 from duplo.status import (
     UpdateSummary,
@@ -1720,6 +1720,14 @@ def _subsequent_run() -> None:
         if not remaining:
             print("All features implemented. Nothing to do.")
             return
+        # Let the user narrow the feature set before roadmap generation.
+        # Skip when stdin is not a TTY (CI, piped input) so non-interactive
+        # runs proceed with all extracted features as before.
+        if sys.stdin.isatty():
+            remaining = select_features(remaining)
+            if not remaining:
+                print("No features selected. Nothing to do.")
+                return
         source_url = _source_url_from_spec(spec) or data.get("source_url", "")
         preferences = _load_preferences(data, spec)
         profiles = _resolve_platform_profiles(preferences)
