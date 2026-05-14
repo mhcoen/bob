@@ -15,15 +15,16 @@ destroying previous work.
 Typical workflow:
 
 ```
-duplo init https://numi.app       # one-time: create a spec from a live product
-vim SPEC.md                        # review and customize (architecture, scope, design)
-duplo                              # extract features, generate all-phases build plan
-mcloop                             # build it (runs all phases continuously)
+duplo init https://numi.app             # one-time: create a spec from a live product
+vim SPEC.md                              # review and customize (architecture, scope, design)
+duplo                                    # extract features, generate all-phases build plan
+mcloop                                   # build it (runs all phases continuously)
 # ... test the result ...
-duplo fix "colors are wrong"       # diagnose bugs, append fix tasks
-mcloop                             # apply fixes
-duplo                              # detect gaps, generate next phases
-mcloop                             # build next phases
+duplo fix "colors are wrong"             # known bug: append fix task to PLAN.md
+duplo investigate "feels sluggish"       # uncertain cause: diagnose, then append tasks
+mcloop                                   # apply fixes
+duplo                                    # detect gaps, generate next phases
+mcloop                                   # build next phases
 ```
 
 No source code from the reference product is used. Duplo works from
@@ -109,15 +110,15 @@ edit SPEC.md to describe what you're building, then run `duplo`.
    tasks for anything that was missed.
 
 ```bash
-duplo init [url]             # One-time: create SPEC.md + ref/
+duplo init [url]                       # One-time: create SPEC.md + ref/
 # ... edit SPEC.md, optionally add files to ref/ ...
-duplo                        # Generate the build plan
-mcloop                       # Build it (runs until all tasks complete)
+duplo                                  # Generate the build plan
+mcloop                                 # Build it (runs until all tasks complete)
 # ... test the result ...
-duplo fix "bug description"  # Diagnose bugs and append fix tasks
-duplo investigate "bug"      # Alias for `duplo fix` (explicit naming)
-duplo                        # Detect gaps, generate next phase
-mcloop                       # Build the next phase
+duplo fix "button doesn't work"        # Known bug: append a fix task
+duplo investigate "layout is off"      # Uncertain cause: diagnose first
+duplo                                  # Detect gaps, generate next phase
+mcloop                                 # Build the next phase
 ```
 
 ## `duplo init` reference
@@ -299,10 +300,19 @@ since the last run:
   implemented, prompts for known issues, and enters the next-phase
   flow. See "Phase completion" and "Next-phase generation" below.
 
-- **Incomplete phase:** If PLAN.md has unchecked tasks, Duplo
-  prints a status summary and tells you to run mcloop to continue
-  building. Gap detection is skipped for incomplete plans to avoid
-  appending hallucinated tasks to plans the user is still editing.
+- **Incomplete phase:** If PLAN.md has unchecked tasks but every
+  phase in the roadmap is already written, Duplo prints a status
+  summary and tells you to run mcloop to continue building. Gap
+  detection is skipped to avoid appending hallucinated tasks to
+  plans the user is still editing.
+
+- **Partial plan generation:** If PLAN.md exists but the roadmap
+  has phases not yet written (e.g. `claude` CLI timed out
+  mid-generation on the previous run), Duplo resumes phase
+  generation at the first unwritten phase. Already-saved phases
+  are preserved verbatim; nothing is regenerated. If generation
+  fails again, Duplo exits 75 and prints a `re-run duplo to
+  continue generation` hint.
 
 - **No PLAN.md:** Duplo enters the next-phase flow directly.
 
@@ -453,11 +463,25 @@ product site.
 
 ## Bug reporting and investigation
 
-When testing reveals bugs, use `duplo fix` (or its alias
-`duplo investigate`) to record them and append diagnosed fix tasks
-to PLAN.md.
+Duplo has two intake verbs for testing-time defects, distinguished
+by what you know about the bug:
 
-### How it works
+- **`duplo fix`** is for *known bugs or failures*. You have a
+  concrete defect to describe (a captured crash, a wrong result, a
+  visibly broken UI) and you want it appended to PLAN.md as a fix
+  task. Bugs may come from your own testing, the McLoop wrapper's
+  auto-captured crashes, or anywhere else you can name what is
+  wrong.
+- **`duplo investigate`** is for *uncertain causes*. The system
+  feels wrong but there is no captured error and you cannot point
+  at a specific defect — sluggish behavior, intermittent failures,
+  something looks off. Duplo diagnoses first, then appends what it
+  finds.
+
+Both verbs end up writing fix tasks into the ``## Bugs`` section
+of PLAN.md; the difference is what runs before that.
+
+### `duplo fix`
 
 `duplo fix` records bugs and runs intelligent product-level
 diagnosis on each one:
@@ -484,17 +508,16 @@ on first plan generation and aligns with mcloop's contract:
 mcloop prioritises unchecked items in ``## Bugs`` before any
 feature tasks.
 
-### Intelligent investigation
+### `duplo investigate`
 
-`duplo investigate` is an explicit alias for `duplo fix`; both
-invoke the same investigation pipeline. The `--investigate` flag
-on `duplo fix` exists for the same reason and does not alter the
-code path. Use whichever name reads most clearly in context:
+`duplo investigate` runs the same investigation pipeline against
+uncertain-cause observations rather than concrete bug reports.
+Use it when you do not yet know what to file as a bug:
 
 ```bash
 duplo investigate "expressions don't evaluate"
-duplo fix --investigate "wrong colors"
-duplo investigate --images bug1.png bug2.png "layout is broken"
+duplo investigate "layout feels off after window resize"
+duplo investigate --images bug1.png bug2.png "something's wrong here"
 duplo investigate --screenshot "results not showing"
 ```
 
@@ -515,6 +538,67 @@ of PLAN.md as fix tasks.
 User-supplied screenshots (via `--images`) let you show the
 investigator exactly what's wrong without relying on appshot
 capture.
+
+### Plan re-authoring (`duplo reauthor`)
+
+The build can drift. Phases may take longer than estimated, scope
+may grow, or a feature you thought was simple turns out to need
+three more. Duplo tracks these signals in a **Plan Ledger** at
+`.duplo/ledger/` and, when the drift crosses a threshold, emits a
+`threshold_crossed` event. Run `duplo reauthor EVENT_ID` to
+regenerate the remaining roadmap and PLAN.md against the current
+reality, preserving everything already shipped.
+
+```bash
+duplo reauthor abc123                  # use defaults: PLAN.md + .duplo/ledger/
+duplo reauthor abc123 \
+  --plan custom-PLAN.md \
+  --ledger-dir .duplo/ledger \
+  --out PLAN.md.next \
+  --council-config .duplo/council.json
+```
+
+Arguments and flags:
+
+- `EVENT_ID` *(positional, required)* — the `event_id` of the
+  `threshold_crossed` event that triggered the re-author. Found
+  in the ledger output, in the Telegram notification that fires
+  on drift, or by running ``cat .duplo/ledger/events.jsonl |
+  grep threshold_crossed``.
+- `--plan PATH` — plan file to re-author. Default: `PLAN.md`.
+- `--ledger-dir PATH` — ledger directory. Default:
+  `.duplo/ledger`.
+- `--out PATH` — where to write the new plan. Default: overwrite
+  the input plan in place.
+- `--council-config PATH` — optional council configuration for
+  the re-author run (see *Council mode* below).
+
+The ledger and reauthor flow are designed to be safe: the input
+plan is never destroyed until the new plan validates, and shipped
+phases are carried forward verbatim. Only the unshipped tail is
+regenerated.
+
+### Council mode
+
+For plan generation and re-authoring, Duplo can route the work
+through a **council** — a small panel of LLM roles (drafter,
+critics, chair) that produce, critique, and synthesize the plan
+rather than relying on a single model. This is most useful when
+the stakes are high (large rewrites, expensive missing scope) and
+the cost of more model calls is acceptable.
+
+Flags on bare `duplo`:
+
+- `--use-council` / `--no-council` — enable or disable council
+  mode for this run. Mutually exclusive. If neither flag is
+  passed, the config (or default) decides.
+- `--council-config PATH` — path to a council configuration file
+  describing the roles, models, and adapters. Implies
+  `--use-council`.
+
+The council shares the same machinery as `duplo reauthor`'s
+`--council-config` flag, so an environment configured for one is
+configured for the other.
 
 ## Product specification (SPEC.md)
 
