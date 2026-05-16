@@ -460,3 +460,5 @@ a52ac94: Added a task context resolver to replace substring-based phase lookups.
 02f4c1e: Implemented the CLI for bob-plan with subcommands validate, next, fmt, done, and fail. Added file I/O operations load and save, and the migrate function to assign stable IDs to tasks and phases. The CLI handles parsing, validation, and atomic writes, and outputs settlements as JSON for done and fail commands.
 
 ecdf99d: Added a Stage 7 verification script for the bob-plan CLI that performs an end-to-end test. The script validates, formats, re-validates, and fetches the next task from a plan file, ensuring the formatting diff is additive-only. It also documents two pre-existing issues: a missing CLI tool installation and non-additive formatting changes in certain edge cases.
+
+adf7278: Added a verification script to ensure `bob-plan fmt` only makes additive changes to duplo-generated plan files. The script copies a real plan, runs the formatter, and compares parsed structures to detect any semantic changes beyond allowed formatting adjustments. If divergences are found, it logs them to a bugs file and fails.
