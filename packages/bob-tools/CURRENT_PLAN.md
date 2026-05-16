@@ -8,7 +8,7 @@ new parser agrees with mcloop on every existing fixture.
 - [ ] Round-trip every existing PLAN.md through fmt
    - [x] In `tests/test_existing_plans.py`, add a parameterized test that loads each of `/Users/mhcoen/proj/duplo/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`, runs the fmt composition (parse, migrate, render) on each, then re-parses the result in strict mode (since the migrated form has IDs and phase-id comments), then renders again, and asserts the second render equals the first render. This is the fixed-point property on real files.
    - [x] The test does NOT modify the source files. It reads them and operates in memory.
-   - [ ] Skip with a clear pytest.skip message if any source file is missing (so the suite is hermetic when running outside the dev environment).
+   - [x] Skip with a clear pytest.skip message if any source file is missing (so the suite is hermetic when running outside the dev environment).
    - [ ] Tests: each fixture round-trips; any deviation is reported with a unified diff in the assertion message.
 
 - [ ] Mcloop parity tests
