@@ -26,7 +26,7 @@ line.
    - [x] Tests: a task line with a stable ID parses with that ID; a task line without an ID parses with task_id None in compat mode and raises in strict mode; `_find_task_by_id` distinguishes T-000001 from T-0000010.
 
 - [ ] Ordinal fallback for unattributed phases
-   - [ ] When neither a phase-id comment nor the legacy header form provides an id, leave `Phase.phase_id` as None and `Phase.phase_id_source` as "none". The Stage 5 `resolve_task_context` function is what maps None to an ordinal fallback at resolve time.
+   - [x] When neither a phase-id comment nor the legacy header form provides an id, leave `Phase.phase_id` as None and `Phase.phase_id_source` as "none". The Stage 5 `resolve_task_context` function is what maps None to an ordinal fallback at resolve time.
    - [ ] Tests: a phase with no id source has phase_id None and source "none".
 
 - [ ] Magic line gates strict mode by default
