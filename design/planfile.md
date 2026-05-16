@@ -643,6 +643,14 @@ Phased migration. No big-bang rewrite.
    `planfile.complete_task`, `fail_task`, `next_tasks`.
 3. McLoop's parser disappears or remains as a 5-line shim.
 
+Consumer contract: the split-plan runner is the proven, mostly-working
+status quo, but `planfile` is its principled successor. The migration
+does not use an interim direct-PLAN.md checklist hack. The ordered path
+is: first finish the planfile operations, mutation/checkoff, and file-I/O
+surface; then migrate McLoop to consume that deterministic API with
+PLAN.md as the sole authoritative build document; then eliminate
+CURRENT_PLAN.md, `mcloop/plan_split.py`, and the split-specific tests.
+
 ### Phase C: Duplo migration
 
 1. Duplo's planner stops emitting raw Markdown. It produces typed
