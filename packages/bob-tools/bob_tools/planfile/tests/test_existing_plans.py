@@ -29,6 +29,7 @@ suite.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 from pathlib import Path
 
@@ -65,11 +66,21 @@ def test_existing_plan_fmt_is_fixed_point(source_path: Path) -> None:
     first_render = render_plan(migrated)
     re_parsed = parse_plan(first_render, strict=True)
     second_render = render_plan(re_parsed)
-    assert first_render == second_render, (
-        f"fmt is not a fixed point on {source_path}: "
-        f"render(parse_strict(render(migrate(parse({source_path.name}))))) "
-        f"differs from the first render"
-    )
+    if first_render != second_render:
+        diff = "".join(
+            difflib.unified_diff(
+                first_render.splitlines(keepends=True),
+                second_render.splitlines(keepends=True),
+                fromfile=f"{source_path.name} (first render)",
+                tofile=f"{source_path.name} (second render)",
+            )
+        )
+        raise AssertionError(
+            f"fmt is not a fixed point on {source_path}: "
+            "render(parse_strict(render(migrate(parse(...))))) differs "
+            "from the first render. Unified diff "
+            "(first render -> second render):\n" + diff
+        )
 
 
 def test_source_files_are_untouched() -> None:
