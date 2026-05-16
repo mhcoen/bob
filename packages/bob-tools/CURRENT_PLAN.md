@@ -54,9 +54,9 @@ mcloop's substring matching.
    - [x] Implement `_check_structural_sanity(parsed_plan)` raising `PlanSyntaxError` on duplicate H1 titles, multiple Bugs sections (any heading level), or duplicate phase/stage ordinals. Per mcloop's `_check_structural_sanity` function; the rationale (no auto-fix) is preserved.
    - [x] Tests: each corruption pattern detected with the offending line numbers in the error message.
 
-- [ ] [BATCH] Malformed-input rejection coverage
-   - [ ] Add a parameterized test class `tests/test_parser_rejections.py` exercising each rejection condition with a minimal failing fixture: duplicate H1, multiple Bugs sections, duplicate phase ordinals, malformed annotations (unclosed bracket, missing colon, empty value), action tag without colon, action tag with empty action name. Per Codex's pile-5 acceptance test gap.
-   - [ ] Each test asserts on the specific error message and the line number where the error was detected.
+- [x] [BATCH] Malformed-input rejection coverage
+   - [x] Add a parameterized test class `tests/test_parser_rejections.py` exercising each rejection condition with a minimal failing fixture: duplicate H1, multiple Bugs sections, duplicate phase ordinals, malformed annotations (unclosed bracket, missing colon, empty value), action tag without colon, action tag with empty action name. Per Codex's pile-5 acceptance test gap.
+   - [x] Each test asserts on the specific error message and the line number where the error was detected.
 
 - [ ] [USER] Verify compat-mode parser reads existing PLAN.md files without error. From a shell, run `python -c "from bob_tools.planfile import parse_plan; from pathlib import Path; p = parse_plan(Path('/Users/mhcoen/proj/duplo/PLAN.md').read_text()); print(f'phases={len(p.phases)}, bugs={p.bugs is not None}')"`. Then do the same for `/Users/mhcoen/proj/mcloop/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`. Report the phase counts. No exceptions should be raised. Expected counts: duplo has 8 phases, mcloop has at least 7 stages plus a Bugs section, PLAN.EXAMPLE has 2 stages.
 
