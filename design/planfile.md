@@ -392,6 +392,15 @@ itself) is not classified as that operational kind.
 3. **Key-value annotations** (`[feat: "..."]`, `[fix: "..."]`): at
    end of line. Multiple allowed.
 
+`[USER]` is reserved for genuinely human-only checks with no
+scriptable form, such as visual or physical confirmation. A runnable
+verification command, test, or script must not be encoded as `[USER]`;
+it must be represented as deterministic work, typically a normal task
+that creates a hardcoded helper script followed by an `[AUTO:run_cli]`
+task that invokes it with an absolute command path. This rule applies
+to Duplo-authored plans and to hand-authored planfile construction
+plans.
+
 Compatibility mode parses leading tags as tags and treats non-leading
 bracketed tokens that resemble flag or action tags as prose. The
 parser may emit a validation warning when a non-leading token like
