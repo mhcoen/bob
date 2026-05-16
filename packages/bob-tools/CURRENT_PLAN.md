@@ -25,7 +25,7 @@
    - [x] Run 100 random plans per property by default; bump to 1000 in a slow-mode pytest marker.
 
 - [ ] Canonicalization function
-   - [ ] Implement `canonicalize(text: str) -> str` as `render_plan(parse_plan(text))`. Lossless formatting only. Does not assign IDs or add phase-id comments — that is the `migrate` operation in Stage 5. Per design doc section 3.2.
+   - [x] Implement `canonicalize(text: str) -> str` as `render_plan(parse_plan(text))`. Lossless formatting only. Does not assign IDs or add phase-id comments — that is the `migrate` operation in Stage 5. Per design doc section 3.2.
    - [ ] Test: `canonicalize(canonicalize(text))` equals `canonicalize(text)` for every fixture. Test: tasks without IDs in the input have no IDs in the output (canonicalize does not migrate).
 
 - [ ] Verify Stage 4 leaves the repo green.
