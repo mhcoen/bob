@@ -17,12 +17,12 @@ operational tags are recognized only in the leading position of a
 task line, not anywhere in the task text. This is stricter than
 mcloop's substring matching.
 
-- [ ] [BATCH] Parse stage and phase headings
-   - [ ] In `parser.py`, implement `_parse_heading(line, line_number)` that recognizes the pattern `^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b` (matches mcloop's `STAGE_RE`). Return (ordinal, keyword, title) or None.
-   - [ ] Implement `_parse_bugs_heading(line)` matching `^#+\s+Bugs\s*$` (mcloop's `BUGS_RE`). Return True or False.
-   - [ ] Implement `_parse_h1(line)` matching `^#\s+(.+)$` for the project title.
-   - [ ] Implement `_parse_subsection(line)` matching `^###\s+(.+)$` for sub-grouping headings such as Manual verification headings.
-   - [ ] Tests in `tests/test_parser.py`: each heading type matches; case-insensitive on stage and phase; bare digits required after the stage or phase keyword. A heading like `## Phase phase_001:` does not match this regex — that strict-mode form is handled in Stage 3.
+- [x] [BATCH] Parse stage and phase headings
+   - [x] In `parser.py`, implement `_parse_heading(line, line_number)` that recognizes the pattern `^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b` (matches mcloop's `STAGE_RE`). Return (ordinal, keyword, title) or None.
+   - [x] Implement `_parse_bugs_heading(line)` matching `^#+\s+Bugs\s*$` (mcloop's `BUGS_RE`). Return True or False.
+   - [x] Implement `_parse_h1(line)` matching `^#\s+(.+)$` for the project title.
+   - [x] Implement `_parse_subsection(line)` matching `^###\s+(.+)$` for sub-grouping headings such as Manual verification headings.
+   - [x] Tests in `tests/test_parser.py`: each heading type matches; case-insensitive on stage and phase; bare digits required after the stage or phase keyword. A heading like `## Phase phase_001:` does not match this regex — that strict-mode form is handled in Stage 3.
 
 - [ ] [BATCH] Parse task lines (compat mode, leading-position tag rule)
    - [ ] Implement `_CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")` matching mcloop's `CHECKBOX_RE`.
