@@ -111,21 +111,7 @@ mcloop's substring matching.
 
 - [x] Write the Stage 2 verification helper script. Create `bob_tools/planfile/tests/manual/check_compat_read.py` (create the `manual` directory). The script imports `parse_plan`, parses each of the three existing PLAN.md files (`/Users/mhcoen/proj/duplo/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`), and for each prints one line: `OK <path> phases=<n> bugs=<true|false>`. If parsing raises, it prints `FAIL <path> <exception>` and exits non-zero. The script takes no arguments and hardcodes the three paths. This task makes the USER step a single command instead of a pasted one-liner.
 
-- [x] [USER] Run the compat-mode read check and confirm the results.
-
-   What to do: run this single command in a shell.
-
-   python -m bob_tools.planfile.tests.manual.check_compat_read
-
-   What to expect: three lines, each starting with OK, and no Python traceback. Approximate expected values (exact phase counts may differ; the point is that parsing succeeds and the numbers are sane, not that they match a hardcoded constant):
-
-   duplo/PLAN.md is around 8 phases, bugs=false
-
-   mcloop/PLAN.md is 7 or more phases, bugs=true
-
-   mcloop/PLAN.EXAMPLE.md is around 2 phases
-
-   What to report back: paste the three output lines. If any line starts with FAIL or a traceback appears, paste the full output. That is a parser bug to fix before Stage 2 is complete, not a problem with your environment.
+- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_compat_read
 
 - [x] Verify Stage 2 leaves the repo green.
 
@@ -166,15 +152,7 @@ line.
 
 - [ ] Write the Stage 3 verification helper script. Create `bob_tools/planfile/tests/manual/check_strict_reject.py`. The script imports `parse_plan` and `PlanSyntaxError`, then for each of `/Users/mhcoen/proj/duplo/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.md` calls `parse_plan(text, strict=True)`. Expected outcome is rejection: for each file it prints either `REJECTED <path> at line=<n> col=<m>` (the correct result) or `PARSED <path> (UNEXPECTED - strict mode should have rejected this)` and exits non-zero. The script takes no arguments and hardcodes the two paths.
 
-- [ ] [USER] Run the strict-mode rejection check and confirm both files are rejected.
-
-   What to do: run this single command in a shell.
-
-   python -m bob_tools.planfile.tests.manual.check_strict_reject
-
-   What to expect: two lines, both starting with REJECTED. Each line names a line and column where the parser expected a stable task ID and did not find one. Both existing files lack `T-NNNNNN:` IDs, so strict mode must reject them.
-
-   What to report back: paste the two output lines. If either line starts with PARSED, strict mode is incorrectly accepting un-migrated files. That is a parser bug to fix before Stage 3 is complete.
+- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_strict_reject
 
 - [ ] Verify Stage 3 leaves the repo green.
 
@@ -282,37 +260,9 @@ doc section 9: validate, fmt, next, done, fail.
    - [ ] Exit codes: 0 success; 1 invalid plan; 2 task not found; 3 other error.
    - [ ] Tests: each subcommand with a fixture file; exit codes; output formats.
 
-- [ ] [USER] Verify the CLI end to end on a throwaway copy of a real plan.
+- [ ] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-   What to do: run these six commands one at a time, in order. Each is on its own line for easy copying.
-
-   pip install -e /Users/mhcoen/proj/bob-tools
-
-   cp /Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md /tmp/test-plan.md
-
-   bob-plan validate /tmp/test-plan.md
-
-   bob-plan fmt /tmp/test-plan.md
-
-   bob-plan validate /tmp/test-plan.md
-
-   bob-plan next /tmp/test-plan.md
-
-   What to expect, command by command:
-
-   The first validate (before fmt) should FAIL and report that task IDs are missing, exit code 1. This is correct: the example file is not migrated yet.
-
-   fmt should succeed silently or print a short confirmation, and rewrite /tmp/test-plan.md in place with IDs and phase-id comments added.
-
-   The second validate (after fmt) should SUCCEED, exit code 0.
-
-   next should print one line naming the first actionable task, in the form T-NNNNNN: followed by the task text.
-
-   Then run this command to see exactly what fmt changed:
-
-   diff /Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md /tmp/test-plan.md
-
-   What to report back: for each of the six commands, paste its output and (where relevant) its exit code. Paste the diff output too. The diff should show only added task IDs, added phase-id comments, indentation normalization, and the format magic line. If the diff shows reordered or reworded tasks, that is a bug.
+- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
 
 - [ ] Verify Stage 7 leaves the repo green.
 
@@ -334,23 +284,9 @@ new parser agrees with mcloop on every existing fixture.
    - [ ] Assert structural agreement on: stage and phase ordinals; bugs section presence; task counts per phase; flag-tag presence on each task (USER and BATCH); action-tag presence; RULEDOUT attachments; checkbox status for each task. Cross the two trees by position (since stable IDs are present in one but not the other).
    - [ ] Document one known divergence: mcloop's substring matcher classifies prose-mention tasks as USER, BATCH, or AUTO tasks (mcloop substring-matches BATCH the same way it does USER, in `is_batch_task`); bob_tools.planfile does not. The parity test allows this specific divergence and asserts nothing else differs.
 
-- [ ] [USER] Run bob-plan fmt against a real duplo-generated plan to verify the fourth fixture class.
+- [ ] Write the Stage 8 verification helper script. Create `bob_tools/planfile/tests/manual/check_duplo_generated_fmt.py`. The script globs `/Users/mhcoen/proj/*/.duplo`, picks the first parent directory that also has a `PLAN.md`, copies that plan to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan fmt` on the copy, and diffs source against copy. It asserts only additive changes: task IDs, phase-id comments, indentation normalization, and the format magic line; task structure, tag set, and task order must be unchanged. On semantic divergence it appends a precise entry to `/Users/mhcoen/proj/bob-tools/BUGS.md` and exits non-zero. It hardcodes all paths, takes no arguments, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-   What to do: first find a duplo-generated project. Run this command to list candidates (projects with a .duplo directory):
-
-   ls -d /Users/mhcoen/proj/*/.duplo 2>/dev/null
-
-   Pick any one of the parent directories it lists. Then run these commands, substituting the project's PLAN.md path for SOURCE in the first command:
-
-   cp SOURCE /tmp/duplo-generated.md
-
-   bob-plan fmt /tmp/duplo-generated.md
-
-   diff SOURCE /tmp/duplo-generated.md
-
-   What to expect: the diff should show only added task IDs, added phase-id comments, indentation normalization, and the format magic line. Task structure, tag set, and task order should be unchanged.
-
-   What to report back: name the project you picked, then paste the diff output. If a real semantic divergence appears (tasks reordered, reworded, tags dropped, structure changed), that is a bug: add an entry describing it to /Users/mhcoen/proj/bob-tools/BUGS.md (create that file if it does not exist; mcloop reads a standalone BUGS.md as a priority surface). Do not put a Bugs section inside this PLAN.md.
+- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_duplo_generated_fmt
 
 - [ ] Final verification: run the full pytest suite with mypy strict and ruff check. All green. Then run `pip install -e /Users/mhcoen/proj/bob-tools` and verify `bob-plan --help` lists all subcommands.
 
