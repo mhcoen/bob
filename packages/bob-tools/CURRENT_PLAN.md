@@ -39,7 +39,7 @@ so derived parent completion is explicit.
 
 - [ ] validate_plan and check_consistency
    - [x] Implement `validate_plan(plan) -> None` raising `PlanValidationError(messages)` on: unknown bracket tags anywhere, malformed annotations, duplicate task IDs, references in @deps to non-existent task IDs. Per design doc section 4.2 Notes (unknown bracket tags are rejected by validation).
-   - [ ] Implement `check_consistency(plan, events) -> None` raising `PlanInconsistencyError(messages)` per design doc section 5: flag contradictions between checkbox state and the most recent lifecycle event for each task; do NOT flag intentional ledger gaps such as derived parent completion or settlements where ledger_event_required is false.
+   - [x] Implement `check_consistency(plan, events) -> None` raising `PlanInconsistencyError(messages)` per design doc section 5: flag contradictions between checkbox state and the most recent lifecycle event for each task; do NOT flag intentional ledger gaps such as derived parent completion or settlements where ledger_event_required is false.
    - [ ] Tests for each violation category.
 
 - [ ] Verify Stage 5 leaves the repo green.
