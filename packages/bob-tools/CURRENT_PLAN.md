@@ -13,11 +13,11 @@
    - [x] Trailing newline at end of file. Always exactly one.
    - [x] Tests: render output matches a hand-written fixture byte-for-byte for a small Plan; output ends with exactly one newline; indentation always 2 spaces regardless of input indentation.
 
-- [ ] Round-trip property tests
+- [x] Round-trip property tests
    - [x] Implement two property tests in `tests/test_roundtrip.py`:
    - [x] `test_parse_render_parse_idempotent`: for each fixture text, `parse(render(parse(text)))` equals `parse(text)` on the Plan value (ignoring line_number fields which differ between iterations). Fixtures are hand-crafted small plans covering each tag, each heading form, each status, the bugs section, subsections, RULEDOUT lines, and @deps lines.
    - [x] `test_render_parse_render_stable`: for each fixture plan, `render(parse(render(plan)))` equals `render(plan)`. This is the canonical-form fixed-point property.
-   - [ ] Fixtures live in `bob_tools/planfile/tests/fixtures/` as markdown files; the test loads them at runtime.
+   - [x] Fixtures live in `bob_tools/planfile/tests/fixtures/` as markdown files; the test loads them at runtime.
 
 - [ ] Generative property tests
    - [ ] Add `tests/test_generative.py`. Implement a small Plan generator using stdlib (no Hypothesis dependency): random small valid trees with random phase counts, random task counts per phase, random tag combinations, random deps among declared IDs. Per Codex's pile-5 acceptance test gap.
