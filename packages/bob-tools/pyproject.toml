@@ -20,6 +20,9 @@ dev = [
     "pytest-timeout>=2.3",
 ]
 
+[project.scripts]
+bob-plan = "bob_tools.planfile.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bob_tools*"]

@@ -16,6 +16,7 @@ and the CLI are subsequent stages.
 
 from __future__ import annotations
 
+from bob_tools.planfile.fileio import load, save, update
 from bob_tools.planfile.model import (
     BugsSection,
     Outcome,
@@ -37,6 +38,7 @@ from bob_tools.planfile.operations import (
     check_consistency,
     complete_task,
     fail_task,
+    migrate,
     next_tasks,
     replace_phase,
     reset_task,
@@ -68,16 +70,14 @@ __all__ = [
     "check_consistency",
     "complete_task",
     "fail_task",
+    "load",
+    "migrate",
     "next_tasks",
     "parse_plan",
     "render_plan",
     "replace_phase",
     "reset_task",
     "resolve_task_context",
-    # Stage 5 — operations still to land:
-    # "migrate",
-    # Stage 6 — file I/O:
-    # "load",
-    # "save",
-    # "update",
+    "save",
+    "update",
 ]

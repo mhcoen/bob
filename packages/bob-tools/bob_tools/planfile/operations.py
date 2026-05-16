@@ -1347,3 +1347,133 @@ def replace_phase(plan: Plan, phase_id: str, new_phase: Phase) -> Plan:
     if not found:
         raise ValueError(f"phase {phase_id!r} not found in plan")
     return dataclasses.replace(plan, phases=tuple(new_phases))
+
+
+_PHASE_ID_RE = re.compile(r"^phase_(\d+)$")
+
+
+def _max_phase_id_number(plan: Plan) -> int:
+    """Return the maximum numeric suffix used in any ``phase_NNN`` id.
+
+    Scans every phase's ``phase_id`` and returns the largest digit run
+    after the ``phase_`` prefix; returns ``0`` when no phase has a
+    conforming id. Used by :func:`migrate` to assign ids to phases
+    whose ``phase_id_source`` is ``"none"`` without colliding with ids
+    already in use.
+    """
+    max_num = 0
+    for phase in plan.phases:
+        if phase.phase_id is None:
+            continue
+        match = _PHASE_ID_RE.match(phase.phase_id)
+        if match is None:
+            continue
+        num = int(match.group(1))
+        if num > max_num:
+            max_num = num
+    return max_num
+
+
+def _assign_task_ids(tasks: tuple[Task, ...], counter: list[int]) -> tuple[Task, ...]:
+    """Return a copy of ``tasks`` with missing ``task_id`` fields assigned.
+
+    ``counter`` is a single-element list holding the next id number to
+    use; it is mutated in place so sibling subtrees share one running
+    counter. Tasks that already have a ``task_id`` are returned with
+    only their ``children`` re-walked (so a partially-migrated tree
+    fills only the gaps).
+    """
+    new_tasks: list[Task] = []
+    for task in tasks:
+        new_children = _assign_task_ids(task.children, counter)
+        if task.task_id is None:
+            new_id = f"T-{counter[0]:06d}"
+            counter[0] += 1
+            new_tasks.append(
+                dataclasses.replace(task, task_id=new_id, children=new_children)
+            )
+        else:
+            new_tasks.append(dataclasses.replace(task, children=new_children))
+    return tuple(new_tasks)
+
+
+def migrate(plan: Plan) -> Plan:
+    """Return ``plan`` with stable identifiers assigned to every task and phase.
+
+    Per design doc section 3.2: identity migration is a one-shot
+    transformation that fills in the structural information PLAN.md
+    needs for deterministic addressing. ``canonicalize`` is the
+    lossless formatter; ``migrate`` is the identity-mutating step.
+
+    Rules:
+
+    * Every existing ``T-NNNNNN`` is preserved unchanged. Tasks with no
+      id receive sequential ids starting at ``max(existing) + 1`` (or
+      ``T-000001`` when no task in the plan has a conforming id).
+    * Every phase whose ``phase_id_source`` is ``"none"`` receives a
+      synthesized ``phase_NNN`` id (sequential, starting at one greater
+      than the maximum existing ``phase_NNN`` suffix) and has its
+      ``phase_id_source`` set to ``"explicit_comment"`` so the
+      renderer emits a ``<!-- phase_id: ... -->`` line.
+    * Phases that already have an explicit id (any source other than
+      ``"none"``) are left untouched.
+
+    The operation is idempotent: ``migrate(migrate(plan))`` equals
+    ``migrate(plan)``.
+    """
+    counter = [_next_task_id_number(plan)]
+    new_phases: list[Phase] = []
+    next_phase_num = _max_phase_id_number(plan) + 1
+    for phase in plan.phases:
+        new_root_tasks = _assign_task_ids(phase.tasks, counter)
+        new_subsections = tuple(
+            dataclasses.replace(sub, tasks=_assign_task_ids(sub.tasks, counter))
+            for sub in phase.subsections
+        )
+        if phase.phase_id_source == "none":
+            new_phase_id = f"phase_{next_phase_num:03d}"
+            next_phase_num += 1
+            new_phases.append(
+                dataclasses.replace(
+                    phase,
+                    phase_id=new_phase_id,
+                    phase_id_source="explicit_comment",
+                    tasks=new_root_tasks,
+                    subsections=new_subsections,
+                )
+            )
+        else:
+            new_phases.append(
+                dataclasses.replace(
+                    phase, tasks=new_root_tasks, subsections=new_subsections
+                )
+            )
+
+    new_bugs = plan.bugs
+    if new_bugs is not None:
+        new_bugs = dataclasses.replace(
+            new_bugs, tasks=_assign_task_ids(new_bugs.tasks, counter)
+        )
+
+    return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
+
+
+def _next_task_id_number(plan: Plan) -> int:
+    """Return the integer suffix to use for the next assigned task id.
+
+    Equivalent to :func:`_next_task_id` but returns the integer rather
+    than the formatted ``T-NNNNNN`` string; used by :func:`migrate`,
+    which mutates a counter as it walks the tree and needs to increment
+    the raw number.
+    """
+    max_num = 0
+    for task in _iter_plan_tasks(plan):
+        if task.task_id is None or not task.task_id.startswith("T-"):
+            continue
+        suffix = task.task_id[2:]
+        if not suffix.isdigit():
+            continue
+        num = int(suffix)
+        if num > max_num:
+            max_num = num
+    return max_num + 1

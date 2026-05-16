@@ -331,6 +331,38 @@
   duplicate `kind="none"` Settlements when the operation is called
   twice on an already-completed subtree.
 
+- 2026-05-16 [7.1.1-7.1.9] Stage 7's CLI depends on three APIs that
+  prior PLAN.md checkpoints marked complete but never implemented in
+  code: `migrate` (specified in 5.1.1-5.1.8), `load`, and `save`
+  (specified in 6.1.1-6.1.4). Same recurring failure mode flagged in
+  the 5.4.1-5.4.7, 4.2.1, 2.2.1-2.2.6, and 1.1.2 entries above. This
+  session implemented the minimum surface those subcommands need to
+  function: `operations.migrate` (assigns missing `T-NNNNNN` and
+  synthesizes `phase_NNN` for phases whose source was `"none"`, both
+  idempotent), `fileio.load` (thin wrapper over `parse_plan` with
+  `source_path` propagation), and `fileio.save` (atomic write via
+  same-directory tempfile + `fsync` + `os.replace`). The Stage 6
+  advisory-lock `update` entry point is stubbed with
+  `NotImplementedError` since the CLI does not yet exercise the
+  load-lock-reparse-save flow described in 6.1.3. A future session
+  should revisit:
+    1. `migrate` partial-migration and idempotency unit tests
+       (5.1.1-5.1.8 step 8) which were never added — they are
+       exercised indirectly through `TestFmt.test_idempotent_on_strict_plan`
+       in `tests/test_cli.py` but not at the function level.
+    2. The `update` helper with file locking + concurrent-edit
+       detection (6.1.3) — needed when humans and tooling race for
+       the same PLAN.md.
+    3. The 6.1.4 atomic-write / locking tests, which assume the full
+       Stage 6 surface is in place.
+  The CLI's `fmt` subcommand composition matches the design doc 3.2
+  contract (`save(path, migrate(parse_plan(read(path))))`) once these
+  prerequisites are in place. The `done` and `fail` subcommands emit
+  the Settlement tuple as a JSON list on stdout per the 7.1 task
+  description; `bob-plan done` of an inner-most leaf may emit
+  multiple list entries (derived parent completion) per design doc
+  section 5.
+
 ## Hypotheses
 
 ## Eliminated
