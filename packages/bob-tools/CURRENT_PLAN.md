@@ -39,7 +39,7 @@ mcloop's substring matching.
 
 - [ ] Parse @deps lines
    - [x] Implement `_DEPS_RE = re.compile(r"^(\s*)@deps\s+(.+)$")`. The captured tail is whitespace-separated task IDs of the form T-NNNNNN (no trailing colon — bare IDs).
-   - [ ] A `@deps` line attaches to the immediately preceding task line at strictly lesser indent. A `@deps` line at the same indent as its task is also accepted (lenient) and emits a validation warning.
+   - [x] A `@deps` line attaches to the immediately preceding task line at strictly lesser indent. A `@deps` line at the same indent as its task is also accepted (lenient) and emits a validation warning.
    - [ ] Validation: every referenced ID must exist in the plan; otherwise raise `PlanValidationError` from `validate_plan` (not at parse time — parse only structures, validate checks references).
    - [ ] Tests: single-line deps with one or more IDs; deps attached to nested subtasks; missing target ID surfaces in `validate_plan`. Per design doc section 6 and Phase A scope in section 8.
 
