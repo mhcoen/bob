@@ -267,3 +267,5 @@ a1c07d9: Updated task ID parsing to capture the full line after the ID, enabling
 0f731a9: Added a helper function to find tasks by exact ID match, preventing substring confusion where similar IDs like T-000001 and T-0000010 would be incorrectly conflated. Updated tests to verify the function works across all plan sections and correctly handles prefix overlaps.
 
 d02cfa5: The parser now automatically enforces strict mode when a plan file includes the magic version line, ensuring files that opt into the strict format are parsed correctly regardless of the caller's flag. This prevents silent failures when a plan declares itself strict but the caller forgets to enable strict mode. The caller's explicit strict flag is still honored when no magic line is present.
+
+6c244f0: Added a manual verification script to test strict parsing mode. The script checks that existing PLAN.md files without the required strict-mode header are correctly rejected, ensuring backward compatibility and preventing accidental acceptance of outdated formats.
