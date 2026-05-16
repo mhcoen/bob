@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from bob_tools.planfile import parse_plan, render_plan
+from bob_tools.planfile import Plan, Task, canonicalize, parse_plan, render_plan
 from bob_tools.planfile.renderer import normalize_positions
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -45,6 +45,29 @@ def _fixture_paths() -> list[Path]:
     if not paths:
         pytest.fail(f"no fixtures found in {FIXTURES_DIR}")
     return paths
+
+
+def _collect_task_ids_including_none(plan: Plan) -> list[str | None]:
+    """Return every ``task_id`` in document order, preserving ``None`` entries.
+
+    Unlike the non-None-filtering helper in ``test_generative.py``, this
+    keeps the ID-less slots in the sequence so list equality is a faithful
+    "no ID was assigned, no ID was removed" oracle.
+    """
+    ids: list[str | None] = []
+
+    def _walk(tasks: tuple[Task, ...]) -> None:
+        for task in tasks:
+            ids.append(task.task_id)
+            _walk(task.children)
+
+    for phase in plan.phases:
+        _walk(phase.tasks)
+        for subsection in phase.subsections:
+            _walk(subsection.tasks)
+    if plan.bugs is not None:
+        _walk(plan.bugs.tasks)
+    return ids
 
 
 @pytest.mark.parametrize(
@@ -77,4 +100,51 @@ def test_render_parse_render_stable(fixture_path: Path) -> None:
         f"render(parse(render(parse({fixture_path.name})))) "
         f"diverged from render(parse({fixture_path.name})) "
         f"— canonical form is not a fixed point"
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    _fixture_paths(),
+    ids=lambda p: p.name,
+)
+def test_canonicalize_idempotent(fixture_path: Path) -> None:
+    """``canonicalize(canonicalize(text)) == canonicalize(text)`` for every fixture.
+
+    Canonical text is by definition the fixed point of ``parse∘render``,
+    and ``canonicalize`` is just that composition, so applying it twice
+    must equal applying it once. This is the user-facing restatement of
+    ``test_render_parse_render_stable`` — same property, expressed
+    against the public ``canonicalize`` surface.
+    """
+    text = fixture_path.read_text()
+    once = canonicalize(text)
+    twice = canonicalize(once)
+    assert once == twice, (
+        f"canonicalize(canonicalize({fixture_path.name})) "
+        f"diverged from canonicalize({fixture_path.name})"
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    _fixture_paths(),
+    ids=lambda p: p.name,
+)
+def test_canonicalize_does_not_assign_task_ids(fixture_path: Path) -> None:
+    """``canonicalize`` does not migrate identities: tasks without IDs in
+    the input have no IDs in the output, and tasks with IDs keep theirs.
+
+    Identity assignment (giving an ID-less task a fresh ``T-NNNNNN``) is
+    the responsibility of ``migrate`` per design doc section 3.2, not of
+    ``canonicalize``. Comparing the full ``task_id`` sequence with
+    ``None`` entries preserved catches both directions of drift: an ID
+    appearing where there was none, or an existing ID being dropped.
+    """
+    text = fixture_path.read_text()
+    before = _collect_task_ids_including_none(parse_plan(text))
+    after = _collect_task_ids_including_none(parse_plan(canonicalize(text)))
+    assert before == after, (
+        f"canonicalize({fixture_path.name}) altered task identities: "
+        f"before={before} after={after}"
     )
