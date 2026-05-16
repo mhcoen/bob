@@ -11,6 +11,8 @@ Authoritative design reference:
 design doc disagree, the design doc wins. Flag the discrepancy for
 resolution rather than silently picking one interpretation.
 
+Deferred cross-project design backlog: see `/Users/mhcoen/proj/bob/design/BACKLOG.md`.
+
 Python 3.12+, ruff for linting, pytest for tests, mypy strict for
 typing. Sits in `bob_tools/planfile/` as a peer of `bob_tools/ledger/`.
 No new top-level dependencies; stdlib only for parser, renderer, and
@@ -351,3 +353,7 @@ new parser agrees with mcloop on every existing fixture.
    What to report back: name the project you picked, then paste the diff output. If a real semantic divergence appears (tasks reordered, reworded, tags dropped, structure changed), that is a bug: add an entry describing it to /Users/mhcoen/proj/bob-tools/BUGS.md (create that file if it does not exist; mcloop reads a standalone BUGS.md as a priority surface). Do not put a Bugs section inside this PLAN.md.
 
 - [ ] Final verification: run the full pytest suite with mypy strict and ruff check. All green. Then run `pip install -e /Users/mhcoen/proj/bob-tools` and verify `bob-plan --help` lists all subcommands.
+
+## Stage 9: DEFERRED - deterministic bugfile layer (DO-NOT-EXECUTE)
+
+DEFERRED / DO-NOT-EXECUTE: McLoop must skip this section because it contains no checkbox tasks. Deterministic bugfile layer - a parser/renderer/operations/CLI layer for BUGS.md analogous to bob_tools.planfile, with a defined schema that includes temporal and provenance fields (opened-at, resolved-at, and a build/run or commit identifier so a resolved bug is locatable in the build process, not just in wall-clock time). Rationale: BUGS.md has repeatedly been LLM-corrupted (same failure mode that motivated planfile); adding structured temporal/provenance metadata to freeform markdown is the forcing function for giving the bug file the same anti-corruption deterministic-access treatment as the plan file. Sibling to the planfile stages. Not to be started until the planfile work is complete and the user explicitly schedules it.
