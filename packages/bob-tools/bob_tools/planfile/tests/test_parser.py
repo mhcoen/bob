@@ -561,15 +561,21 @@ class TestParsePlanStateMachine:
         assert plan.phases[0].ordinal == 2
         assert plan.phases[0].title == "Implementation"
 
-    def test_phase_with_non_bare_digit_id_is_not_a_phase_heading(self) -> None:
-        # `## Phase phase_001:` is the legacy strict-form heading; per
-        # design doc section 2.5 it does NOT match the bare-digit
-        # STAGE_RE and so is invisible to the compat parser. The tasks
-        # that follow have no enclosing phase and are dropped.
-        text = "## Phase phase_001: Core\n- [ ] orphan task\n"
+    def test_phase_with_non_bare_digit_id_opens_a_ledger_phase(self) -> None:
+        # `## Phase phase_001:` is the legacy ledger-form heading: per
+        # design doc section 7.1 mechanism 2 the parser accepts it in
+        # both compat and strict mode, with `phase_id` set from the
+        # heading and `phase_id_source="explicit_header"`. The detailed
+        # behavior is exercised in `TestLedgerPhaseHeading`; this test
+        # pins that following tasks land inside the new phase rather
+        # than being dropped as orphans (the old compat behavior before
+        # task 3.2.2 wired the ledger regex into `parse_plan`).
+        text = "## Phase phase_001: Core\n- [ ] task\n"
         plan = parse_plan(text)
-        assert plan.phases == ()
-        assert plan.bugs is None
+        assert len(plan.phases) == 1
+        phase = plan.phases[0]
+        assert phase.phase_id == "phase_001"
+        assert tuple(t.text for t in phase.tasks) == ("task",)
 
     def test_indent_stack_builds_task_tree(self) -> None:
         text = (
@@ -1432,3 +1438,57 @@ class TestPhaseIdComment:
         phase = plan.phases[0]
         assert phase.phase_id is None
         assert phase.phase_id_source == "none"
+
+
+class TestLedgerPhaseHeading:
+    """``## Phase <id>: <title>`` with a non-numeric id opens a phase.
+
+    Per design doc section 7.1 mechanism 2: the ledger's legacy heading
+    form (e.g. ``## Phase phase_001: Core``) does not satisfy the bare-
+    digits ordinal regex, but the parser must still accept it and pull
+    the phase id from the heading rather than treat the line as prose.
+    """
+
+    def test_non_numeric_id_opens_phase_with_explicit_header_source(self) -> None:
+        text = "## Phase phase_001: Core\n- [ ] task\n"
+        plan = parse_plan(text)
+        assert len(plan.phases) == 1
+        phase = plan.phases[0]
+        assert phase.phase_id == "phase_001"
+        assert phase.phase_id_source == "explicit_header"
+        assert phase.title == "Core"
+        assert phase.keyword == "Phase"
+        assert phase.ordinal == 1
+        assert tuple(t.text for t in phase.tasks) == ("task",)
+
+    def test_numeric_heading_still_takes_ordinal_path(self) -> None:
+        # ``## Phase 1: Core`` matches both the ordinal regex and the
+        # ledger regex. The ordinal path runs first, so phase_id is not
+        # set from the heading — it would otherwise be the string "1",
+        # which is not a stable identifier.
+        plan = parse_plan("## Phase 1: Core\n- [ ] x\n")
+        phase = plan.phases[0]
+        assert phase.ordinal == 1
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
+
+    def test_mixed_ordinal_and_ledger_headings_in_one_plan(self) -> None:
+        # The ordinal of a ledger-form phase is positional (its index
+        # in document order), since there is no digit to extract.
+        text = (
+            "## Stage 1: A\n"
+            "- [ ] a\n"
+            "## Phase phase_002: B\n"
+            "- [ ] b\n"
+            "## Phase 3: C\n"
+            "- [ ] c\n"
+        )
+        plan = parse_plan(text)
+        assert len(plan.phases) == 3
+        assert plan.phases[0].ordinal == 1
+        assert plan.phases[0].phase_id is None
+        assert plan.phases[1].ordinal == 2
+        assert plan.phases[1].phase_id == "phase_002"
+        assert plan.phases[1].phase_id_source == "explicit_header"
+        assert plan.phases[2].ordinal == 3
+        assert plan.phases[2].phase_id is None

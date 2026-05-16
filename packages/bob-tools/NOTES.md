@@ -196,6 +196,25 @@
   section, empty section, populated section) so the disambiguation
   cannot regress.
 
+- 2026-05-16 [3.2.2] The ordinal field for a ledger-form
+  `## Phase phase_001: ...` heading is set to positional index
+  (`len(phases) + 1`) since there is no digit to extract. Consequence:
+  a mixed plan like `## Phase 1: A` then `## Phase phase_002: B` then
+  `## Phase 5: C` produces ordinals 1, 2, 5 — non-contiguous because
+  the digit-form headings override positional numbering. This matches
+  the design doc's "ordinal fallback = n-th heading in document order"
+  rule applied only when no digit is present, and it preserves the
+  behavior of digit-form headings.
+
+  The structural-sanity check (`_check_structural_sanity`) only
+  groups duplicates by `_STAGE_RE`'s `num` group, so two phases with
+  the same ledger-form phase_id (e.g. two `## Phase phase_001:` lines)
+  are not flagged. This is a gap parallel to the digit-form duplicate
+  detection. Worth extending in a later task if a corrupt PLAN.md
+  with duplicate ledger phase_ids is ever observed in the wild; for
+  now no precedent has surfaced and the design doc does not require
+  it.
+
 ## Hypotheses
 
 ## Eliminated

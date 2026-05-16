@@ -158,11 +158,20 @@ def parse_plan(
     interpretation and no mcloop-tolerance to preserve (mcloop never
     recognized ``@deps`` at all). The error message quotes the offending
     line so the location is unambiguous to the human fixing the file.
-    2.6.1 (this) runs :func:`_check_structural_sanity` first: it scans
+    2.6.1 runs :func:`_check_structural_sanity` first: it scans
     the raw lines for duplicate H1 titles, multiple Bugs sections, and
     duplicate phase/stage ordinals before any structural parsing
     happens, so the typed model never has to represent a corrupted
     document. Mirrors mcloop's pre-parse corruption check.
+    3.2.2 (this) accepts the ledger-form ``## Phase <id>: <title>``
+    heading whose id is non-numeric (e.g. ``phase_001``), per design
+    doc section 7.1 mechanism 2: the line opens a new phase with
+    ``phase_id`` set from the heading and ``phase_id_source`` set to
+    ``"explicit_header"``. The ordinal in this case is positional
+    (``len(phases) + 1``) since there is no digit to extract. The
+    ordinal-form check runs first so ``## Phase 1: ...`` still takes
+    the ordinal path and produces ``phase_id=None`` until an explicit
+    comment attaches one.
     """
     del strict
     lines = text.splitlines()
@@ -208,6 +217,27 @@ def parse_plan(
                 ordinal=ordinal,
                 keyword=keyword,
                 title=title,
+                line_number=line_number,
+            )
+            phases_b.append(current_phase)
+            current_subsection = None
+            in_bugs = False
+            stack.clear()
+            phase_prose_lines = []
+            continue
+
+        ledger_heading = _parse_ledger_phase_heading(line)
+        if ledger_heading is not None:
+            _close_subsection_prose()
+            _close_phase_prose()
+            preamble_active = False
+            phase_id, title = ledger_heading
+            current_phase = _PhaseBuilder(
+                ordinal=len(phases_b) + 1,
+                keyword="Phase",
+                title=title,
+                phase_id=phase_id,
+                phase_id_source="explicit_header",
                 line_number=line_number,
             )
             phases_b.append(current_phase)
@@ -549,6 +579,25 @@ def _parse_phase_heading(line: str) -> tuple[int, str, str] | None:
     if m is None:
         return None
     return int(m.group("num")), m.group("kw").capitalize(), m.group("title").strip()
+
+
+def _parse_ledger_phase_heading(line: str) -> tuple[str, str] | None:
+    """Match the ledger-form ``## Phase <id>: <title>`` heading.
+
+    Per design doc section 7.1 mechanism 2: a heading with a non-numeric
+    identifier (e.g. ``## Phase phase_001: Core``) does not match
+    :data:`_STAGE_RE` (which requires bare digits after the keyword) but
+    must still be accepted so a plan written in the ledger's own form
+    parses. Returns ``(phase_id, title)`` or ``None``. The caller checks
+    this only after :func:`_parse_phase_heading` has failed, so a digit
+    id like ``## Phase 1: Core`` is consumed by the ordinal path first
+    and never reaches here (which would otherwise set
+    ``phase_id="1"`` from the same line).
+    """
+    m = _LEDGER_PHASE_HEADER_RE.match(line)
+    if m is None:
+        return None
+    return m.group("id"), m.group("title").strip()
 
 
 def _extract_task_id(text: str) -> tuple[str | None, str]:
