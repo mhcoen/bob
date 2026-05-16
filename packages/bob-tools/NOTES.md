@@ -426,3 +426,5 @@ a52ac94: Added a task context resolver to replace substring-based phase lookups.
 0900df6: Enhanced plan validation to detect duplicate task IDs, unknown leading bracket tags, and malformed trailing annotations. The validator now reports all issues together without short-circuiting, providing comprehensive error messages for users to fix their plan files.
 
 7441584: Added a consistency checker that reconciles PLAN.md task statuses against ledger events. It raises an error when a task's checkbox contradicts the most recent lifecycle event for that task, such as a DONE checkbox after a test_failed event. The checker intentionally allows resets (TODO after test_failed) and ignores tasks without events or stable IDs.
+
+02f4c1e: Implemented the CLI for bob-plan with subcommands validate, next, fmt, done, and fail. Added file I/O operations load and save, and the migrate function to assign stable IDs to tasks and phases. The CLI handles parsing, validation, and atomic writes, and outputs settlements as JSON for done and fail commands.
