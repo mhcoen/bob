@@ -20,6 +20,43 @@ from bob_tools.planfile.model import (
 
 _POSITIONAL_LABEL_RE = re.compile(r"^\d+(?:\.\d+)+$")
 
+# Leading-position bracket form whose content has the shape of an
+# operational tag: an all-uppercase identifier of two or more chars,
+# optionally followed by ``:word`` (the AUTO action-tag form). Matches
+# ``[USER]``, ``[BATCH]``, ``[AUTO:run]``, ``[FOO]``, ``[FOO:bar]``;
+# does NOT match lowercase or single-char brackets like ``[x]`` or
+# ``[note]`` (those are prose per design doc section 4.3). When the
+# parser succeeds at extracting a known leading tag the bracket is
+# removed from ``task.text``, so a surviving match here is either a
+# tag form the parser does not recognize (``[FOO]``) or a known tag
+# in a non-leading-after-other-tags position the parser refused to
+# strip — both cases are unknown bracket tags by validation.
+_LEADING_TAG_LIKE_RE = re.compile(r"^\[([A-Z][A-Z0-9_]+(?::\w+)?)\]")
+
+# Trailing bracket form. The opening ``[`` must abut either start of
+# string or whitespace (mirrors ``_extract_annotations``' separation
+# requirement) and the closing ``]`` must be the last non-whitespace
+# character. Used to detect malformed annotations: a bracket form the
+# parser left in text because its content did not parse as
+# ``key: value``.
+_TRAILING_BRACKET_RE = re.compile(r"(?:(?<=\s)|^)\[([^\[\]\n]+)\]\s*$")
+
+# Annotation content shape per the parser's ``_ANNOTATION_CONTENT_RE``:
+# identifier-shaped key, colon, then mandatory whitespace and value.
+# A bracket whose content has a key-and-colon prefix but fails this
+# pattern is the canonical "malformed annotation" signal — the author
+# intended an annotation but missed the required whitespace or value.
+_ANNOTATION_OK_RE = re.compile(r"^[A-Za-z_]\w*:\s+\S.*$", re.DOTALL)
+
+# Annotation-attempt prefix: identifier-shaped key followed immediately
+# by a colon. Used to distinguish "this trailing bracket looks like an
+# annotation attempt" (``[feat:foo]``) from "this trailing bracket is
+# just prose ending in brackets" (``[some text]``); only the former is
+# flagged as malformed.
+_ANNOTATION_KEY_RE = re.compile(r"^[A-Za-z_]\w*:")
+
+_KNOWN_LEADING_FLAGS = frozenset({"USER", "BATCH"})
+
 
 def bug_count(plan: Plan) -> int:
     """Return the number of bug tasks in ``plan``.
@@ -72,33 +109,135 @@ def _find_task_by_id(plan: Plan, task_id: str) -> Task | None:
     return None
 
 
-def validate_plan(plan: Plan) -> None:
-    """Validate referential integrity of ``@deps`` references in ``plan``.
+def _task_ref(task: Task) -> str:
+    """Return a short reference for ``task`` for use in validator messages.
 
-    Every task ID listed in any task's ``deps`` must resolve to the
-    ``task_id`` of some task in the plan. Otherwise raise
-    :class:`PlanValidationError` carrying one message per missing
-    reference (design doc section 8 phase A: "validation requires
-    referenced IDs to exist in the plan").
-
-    Parse-time concerns (syntax, structure) are not re-checked here; the
-    parser raises :class:`PlanSyntaxError` for those. Validation only
-    cross-checks references between already-parsed objects.
+    Prefers the stable ``T-NNNNNN`` id when present, falling back to the
+    1-based source line number for compat-mode tasks (no id). Validation
+    messages must locate the offending task uniquely; both forms appear
+    elsewhere in the codebase (``T-...`` in deps references, ``line N``
+    in mcloop's parser diagnostics), so reusing them keeps the human
+    fix-it experience consistent.
     """
-    known_ids: set[str] = {
-        task.task_id for task in _iter_plan_tasks(plan) if task.task_id is not None
-    }
+    return task.task_id if task.task_id is not None else f"line {task.line_number}"
 
+
+def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
+    """Flag a leading bracket form that does not match a known tag.
+
+    Per design doc section 4.3, leading-position tags are ``[USER]``,
+    ``[BATCH]``, and ``[AUTO:<word>]``. The parser strips known tags
+    from the task body, so any tag-shaped bracket form still at the
+    leading position of ``task.text`` is by definition unknown to this
+    library (either a typo or an attempt to add a new tag without a
+    library change). ``[RULEDOUT]`` is a sibling line, not a task tag,
+    so it never appears at the leading position of a task body.
+
+    Lowercase bracket forms and multi-word bracket forms are prose
+    (``_LEADING_TAG_LIKE_RE`` requires an all-caps identifier of two
+    or more characters), so a task that legitimately starts with prose
+    like ``[note] do thing`` is not flagged. ``[USER]`` and ``[BATCH]``
+    appearing here are skipped: if the parser left them in text it is
+    a parser bug, not a validation concern, and double-reporting would
+    confuse the user fixing the file.
+    """
+    m = _LEADING_TAG_LIKE_RE.match(task.text)
+    if m is None:
+        return
+    content = m.group(1)
+    if content in _KNOWN_LEADING_FLAGS:
+        return
+    if ":" in content and content.split(":", 1)[0] == "AUTO":
+        return
+    errors.append(f"task {_task_ref(task)} has unknown bracket tag [{content}]")
+
+
+def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
+    """Flag a trailing bracket form that looks like a broken annotation.
+
+    Per design doc section 4.2, an annotation is ``[key: value]``: an
+    identifier-shaped key, a colon, mandatory whitespace, then a
+    non-empty value. The parser strips well-formed annotations from
+    the task body; a trailing bracket still in ``task.text`` whose
+    content has the ``key:`` prefix but does not satisfy
+    ``key: value`` (missing whitespace, empty value, etc.) is the
+    canonical malformed-annotation case.
+
+    Bracket forms that do not look like annotation attempts at all
+    (no colon, or no identifier-shaped prefix before the colon) are
+    treated as prose and left alone — flagging ``[some text]`` at end
+    of a task description would produce more false positives than
+    real catches. The malformed signal is the *colon* that the author
+    typed when reaching for an annotation.
+    """
+    m = _TRAILING_BRACKET_RE.search(task.text)
+    if m is None:
+        return
+    content = m.group(1)
+    if _ANNOTATION_KEY_RE.match(content) is None:
+        return
+    if _ANNOTATION_OK_RE.match(content) is not None:
+        return
+    errors.append(f"task {_task_ref(task)} has malformed annotation [{content}]")
+
+
+def validate_plan(plan: Plan) -> None:
+    """Validate structural and referential integrity of ``plan``.
+
+    Raises :class:`PlanValidationError` carrying one message per problem
+    found; validation does not short-circuit on the first failure so a
+    single run surfaces every fix the user needs to make. Checks, in
+    the order they are reported:
+
+    1. **Duplicate task ids.** Each ``T-NNNNNN`` must occur exactly
+       once in the plan. Tasks without an id (compat-mode) are not
+       counted. Per design doc section 7.2: task ids are the canonical
+       reference, so two tasks sharing one id makes ``@deps`` ambiguous
+       and ``complete_task`` / ``fail_task`` non-deterministic.
+    2. **Unknown bracket tags.** A bracket form at the leading position
+       of any task body that does not match a known tag (``[USER]``,
+       ``[BATCH]``, ``[AUTO:<word>]``) — per design doc section 4.2
+       Notes, "unknown bracket tags are rejected by validation, not
+       silently ignored. New tags require a library change." Detection
+       is delegated to :func:`_check_leading_bracket_tag`.
+    3. **Malformed annotations.** A trailing bracket form that looks
+       like an annotation attempt (``[key:value]``) but does not match
+       the ``key: value`` shape the parser accepts. Detection is
+       delegated to :func:`_check_trailing_annotation`.
+    4. **Unknown ``@deps`` references.** Every task id listed in any
+       task's ``deps`` must resolve to a known task id in the plan
+       (design doc section 8 phase A: "validation requires referenced
+       IDs to exist in the plan"). Duplicate ids are still added to
+       the known set so dep references resolve, since the duplicate
+       diagnostic above already reports the underlying problem.
+
+    Parse-time concerns (syntax, structure of headings) are not
+    re-checked here; the parser raises :class:`PlanSyntaxError` for
+    those.
+    """
     errors: list[str] = []
+
+    id_lines: dict[str, list[int]] = {}
+    for task in _iter_plan_tasks(plan):
+        if task.task_id is None:
+            continue
+        id_lines.setdefault(task.task_id, []).append(task.line_number)
+
+    for task_id, lines in id_lines.items():
+        if len(lines) > 1:
+            locs = ", ".join(str(n) for n in lines)
+            errors.append(f"duplicate task id {task_id} at lines {locs}")
+
+    known_ids: set[str] = set(id_lines.keys())
+
+    for task in _iter_plan_tasks(plan):
+        _check_leading_bracket_tag(task, errors)
+        _check_trailing_annotation(task, errors)
+
     for task in _iter_plan_tasks(plan):
         for dep in task.deps:
             if dep not in known_ids:
-                ref = (
-                    task.task_id
-                    if task.task_id is not None
-                    else (f"line {task.line_number}")
-                )
-                errors.append(f"task {ref} references unknown dep {dep}")
+                errors.append(f"task {_task_ref(task)} references unknown dep {dep}")
 
     if errors:
         raise PlanValidationError(errors)

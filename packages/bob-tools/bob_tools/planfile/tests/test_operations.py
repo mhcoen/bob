@@ -268,6 +268,190 @@ class TestValidatePlan:
             "task line 42 references unknown dep T-000999",
         ]
 
+    def test_duplicate_task_id_raises(self) -> None:
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(
+                        _task(task_id="T-000001", line_number=10),
+                        _task(task_id="T-000001", line_number=12),
+                    )
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "duplicate task id T-000001 at lines 10, 12",
+        ]
+
+    def test_duplicate_task_id_across_sections(self) -> None:
+        # Duplicate detection walks every section — a phase task can
+        # collide with a bug task or a subsection task. Lines list
+        # the every occurrence in document order so the user can
+        # locate both copies.
+        sub = Subsection(
+            title="Manual",
+            prose="",
+            tasks=(_task(task_id="T-000001", line_number=30),),
+            line_number=29,
+        )
+        phase = _phase(
+            tasks=(_task(task_id="T-000001", line_number=11),),
+            subsections=(sub,),
+        )
+        plan = _plan(
+            phases=(phase,),
+            bugs=BugsSection(
+                tasks=(_task(task_id="T-000001", line_number=99),),
+                line_number=98,
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "duplicate task id T-000001 at lines 11, 30, 99",
+        ]
+
+    def test_dep_to_duplicate_id_still_resolves(self) -> None:
+        # A duplicate id is its own error, but other tasks that depend
+        # on it should not also be reported as referencing an unknown
+        # id — the underlying problem is the duplicate, not the
+        # reference. Reporting both would multiply error count and
+        # confuse the fix-it experience.
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(
+                        _task(task_id="T-000001", line_number=10),
+                        _task(task_id="T-000001", line_number=11),
+                        _task(task_id="T-000002", deps=("T-000001",), line_number=12),
+                    )
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "duplicate task id T-000001 at lines 10, 11",
+        ]
+
+    def test_unknown_leading_bracket_tag_raises(self) -> None:
+        # A bracket form at the leading position whose content has
+        # tag-shape (uppercase identifier) but is not a known tag is
+        # rejected per design doc section 4.2 Notes.
+        plan = _plan(
+            phases=(_phase(tasks=(_task(task_id="T-000001", text="[FOO] do thing"),)),)
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "task T-000001 has unknown bracket tag [FOO]",
+        ]
+
+    def test_unknown_leading_action_tag_raises(self) -> None:
+        # Same rule for action-tag-shaped brackets with an unknown
+        # prefix (the prefix is what dispatches the runner, so a
+        # made-up prefix would silently no-op without validation).
+        plan = _plan(
+            phases=(
+                _phase(tasks=(_task(task_id="T-000001", text="[NEW:thing] do it"),)),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "task T-000001 has unknown bracket tag [NEW:thing]",
+        ]
+
+    def test_known_tags_in_prose_not_flagged(self) -> None:
+        # Lowercase/multi-word brackets are prose, not tag attempts —
+        # ``_LEADING_TAG_LIKE_RE`` requires an all-caps identifier of
+        # two or more chars, so legitimate prose with brackets passes.
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(
+                        _task(task_id="T-000001", text="[note] write design doc"),
+                        _task(
+                            task_id="T-000002",
+                            text="[x] checkmark literal in text",
+                            line_number=2,
+                        ),
+                    )
+                ),
+            )
+        )
+        validate_plan(plan)
+
+    def test_malformed_annotation_raises(self) -> None:
+        # Trailing ``[key:value]`` with no whitespace after the colon
+        # is the canonical malformed-annotation case; the parser
+        # leaves it in text because ``_ANNOTATION_CONTENT_RE`` rejects
+        # it, and validation surfaces the broken form.
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(_task(task_id="T-000001", text="do thing [feat:nospace]"),)
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "task T-000001 has malformed annotation [feat:nospace]",
+        ]
+
+    def test_trailing_prose_brackets_not_flagged(self) -> None:
+        # A bracketed tail with no colon is prose, not an annotation
+        # attempt — flagging ``[some text]`` would produce false
+        # positives. The colon is the malformed-annotation signal.
+        plan = _plan(
+            phases=(
+                _phase(tasks=(_task(task_id="T-000001", text="see references [1]"),)),
+            )
+        )
+        validate_plan(plan)
+
+    def test_all_error_kinds_reported_together(self) -> None:
+        # validate_plan does not short-circuit across error kinds: a
+        # plan with a duplicate id, an unknown tag, a malformed
+        # annotation, and an unknown dep produces one message per
+        # problem in the same raise.
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(
+                        _task(task_id="T-000001", line_number=10),
+                        _task(task_id="T-000001", line_number=11),
+                        _task(
+                            task_id="T-000002",
+                            text="[FOO] do thing",
+                            line_number=12,
+                        ),
+                        _task(
+                            task_id="T-000003",
+                            text="do other thing [feat:nospace]",
+                            line_number=13,
+                        ),
+                        _task(
+                            task_id="T-000004",
+                            deps=("T-000999",),
+                            line_number=14,
+                        ),
+                    )
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan)
+        assert exc_info.value.messages == [
+            "duplicate task id T-000001 at lines 10, 11",
+            "task T-000002 has unknown bracket tag [FOO]",
+            "task T-000003 has malformed annotation [feat:nospace]",
+            "task T-000004 references unknown dep T-000999",
+        ]
+
 
 class TestBugCount:
     """``bug_count`` disambiguates the three Bugs-section states.
