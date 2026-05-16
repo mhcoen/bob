@@ -15,7 +15,7 @@ so derived parent completion is explicit.
    - [x] Tests: Settlement construction; the four kind values; `migrate` assigns missing IDs on a fully unmigrated plan; `migrate(migrate(plan))` equals `migrate(plan)`; `migrate` does not change tasks or phases that already have identifiers; partially-migrated input (some tasks have T-000003 and T-000007, others have none) correctly assigns T-000008, T-000009, ... to the unmigrated tasks without touching T-000003 or T-000007; the same rule for non-contiguous phase IDs.
 
 - [ ] resolve_task_context
-   - [ ] Implement `resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext` where TaskContext is a dataclass with fields `task_id: str | None`, `phase_id: str | None`, `phase_id_source: str`, `label: str`, `plan_phase_count: int`.
+   - [x] Implement `resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext` where TaskContext is a dataclass with fields `task_id: str | None`, `phase_id: str | None`, `phase_id_source: str`, `label: str`, `plan_phase_count: int`.
    - [ ] Accepts either a stable task ID or a positional label such as "1.3.2" (as mcloop's `task_label` function produces today via `checklist.py`). Tokenizes properly — does not do substring search. Per design doc section 7.2 caveat.
    - [ ] When the task's containing phase has `phase_id_source` equal to "none", fill in the ordinal-derived id (the n-th phase in document order) and set source to "ordinal". Per design doc section 2.4 and 7.1.
    - [ ] Tests: lookup by ID; lookup by label; ordinal fallback when no explicit phase_id; raises a clear error for an unknown task.

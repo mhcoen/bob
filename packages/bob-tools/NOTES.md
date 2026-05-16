@@ -309,3 +309,5 @@ d02cfa5: The parser now automatically enforces strict mode when a plan file incl
 226cba2: Added auto-skipping for slow-marked generative tests unless explicitly requested with `pytest -m slow`. The default iteration count for property-based tests is 100, while the slow variant runs 1000 iterations. This keeps the default test suite fast while allowing thorough generative testing when needed.
 
 f4480ea: Added canonicalize function to renderer, enabling round-trip formatting of plan files without modifying task IDs or adding phase comments. This provides a lossless reformatting step separate from identity-mutating operations like migration.
+
+a52ac94: Added a task context resolver to replace substring-based phase lookups. The new function resolves task references by exact task ID or structured text matching, preventing ambiguous overlaps. It returns a context object with phase info, supporting both modern task IDs and legacy plan files. Comprehensive tests verify correct behavior for nested tasks, subsections, bugs, and edge cases like prefix collisions.
