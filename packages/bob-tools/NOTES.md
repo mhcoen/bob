@@ -14,6 +14,24 @@
   proceeded with the sibling files only; the package currently has no
   `__init__.py` despite the checkbox claiming otherwise. The user
   should decide whether to re-run 1.1.1 or accept a namespace package.
+- 2026-05-15 [2.2.1-2.2.6] Same failure mode appears to have recurred at
+  task 2.1.1-2.1.5 (heading parsers `_parse_heading`, `_parse_bugs_heading`,
+  `_parse_h1`, `_parse_subsection`). The checkpoint commit
+  `b608c08` is marked "next: 2.1.1-2.1.5" but no completion commit follows
+  and `parser.py` was empty when this session (2.2.1-2.2.6) started. The
+  orchestra log at `logs/orchestra-runs/f1af613fa1f2/log.jsonl` shows the
+  edit state exited in 9 seconds with `output_chars: 38` and the editor
+  said "Ready. What would you like to work on?" — the orchestrator
+  still marked the state `complete` and advanced. Heading parsers will
+  need to be retroactively implemented before the parser can be wired
+  together; flagging for the user so the gap is not papered over.
+- 2026-05-15 [2.2.1-2.2.6] `_extract_annotations` distinguishes annotations
+  from action tags by the mandatory whitespace after the colon: `[feat: x]`
+  matches (whitespace after `:`), `[AUTO:run]` does not. This is the
+  cleanest separator available given that both share the bracketed
+  `key:value` shape and both could be observed as a trailing token. Per
+  design doc grammar `Annot ← WS "[" Key ":" WS Value "]"` the post-colon
+  WS is required, so this is faithful to spec, not a workaround.
 
 ## Hypotheses
 
