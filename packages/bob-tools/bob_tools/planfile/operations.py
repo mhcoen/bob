@@ -621,13 +621,18 @@ def _walk_actionable(
         first_child = next(sub_iter, None)
         if first_child is not None:
             if "BATCH" in task.flag_tags:
-                yield _surface_batch_parent(task)
-                # The BATCH parent is the unit; drain the remaining
-                # actionable children so the iterator state is clean,
-                # but do not yield them individually (the surfaced
-                # parent carries the batch).
-                for _ in sub_iter:
-                    pass
+                batch_children = _get_batch_children(task)
+                if batch_children:
+                    yield dataclasses.replace(task, children=batch_children)
+                    # The BATCH parent is the unit; drain the remaining
+                    # actionable children so the iterator state is clean,
+                    # but do not yield them individually (the surfaced
+                    # parent carries the batch).
+                    for _ in sub_iter:
+                        pass
+                    continue
+                yield first_child
+                yield from sub_iter
             else:
                 yield first_child
                 yield from sub_iter

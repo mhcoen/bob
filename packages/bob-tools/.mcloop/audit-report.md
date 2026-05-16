@@ -1,10 +1,33 @@
 # Bugs
 
-## bob_tools/planfile/renderer.py:182 -- Renderer-parser round-trip drops task_id when task has empty text
+## bob_tools/planfile/operations.py:622-630 -- `[BATCH]` parent surfaces with empty unit when first actionable child is `[USER]` or `[AUTO:...]`
+**Severity**: medium
 
-**Severity**: low
-For a `Task` whose `task_id` is set but `text`, `flag_tags`, `action_tag`, and `annotations` are all empty, `_render_task_lines` builds `body_parts = ["T-NNNNNN:"]`, joins to `body = "T-NNNNNN:"`, and produces the line `"- [ ] T-NNNNNN:"` (the trailing space from the `" {body}"` template is removed by `.rstrip()` on line 182).
+`_walk_actionable` decides to yield a surfaced `[BATCH]` parent based on
+whether the inner recursion yields anything at all (`first_child is not
+None`), but the surfaced parent's children are computed independently by
+`_get_batch_children`, which stops at the first `[USER]`/`[AUTO:...]`
+child. When the first non-DONE child of a `[BATCH]` parent is `[USER]`
+or `[AUTO:...]`, the recursion still yields that child (the inner walker
+ignores the tag) so `first_child is not None`, but `_get_batch_children`
+returns `()`. The code yields `_surface_batch_parent(task)` — a copy of
+the parent with `children=()` — and then drains the iterator (lines
+629-630) so the actionable `[USER]`/`[AUTO]` child and any later siblings
+are discarded.
 
-Re-parsing that line, `_CHECKBOX_RE` matches with text `"T-NNNNNN:"`, but `_extract_task_id` (parser.py:633) uses `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")` which requires *at least one* whitespace character after the colon. With nothing after the colon, the match fails, so `_extract_task_id` returns `(None, "T-NNNNNN:")`. The parsed `Task` therefore has `task_id=None` and `text="T-NNNNNN:"` — the stable id is silently lost and embedded into the text body.
+Concretely, for a plan fragment like:
 
-This is reachable via the public `add_task(plan, phase_id, text="")` API (operations.py:1069), which creates exactly this shape (auto-assigned `task_id`, empty `text`, no other fields). Following `save(path, plan_after_add)` with a subsequent `load(path)` returns a plan in which the new task's `task_id` is gone and `@deps` references / `complete_task` lookups against that id will no longer resolve.
+```
+- [ ] T-001: [BATCH] parent
+  - [ ] T-002: [USER] verify thing
+  - [ ] T-003: do other thing
+```
+
+`next_tasks(plan, limit=1)` returns `[T-001]` with `children=()`. T-002
+(actionable, USER) and T-003 (actionable) are not surfaced. Re-calling
+`next_tasks` produces the same empty BATCH parent, so the workflow
+stalls: there is nothing to act on in the returned task, and the only
+way forward is to mark T-001 done out-of-band (which itself violates the
+parent-derived-from-children rule). The fix is to guard the BATCH branch
+on a non-empty batch (e.g., compute `_get_batch_children(task)` once and
+fall through to the non-BATCH yield path when it is empty).
