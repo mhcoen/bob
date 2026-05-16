@@ -1,21 +1,23 @@
-## Stage 7: CLI
+## Stage 8: Round-trip and parity validation
 
-The `bob-plan` console script is the human entry point. Per design
-doc section 9: validate, fmt, next, done, fail.
+This stage is the empirical acceptance test for the library. It does
+not write new logic — it verifies that fmt produces clean,
+semantics-preserving output on every existing PLAN.md and that the
+new parser agrees with mcloop on every existing fixture.
 
-- [x] [BATCH] Implement the bob-plan CLI
-   - [x] Update `pyproject.toml`: add a `[project.scripts]` section with `bob-plan = "bob_tools.planfile.cli:main"`.
-   - [x] In `cli.py`, implement subcommands with argparse:
-   - [x] `bob-plan validate PATH` — parse the file (strict mode when the magic line is present, compat mode otherwise) and call `validate_plan`. Print success or an error with line and column. Exit code 0 on success, 1 on any parse or validation error. This is the standalone validation entry point; other subcommands invoke validation internally before scheduling.
-   - [x] `bob-plan next PATH` — call `validate_plan` first; on validation failure print the errors and exit with code 1. Otherwise call `next_tasks` and print the next actionable task as a single line in the form `T-NNNNNN: <text>`. Per design doc section 6 contract: `next_tasks` assumes a validated Plan.
-   - [x] `bob-plan fmt PATH` — load, call `migrate`, save. Equivalent to `save(path, migrate(parse_plan(read(path))))`. Per design doc section 3.2 fmt composition.
-   - [x] `bob-plan done PATH TASK_ID` — call `validate_plan` first; on validation failure exit code 1. Otherwise call `complete_task` and save. Prints the resulting Settlements as JSON on stdout for the caller to optionally feed to the ledger. The JSON is a list, since the tuple may have more than one entry on derived parent completion.
-   - [x] `bob-plan fail PATH TASK_ID --reason TEXT` — call `validate_plan` first; on validation failure exit code 1. Otherwise call `fail_task` and save. Prints the Settlement(s) as JSON.
-   - [x] Exit codes: 0 success; 1 invalid plan; 2 task not found; 3 other error.
-   - [x] Tests: each subcommand with a fixture file; exit codes; output formats.
+- [ ] Round-trip every existing PLAN.md through fmt
+   - [ ] In `tests/test_existing_plans.py`, add a parameterized test that loads each of `/Users/mhcoen/proj/duplo/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`, runs the fmt composition (parse, migrate, render) on each, then re-parses the result in strict mode (since the migrated form has IDs and phase-id comments), then renders again, and asserts the second render equals the first render. This is the fixed-point property on real files.
+   - [ ] The test does NOT modify the source files. It reads them and operates in memory.
+   - [ ] Skip with a clear pytest.skip message if any source file is missing (so the suite is hermetic when running outside the dev environment).
+   - [ ] Tests: each fixture round-trips; any deviation is reported with a unified diff in the assertion message.
 
-- [x] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
+- [ ] Mcloop parity tests
+   - [ ] In `tests/test_mcloop_parity.py`, for each existing PLAN.md fixture, parse it both with `bob_tools.planfile.parse_plan` (compat mode) and with `mcloop.checklist.parse`. Per Codex's pile-5 acceptance test gap.
+   - [ ] Assert structural agreement on: stage and phase ordinals; bugs section presence; task counts per phase; flag-tag presence on each task (USER and BATCH); action-tag presence; RULEDOUT attachments; checkbox status for each task. Cross the two trees by position (since stable IDs are present in one but not the other).
+   - [ ] Document one known divergence: mcloop's substring matcher classifies prose-mention tasks as USER, BATCH, or AUTO tasks (mcloop substring-matches BATCH the same way it does USER, in `is_batch_task`); bob_tools.planfile does not. The parity test allows this specific divergence and asserts nothing else differs.
 
-- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
+- [ ] Write the Stage 8 verification helper script. Create `bob_tools/planfile/tests/manual/check_duplo_generated_fmt.py`. The script globs `/Users/mhcoen/proj/*/.duplo`, picks the first parent directory that also has a `PLAN.md`, copies that plan to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan fmt` on the copy, and diffs source against copy. It asserts only additive changes: task IDs, phase-id comments, indentation normalization, and the format magic line; task structure, tag set, and task order must be unchanged. On semantic divergence it appends a precise entry to `/Users/mhcoen/proj/bob-tools/BUGS.md` and exits non-zero. It hardcodes all paths, takes no arguments, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-- [ ] Verify Stage 7 leaves the repo green.
+- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_duplo_generated_fmt
+
+- [ ] Final verification: run the full pytest suite with mypy strict and ruff check. All green. Then run `pip install -e /Users/mhcoen/proj/bob-tools` and verify `bob-plan --help` lists all subcommands.
