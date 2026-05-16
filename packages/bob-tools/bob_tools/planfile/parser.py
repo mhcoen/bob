@@ -32,6 +32,13 @@ _ANNOTATION_CONTENT_RE = re.compile(r"^([A-Za-z_]\w*):\s+(.*)$", re.DOTALL)
 # literal bracket token.
 _RULEDOUT_RE = re.compile(r"^(\s*)\[RULEDOUT\](.*)$")
 
+# Deps sibling line: optional indent, the literal `@deps` token, then
+# whitespace-separated task IDs (bare `T-NNNNNN`, no trailing colon)
+# per design doc grammar `Indent* "@deps" (WS TaskRef)+ NL`. The tail
+# group captures the remainder of the line; splitting on whitespace
+# and validating each ID is a higher-level step.
+_DEPS_RE = re.compile(r"^(\s*)@deps\s+(.+)$")
+
 
 @dataclass(frozen=True)
 class _RawTaskLine:
