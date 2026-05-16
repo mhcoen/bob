@@ -1172,3 +1172,130 @@ class TestCheckStructuralSanity:
         assert "multiple Bugs sections" in err.message
         # Earliest anomaly is the H1 duplicate at line 1.
         assert err.line == 1
+
+
+class TestCheckStructuralSanityLineNumberReporting:
+    """Each corruption pattern surfaces every offending line number.
+
+    Sibling tests in :class:`TestCheckStructuralSanity` confirm each
+    anomaly is detected at all; this class targets the contract spelled
+    out by the 2.6.2 task description specifically: every offending
+    source line number must appear in the error message so the user can
+    fix all occurrences in one pass without re-running. The numbers must
+    be one-based (matching design doc section 9, which makes line/column
+    one-based on the :class:`PlanSyntaxError` itself), absolute (not
+    relative to a phase or section), and listed in source order.
+
+    Each pattern is exercised with three+ occurrences and at non-trivial
+    line numbers (i.e. not just the head of the file) so a future
+    refactor that drops occurrences after the first two, or that emits
+    zero-based offsets, will be caught.
+    """
+
+    def test_duplicate_h1_three_occurrences_lists_every_line(self) -> None:
+        # Three copies of the same H1 with prose padding between them so
+        # the offending lines are non-adjacent and at >1-digit positions.
+        text = (
+            "# Same Title\n"
+            "Intro one.\n"
+            "\n"
+            "More prose.\n"
+            "\n"
+            "# Same Title\n"
+            "Intro two.\n"
+            "\n"
+            "More prose.\n"
+            "\n"
+            "# Same Title\n"
+            "## Stage 1: Core\n"
+            "- [ ] x\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "duplicate top-level heading '# Same Title'" in err.message
+        assert "lines 1, 6, 11" in err.message
+        # The exception's own line attribute matches the earliest occurrence.
+        assert err.line == 1
+
+    def test_multiple_bugs_sections_three_occurrences_lists_every_line(self) -> None:
+        # Three Bugs sections — across multiple heading levels — with
+        # tasks in between so the offending lines are spread out.
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] task one\n"
+            "- [ ] task two\n"
+            "## Bugs\n"
+            "- [ ] bug a\n"
+            "- [ ] bug b\n"
+            "### Bugs\n"
+            "- [ ] bug c\n"
+            "## Bugs\n"
+            "- [ ] bug d\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "multiple Bugs sections" in err.message
+        assert "lines 4, 7, 9" in err.message
+        assert err.line == 4
+
+    def test_duplicate_phase_ordinals_three_occurrences_lists_every_line(self) -> None:
+        # Three headers numbered 2 — Stage and Phase keywords mixed —
+        # at non-adjacent lines. All offending line numbers must appear.
+        text = (
+            "## Stage 1: A\n"
+            "- [ ] task a\n"
+            "## Stage 2: B\n"
+            "- [ ] task b\n"
+            "## Stage 3: C\n"
+            "- [ ] task c\n"
+            "## Phase 2: D\n"
+            "- [ ] task d\n"
+            "## Stage 2: E\n"
+            "- [ ] task e\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "duplicate Phase/Stage 2" in err.message
+        assert "lines 3, 7, 9" in err.message
+        assert err.line == 3
+
+    def test_line_numbers_are_one_based(self) -> None:
+        # Belt-and-suspenders: the offending line numbers in the message
+        # must match a human reading the file with 1-based numbering,
+        # not the 0-based list index used internally. A duplicate H1 on
+        # the very first line therefore reports "lines 1, ..." not
+        # "lines 0, ...".
+        text = "# Same\n# Same\n## Stage 1: Core\n- [ ] x\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "lines 1, 2" in err.message
+        assert "lines 0" not in err.message
+        assert err.line == 1
+
+    def test_h1_duplicates_reported_in_source_order(self) -> None:
+        # If duplicates appear later in the file in a non-monotonic
+        # internal walk (e.g. an order-of-insertion-into-dict accident),
+        # the listed line numbers must still come out in source order so
+        # the user reads them as they appear in the editor.
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] task\n"
+            "\n"
+            "# Echo\n"
+            "\n"
+            "## Stage 2: Polish\n"
+            "- [ ] task\n"
+            "\n"
+            "# Echo\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "lines 4, 9" in err.message
+        # ``err.line`` is the earliest anomaly, not the earliest H1
+        # specifically; here it happens to be both.
+        assert err.line == 4
