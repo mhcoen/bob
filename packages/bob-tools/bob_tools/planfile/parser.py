@@ -177,8 +177,13 @@ def parse_plan(
     ordinal-form check runs first so ``## Phase 1: ...`` still takes
     the ordinal path and produces ``phase_id=None`` until an explicit
     comment attaches one.
+    3.3.3 (this) wires the ``strict`` parameter to enforce mandatory
+    task IDs: when a checkbox line parses with ``task_id=None``, the
+    parser raises :class:`PlanSyntaxError` with the exact message from
+    design doc section 9 ("expected task id like T-000123 after checkbox
+    marker"). Compat mode preserves today's behavior (``task_id`` is
+    ``None`` and parsing continues).
     """
-    del strict
     lines = text.splitlines()
     magic_version = _detect_magic_line(lines, source_path)
     _check_structural_sanity(lines, source_path)
@@ -354,6 +359,17 @@ def parse_plan(
         _close_phase_prose()
 
         builder = _build_task(raw)
+        if strict and builder.task_id is None:
+            # Column points at where the body begins after ``- [x] ``
+            # — i.e. the spot where the missing ``T-NNNNNN:`` should
+            # have appeared. ``- [x] `` is six characters, so the body
+            # column is one past the trailing space.
+            raise PlanSyntaxError(
+                "expected task id like T-000123 after checkbox marker",
+                raw.line_number,
+                len(raw.indent) + len("- [x] ") + 1,
+                source_path,
+            )
         indent = builder.indent_level
 
         while stack and stack[-1].indent_level >= indent:

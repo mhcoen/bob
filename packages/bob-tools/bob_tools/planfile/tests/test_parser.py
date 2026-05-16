@@ -1555,3 +1555,82 @@ class TestTaskIdInCompatMode:
         plan = parse_plan(text)
         ids = tuple(t.task_id for t in plan.phases[0].tasks)
         assert ids == ("T-000001", None, "T-000003")
+
+
+class TestTaskIdInStrictMode:
+    """Strict-mode contract: ``T-NNNNNN:`` is required on every task.
+
+    Per design doc section 9 the missing-id message must be exactly
+    ``expected task id like T-000123 after checkbox marker`` — the
+    string is part of the user-facing contract (the design doc quotes
+    it as the literal error a human will see when McLoop refuses to
+    run), so the assertion checks the message verbatim, not just a
+    substring. The location attributes (line, column, source path) are
+    pinned alongside so a regression that drops them surfaces here too.
+    """
+
+    def test_task_without_id_raises(self) -> None:
+        text = "## Stage 1: Core\n- [ ] do thing\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text, strict=True)
+        err = exc_info.value
+        assert err.message == "expected task id like T-000123 after checkbox marker"
+        assert err.line == 2
+        # Column points at the body position after ``- [x] `` (six
+        # chars + 1 for 1-indexing). For a non-indented checkbox the
+        # body starts at column 7.
+        assert err.column == 7
+
+    def test_task_with_id_parses(self) -> None:
+        text = "## Stage 1: Core\n- [ ] T-000042: do thing\n"
+        plan = parse_plan(text, strict=True)
+        assert plan.phases[0].tasks[0].task_id == "T-000042"
+
+    def test_indented_subtask_without_id_raises(self) -> None:
+        # Strict mode applies to nested children, not just root tasks.
+        # The column reflects the indent.
+        text = "## Stage 1: Core\n- [ ] T-000001: parent\n  - [ ] child without id\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text, strict=True)
+        err = exc_info.value
+        assert err.message == "expected task id like T-000123 after checkbox marker"
+        assert err.line == 3
+        # Two-space indent + 6 ("- [x] ") + 1 = 9.
+        assert err.column == 9
+
+    def test_first_offender_is_reported(self) -> None:
+        # When multiple tasks lack IDs the parser stops at the first
+        # one (fail-fast); the message identifies that line, not the
+        # second.
+        text = "## Stage 1: Core\n- [ ] first\n- [ ] second\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text, strict=True)
+        assert exc_info.value.line == 2
+
+    def test_strict_error_carries_source_path(self) -> None:
+        path = Path("/tmp/PLAN.md")
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(
+                "## Stage 1: Core\n- [ ] no id\n",
+                strict=True,
+                source_path=path,
+            )
+        assert exc_info.value.path == path
+
+    def test_strict_error_str_format_matches_design_doc(self) -> None:
+        # Design doc section 9 quotes the rendered form as
+        # ``PLAN.md invalid at line N, column M: <message>``. The
+        # message here must be the literal contract string — no quoted
+        # line tail appended, unlike the @deps-orphan error.
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("## Stage 1: Core\n- [ ] no id\n", strict=True)
+        rendered = str(exc_info.value)
+        assert rendered == (
+            "PLAN.md invalid at line 2, column 7: "
+            "expected task id like T-000123 after checkbox marker"
+        )
+
+    def test_compat_mode_still_accepts_missing_id(self) -> None:
+        # Sanity: strict-mode wiring did not change compat-mode behavior.
+        plan = parse_plan("## Stage 1: Core\n- [ ] no id\n")
+        assert plan.phases[0].tasks[0].task_id is None
