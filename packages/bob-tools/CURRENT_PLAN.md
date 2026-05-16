@@ -37,9 +37,9 @@ so derived parent completion is explicit.
    - [x] All operations are pure: input Plan is not mutated; a new Plan is constructed.
    - [x] Tests for each operation: status transitions, settlement kinds, derived parent completion produces multiple Settlements in the right order, ID assignment in `add_task`, replacement preserves other phases. Specifically test: completing the last unchecked child of a chain of two BATCH parents returns three Settlements (direct + two derived).
 
-- [ ] validate_plan and check_consistency
+- [x] validate_plan and check_consistency
    - [x] Implement `validate_plan(plan) -> None` raising `PlanValidationError(messages)` on: unknown bracket tags anywhere, malformed annotations, duplicate task IDs, references in @deps to non-existent task IDs. Per design doc section 4.2 Notes (unknown bracket tags are rejected by validation).
    - [x] Implement `check_consistency(plan, events) -> None` raising `PlanInconsistencyError(messages)` per design doc section 5: flag contradictions between checkbox state and the most recent lifecycle event for each task; do NOT flag intentional ledger gaps such as derived parent completion or settlements where ledger_event_required is false.
-   - [ ] Tests for each violation category.
+   - [x] Tests for each violation category.
 
 - [ ] Verify Stage 5 leaves the repo green.
