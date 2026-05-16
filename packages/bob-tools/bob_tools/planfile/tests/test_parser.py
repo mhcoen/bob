@@ -13,10 +13,15 @@ Stage 2 task-line recognizers and tag extractors:
     to the most recent root task (mcloop's ``parse`` parity). The
     parse-then-attach composition test confirms multiple RULEDOUT
     lines on one task are collected in source order.
+  - ``_DEPS_RE`` recognizes ``@deps`` sibling lines, captures indent
+    and the whitespace-separated tail of bare ``T-NNNNNN`` IDs, and
+    enforces that at least one ID follows the keyword.
   - ``_attach_deps`` resolves the attachment target for an ``@deps``
     sibling line: the innermost open ancestor at strictly-less indent
     is the strict-form parent; an ancestor at equal indent is the
     lenient-form parent (caller should warn). No root-task fallback.
+    A composition test pairs ``_DEPS_RE`` parsing with ``_attach_deps``
+    to confirm a deeply-indented ``@deps`` lands on a nested subtask.
   - ``_extract_flag_tags`` consumes leading ``[USER]`` / ``[BATCH]``
     tokens, in isolation and combination, and leaves non-leading
     occurrences as prose (design doc section 4.3).
@@ -37,6 +42,7 @@ import pytest
 
 from bob_tools.planfile.parser import (
     _CHECKBOX_RE,
+    _DEPS_RE,
     _attach_deps,
     _attach_ruledout,
     _extract_action_tag,
@@ -222,6 +228,46 @@ class TestAttachRuledOut:
         }
 
 
+class TestDepsRe:
+    def test_single_id(self) -> None:
+        m = _DEPS_RE.match("@deps T-000001")
+        assert m is not None
+        assert m.group(1) == ""
+        assert m.group(2).split() == ["T-000001"]
+
+    def test_multiple_ids(self) -> None:
+        m = _DEPS_RE.match("@deps T-000001 T-000002 T-000003")
+        assert m is not None
+        assert m.group(1) == ""
+        assert m.group(2).split() == ["T-000001", "T-000002", "T-000003"]
+
+    def test_indented_captures_indent(self) -> None:
+        m = _DEPS_RE.match("    @deps T-000001 T-000002")
+        assert m is not None
+        assert m.group(1) == "    "
+        assert m.group(2).split() == ["T-000001", "T-000002"]
+
+    def test_extra_inter_id_whitespace_collapses_on_split(self) -> None:
+        # Variable spacing between IDs is normalized by str.split().
+        m = _DEPS_RE.match("@deps T-000001    T-000002")
+        assert m is not None
+        assert m.group(2).split() == ["T-000001", "T-000002"]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "",
+            "- [ ] regular task",
+            "@dep T-000001",
+            "@deps",
+            "@deps ",
+            " @deps_ T-000001",
+        ],
+    )
+    def test_non_deps_lines(self, line: str) -> None:
+        assert _DEPS_RE.match(line) is None
+
+
 class TestAttachDeps:
     def test_strict_form_deps_indented_under_parent(self) -> None:
         # Canonical form: @deps is indented strictly more than the
@@ -284,6 +330,26 @@ class TestAttachDeps:
         target, lenient = _attach_deps(2, [deep])
         assert target is None
         assert lenient is False
+
+    def test_parse_and_attach_to_nested_subtask(self) -> None:
+        # Compose _DEPS_RE with _attach_deps: a deeply-indented @deps
+        # line resolves to the innermost open ancestor at strictly-less
+        # indent — i.e. the nested subtask, not the root task. This is
+        # the end-to-end shape the higher-level parser will use.
+        root = _FakeTask(indent_level=0, name="root")
+        child = _FakeTask(indent_level=2, name="child")
+        grand = _FakeTask(indent_level=4, name="grand")
+        stack = [root, child, grand]
+
+        m = _DEPS_RE.match("      @deps T-000001 T-000002")
+        assert m is not None
+        indent = len(m.group(1))
+        ids = m.group(2).split()
+
+        target, lenient = _attach_deps(indent, stack)
+        assert target is grand
+        assert lenient is False
+        assert ids == ["T-000001", "T-000002"]
 
 
 class TestExtractFlagTags:
