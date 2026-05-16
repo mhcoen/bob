@@ -27,7 +27,7 @@ include = ["bob_tools*"]
 [tool.pytest.ini_options]
 addopts = "-n auto"
 timeout = 60
-testpaths = ["bob_tools/ledger/tests"]
+testpaths = ["bob_tools/ledger/tests", "bob_tools/planfile/tests"]
 
 [tool.ruff]
 target-version = "py312"
