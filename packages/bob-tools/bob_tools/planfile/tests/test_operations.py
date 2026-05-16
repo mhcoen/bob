@@ -452,18 +452,107 @@ class TestResolveTaskContext:
         assert ctx.phase_id == "phase_002"
         assert ctx.phase_id_source == "explicit_header"
 
-    def test_phase_with_none_source_propagates_none(self) -> None:
+    def test_phase_with_none_source_fills_ordinal_id(self) -> None:
+        # When the matched task's containing phase has no explicit
+        # phase_id, the resolver synthesizes ``phase_NNN`` from the
+        # phase's 1-based document order position and reports
+        # ``phase_id_source="ordinal"``. Per design doc section 7.1
+        # ("Ordinal fallback. The n-th phase heading in document
+        # order") and section 2.4 (explicit-required / ordinal-degraded
+        # contract). The pre-fill behavior — propagating ``None`` and
+        # ``"none"`` to the caller — would have forced the ledger_emit
+        # shim to do a second pass with an ``ordinal_index`` argument;
+        # synthesizing inside the resolver eliminates that.
         phase = self._phase_with_id(
             tasks=(_task(task_id="T-000001"),),
             phase_id=None,
             phase_id_source="none",
         )
         ctx = resolve_task_context(_plan(phases=(phase,)), "T-000001")
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "ordinal"
+        # The match still happened — task_id is populated.
+        assert ctx.task_id == "T-000001"
+
+    def test_ordinal_fill_uses_document_position_not_phase_ordinal(self) -> None:
+        # The synthesized id reflects the phase's 1-based index in
+        # ``plan.phases`` (document order), not ``Phase.ordinal``
+        # (which is parsed from the heading text and can start above 1
+        # in a partial-plan snippet). A plan whose first phase is
+        # ``Stage 5`` still synthesizes ``phase_001`` for that phase
+        # when its source is "none".
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=5,
+        )
+        ctx = resolve_task_context(_plan(phases=(phase,)), "T-000001")
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "ordinal"
+
+    def test_ordinal_fill_per_phase_position(self) -> None:
+        # Each "none"-source phase gets its own synthesized id based
+        # on its own document position; explicit phases in between
+        # do not shift the count.
+        none_first = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=1,
+        )
+        explicit_second = self._phase_with_id(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_named",
+            phase_id_source="explicit_comment",
+            ordinal=2,
+        )
+        none_third = self._phase_with_id(
+            tasks=(_task(task_id="T-000003"),),
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=3,
+        )
+        plan = _plan(phases=(none_first, explicit_second, none_third))
+        assert resolve_task_context(plan, "T-000001").phase_id == "phase_001"
+        assert resolve_task_context(plan, "T-000001").phase_id_source == "ordinal"
+        assert resolve_task_context(plan, "T-000002").phase_id == "phase_named"
+        assert (
+            resolve_task_context(plan, "T-000002").phase_id_source == "explicit_comment"
+        )
+        assert resolve_task_context(plan, "T-000003").phase_id == "phase_003"
+        assert resolve_task_context(plan, "T-000003").phase_id_source == "ordinal"
+
+    def test_ordinal_fill_via_positional_label(self) -> None:
+        # Positional resolution exits the resolver early; it must
+        # apply the same ordinal-fill rule as the task-walk path,
+        # otherwise a "5.1" reference into an unmigrated phase would
+        # leak the raw ``phase_id=None`` to callers.
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=5,
+        )
+        ctx = resolve_task_context(_plan(phases=(phase,)), "5.1")
+        assert ctx.task_id == "T-000001"
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "ordinal"
+
+    def test_unresolved_reference_stays_none_not_ordinal(self) -> None:
+        # The ordinal-fill rule only applies when a task is actually
+        # matched inside a phase. A miss must NOT silently invent a
+        # phase_id — callers branch on ``phase_id is None`` to detect
+        # "not found" and inventing an id here would mask that.
+        none_phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id=None,
+            phase_id_source="none",
+        )
+        ctx = resolve_task_context(_plan(phases=(none_phase,)), "T-000999")
+        assert ctx.task_id is None
         assert ctx.phase_id is None
         assert ctx.phase_id_source == "none"
-        # The match still happened — task_id is populated even though
-        # the phase has no id.
-        assert ctx.task_id == "T-000001"
 
     def test_unresolved_reference_returns_none_context(self) -> None:
         plan = _plan(phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),))

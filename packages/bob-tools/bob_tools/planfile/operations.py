@@ -130,8 +130,8 @@ def _task_matches_label(task: Task, ref: str) -> bool:
     return any(task.text.startswith(ref + sep) for sep in (":", ")", " ", "\t"))
 
 
-def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, Task] | None:
-    """Resolve a positional label like ``1.3.2`` to ``(phase, task)``.
+def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, int, Task] | None:
+    """Resolve a positional label like ``1.3.2`` to ``(phase, doc_index, task)``.
 
     Mirrors mcloop's ``task_label`` output (``checklist.py``): the first
     dot-separated token is the phase ordinal as printed in the
@@ -143,6 +143,14 @@ def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, Task] | No
     a sub-heading whose stage number is empty in mcloop, so mcloop never
     produces ``N.M`` labels for them. Mirroring that here keeps the
     resolver consistent with the strings mcloop actually emits.
+
+    ``doc_index`` is the 1-based position of the matched phase within
+    ``plan.phases``, surfaced so :func:`resolve_task_context` can
+    synthesize an ordinal-fallback phase_id when the matched phase has
+    ``phase_id_source == "none"`` (design doc section 7.1). The
+    distinction matters: ``Phase.ordinal`` comes from the heading text
+    (``Stage 5`` → ``ordinal == 5``), but a plan whose first phase is
+    ``Stage 5`` still has that phase at ``doc_index == 1``.
 
     Returns ``None`` when ``label`` is not in ``N.M[.K...]`` form (the
     pattern is anchored — at least two dot-separated all-numeric
@@ -165,9 +173,11 @@ def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, Task] | No
     phase_ordinal, *task_indexes = parts
 
     matched_phase: Phase | None = None
-    for phase in plan.phases:
+    matched_doc_index: int = 0
+    for doc_index, phase in enumerate(plan.phases, start=1):
         if phase.ordinal == phase_ordinal:
             matched_phase = phase
+            matched_doc_index = doc_index
             break
     if matched_phase is None:
         return None
@@ -182,11 +192,21 @@ def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, Task] | No
 
     if matched_task is None:
         return None
-    return matched_phase, matched_task
+    return matched_phase, matched_doc_index, matched_task
 
 
-def _iter_phase_tasks_with_phase(plan: Plan) -> Iterator[tuple[Task, Phase]]:
-    """Yield every ``(task, phase)`` pair for tasks inside a phase.
+def _iter_phase_tasks_with_phase(
+    plan: Plan,
+) -> Iterator[tuple[Task, Phase, int]]:
+    """Yield ``(task, phase, doc_index)`` for every task inside a phase.
+
+    ``doc_index`` is the 1-based position of ``phase`` within
+    ``plan.phases``; :func:`resolve_task_context` uses it to synthesize
+    a ``phase_NNN`` ordinal fallback when the containing phase has no
+    explicit id (design doc section 7.1, "Ordinal fallback. The n-th
+    phase heading in document order"). The plan's positional addressing
+    uses 1-based indexes throughout, so the synthesized id starts at
+    ``phase_001``.
 
     Bug tasks are not yielded here; resolve_task_context handles them
     in a separate pass so the ``phase`` parameter is never ``None``
@@ -195,12 +215,32 @@ def _iter_phase_tasks_with_phase(plan: Plan) -> Iterator[tuple[Task, Phase]]:
     subsections are humans-only grouping; they have no phase_id of
     their own).
     """
-    for phase in plan.phases:
+    for doc_index, phase in enumerate(plan.phases, start=1):
         for task in _iter_tasks(phase.tasks):
-            yield task, phase
+            yield task, phase, doc_index
         for subsection in phase.subsections:
             for task in _iter_tasks(subsection.tasks):
-                yield task, phase
+                yield task, phase, doc_index
+
+
+def _phase_id_for_task_context(phase: Phase, doc_index: int) -> tuple[str | None, str]:
+    """Return the ``(phase_id, phase_id_source)`` pair for a TaskContext.
+
+    Pass-through when the phase already has an explicit identifier
+    (``"explicit_comment"`` or ``"explicit_header"``). When the
+    containing phase has ``phase_id_source == "none"`` the function
+    synthesizes the ordinal-derived id ``phase_{doc_index:03d}`` and
+    reports ``phase_id_source == "ordinal"``, per design doc section
+    7.1 ("Ordinal fallback. The n-th phase heading in document order")
+    and section 2.4 (the explicit-required / ordinal-degraded
+    contract). The synthesis lets callers proceed with a usable
+    phase_id rather than having to thread a separate
+    ``ordinal_index`` argument through the resolver, which is exactly
+    the simplification that section 7.1's shim sketch is aiming at.
+    """
+    if phase.phase_id_source == "none":
+        return f"phase_{doc_index:03d}", "ordinal"
+    return phase.phase_id, phase.phase_id_source
 
 
 def resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext:
@@ -223,6 +263,19 @@ def resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext:
     when they need to distinguish "matched a bug" from "matched
     nothing"), not on exceptions.
 
+    When the matched task's containing phase has ``phase_id_source ==
+    "none"`` (no ``<!-- phase_id: ... -->`` comment and no legacy
+    ``## Phase phase_NNN: ...`` header), the resolver synthesizes an
+    ordinal-derived ``phase_NNN`` id from the phase's 1-based position
+    in ``plan.phases`` and reports ``phase_id_source == "ordinal"``.
+    This implements the ordinal-fallback half of the explicit-required
+    / ordinal-degraded contract inside the library, per design doc
+    sections 2.4 and 7.1, so the ledger_emit shim does not need a
+    separate ``ordinal_index`` pass over the plan to recover a usable
+    phase_id. Bug-section tasks and unresolved references stay
+    ``phase_id_source == "none"`` — they are not contained in a phase,
+    so there is no ordinal to attribute to.
+
     ``plan_phase_count`` is always populated from ``len(plan.phases)``
     so the ordinal-fallback shim has the count it needs without a
     second pass over the plan.
@@ -241,21 +294,23 @@ def resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext:
 
     positional = _resolve_positional_label(plan, task_label_or_id)
     if positional is not None:
-        phase, task = positional
+        phase, doc_index, task = positional
+        phase_id, phase_id_source = _phase_id_for_task_context(phase, doc_index)
         return TaskContext(
             task_id=task.task_id,
-            phase_id=phase.phase_id,
-            phase_id_source=phase.phase_id_source,
+            phase_id=phase_id,
+            phase_id_source=phase_id_source,
             label=task_label_or_id,
             plan_phase_count=plan_phase_count,
         )
 
-    for task, phase in _iter_phase_tasks_with_phase(plan):
+    for task, phase, doc_index in _iter_phase_tasks_with_phase(plan):
         if _task_matches_label(task, task_label_or_id):
+            phase_id, phase_id_source = _phase_id_for_task_context(phase, doc_index)
             return TaskContext(
                 task_id=task.task_id,
-                phase_id=phase.phase_id,
-                phase_id_source=phase.phase_id_source,
+                phase_id=phase_id,
+                phase_id_source=phase_id_source,
                 label=task_label_or_id,
                 plan_phase_count=plan_phase_count,
             )

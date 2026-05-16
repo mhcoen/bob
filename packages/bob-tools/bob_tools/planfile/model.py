@@ -144,9 +144,15 @@ class TaskContext:
       lives in the Bugs section or could not be resolved.
     - ``phase_id_source``: how the containing phase's id was determined.
       ``"explicit_comment"`` / ``"explicit_header"`` for resolved phase
-      tasks, ``"none"`` for bug tasks or unresolved references. The
-      shim in ``ledger_emit`` collapses both ``explicit_*`` values to
-      ``"explicit"`` for its ``PhaseIdResolution.source`` field.
+      tasks with an explicit identifier; ``"ordinal"`` when the
+      containing phase had no explicit id and the resolver synthesized
+      ``phase_NNN`` from the phase's 1-based document-order position
+      (design doc section 7.1, "Ordinal fallback. The n-th phase
+      heading in document order"); ``"none"`` for bug tasks or
+      unresolved references. The shim in ``ledger_emit`` collapses
+      both ``explicit_*`` values to ``"explicit"`` for its
+      ``PhaseIdResolution.source`` field and passes ``"ordinal"``
+      through unchanged.
     - ``label``: the input reference, echoed back so callers can include
       it in diagnostics without re-threading the original string.
     - ``plan_phase_count``: ``len(plan.phases)``, snapshotted at resolve
