@@ -24,6 +24,12 @@ _ACTION_TAG_RE = re.compile(r"^\[AUTO:(\w+)\]")
 # after its colon).
 _ANNOTATION_CONTENT_RE = re.compile(r"^([A-Za-z_]\w*):\s+(.*)$", re.DOTALL)
 
+# RULEDOUT sibling line: optional indent, the literal `[RULEDOUT]`
+# token, and optional trailing text. Matches mcloop's `parse`, which
+# treats a line as RULEDOUT when its stripped form starts with the
+# literal bracket token.
+_RULEDOUT_RE = re.compile(r"^(\s*)\[RULEDOUT\](.*)$")
+
 
 @dataclass(frozen=True)
 class _RawTaskLine:
@@ -50,6 +56,38 @@ def _parse_task_line(line: str, line_number: int) -> _RawTaskLine | None:
         indent=m.group(1),
         status_char=m.group(2),
         text=m.group(3),
+        line_number=line_number,
+    )
+
+
+@dataclass(frozen=True)
+class _RawRuledOut:
+    """Recognize-step output of `_parse_ruledout_line`.
+
+    A RULEDOUT line is a sibling of the task it pertains to (design
+    doc grammar `Indent* "[RULEDOUT]" WS Text NL`). The recognizer
+    captures only indent, body text, and source line number; attaching
+    the line to its parent task by indentation is a higher-level step.
+    """
+
+    indent: str
+    text: str
+    line_number: int
+
+
+def _parse_ruledout_line(line: str, line_number: int) -> _RawRuledOut | None:
+    """Match a single ``[RULEDOUT]`` sibling line. Returns None otherwise.
+
+    Per mcloop's ``parse``, a line is a RULEDOUT line when its stripped
+    form starts with the literal ``[RULEDOUT]`` bracket token. Trailing
+    whitespace on the body text is stripped; an empty body is allowed.
+    """
+    m = _RULEDOUT_RE.match(line)
+    if m is None:
+        return None
+    return _RawRuledOut(
+        indent=m.group(1),
+        text=m.group(2).strip(),
         line_number=line_number,
     )
 

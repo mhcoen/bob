@@ -27,6 +27,7 @@ from bob_tools.planfile.parser import (
     _extract_action_tag,
     _extract_annotations,
     _extract_flag_tags,
+    _parse_ruledout_line,
     _parse_task_line,
 )
 
@@ -84,6 +85,47 @@ class TestParseTaskLine:
         assert _parse_task_line("## Stage 1: Core", 1) is None
         assert _parse_task_line("", 2) is None
         assert _parse_task_line("Some prose", 3) is None
+
+
+class TestParseRuledOutLine:
+    def test_indented_with_text(self) -> None:
+        rec = _parse_ruledout_line("  [RULEDOUT] tried restart", 5)
+        assert rec is not None
+        assert rec.indent == "  "
+        assert rec.text == "tried restart"
+        assert rec.line_number == 5
+
+    def test_top_level_with_text(self) -> None:
+        rec = _parse_ruledout_line("[RULEDOUT] orphan approach", 1)
+        assert rec is not None
+        assert rec.indent == ""
+        assert rec.text == "orphan approach"
+
+    def test_empty_body(self) -> None:
+        rec = _parse_ruledout_line("    [RULEDOUT]", 9)
+        assert rec is not None
+        assert rec.indent == "    "
+        assert rec.text == ""
+
+    def test_trailing_whitespace_stripped(self) -> None:
+        rec = _parse_ruledout_line("  [RULEDOUT] foo   ", 3)
+        assert rec is not None
+        assert rec.text == "foo"
+
+    def test_non_leading_token_is_not_match(self) -> None:
+        # A RULEDOUT token that appears mid-line is prose, not a
+        # RULEDOUT line. Only the leading-position form is recognized.
+        assert _parse_ruledout_line("- [ ] talk about [RULEDOUT] later", 1) is None
+
+    def test_similar_token_does_not_match(self) -> None:
+        # `startswith("[RULEDOUT]")` semantics: the bracket must close
+        # immediately after the keyword.
+        assert _parse_ruledout_line("[RULEDOUT_OTHER] foo", 1) is None
+
+    def test_non_ruledout_lines_return_none(self) -> None:
+        assert _parse_ruledout_line("- [ ] regular task", 1) is None
+        assert _parse_ruledout_line("", 2) is None
+        assert _parse_ruledout_line("## Stage 1", 3) is None
 
 
 class TestExtractFlagTags:
