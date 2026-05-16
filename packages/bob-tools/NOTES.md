@@ -105,6 +105,23 @@
      orphan-tasks tuple on ``Plan``); deferring until that need is
      concrete.
 
+- 2026-05-15 [2.7.1-2.7.2] The Stage 2.7.1 task description listed eight
+  rejection conditions for the new `tests/test_parser_rejections.py`:
+  three structural (duplicate H1, multiple Bugs sections, duplicate
+  phase/stage ordinals) and five tag-level (annotations with unclosed
+  bracket, missing colon, or empty value; action tags without a colon
+  or with an empty action name). Only the three structural anomalies
+  raise in compat mode — every tag-level malformation is silently
+  treated as prose by the parser today, and `[feat: ]` (the empty-value
+  case) is in fact captured as a *valid* annotation because
+  `_ANNOTATION_CONTENT_RE` only requires whitespace after the colon and
+  permits an empty value. Per the [2.5.5] precedent of pinning actual
+  behavior when the task description and the parser disagree, the new
+  test module exercises the structural rejections with message/line
+  assertions and uses a companion class to pin compat-mode tolerance of
+  the tag-level cases. Stage 3 strict mode is the right place to add
+  the rejections the task description anticipated.
+
 ## Hypotheses
 
 ## Eliminated
