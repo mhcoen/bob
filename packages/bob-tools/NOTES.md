@@ -249,6 +249,33 @@
   `test_parse_render_parse_idempotent` (the canonical-form
   fixed-point test still passes on it without normalization).
 
+- 2026-05-16 [5.2.4] Coverage-pinning task; the four bullets in the task
+  description are already exercised by `TestResolveTaskContext` from the
+  prior 5.2.1–5.2.3 sessions: lookup by ID
+  (`test_resolves_by_task_id_exact_match`), lookup by label
+  (`test_resolves_label_prefix_with_separator` plus the
+  `test_resolves_positional_label_*` cases), ordinal fallback
+  (`test_phase_with_none_source_fills_ordinal_id`,
+  `test_ordinal_fill_uses_document_position_not_phase_ordinal`,
+  `test_ordinal_fill_per_phase_position`,
+  `test_ordinal_fill_via_positional_label`), and unknown-task handling
+  (`test_unresolved_reference_returns_none_context`,
+  `test_unresolved_reference_stays_none_not_ordinal`). No new tests
+  added in this session.
+
+  Wording discrepancy flagged per the PLAN.md preamble: the task
+  description says "raises a clear error for an unknown task", but the
+  design doc (section 7.1 shim sketch — `return PhaseIdResolution(None,
+  "none", ctx.plan_phase_count)`) and the contract pinned by the prior
+  subtasks have `resolve_task_context` return a none-shaped
+  `TaskContext` for an unknown reference, not raise. Callers branch on
+  `task_id is None` / `phase_id is None`; the `label` field echoes the
+  input so a clear diagnostic can be constructed at the call site
+  (`test_label_field_echoes_input`). Design doc wins per the PLAN.md
+  reconciliation rule. If the user actually wants the resolver to
+  raise, that is a contract change to the design doc, not something to
+  bolt onto the test layer.
+
 - 2026-05-16 [3.5.2] Contract-pinning task; the implementing agent in
   3.5.1 wrote the full test class `TestMagicLineForcesStrict`
   (`bob_tools/planfile/tests/test_parser.py:1690-1746`) covering all
