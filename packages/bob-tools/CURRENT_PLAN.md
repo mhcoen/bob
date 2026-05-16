@@ -45,7 +45,7 @@ mcloop's substring matching.
 
 - [ ] Assemble the parse tree
    - [x] Implement `parse_plan(text: str, *, strict: bool = False, source_path: Path | None = None) -> Plan`. The `strict` parameter is wired but defaults to False (compat mode); strict-mode behavior is added in Stage 3.
-   - [ ] State machine: walk lines once, tracking the current phase (or bugs section), the current subsection within a phase, and a stack of open tasks (by indent). Each task line opens or closes scopes by indent comparison, matching mcloop's logic in `parse`.
+   - [x] State machine: walk lines once, tracking the current phase (or bugs section), the current subsection within a phase, and a stack of open tasks (by indent). Each task line opens or closes scopes by indent comparison, matching mcloop's logic in `parse`.
    - [ ] Project title: the first H1 heading seen. Preamble: prose between the H1 and the first phase or bugs heading. Phase prose: prose between a phase heading and its first task or subsection. Subsection prose: prose between a sub-heading and its first task.
    - [ ] On a syntax violation in compat mode, raise `PlanSyntaxError(message, line, column, path)` with a message that quotes the offending line.
    - [ ] Tests: a hand-crafted minimal valid plan parses correctly; a missing H1 raises; tasks before any phase land in an implicit phase zero (mcloop tolerates this — see `parse` function and PLAN.EXAMPLE.md fixtures in mcloop); a Bugs section after phases is recognized; subsections inside a phase preserve their tasks.
