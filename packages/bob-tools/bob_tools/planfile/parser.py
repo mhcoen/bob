@@ -81,10 +81,15 @@ _SUBSECTION_RE = re.compile(r"^###\s+(.+?)\s*$")
 # mode) fall through to the active prose accumulator.
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 
-# Leading task ID: ``T-NNNNNN:`` followed by mandatory whitespace.
-# Per design doc section 4.2 grammar ``TaskId ← TaskRef ":" WS``.
-# Recognized only at the start of the task body, before any flag tags.
-_TASK_ID_RE = re.compile(r"^(T-\d+):\s+")
+# Leading task ID: ``T-NNNNNN:`` followed by mandatory whitespace and
+# then the rest of the task body. Per design doc section 4.2 grammar
+# ``TaskId ← TaskRef ":" WS``. Recognized only at the start of the
+# checkbox-stripped task text, before any tag extraction. Group 1 is
+# the bare digits (the ``T-`` prefix is re-attached by the caller so
+# the stored ``task_id`` field keeps the canonical ``T-NNNNNN`` form);
+# group 2 is the remainder of the line through end-of-input, which the
+# caller hands to the tag extractors next.
+_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")
 
 # Magic format-version line: anchored to a full line per design doc
 # section 4.1 grammar ``Magic ← "<!--" WS? "bob-plan-format:" WS? Int
@@ -606,24 +611,31 @@ def _extract_task_id(text: str) -> tuple[str | None, str]:
     Per design doc section 4.2 grammar, the task ID is the first token
     in the body after the checkbox. Returns ``(None, text)`` when no
     leading task ID is present; task IDs are optional in compat mode
-    and mandatory in strict mode (enforced separately in Stage 3).
+    and mandatory in strict mode (enforced separately in Stage 3). The
+    returned id is the canonical ``T-NNNNNN`` form: the regex captures
+    only the digits as group 1, and the ``T-`` prefix is re-attached
+    here so the stored ``task_id`` matches what every other call site
+    (tests, ledger emitter, dep validator) compares against.
     """
     m = _TASK_ID_RE.match(text)
     if m is None:
         return None, text
-    return m.group(1), text[m.end() :]
+    return f"T-{m.group(1)}", m.group(2)
 
 
 def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
     """Classify a checkbox body into a mutable :class:`_TaskBuilder`.
 
-    Order matters: annotations come first (they live at end of line
-    and would otherwise be swallowed by the action tag's args, which
-    span to end of line). Task ID, then flag tags, then action tag run
+    Order matters. Task ID comes first: per task 3.3.1 it is applied
+    directly to the checkbox-stripped text, before any tag extraction,
+    so the ``^T-(\\d+):\\s+(.*)$`` regex can consume the whole rest of
+    the line as group 2. Annotations come next (they live at end of
+    line and would otherwise be swallowed by the action tag's args,
+    which span to end of line). Then flag tags, then action tag run
     left-to-right. The remaining text is the task description.
     """
-    annotations, remaining = _extract_annotations(raw.text)
-    task_id, remaining = _extract_task_id(remaining)
+    task_id, remaining = _extract_task_id(raw.text)
+    annotations, remaining = _extract_annotations(remaining)
     flag_tags, remaining = _extract_flag_tags(remaining)
     action_tag, remaining = _extract_action_tag(remaining)
     return _TaskBuilder(
