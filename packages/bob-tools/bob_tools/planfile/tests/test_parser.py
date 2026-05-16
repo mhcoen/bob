@@ -1440,6 +1440,54 @@ class TestPhaseIdComment:
         assert phase.phase_id_source == "none"
 
 
+class TestPhaseIdSourceDefaults:
+    """A phase with no id source has ``phase_id`` None and source ``"none"``.
+
+    Per design doc section 7.1: an ordinal-only heading (no phase-id
+    comment, no ledger ``## Phase phase_NNN:`` form) carries no stable
+    identifier. The parser does not synthesize one — that is the Stage
+    5 ``resolve_task_context`` resolver's job. This class pins the
+    parser-level contract: every code path that opens a phase without
+    binding an id leaves both ``phase_id`` and ``phase_id_source``
+    unset (``None`` and ``"none"`` respectively), so a downstream
+    canonicalizer or resolver can distinguish "no id was provided"
+    from "an id was provided as X" by inspecting one field.
+    """
+
+    def test_stage_heading_with_no_comment(self) -> None:
+        plan = parse_plan("## Stage 1: Core\n- [ ] x\n")
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
+
+    def test_phase_heading_with_numeric_ordinal_and_no_comment(self) -> None:
+        plan = parse_plan("## Phase 1: Core\n- [ ] x\n")
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
+
+    def test_phase_with_prose_but_no_id_source(self) -> None:
+        # Prose between heading and first task does not introduce an
+        # id source. The phase-id comment is the only in-window
+        # mechanism that sets it from the comment path, and a numeric
+        # heading is the only mechanism that would set it from the
+        # header path.
+        text = "## Stage 1: Core\n\nIntro prose.\n\n- [ ] x\n"
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
+        assert phase.prose == "Intro prose."
+
+    def test_multiple_unsourced_phases_each_default_to_none(self) -> None:
+        # Two ordinal headings in the same plan; neither has a
+        # comment. Both phases independently default to None/"none".
+        text = "## Stage 1: A\n- [ ] a\n## Stage 2: B\n- [ ] b\n"
+        plan = parse_plan(text)
+        sources = tuple((p.phase_id, p.phase_id_source) for p in plan.phases)
+        assert sources == ((None, "none"), (None, "none"))
+
+
 class TestLedgerPhaseHeading:
     """``## Phase <id>: <title>`` with a non-numeric id opens a phase.
 
