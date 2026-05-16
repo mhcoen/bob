@@ -1,17 +1,17 @@
 ## Stage 4: Renderer
 
-- [ ] [BATCH] Implement `render_plan(plan: Plan) -> str`
-   - [ ] Render order: magic line (if present in the input or required by strict output mode), blank line, project H1, blank line, preamble (if any), blank line, each phase in order, then bugs section if present.
-   - [ ] Phase rendering: heading line `## {keyword} {ordinal}: {title}`, then on the next line the phase-id comment if `phase_id_source != "none"`, then blank line, then prose (if any), then blank line, then subsections in order, then tasks in order.
-   - [ ] Canonical phase-id position is always the comment form, even when input used the legacy header form. The renderer is what migrates legacy header to comment per design doc section 7.1.
-   - [ ] Task rendering: `{indent}- [{status_char}] {task_id_prefix}{flag_tag_block}{action_tag_block}{text} {annotations}`. Status char: TODO renders as space, DONE as x, FAILED as exclamation mark. Flag tags ordered by source position; action tag immediately after flag tags. Annotations at end of line, separated by spaces.
-   - [ ] When `task_id` is None (compat-mode plan being rendered without identity migration), omit the task-id prefix. This is the same plan a compat-mode parse produced, rendered back unchanged.
-   - [ ] @deps line rendering: when a task has non-empty `deps`, render `{child_indent}@deps {id} {id} ...` on the line immediately after the task line.
-   - [ ] Subsection rendering: blank line, sub-heading, blank line, prose (if any), blank line, tasks in order.
-   - [ ] Bugs section rendering: blank line, the Bugs H2 heading, blank line, tasks in order.
-   - [ ] Indentation: 2 spaces per nesting level. Canonical, per design doc section 4.2 Notes.
-   - [ ] Trailing newline at end of file. Always exactly one.
-   - [ ] Tests: render output matches a hand-written fixture byte-for-byte for a small Plan; output ends with exactly one newline; indentation always 2 spaces regardless of input indentation.
+- [x] [BATCH] Implement `render_plan(plan: Plan) -> str`
+   - [x] Render order: magic line (if present in the input or required by strict output mode), blank line, project H1, blank line, preamble (if any), blank line, each phase in order, then bugs section if present.
+   - [x] Phase rendering: heading line `## {keyword} {ordinal}: {title}`, then on the next line the phase-id comment if `phase_id_source != "none"`, then blank line, then prose (if any), then blank line, then subsections in order, then tasks in order.
+   - [x] Canonical phase-id position is always the comment form, even when input used the legacy header form. The renderer is what migrates legacy header to comment per design doc section 7.1.
+   - [x] Task rendering: `{indent}- [{status_char}] {task_id_prefix}{flag_tag_block}{action_tag_block}{text} {annotations}`. Status char: TODO renders as space, DONE as x, FAILED as exclamation mark. Flag tags ordered by source position; action tag immediately after flag tags. Annotations at end of line, separated by spaces.
+   - [x] When `task_id` is None (compat-mode plan being rendered without identity migration), omit the task-id prefix. This is the same plan a compat-mode parse produced, rendered back unchanged.
+   - [x] @deps line rendering: when a task has non-empty `deps`, render `{child_indent}@deps {id} {id} ...` on the line immediately after the task line.
+   - [x] Subsection rendering: blank line, sub-heading, blank line, prose (if any), blank line, tasks in order.
+   - [x] Bugs section rendering: blank line, the Bugs H2 heading, blank line, tasks in order.
+   - [x] Indentation: 2 spaces per nesting level. Canonical, per design doc section 4.2 Notes.
+   - [x] Trailing newline at end of file. Always exactly one.
+   - [x] Tests: render output matches a hand-written fixture byte-for-byte for a small Plan; output ends with exactly one newline; indentation always 2 spaces regardless of input indentation.
 
 - [ ] Round-trip property tests
    - [ ] Implement two property tests in `tests/test_roundtrip.py`:
