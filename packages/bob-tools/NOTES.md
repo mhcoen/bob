@@ -393,6 +393,23 @@
   multiple list entries (derived parent completion) per design doc
   section 5.
 
+- 2026-05-16 [8.5] Final-verification install step (`pip install -e
+  /Users/mhcoen/proj/bob-tools`) cannot run in this session: PyPI is
+  unreachable from the sandbox (SSL cert verification fails for
+  `pypi.org`) and the venv at `.venv` does not have `setuptools`
+  installed, so even `--no-build-isolation` is unusable
+  (`Cannot import 'setuptools.build_meta'`). Same blocker the Stage 7
+  and Stage 8.4 verification scripts hit: `.venv/bin/bob-plan` is not
+  present because the package has never been editable-installed. The
+  global CLAUDE.md forbids invoking package installers from a session,
+  so this step has to be run by the user once with network access and
+  `setuptools` available in the venv. CLI surface itself is verified
+  functional in this session by `python -m bob_tools.planfile.cli
+  --help`, which lists all five subcommands (`validate`, `next`,
+  `fmt`, `done`, `fail`) from the same `main()` the `bob-plan` console
+  script would dispatch to. Once the user runs the install,
+  `bob-plan --help` will print the same banner.
+
 ## Hypotheses
 
 ## Eliminated
