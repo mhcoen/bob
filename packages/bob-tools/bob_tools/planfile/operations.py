@@ -40,6 +40,24 @@ def _iter_plan_tasks(plan: Plan) -> Iterator[Task]:
         yield from _iter_tasks(plan.bugs.tasks)
 
 
+def _find_task_by_id(plan: Plan, task_id: str) -> Task | None:
+    """Return the task whose ``task_id`` equals ``task_id``, or ``None``.
+
+    Walks the parsed tree via :func:`_iter_plan_tasks` and compares
+    ``task.task_id == task_id``. The library MUST NOT resolve task
+    references with substring matching (e.g. ``task_id in line``)
+    because ``T-NNNNNN`` IDs prefix-overlap: ``T-000001`` is a substring
+    of ``T-0000010``, so a substring search would conflate the two. Per
+    design doc section 7.2 caveat. Returns the first match in iteration
+    order; a well-formed plan has unique IDs, so the order only matters
+    when callers want to surface a duplicate-id diagnostic separately.
+    """
+    for task in _iter_plan_tasks(plan):
+        if task.task_id == task_id:
+            return task
+    return None
+
+
 def validate_plan(plan: Plan) -> None:
     """Validate referential integrity of ``@deps`` references in ``plan``.
 

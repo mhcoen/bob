@@ -30,7 +30,7 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
-from bob_tools.planfile.operations import bug_count, validate_plan
+from bob_tools.planfile.operations import _find_task_by_id, bug_count, validate_plan
 
 
 def _task(
@@ -299,3 +299,64 @@ class TestBugCount:
         root = _task(task_id="T-000901", children=(child,), line_number=21)
         plan = _plan(bugs=BugsSection(tasks=(root,), line_number=20))
         assert bug_count(plan) == 1
+
+
+class TestFindTaskById:
+    """``_find_task_by_id`` walks the parsed tree by ID equality.
+
+    Per design doc section 7.2 caveat: the library must tokenize and
+    match against parsed task entries, not substring-search raw lines,
+    because ``T-000001`` is a substring of ``T-0000010``. These tests
+    pin that contract — both the affirmative tree-walk behavior across
+    every section type and the prefix-overlap regression that motivated
+    the function in the first place.
+    """
+
+    def test_returns_none_when_id_absent(self) -> None:
+        plan = _plan(phases=(_phase(tasks=(_task(task_id="T-000001"),)),))
+        assert _find_task_by_id(plan, "T-000999") is None
+
+    def test_finds_root_phase_task(self) -> None:
+        target = _task(task_id="T-000002", text="target")
+        plan = _plan(
+            phases=(_phase(tasks=(_task(task_id="T-000001"), target)),),
+        )
+        assert _find_task_by_id(plan, "T-000002") is target
+
+    def test_finds_nested_child(self) -> None:
+        target = _task(task_id="T-000002", indent_level=2, text="child")
+        parent = _task(task_id="T-000001", children=(target,))
+        plan = _plan(phases=(_phase(tasks=(parent,)),))
+        assert _find_task_by_id(plan, "T-000002") is target
+
+    def test_finds_subsection_task(self) -> None:
+        target = _task(task_id="T-000010", line_number=20, text="manual")
+        sub = Subsection(title="Manual", prose="", tasks=(target,), line_number=19)
+        phase = _phase(tasks=(_task(task_id="T-000001"),), subsections=(sub,))
+        assert _find_task_by_id(_plan(phases=(phase,)), "T-000010") is target
+
+    def test_finds_bugs_task(self) -> None:
+        target = _task(task_id="T-000900", line_number=100, text="bug")
+        plan = _plan(bugs=BugsSection(tasks=(target,), line_number=99))
+        assert _find_task_by_id(plan, "T-000900") is target
+
+    def test_skips_tasks_without_id(self) -> None:
+        # Compat-mode tasks (task_id=None) must not match a lookup for
+        # any string; the equality compare against ``None`` handles this
+        # automatically, but pin it so a future refactor cannot silently
+        # introduce ``startswith`` / ``in`` semantics that would coerce.
+        with_id = _task(task_id="T-000001")
+        without_id = _task(task_id=None, line_number=2)
+        plan = _plan(phases=(_phase(tasks=(without_id, with_id)),))
+        assert _find_task_by_id(plan, "T-000001") is with_id
+
+    def test_does_not_substring_match_prefix_overlap(self) -> None:
+        # The regression that motivates the whole function: ``T-000001``
+        # is a substring of ``T-0000010``. A substring-based lookup
+        # would conflate them. Tree-walk equality must keep them
+        # distinct, finding each only by exact match.
+        shorter = _task(task_id="T-000001", text="short id")
+        longer = _task(task_id="T-0000010", text="long id", line_number=2)
+        plan = _plan(phases=(_phase(tasks=(shorter, longer)),))
+        assert _find_task_by_id(plan, "T-000001") is shorter
+        assert _find_task_by_id(plan, "T-0000010") is longer
