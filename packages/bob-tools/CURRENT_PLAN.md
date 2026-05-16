@@ -24,13 +24,13 @@ mcloop's substring matching.
    - [x] Implement `_parse_subsection(line)` matching `^###\s+(.+)$` for sub-grouping headings such as Manual verification headings.
    - [x] Tests in `tests/test_parser.py`: each heading type matches; case-insensitive on stage and phase; bare digits required after the stage or phase keyword. A heading like `## Phase phase_001:` does not match this regex — that strict-mode form is handled in Stage 3.
 
-- [ ] [BATCH] Parse task lines (compat mode, leading-position tag rule)
-   - [ ] Implement `_CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")` matching mcloop's `CHECKBOX_RE`.
-   - [ ] Implement `_parse_task_line(line, line_number)` returning a raw record with indent, status_char, text, line_number — or None.
-   - [ ] Implement `_extract_flag_tags(text)` returning a pair of (flag_tags tuple, remaining_text). Flag tags are recognized only at the leading position of the text, immediately after a stable ID if present. Specifically, scan from the start: if the next token is the bracketed form for USER or for BATCH, consume it and continue scanning; stop at the first non-flag-tag token. Flag tags appearing later in the text are prose, not tags. Per design doc section 4.3.
-   - [ ] Implement `_extract_action_tag(text)` returning a pair of (action_tag or None, remaining_text). The action-tag pattern is the bracketed form starting with "AUTO:" followed by a word character sequence. Recognized only at the leading position after any flag tags. Argument string is the text from the closing bracket to end of line. Non-leading occurrences are prose.
-   - [ ] Implement `_extract_annotations(text)` returning a pair of (annotations tuple, remaining_text). Annotations are bracketed key-colon-value patterns at the end of the line. Keys observed today: `feat`, `fix`. Per design doc section 4.3.
-   - [ ] Tests covering each tag family in isolation, in combination, and absent. Edge cases: nested brackets in annotation values; tag-like substrings in task description text are treated as prose, never as tags.
+- [x] [BATCH] Parse task lines (compat mode, leading-position tag rule)
+   - [x] Implement `_CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")` matching mcloop's `CHECKBOX_RE`.
+   - [x] Implement `_parse_task_line(line, line_number)` returning a raw record with indent, status_char, text, line_number — or None.
+   - [x] Implement `_extract_flag_tags(text)` returning a pair of (flag_tags tuple, remaining_text). Flag tags are recognized only at the leading position of the text, immediately after a stable ID if present. Specifically, scan from the start: if the next token is the bracketed form for USER or for BATCH, consume it and continue scanning; stop at the first non-flag-tag token. Flag tags appearing later in the text are prose, not tags. Per design doc section 4.3.
+   - [x] Implement `_extract_action_tag(text)` returning a pair of (action_tag or None, remaining_text). The action-tag pattern is the bracketed form starting with "AUTO:" followed by a word character sequence. Recognized only at the leading position after any flag tags. Argument string is the text from the closing bracket to end of line. Non-leading occurrences are prose.
+   - [x] Implement `_extract_annotations(text)` returning a pair of (annotations tuple, remaining_text). Annotations are bracketed key-colon-value patterns at the end of the line. Keys observed today: `feat`, `fix`. Per design doc section 4.3.
+   - [x] Tests covering each tag family in isolation, in combination, and absent. Edge cases: nested brackets in annotation values; tag-like substrings in task description text are treated as prose, never as tags.
 
 - [ ] Parse RULEDOUT sibling lines
    - [ ] Implement `_parse_ruledout_line(line, line_number)` returning a raw RuledOut record. A line is a RULEDOUT line when its stripped form starts with the literal RULEDOUT bracket token. Per mcloop's `parse` function.
