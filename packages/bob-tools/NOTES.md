@@ -311,3 +311,5 @@ d02cfa5: The parser now automatically enforces strict mode when a plan file incl
 f4480ea: Added canonicalize function to renderer, enabling round-trip formatting of plan files without modifying task IDs or adding phase comments. This provides a lossless reformatting step separate from identity-mutating operations like migration.
 
 a52ac94: Added a task context resolver to replace substring-based phase lookups. The new function resolves task references by exact task ID or structured text matching, preventing ambiguous overlaps. It returns a context object with phase info, supporting both modern task IDs and legacy plan files. Comprehensive tests verify correct behavior for nested tasks, subsections, bugs, and edge cases like prefix collisions.
+
+9e70c89: Added support for positional task labels (e.g., "1.3.2") to resolve tasks by phase ordinal and hierarchical position, matching mcloop's output. This prevents ambiguous substring matches and ensures compatibility with pre-migration plans lacking task IDs. The resolver now attempts positional lookup first, falling back to ID or text matching if the format is invalid or out of range.
