@@ -1,6 +1,8 @@
 """Tests for bob_tools.planfile.operations.
 
-Covers :func:`validate_plan` referential-integrity checks for ``@deps``:
+Covers :func:`validate_plan` referential-integrity checks for ``@deps``,
+:func:`check_consistency` reconciliation of PLAN.md against ledger
+events, and the other operation surfaces:
 
   - Plans with no tasks and plans whose ``@deps`` all resolve return
     ``None`` (no error).
@@ -17,7 +19,9 @@ Covers :func:`validate_plan` referential-integrity checks for ``@deps``:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -26,6 +30,7 @@ from bob_tools.planfile.model import (
     Outcome,
     Phase,
     Plan,
+    PlanInconsistencyError,
     PlanValidationError,
     Settlement,
     Subsection,
@@ -37,6 +42,7 @@ from bob_tools.planfile.operations import (
     _find_task_by_id,
     add_task,
     bug_count,
+    check_consistency,
     complete_task,
     fail_task,
     next_tasks,
@@ -1836,3 +1842,290 @@ class TestReplacePhase:
         plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
         with pytest.raises(ValueError, match="phase_999"):
             replace_phase(plan, "phase_999", new_phase)
+
+
+@dataclass(frozen=True)
+class _StubEvent:
+    """Minimal structural fixture satisfying the :class:`_LedgerEvent` protocol.
+
+    Carries only the fields :func:`check_consistency` reads
+    (``event_id``, ``type``, ``payload``). The real
+    :class:`bob_tools.ledger.events.Event` carries additional envelope
+    fields (``seq``, ``ts``, ``writer_id``, etc.); leaving them off
+    here keeps the tests focused on what consistency-checking
+    actually consumes and avoids dragging the ledger schema into the
+    planfile test surface.
+    """
+
+    event_id: str
+    type: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+def _test_failed_event(event_id: str, *, test_id: str | None) -> _StubEvent:
+    return _StubEvent(
+        event_id=event_id,
+        type="test_failed",
+        payload={"test_id": test_id} if test_id is not None else {},
+    )
+
+
+def _commit_landed_event(
+    event_id: str, *, attributed_task_id: str | None
+) -> _StubEvent:
+    payload: dict[str, Any] = {}
+    if attributed_task_id is not None:
+        payload["attributed_task_id"] = attributed_task_id
+    return _StubEvent(event_id=event_id, type="commit_landed", payload=payload)
+
+
+def _work_observed_event(
+    event_id: str, *, attributed_task_id: str | None
+) -> _StubEvent:
+    payload: dict[str, Any] = {}
+    if attributed_task_id is not None:
+        payload["attributed_task_id"] = attributed_task_id
+    return _StubEvent(event_id=event_id, type="work_observed", payload=payload)
+
+
+class TestCheckConsistency:
+    """``check_consistency`` flags only contradictions, per design doc §5.
+
+    The rules being pinned:
+
+    * For each task with a stable id, the most recent task-attributed
+      lifecycle event determines the expected checkbox state
+      (``test_failed`` → FAILED, ``commit_landed`` /
+      ``work_observed`` → DONE). A direct disagreement raises
+      :class:`PlanInconsistencyError`.
+    * Reset (TODO after ``test_failed``) is intentional and silent.
+    * Derived parent completion and tasks with no events stay silent.
+    * Multiple events for the same task: the lexicographically largest
+      ``event_id`` (UUIDv7 time-prefix) wins, matching the ledger's
+      replay-order key.
+    """
+
+    def test_empty_plan_and_events_is_consistent(self) -> None:
+        check_consistency(_plan(), [])
+
+    def test_done_task_with_no_events_is_silent(self) -> None:
+        # Hand-edits and derived parent completion both land here:
+        # no task-attributed event exists for the task, so there is
+        # no evidence to contradict. Silent.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        check_consistency(plan, [])
+
+    def test_done_task_with_matching_commit_landed_is_consistent(self) -> None:
+        # Forward-compatible path: once ``attributed_task_id`` lands
+        # on ``commit_landed`` (design doc §10), DONE plus a
+        # commit_landed event for the same task is the canonical
+        # consistent shape.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_commit_landed_event("0001", attributed_task_id="T-000001")]
+        check_consistency(plan, events)
+
+    def test_failed_task_with_test_failed_event_is_consistent(self) -> None:
+        target = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_test_failed_event("0001", test_id="T-000001")]
+        check_consistency(plan, events)
+
+    def test_done_but_most_recent_is_test_failed_raises(self) -> None:
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_test_failed_event("0001", test_id="T-000001")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is DONE but most recent "
+            "lifecycle event is test_failed",
+        ]
+
+    def test_failed_but_most_recent_is_commit_landed_raises(self) -> None:
+        target = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_commit_landed_event("0001", attributed_task_id="T-000001")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is FAILED but most recent "
+            "lifecycle event is commit_landed",
+        ]
+
+    def test_todo_but_most_recent_is_work_observed_raises(self) -> None:
+        # A checkoff that regressed back to unchecked is a contradiction,
+        # not a reset. Reset is only the FAILED → TODO transition.
+        target = _task(task_id="T-000001", status=TaskStatus.TODO)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_work_observed_event("0001", attributed_task_id="T-000001")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is TODO but most recent "
+            "lifecycle event is work_observed",
+        ]
+
+    def test_todo_after_test_failed_is_intentional_reset(self) -> None:
+        # Per design doc §5: "Resetting [!] to [ ] via retry → no
+        # ledger event; it is an operator decision to retry existing
+        # work." The checker must accept TODO after test_failed.
+        target = _task(task_id="T-000001", status=TaskStatus.TODO)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_test_failed_event("0001", test_id="T-000001")]
+        check_consistency(plan, events)
+
+    def test_most_recent_event_wins_when_multiple_for_same_task(self) -> None:
+        # An older test_failed followed by a newer commit_landed:
+        # the task has been re-tried and now succeeded. DONE checkbox
+        # is consistent with the most recent event.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [
+            _test_failed_event("0001", test_id="T-000001"),
+            _commit_landed_event("0002", attributed_task_id="T-000001"),
+        ]
+        check_consistency(plan, events)
+
+    def test_event_order_in_iterable_does_not_matter(self) -> None:
+        # event_id (UUIDv7) is the ordering key, not iteration order.
+        # Same as the previous test with the events reversed; the
+        # commit_landed still wins.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [
+            _commit_landed_event("0002", attributed_task_id="T-000001"),
+            _test_failed_event("0001", test_id="T-000001"),
+        ]
+        check_consistency(plan, events)
+
+    def test_old_commit_landed_then_recent_test_failed_flags_done(self) -> None:
+        # Now the failure is most recent; a DONE checkbox contradicts it.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [
+            _commit_landed_event("0001", attributed_task_id="T-000001"),
+            _test_failed_event("0002", test_id="T-000001"),
+        ]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is DONE but most recent "
+            "lifecycle event is test_failed",
+        ]
+
+    def test_derived_parent_completion_not_flagged(self) -> None:
+        # Parent is DONE but no event references it directly
+        # (auto-checked because all children are DONE; the derived
+        # Settlement carries ledger_event_required=False). The checker
+        # must not invent a contradiction for it.
+        child = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+        )
+        parent = _task(
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            children=(child,),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        events = [_commit_landed_event("0001", attributed_task_id="T-000010")]
+        check_consistency(plan, events)
+
+    def test_commit_landed_without_attributed_task_id_is_ignored(self) -> None:
+        # Today's commit_landed schema attributes only to a phase
+        # (SCHEMA.md). Events without ``attributed_task_id`` carry no
+        # per-task claim and must not flag any task as inconsistent —
+        # forward-compatible behavior pending the §10 schema bump.
+        target = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_commit_landed_event("0001", attributed_task_id=None)]
+        check_consistency(plan, events)
+
+    def test_unrelated_event_types_are_ignored(self) -> None:
+        # phase_started, finding_observed, threshold_crossed, etc. do
+        # not carry a per-task state claim. Even payloads that happen
+        # to contain a ``test_id`` key under an unrelated event type
+        # are skipped by the type filter.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [
+            _StubEvent("0001", "phase_started", {"phase_id": "phase_001"}),
+            _StubEvent("0002", "finding_observed", {"summary": "x"}),
+            _StubEvent("0003", "threshold_crossed", {"rule_id": "r"}),
+            _StubEvent("0004", "test_failed", {}),  # missing test_id
+        ]
+        check_consistency(plan, events)
+
+    def test_compat_mode_task_without_id_is_skipped(self) -> None:
+        # A task with task_id=None cannot be matched against an event's
+        # task_id field; the checker has nothing to compare and stays
+        # silent regardless of checkbox state.
+        target = _task(task_id=None, status=TaskStatus.DONE, line_number=42)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_test_failed_event("0001", test_id="T-000001")]
+        check_consistency(plan, events)
+
+    def test_event_for_unknown_task_is_silently_skipped(self) -> None:
+        # The ledger may carry events for tasks no longer in PLAN.md
+        # (a phase reauthor dropped them, e.g.). check_consistency
+        # only walks tasks in the plan and ignores orphan events;
+        # nothing to raise.
+        target = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_test_failed_event("0001", test_id="T-000999")]
+        check_consistency(plan, events)
+
+    def test_multiple_contradictions_collected_in_one_raise(self) -> None:
+        # Validation-style behavior: every contradiction surfaces in
+        # the single PlanInconsistencyError so the user sees them all.
+        # Messages are sorted by task_id for deterministic output.
+        a = _task(task_id="T-000001", status=TaskStatus.DONE, line_number=1)
+        b = _task(task_id="T-000002", status=TaskStatus.FAILED, line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(a, b)),))
+        events = [
+            _test_failed_event("0001", test_id="T-000001"),
+            _commit_landed_event("0002", attributed_task_id="T-000002"),
+        ]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is DONE but most recent "
+            "lifecycle event is test_failed",
+            "task T-000002 checkbox is FAILED but most recent "
+            "lifecycle event is commit_landed",
+        ]
+
+    def test_bug_section_task_is_checked(self) -> None:
+        # Bug tasks live outside any phase but are still tracked in the
+        # plan; their checkbox state must reconcile against task-
+        # attributed events the same way phase tasks do.
+        bug = _task(task_id="T-000900", status=TaskStatus.DONE, line_number=100)
+        plan = _plan(bugs=BugsSection(tasks=(bug,), line_number=99))
+        events = [_test_failed_event("0001", test_id="T-000900")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000900 checkbox is DONE but most recent "
+            "lifecycle event is test_failed",
+        ]
+
+    def test_subsection_task_is_checked(self) -> None:
+        # Tasks inside ### subsections share their containing phase's
+        # phase_id (design doc §11 q5) but are still individually
+        # task-identified; the checker walks them via _iter_plan_tasks.
+        sub_task = _task(task_id="T-000010", status=TaskStatus.DONE, line_number=20)
+        sub = Subsection(title="Manual", prose="", tasks=(sub_task,), line_number=19)
+        phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), subsections=(sub,)
+        )
+        events = [_test_failed_event("0001", test_id="T-000010")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(_plan(phases=(phase,)), events)
+        assert exc_info.value.messages == [
+            "task T-000010 checkbox is DONE but most recent "
+            "lifecycle event is test_failed",
+        ]

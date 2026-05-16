@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, Protocol
 
 from bob_tools.planfile.model import (
     Outcome,
     Phase,
     Plan,
+    PlanInconsistencyError,
     PlanValidationError,
     Settlement,
     Subsection,
@@ -1139,6 +1141,185 @@ def add_task(
         raise ValueError(f"phase {phase_id!r} not found in plan")
 
     return dataclasses.replace(plan, phases=tuple(new_phases))
+
+
+class _LedgerEvent(Protocol):
+    """Structural type for events accepted by :func:`check_consistency`.
+
+    Mirrors the shape of :class:`bob_tools.ledger.events.Event` (a frozen
+    dataclass with ``event_id``, ``type``, and ``payload`` attributes)
+    without importing it: per design doc section 3.1 the two libraries
+    are peers and planfile must not depend on ledger. Any object whose
+    attributes match this protocol — including the ledger's ``Event``
+    dataclass and a thin test fixture — satisfies the contract.
+
+    Attributes are declared as ``@property`` (read-only) so the
+    matching is covariant: ``payload`` typed as ``dict[str, Any]`` on a
+    concrete implementation satisfies ``Mapping[str, Any]`` here.
+    ``type`` is returned as ``Any`` so both the ledger's ``EventType``
+    StrEnum and a plain ``str`` (``"test_failed"``, ``"commit_landed"``)
+    are accepted; the consistency check compares with ``==`` which works
+    transparently for both because ``EventType`` is a ``StrEnum``.
+    """
+
+    @property
+    def event_id(self) -> str: ...
+
+    @property
+    def type(self) -> Any: ...
+
+    @property
+    def payload(self) -> Mapping[str, Any]: ...
+
+
+# Event-type → checkbox state implied when this is the most recent
+# task-attributed lifecycle event for a task. Per design doc section 5
+# kind policy: test_failed implies the task is currently FAILED;
+# commit_landed and work_observed both imply the task is currently DONE
+# (commit_landed is the commit-producing path, work_observed the
+# AUTO/USER verification path). Other event types (phase lifecycle,
+# findings, threshold crossings, etc.) do not carry a task-level
+# state claim and are excluded.
+_EVENT_TYPE_TO_EXPECTED_STATUS: dict[str, TaskStatus] = {
+    "test_failed": TaskStatus.FAILED,
+    "commit_landed": TaskStatus.DONE,
+    "work_observed": TaskStatus.DONE,
+}
+
+
+def _event_task_id(event_type: str, payload: Mapping[str, Any]) -> str | None:
+    """Return the task_id referenced by ``event``, or ``None`` when absent.
+
+    Field lookup per event type:
+
+    - ``test_failed`` → ``payload["test_id"]``. Per design doc section
+      7.2: "Task identity flows through ``test_failed.test_id`` (which
+      is the task label, per ``emit_task_lifecycle_events``)." After
+      McLoop's settle hook moves to :func:`resolve_task_context`, the
+      same field carries a stable ``T-NNNNNN`` id.
+    - ``commit_landed`` / ``work_observed`` → ``payload
+      ["attributed_task_id"]``. Today's ledger schema (SCHEMA.md §
+      ``commit_landed``) attributes commits only to a phase
+      (``attributed_phase_id``); the design doc section 7.2 / section
+      10 flags ``attributed_task_id`` as a future schema bump. Reading
+      the field here is forward-compatible: payloads that omit it
+      (the current case) return ``None`` and the event contributes no
+      task-level claim.
+
+    Returns ``None`` for any other event type — phase lifecycle events,
+    findings, invariants, assumptions, decisions, and the reserved
+    ``threshold_crossed`` / ``plan_reauthored`` types do not carry a
+    per-task state claim.
+    """
+    if event_type == "test_failed":
+        value = payload.get("test_id")
+    elif event_type in ("commit_landed", "work_observed"):
+        value = payload.get("attributed_task_id")
+    else:
+        return None
+    return str(value) if value is not None else None
+
+
+def check_consistency(plan: Plan, events: Iterable[_LedgerEvent]) -> None:
+    """Compare checkbox state against the most recent lifecycle event per task.
+
+    Per design doc section 5: PLAN.md is the writable surface, the
+    ledger is the append-only witness, and the two are coupled at the
+    settle call site rather than enforced as a bidirectional invariant.
+    ``check_consistency`` is the after-the-fact reconciliation hook —
+    it raises :class:`PlanInconsistencyError` when a task's current
+    checkbox state contradicts the most recent task-attributed
+    lifecycle event for that task, and stays silent on every other
+    situation.
+
+    Per-task attribution. Events without a resolvable task_id
+    (:func:`_event_task_id` returns ``None``) are ignored: today
+    ``commit_landed`` and ``work_observed`` attribute only to a phase
+    (SCHEMA.md), so the function can only check tasks for which the
+    ledger carries a task-level claim. Once ``attributed_task_id`` lands
+    on those events (design doc section 10, future schema bump), the
+    same check applies to commit/work events without further change.
+
+    "Most recent" is decided by ``event.event_id``. Ledger event_ids are
+    UUIDv7 (SCHEMA.md envelope) whose 48-bit time prefix gives
+    lexicographic order that matches emission order across writers;
+    breaking ties by the same field is acceptable because the projector
+    uses the same key for replay ordering. ``ts`` is explicitly not
+    used — SCHEMA.md forbids relying on ``ts`` for ordering.
+
+    What gets flagged (contradictions):
+
+    - Checkbox is ``DONE`` but the most recent event is
+      ``test_failed`` — the ledger says the task failed and no later
+      success event landed.
+    - Checkbox is ``FAILED`` but the most recent event is
+      ``commit_landed`` / ``work_observed`` — the ledger says the task
+      succeeded and no later failure event landed.
+    - Checkbox is ``TODO`` but the most recent event is
+      ``commit_landed`` / ``work_observed`` — the ledger says the task
+      succeeded but PLAN.md no longer reflects it (a checkoff that
+      regressed back to unchecked is a contradiction, not a reset).
+
+    What does NOT get flagged (intentional gaps, per design doc § 5):
+
+    - Checkbox is ``TODO`` and the most recent event is
+      ``test_failed``: per design doc section 5, "Resetting ``[!]`` to
+      ``[ ]`` via retry → no ledger event; it is an operator decision
+      to retry existing work, not evidence about the implementation."
+      :func:`reset_task` emits a ``"none"``-kind Settlement with
+      ``ledger_event_required=False`` for exactly this reason, so the
+      checker must accept TODO after a test_failed as the expected
+      shape of a reset.
+    - Derived parent completion: a parent that auto-checks because all
+      of its children are DONE does not produce a ledger event
+      (:func:`complete_task` returns a ``"none"``-kind Settlement with
+      ``ledger_event_required=False``). The parent therefore has no
+      task-attributed event of its own; the checker sees no event for
+      the parent and stays silent.
+    - Tasks with no task-attributed events at all: the absence of
+      evidence is not a contradiction. Compat-mode tasks (no stable
+      id) fall here too — they cannot be matched by ``test_id`` /
+      ``attributed_task_id`` so the checker has nothing to compare
+      against.
+
+    Every contradiction is collected into one
+    :class:`PlanInconsistencyError`; the function does not short-
+    circuit on the first failure so a single run surfaces every fix.
+    Messages are sorted by ``task_id`` for deterministic output.
+    """
+    latest_by_task: dict[str, tuple[str, str]] = {}
+    for event in events:
+        event_type = str(event.type)
+        task_id = _event_task_id(event_type, event.payload)
+        if task_id is None:
+            continue
+        if event_type not in _EVENT_TYPE_TO_EXPECTED_STATUS:
+            continue
+        prior = latest_by_task.get(task_id)
+        if prior is None or event.event_id > prior[0]:
+            latest_by_task[task_id] = (event.event_id, event_type)
+
+    messages: list[str] = []
+    for task in _iter_plan_tasks(plan):
+        if task.task_id is None:
+            continue
+        latest = latest_by_task.get(task.task_id)
+        if latest is None:
+            continue
+        _event_id, event_type = latest
+        expected = _EVENT_TYPE_TO_EXPECTED_STATUS[event_type]
+        if task.status == expected:
+            continue
+        if event_type == "test_failed" and task.status == TaskStatus.TODO:
+            continue
+        messages.append(
+            f"task {task.task_id} checkbox is {task.status.value} but "
+            f"most recent lifecycle event is {event_type}"
+        )
+
+    if messages:
+        messages.sort()
+        raise PlanInconsistencyError(messages)
 
 
 def replace_phase(plan: Plan, phase_id: str, new_phase: Phase) -> Plan:

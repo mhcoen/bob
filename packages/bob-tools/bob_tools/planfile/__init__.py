@@ -34,6 +34,7 @@ from bob_tools.planfile.model import (
 from bob_tools.planfile.operations import (
     add_task,
     bug_count,
+    check_consistency,
     complete_task,
     fail_task,
     next_tasks,
@@ -64,6 +65,7 @@ __all__ = [
     "add_task",
     "bug_count",
     "canonicalize",
+    "check_consistency",
     "complete_task",
     "fail_task",
     "next_tasks",
@@ -74,7 +76,6 @@ __all__ = [
     "resolve_task_context",
     # Stage 5 — operations still to land:
     # "migrate",
-    # "check_consistency",
     # Stage 6 — file I/O:
     # "load",
     # "save",
