@@ -19,7 +19,7 @@ line.
    - [x] Tests: a heading with a non-numeric phase id parses with that id and source "explicit_header"; a heading with a numeric ordinal parses with that ordinal and phase_id None unless a comment follows (then "explicit_comment"); the canonicalizer eventually rewrites explicit_header to explicit_comment, but the parser preserves both forms as input.
 
 - [ ] Stable task IDs
-   - [ ] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
+   - [x] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
    - [ ] In compat mode: presence of a task ID is recorded on `Task.task_id` but absence is accepted.
    - [ ] In strict mode: absence of a task ID raises `PlanSyntaxError` with the exact message format from design doc section 9: "expected task id like T-000123 after checkbox marker".
    - [ ] Tokenization: the library MUST NOT use substring matching to find tasks by ID. Implement `_find_task_by_id(plan, task_id)` that walks the parsed tree. Per design doc section 7.2 caveat about substring matching.

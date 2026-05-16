@@ -248,3 +248,5 @@ e346b0e: Implemented `validate_plan` in `operations.py`, which checks that every
 5f55495: Added support for ledger-form phase headings, allowing phase identifiers like "phase_001" instead of bare integers. This ensures consistency with the ledger emission library's parsing rules.
 
 846d956: Added support for ledger-form phase headings (e.g., "## Phase phase_001: Title") in planfile parsing. These non-numeric identifiers are now recognized as explicit phase IDs, with ordinals assigned positionally. The change ensures compatibility with legacy ledger formats while preserving existing behavior for numeric headings.
+
+a1c07d9: Updated task ID parsing to capture the full line after the ID, enabling proper handling of annotations and tags. The regex now extracts digits and remaining text separately, ensuring the canonical T-NNNNNN format is preserved.
