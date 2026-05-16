@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, TypeVar
+
+from bob_tools.planfile.model import Plan
 
 # Checkbox line: indent, status marker, body text. Matches mcloop's
 # CHECKBOX_RE so loose-edited PLAN.md files parse identically.
@@ -38,6 +41,39 @@ _RULEDOUT_RE = re.compile(r"^(\s*)\[RULEDOUT\](.*)$")
 # group captures the remainder of the line; splitting on whitespace
 # and validating each ID is a higher-level step.
 _DEPS_RE = re.compile(r"^(\s*)@deps\s+(.+)$")
+
+
+def parse_plan(
+    text: str,
+    *,
+    strict: bool = False,
+    source_path: Path | None = None,
+) -> Plan:
+    """Parse PLAN.md ``text`` into a typed :class:`Plan`.
+
+    ``strict=False`` (the default) is compatibility mode — accepts the
+    PLAN.md format mcloop's ``checklist.py`` accepts today (no magic
+    line, optional task IDs, no phase-id comments). ``strict=True``
+    enables the format additions in design doc section 4 (magic line,
+    mandatory ``T-NNNNNN:`` ids, ``<!-- phase_id: ... -->`` comments).
+
+    Stage 2.5.1 wires the signature only: callers may pass ``strict``
+    and ``source_path`` and receive a :class:`Plan`. The state machine
+    that walks ``text`` into phases, subsections, tasks, and bugs is
+    added in 2.5.2; project title and prose extraction in 2.5.3;
+    syntax-error reporting in 2.5.4. Strict-mode behavior lands in
+    Stage 3. Until then ``parse_plan`` returns an empty plan that
+    carries through ``source_path`` for downstream error messages.
+    """
+    del text, strict
+    return Plan(
+        magic_version=None,
+        project_title="",
+        preamble="",
+        phases=(),
+        bugs=None,
+        source_path=source_path,
+    )
 
 
 @dataclass(frozen=True)
