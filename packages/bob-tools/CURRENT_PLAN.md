@@ -14,7 +14,7 @@
    - [x] Tests: render output matches a hand-written fixture byte-for-byte for a small Plan; output ends with exactly one newline; indentation always 2 spaces regardless of input indentation.
 
 - [ ] Round-trip property tests
-   - [ ] Implement two property tests in `tests/test_roundtrip.py`:
+   - [x] Implement two property tests in `tests/test_roundtrip.py`:
    - [ ] `test_parse_render_parse_idempotent`: for each fixture text, `parse(render(parse(text)))` equals `parse(text)` on the Plan value (ignoring line_number fields which differ between iterations). Fixtures are hand-crafted small plans covering each tag, each heading form, each status, the bugs section, subsections, RULEDOUT lines, and @deps lines.
    - [ ] `test_render_parse_render_stable`: for each fixture plan, `render(parse(render(plan)))` equals `render(plan)`. This is the canonical-form fixed-point property.
    - [ ] Fixtures live in `bob_tools/planfile/tests/fixtures/` as markdown files; the test loads them at runtime.
