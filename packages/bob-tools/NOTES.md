@@ -25,6 +25,20 @@
   still marked the state `complete` and advanced. Heading parsers will
   need to be retroactively implemented before the parser can be wired
   together; flagging for the user so the gap is not papered over.
+- 2026-05-15 [2.4.2] `_attach_deps` reads "immediately preceding task line
+  at strictly lesser indent" (from the task description) as: walk the
+  open-ancestor stack from innermost to outermost and return the first
+  task at lesser-or-equal indent — strict on `<`, lenient on `==`. The
+  alternative reading — "look only at the literally-immediately-preceding
+  task and accept only if its indent is strictly less" — would reject
+  the case where @deps sits at indent 0 after a deeper child task in
+  source order. Treating that as lenient attachment to the outer task
+  matches what hand-written PLAN.md files seem to expect, but the design
+  doc grammar only specifies position in the production (`DepsLine?`
+  after the parent Item's `NL`); it does not state indent rules. Flagging
+  in case the strict reading is preferred. No root-task fallback was
+  added (unlike `_attach_ruledout`) because the task description does
+  not mention one.
 - 2026-05-15 [2.2.1-2.2.6] `_extract_annotations` distinguishes annotations
   from action tags by the mandatory whitespace after the colon: `[feat: x]`
   matches (whitespace after `:`), `[AUTO:run]` does not. This is the

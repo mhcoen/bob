@@ -13,6 +13,10 @@ Stage 2 task-line recognizers and tag extractors:
     to the most recent root task (mcloop's ``parse`` parity). The
     parse-then-attach composition test confirms multiple RULEDOUT
     lines on one task are collected in source order.
+  - ``_attach_deps`` resolves the attachment target for an ``@deps``
+    sibling line: the innermost open ancestor at strictly-less indent
+    is the strict-form parent; an ancestor at equal indent is the
+    lenient-form parent (caller should warn). No root-task fallback.
   - ``_extract_flag_tags`` consumes leading ``[USER]`` / ``[BATCH]``
     tokens, in isolation and combination, and leaves non-leading
     occurrences as prose (design doc section 4.3).
@@ -33,6 +37,7 @@ import pytest
 
 from bob_tools.planfile.parser import (
     _CHECKBOX_RE,
+    _attach_deps,
     _attach_ruledout,
     _extract_action_tag,
     _extract_annotations,
@@ -215,6 +220,70 @@ class TestAttachRuledOut:
                 ("third approach", 12),
             ],
         }
+
+
+class TestAttachDeps:
+    def test_strict_form_deps_indented_under_parent(self) -> None:
+        # Canonical form: @deps is indented strictly more than the
+        # task it references. Parent's indent is strictly less than
+        # the deps line's, so attachment is strict (no warning).
+        parent = _FakeTask(indent_level=0, name="parent")
+        target, lenient = _attach_deps(2, [parent])
+        assert target is parent
+        assert lenient is False
+
+    def test_lenient_form_same_indent_warns(self) -> None:
+        # "Forgot to indent" form: @deps at the same indent as its
+        # task. Still attaches, but flagged as lenient so callers can
+        # emit a validation warning.
+        parent = _FakeTask(indent_level=0, name="parent")
+        target, lenient = _attach_deps(0, [parent])
+        assert target is parent
+        assert lenient is True
+
+    def test_strict_attaches_to_innermost_ancestor(self) -> None:
+        # With multiple open ancestors the innermost strictly-less-
+        # indented one wins — not the outermost.
+        outer = _FakeTask(indent_level=0, name="outer")
+        inner = _FakeTask(indent_level=2, name="inner")
+        target, lenient = _attach_deps(4, [outer, inner])
+        assert target is inner
+        assert lenient is False
+
+    def test_lenient_uses_top_of_stack_at_same_indent(self) -> None:
+        # Top of stack is at deps' indent — lenient attachment to the
+        # immediately preceding task.
+        outer = _FakeTask(indent_level=0, name="outer")
+        inner = _FakeTask(indent_level=2, name="inner")
+        target, lenient = _attach_deps(2, [outer, inner])
+        assert target is inner
+        assert lenient is True
+
+    def test_outdented_deps_walks_past_deeper_top(self) -> None:
+        # The most recent task is more indented than @deps, so it is
+        # skipped; the search continues outward and lands on the
+        # equal-indent ancestor as a lenient match.
+        outer = _FakeTask(indent_level=0, name="outer")
+        inner = _FakeTask(indent_level=2, name="inner")
+        target, lenient = _attach_deps(0, [outer, inner])
+        assert target is outer
+        assert lenient is True
+
+    def test_empty_stack_returns_none(self) -> None:
+        # A @deps line before any task in scope has nothing to attach
+        # to — the caller is expected to drop it. No root-task fallback
+        # is provided, unlike _attach_ruledout.
+        target, lenient = _attach_deps(0, [])
+        assert target is None
+        assert lenient is False
+
+    def test_all_ancestors_more_indented_returns_none(self) -> None:
+        # Pathological: deps outdented past every known ancestor.
+        # Stack-walk finds no candidate at lesser-or-equal indent.
+        deep = _FakeTask(indent_level=4, name="deep")
+        target, lenient = _attach_deps(2, [deep])
+        assert target is None
+        assert lenient is False
 
 
 class TestExtractFlagTags:

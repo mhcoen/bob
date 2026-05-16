@@ -140,6 +140,33 @@ def _attach_ruledout(
     return None
 
 
+def _attach_deps(
+    indent: int,
+    stack: Sequence[_T],
+) -> tuple[_T | None, bool]:
+    """Resolve the task a ``@deps`` sibling line should attach to.
+
+    Walks the open-ancestor stack from innermost (top) to outermost.
+    Returns ``(parent, False)`` for the strict form — first ancestor
+    whose indent is strictly less than the deps line's indent. Returns
+    ``(parent, True)`` for the lenient form — first ancestor at the
+    same indent as the deps line, which callers should report as a
+    validation warning (the deps was not indented under its task).
+    Returns ``(None, False)`` when no candidate exists; the caller
+    should drop the line.
+
+    Unlike ``_attach_ruledout`` there is no root-task fallback: a
+    ``@deps`` line not anchored to a preceding task at lesser-or-equal
+    indent is malformed input rather than an orphan that needs adopting.
+    """
+    for task in reversed(stack):
+        if task.indent_level < indent:
+            return task, False
+        if task.indent_level == indent:
+            return task, True
+    return None, False
+
+
 def _extract_flag_tags(text: str) -> tuple[tuple[str, ...], str]:
     """Strip leading USER/BATCH flag tags from ``text``.
 
