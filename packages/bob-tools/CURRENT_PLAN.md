@@ -4,15 +4,15 @@ Operations are pure functions on typed Plan objects. Per design doc
 sections 3.2 and 5: mutation operations return a tuple of Settlements
 so derived parent completion is explicit.
 
-- [ ] [BATCH] Define the Settlement descriptor and migrate operation
-   - [ ] In `model.py`, define `Settlement` dataclass (frozen) with fields: `kind: Literal["commit_landed", "test_failed", "work_observed", "none"]`, `task_id: str | None`, `phase_id: str | None`, `summary: str`, `failure_kind: str | None`, `ledger_event_required: bool`. Per design doc section 5 target contract.
-   - [ ] Settlement kind policy by source operation:
-   - [ ] Direct success with a commit-producing task settles as `commit_landed` with `ledger_event_required=True`.
-   - [ ] Direct success without a commit (AUTO action tasks and successfully verified USER tasks) settles as `work_observed` with `ledger_event_required=True`. This commits to `work_observed` per Codex's pile-1 confirmation.
-   - [ ] Direct terminal task failure settles as `test_failed` with `ledger_event_required=True`.
-   - [ ] Derived parent completion (all children done, parent auto-checked by `complete_task`) settles as kind `none` with `ledger_event_required=False`. Per design doc section 5.
-   - [ ] In `operations.py`, implement `migrate(plan: Plan) -> Plan`. Returns a new Plan with task_id assigned to every task that had none, and a phase-id comment added for every phase whose `phase_id_source` is "none". ID assignment rule: preserve every existing T-NNNNNN unchanged; scan the plan for the maximum existing numeric ID; assign missing IDs sequentially starting at max+1 (or T-000001 if no existing IDs). This handles partially migrated plans, plans with non-contiguous existing IDs, and plans with no IDs at all. Phase-id assignment uses the same rule on phase_NNN values. Idempotent: a plan that already has IDs and phase-ids is returned unchanged.
-   - [ ] Tests: Settlement construction; the four kind values; `migrate` assigns missing IDs on a fully unmigrated plan; `migrate(migrate(plan))` equals `migrate(plan)`; `migrate` does not change tasks or phases that already have identifiers; partially-migrated input (some tasks have T-000003 and T-000007, others have none) correctly assigns T-000008, T-000009, ... to the unmigrated tasks without touching T-000003 or T-000007; the same rule for non-contiguous phase IDs.
+- [x] [BATCH] Define the Settlement descriptor and migrate operation
+   - [x] In `model.py`, define `Settlement` dataclass (frozen) with fields: `kind: Literal["commit_landed", "test_failed", "work_observed", "none"]`, `task_id: str | None`, `phase_id: str | None`, `summary: str`, `failure_kind: str | None`, `ledger_event_required: bool`. Per design doc section 5 target contract.
+   - [x] Settlement kind policy by source operation:
+   - [x] Direct success with a commit-producing task settles as `commit_landed` with `ledger_event_required=True`.
+   - [x] Direct success without a commit (AUTO action tasks and successfully verified USER tasks) settles as `work_observed` with `ledger_event_required=True`. This commits to `work_observed` per Codex's pile-1 confirmation.
+   - [x] Direct terminal task failure settles as `test_failed` with `ledger_event_required=True`.
+   - [x] Derived parent completion (all children done, parent auto-checked by `complete_task`) settles as kind `none` with `ledger_event_required=False`. Per design doc section 5.
+   - [x] In `operations.py`, implement `migrate(plan: Plan) -> Plan`. Returns a new Plan with task_id assigned to every task that had none, and a phase-id comment added for every phase whose `phase_id_source` is "none". ID assignment rule: preserve every existing T-NNNNNN unchanged; scan the plan for the maximum existing numeric ID; assign missing IDs sequentially starting at max+1 (or T-000001 if no existing IDs). This handles partially migrated plans, plans with non-contiguous existing IDs, and plans with no IDs at all. Phase-id assignment uses the same rule on phase_NNN values. Idempotent: a plan that already has IDs and phase-ids is returned unchanged.
+   - [x] Tests: Settlement construction; the four kind values; `migrate` assigns missing IDs on a fully unmigrated plan; `migrate(migrate(plan))` equals `migrate(plan)`; `migrate` does not change tasks or phases that already have identifiers; partially-migrated input (some tasks have T-000003 and T-000007, others have none) correctly assigns T-000008, T-000009, ... to the unmigrated tasks without touching T-000003 or T-000007; the same rule for non-contiguous phase IDs.
 
 - [ ] resolve_task_context
    - [ ] Implement `resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext` where TaskContext is a dataclass with fields `task_id: str | None`, `phase_id: str | None`, `phase_id_source: str`, `label: str`, `plan_phase_count: int`.
