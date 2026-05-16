@@ -35,14 +35,6 @@ line.
 
 - [x] Write the Stage 3 verification helper script. Create `bob_tools/planfile/tests/manual/check_strict_reject.py`. The script imports `parse_plan` and `PlanSyntaxError`, then for each of `/Users/mhcoen/proj/duplo/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.md` calls `parse_plan(text, strict=True)`. Expected outcome is rejection: for each file it prints either `REJECTED <path> at line=<n> col=<m>` (the correct result) or `PARSED <path> (UNEXPECTED - strict mode should have rejected this)` and exits non-zero. The script takes no arguments and hardcodes the two paths.
 
-- [ ] [USER] Run the strict-mode rejection check and confirm both files are rejected.
-
-   What to do: run this single command in a shell.
-
-   python -m bob_tools.planfile.tests.manual.check_strict_reject
-
-   What to expect: two lines, both starting with REJECTED. Each line names a line and column where the parser expected a stable task ID and did not find one. Both existing files lack `T-NNNNNN:` IDs, so strict mode must reject them.
-
-   What to report back: paste the two output lines. If either line starts with PARSED, strict mode is incorrectly accepting un-migrated files. That is a parser bug to fix before Stage 3 is complete.
+- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_strict_reject
 
 - [ ] Verify Stage 3 leaves the repo green.
