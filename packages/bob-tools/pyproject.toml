@@ -16,6 +16,8 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -23,6 +25,8 @@ where = ["."]
 include = ["bob_tools*"]
 
 [tool.pytest.ini_options]
+addopts = "-n auto"
+timeout = 60
 testpaths = ["bob_tools/ledger/tests"]
 
 [tool.ruff]
