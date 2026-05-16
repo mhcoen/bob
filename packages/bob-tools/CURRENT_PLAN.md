@@ -12,7 +12,7 @@ new parser agrees with mcloop on every existing fixture.
    - [x] Tests: each fixture round-trips; any deviation is reported with a unified diff in the assertion message.
 
 - [ ] Mcloop parity tests
-   - [ ] In `tests/test_mcloop_parity.py`, for each existing PLAN.md fixture, parse it both with `bob_tools.planfile.parse_plan` (compat mode) and with `mcloop.checklist.parse`. Per Codex's pile-5 acceptance test gap.
+   - [x] In `tests/test_mcloop_parity.py`, for each existing PLAN.md fixture, parse it both with `bob_tools.planfile.parse_plan` (compat mode) and with `mcloop.checklist.parse`. Per Codex's pile-5 acceptance test gap.
    - [ ] Assert structural agreement on: stage and phase ordinals; bugs section presence; task counts per phase; flag-tag presence on each task (USER and BATCH); action-tag presence; RULEDOUT attachments; checkbox status for each task. Cross the two trees by position (since stable IDs are present in one but not the other).
    - [ ] Document one known divergence: mcloop's substring matcher classifies prose-mention tasks as USER, BATCH, or AUTO tasks (mcloop substring-matches BATCH the same way it does USER, in `is_batch_task`); bob_tools.planfile does not. The parity test allows this specific divergence and asserts nothing else differs.
 
