@@ -1492,3 +1492,26 @@ class TestLedgerPhaseHeading:
         assert plan.phases[1].phase_id_source == "explicit_header"
         assert plan.phases[2].ordinal == 3
         assert plan.phases[2].phase_id is None
+
+    def test_parser_preserves_both_explicit_header_and_explicit_comment(self) -> None:
+        # Per design doc section 7.1: the canonicalizer is the layer
+        # that rewrites the ledger-form ``explicit_header`` source into
+        # the canonical ``explicit_comment`` form (so a downstream reader
+        # only has to handle one shape). The parser itself must report
+        # what it saw — distinct sources for distinct forms — so the
+        # canonicalizer has the information needed to decide what to
+        # rewrite. Pinning that distinction here: a ledger heading and
+        # an ordinal-heading-plus-comment in the same plan produce two
+        # different ``phase_id_source`` values, both carrying the id.
+        text = (
+            "## Phase phase_001: A\n"
+            "- [ ] a\n"
+            "## Stage 2: B\n"
+            "<!-- phase_id: phase_002 -->\n"
+            "- [ ] b\n"
+        )
+        plan = parse_plan(text)
+        assert plan.phases[0].phase_id == "phase_001"
+        assert plan.phases[0].phase_id_source == "explicit_header"
+        assert plan.phases[1].phase_id == "phase_002"
+        assert plan.phases[1].phase_id_source == "explicit_comment"
