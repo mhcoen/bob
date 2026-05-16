@@ -102,6 +102,18 @@ _MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")
 # line is not mistaken for a phase-level annotation.
 _PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*([A-Za-z0-9_]+)\s*-->")
 
+# Ledger-form phase heading: ``## Phase <id>: <title>`` where the id is
+# identifier-shaped (e.g. ``phase_001``) rather than a bare integer.
+# Pattern must match ``mcloop/ledger_emit.py``'s ``_PHASE_HEADER_RE``
+# byte-for-byte so the two libraries cannot disagree about which lines
+# are ledger-form phase headers. Distinct from ``_STAGE_RE``: the
+# compat-mode regex requires bare digits in the ordinal and would
+# reject ``## Phase phase_001: ...``; this strict/ledger form accepts
+# the identifier directly as the phase id.
+_LEDGER_PHASE_HEADER_RE = re.compile(
+    r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
+)
+
 # Format versions this parser knows how to read. Listed as a tuple so
 # adding a v2 later is a single-line change. Absence of the magic line
 # triggers compat mode; presence with a version outside this set is a
