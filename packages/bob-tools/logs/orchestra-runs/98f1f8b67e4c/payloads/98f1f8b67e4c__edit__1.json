@@ -1,0 +1,1 @@
+{"cost_usd": null, "fields": {"changed_files": ["logs/"], "exit_code": 0, "log_path": "/Users/mhcoen/proj/bob-tools/logs/20260515_203225_1-1-1_edit_a1_417127053347833.log"}, "output": "Ready for your request.", "tokens_in": null, "tokens_out": null, "transcript_ref": "/Users/mhcoen/proj/bob-tools/logs/20260515_203225_1-1-1_edit_a1_417127053347833.log", "verdict": "complete"}
