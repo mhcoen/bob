@@ -1515,3 +1515,43 @@ class TestLedgerPhaseHeading:
         assert plan.phases[0].phase_id_source == "explicit_header"
         assert plan.phases[1].phase_id == "phase_002"
         assert plan.phases[1].phase_id_source == "explicit_comment"
+
+
+class TestTaskIdInCompatMode:
+    """Compat-mode contract: ``T-NNNNNN:`` is optional but captured.
+
+    Per design doc section 4.2 the task ID is part of the strict-form
+    grammar. Compat mode (today's mcloop-compatible PLAN.md) accepts
+    plans with or without IDs: when present the parser records the
+    canonical ``T-NNNNNN`` form on ``Task.task_id``; when absent the
+    line still parses and ``task_id`` is ``None``. Strict mode (Stage 3)
+    will require an ID on every task, so this distinction has to be
+    pinned now — otherwise a regression that quietly drops ``task_id``
+    on a parsed task would not surface until the strict-mode tests run.
+    """
+
+    def test_task_with_id_records_canonical_form(self) -> None:
+        plan = parse_plan("## Stage 1: Core\n- [ ] T-000042: do thing\n")
+        task = plan.phases[0].tasks[0]
+        assert task.task_id == "T-000042"
+        assert task.text == "do thing"
+
+    def test_task_without_id_parses_and_task_id_is_none(self) -> None:
+        plan = parse_plan("## Stage 1: Core\n- [ ] do thing\n")
+        task = plan.phases[0].tasks[0]
+        assert task.task_id is None
+        assert task.text == "do thing"
+
+    def test_mixed_with_and_without_ids_in_one_phase(self) -> None:
+        # The two forms can interleave freely in a compat-mode plan
+        # mid-migration. Both end up in the same phase with the IDs
+        # preserved on the ones that have them.
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] T-000001: with id\n"
+            "- [ ] without id\n"
+            "- [x] T-000003: with id done\n"
+        )
+        plan = parse_plan(text)
+        ids = tuple(t.task_id for t in plan.phases[0].tasks)
+        assert ids == ("T-000001", None, "T-000003")
