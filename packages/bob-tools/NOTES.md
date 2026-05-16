@@ -137,6 +137,38 @@
   only the lint cleanup the previous attempt left unfinished was
   applied here.
 
+- 2026-05-16 [3.1.1-3.1.5] Three compat-mode tolerances were chosen for
+  the magic line and phase-id comment that strict mode (Stage 3) should
+  revisit:
+  1. A magic-shaped line appearing later than the first non-blank line
+     falls through to ordinary prose handling rather than being captured
+     or rejected. Recognizing it post-preamble would silently upgrade a
+     compat plan whose author left a stray template comment behind;
+     rejecting it would make a hand-edited PLAN.md harder to recover.
+     The "first non-blank line only" check is in `_detect_magic_line`.
+     Strict mode could either reject a misplaced magic line or require
+     it as the literal first line.
+  2. Duplicate `<!-- phase_id: ... -->` comments inside the phase-prose
+     window overwrite (last write wins), matching the behavior of
+     `mcloop/ledger_emit.find_explicit_phase_id_for_task` so the two
+     libraries cannot drift. The grammar permits at most one comment
+     (`PhaseIdComment?`), so strict mode should raise on duplicates.
+  3. A phase-id comment after the first task of the phase is silently
+     dropped in compat mode. The phase-prose accumulator closes at the
+     first task, so the comment falls through the "no active accumulator"
+     branch. Strict mode should reject it: position is part of the
+     grammar (`PhaseHead PhaseIdComment? Prose? ...`), and a late
+     comment is unrecoverably ambiguous between "intended for this
+     phase" and "intended for the next phase but misplaced".
+
+  The `<!-- phase_id: ... -->` regex was specified as
+  `(...)` in the task description but mcloop uses the named-group form
+  `(?P<id>...)`. The two are functionally equivalent (same match span,
+  same characters), and the task explicitly required the positional
+  form; I kept it that way. If a later task ever needs to call
+  `m.group("id")` for parity with mcloop's call sites, the regex can be
+  re-written to use the named group without changing semantics.
+
 - 2026-05-16 [BUG from task 2.8] The BUGS.md entry filed against task 2.8
   was truncated by mcloop's `flat_obs[:200] + "..."` capture (see
   `mcloop/main.py:1218-1226`); the captured 200 chars covered only the

@@ -86,6 +86,28 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 # Recognized only at the start of the task body, before any flag tags.
 _TASK_ID_RE = re.compile(r"^(T-\d+):\s+")
 
+# Magic format-version line: anchored to a full line per design doc
+# section 4.1 grammar ``Magic ← "<!--" WS? "bob-plan-format:" WS? Int
+# WS? "-->" NL``. Captures the version integer. Only recognized when
+# this is the first non-blank line of the document; later occurrences
+# fall through to prose handling.
+_MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")
+
+# Phase-id comment: ``<!-- phase_id: phase_NNN -->``. Captures the id.
+# Pattern must match ``mcloop/ledger_emit.py``'s ``_PHASE_ID_COMMENT_RE``
+# byte-for-byte (modulo group naming) so the two libraries cannot
+# disagree about which lines carry a phase id. Used in search-form for
+# line scanning; ``_parse_phase_id_comment_line`` wraps it with
+# fullmatch-on-stripped-line semantics so a comment embedded in a task
+# line is not mistaken for a phase-level annotation.
+_PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*([A-Za-z0-9_]+)\s*-->")
+
+# Format versions this parser knows how to read. Listed as a tuple so
+# adding a v2 later is a single-line change. Absence of the magic line
+# triggers compat mode; presence with a version outside this set is a
+# fail-fast PlanSyntaxError so a v2-only file does not silently degrade.
+_SUPPORTED_MAGIC_VERSIONS: tuple[int, ...] = (1,)
+
 
 def parse_plan(
     text: str,
@@ -132,6 +154,7 @@ def parse_plan(
     """
     del strict
     lines = text.splitlines()
+    magic_version = _detect_magic_line(lines, source_path)
     _check_structural_sanity(lines, source_path)
 
     phases_b: list[_PhaseBuilder] = []
@@ -252,6 +275,23 @@ def parse_plan(
 
         raw = _parse_task_line(line, line_number)
         if raw is None:
+            if (
+                phase_prose_lines is not None
+                and current_phase is not None
+                and subsection_prose_lines is None
+            ):
+                pid = _parse_phase_id_comment_line(line)
+                if pid is not None:
+                    # Per design doc grammar the phase-id comment sits
+                    # between the phase heading and any prose, so this
+                    # branch fires while `phase_prose_lines` is still
+                    # the active accumulator. Overwriting on a repeat
+                    # comment matches mcloop's ``find_explicit_phase_id_for_task``
+                    # behavior (last write wins) so the two libraries
+                    # never disagree about which id a phase carries.
+                    current_phase.phase_id = pid
+                    current_phase.phase_id_source = "explicit_comment"
+                    continue
             if preamble_active:
                 preamble_lines.append(line)
             elif subsection_prose_lines is not None:
@@ -286,13 +326,64 @@ def parse_plan(
     _close_phase_prose()
 
     return Plan(
-        magic_version=None,
+        magic_version=magic_version,
         project_title=project_title,
         preamble=_finalize_prose(preamble_lines),
         phases=tuple(p.freeze() for p in phases_b),
         bugs=bugs_b.freeze() if bugs_b is not None else None,
         source_path=source_path,
     )
+
+
+def _detect_magic_line(
+    lines: list[str],
+    source_path: Path | None,
+) -> int | None:
+    """Return the magic-line version, or ``None`` if absent.
+
+    Per design doc section 4.1, the magic line ``<!-- bob-plan-format:
+    N -->`` is the first non-blank line of a strict-form PLAN.md. The
+    parser only recognizes it in that position; a stray match later in
+    the file falls through to ordinary prose handling so it cannot
+    silently upgrade a compat-mode plan to strict-form parsing. An
+    unrecognized version (anything not in :data:`_SUPPORTED_MAGIC_VERSIONS`)
+    is rejected with :class:`PlanSyntaxError`; this fail-fast matches the
+    contract in the task description and ensures a v2-only file does not
+    parse as v1 by accident.
+    """
+    for idx, line in enumerate(lines):
+        if not line.strip():
+            continue
+        m = _MAGIC_RE.match(line)
+        if m is None:
+            return None
+        version = int(m.group(1))
+        if version not in _SUPPORTED_MAGIC_VERSIONS:
+            _raise_syntax_error(
+                f"unrecognized bob-plan-format version {version}",
+                line_text=line,
+                line_number=idx + 1,
+                source_path=source_path,
+            )
+        return version
+    return None
+
+
+def _parse_phase_id_comment_line(line: str) -> str | None:
+    """Return the phase id when ``line`` is a standalone phase-id comment.
+
+    The line content (after stripping leading and trailing whitespace)
+    must consist solely of the ``<!-- phase_id: ... -->`` marker. A
+    comment embedded inside a task line (e.g. ``- [ ] ... <!-- phase_id:
+    phase_002 -->``) returns ``None`` because the design doc scopes
+    phase-id comments to phase-level attachment, not per-task. Using
+    ``fullmatch`` on the stripped line is the cheapest way to distinguish
+    "comment is the whole line" from "comment is somewhere on the line".
+    """
+    m = _PHASE_ID_COMMENT_RE.fullmatch(line.strip())
+    if m is None:
+        return None
+    return m.group(1)
 
 
 def _check_structural_sanity(

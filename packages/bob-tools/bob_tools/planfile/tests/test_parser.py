@@ -1299,3 +1299,136 @@ class TestCheckStructuralSanityLineNumberReporting:
         # ``err.line`` is the earliest anomaly, not the earliest H1
         # specifically; here it happens to be both.
         assert err.line == 4
+
+
+class TestMagicLine:
+    """Format-version magic line: ``<!-- bob-plan-format: N -->``.
+
+    Per design doc section 4.1 the line is optional in compat mode and
+    must be the first non-blank line when present. Unrecognized versions
+    fail fast so a v2-only file does not silently parse under v1 rules.
+    """
+
+    def test_magic_line_captured_as_version(self) -> None:
+        text = "<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] x\n"
+        plan = parse_plan(text)
+        assert plan.magic_version == 1
+        assert plan.project_title == "P"
+        assert len(plan.phases) == 1
+
+    def test_magic_line_absent_means_compat_mode(self) -> None:
+        plan = parse_plan("# P\n## Stage 1: Core\n- [ ] x\n")
+        assert plan.magic_version is None
+
+    def test_magic_line_after_leading_blank_lines_is_recognized(self) -> None:
+        # The check is "first non-blank line", so leading blank padding
+        # is tolerated. Editors sometimes prepend a blank line on save.
+        text = "\n\n<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n"
+        plan = parse_plan(text)
+        assert plan.magic_version == 1
+
+    def test_magic_line_not_first_non_blank_is_not_recognized(self) -> None:
+        # A magic-shaped line appearing after another non-blank line is
+        # treated as prose (and ends up in the preamble accumulator
+        # here). Recognizing it here would silently upgrade a compat
+        # plan whose author left a stray template comment behind.
+        text = "# P\n<!-- bob-plan-format: 1 -->\n## Stage 1: Core\n- [ ] x\n"
+        plan = parse_plan(text)
+        assert plan.magic_version is None
+
+    def test_unrecognized_version_raises(self) -> None:
+        text = "<!-- bob-plan-format: 99 -->\n# P\n## Stage 1: Core\n- [ ] x\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "unrecognized bob-plan-format version 99" in err.message
+        assert err.line == 1
+
+
+class TestPhaseIdComment:
+    """``<!-- phase_id: ... -->`` comment binds an id to its phase.
+
+    The comment is recognized only on a line of its own (after stripping
+    surrounding whitespace), between a phase heading and the first task
+    or subsection. A comment embedded in a task line is not a phase-id
+    annotation under this mechanism — task identity uses ``T-NNNNNN:``.
+    """
+
+    def test_phase_id_attaches_to_preceding_phase(self) -> None:
+        text = "## Stage 1: Core\n<!-- phase_id: phase_001 -->\n- [ ] task\n"
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.phase_id == "phase_001"
+        assert phase.phase_id_source == "explicit_comment"
+
+    def test_phase_id_comment_not_added_to_prose(self) -> None:
+        # The comment line is consumed by the phase-id handler, not the
+        # prose accumulator, so it does not leak into the rendered
+        # phase prose on round-trip.
+        text = (
+            "## Stage 1: Core\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "Phase intro.\n"
+            "\n"
+            "- [ ] task\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.phase_id == "phase_001"
+        assert phase.prose == "Phase intro."
+
+    def test_phase_id_comment_with_indentation_still_attaches(self) -> None:
+        # ``str.strip`` lets a hand-edited comment with leading or
+        # trailing whitespace still match — the regex itself is anchored
+        # by ``fullmatch`` to the stripped line.
+        text = "## Stage 1: Core\n   <!-- phase_id: phase_001 -->  \n- [ ] x\n"
+        plan = parse_plan(text)
+        assert plan.phases[0].phase_id == "phase_001"
+
+    def test_phase_id_comment_on_task_line_does_not_attach(self) -> None:
+        # The comment is embedded in a task body, not on its own line.
+        # ``Phase.phase_id`` stays unset; the task's text retains the
+        # comment text (task-line classification does not strip it).
+        # This is the "different mechanism — task IDs, not phase IDs"
+        # case called out in the task description.
+        text = "## Stage 1: Core\n- [ ] do thing <!-- phase_id: phase_002 -->\n"
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
+
+    def test_phase_id_comment_after_first_task_does_not_attach(self) -> None:
+        # Once a task lands in the phase, the prose accumulator closes
+        # and so does the phase-id window. A comment after that point
+        # is a stray line and is dropped silently in compat mode.
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] first\n"
+            "<!-- phase_id: phase_002 -->\n"
+            "- [ ] second\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert tuple(t.text for t in phase.tasks) == ("first", "second")
+
+    def test_phase_id_comment_per_phase_is_independent(self) -> None:
+        text = (
+            "## Stage 1: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "- [ ] a\n"
+            "## Stage 2: B\n"
+            "<!-- phase_id: phase_002 -->\n"
+            "- [ ] b\n"
+        )
+        plan = parse_plan(text)
+        assert plan.phases[0].phase_id == "phase_001"
+        assert plan.phases[1].phase_id == "phase_002"
+        assert plan.phases[1].phase_id_source == "explicit_comment"
+
+    def test_no_phase_id_comment_leaves_source_as_none(self) -> None:
+        plan = parse_plan("## Stage 1: Core\n- [ ] x\n")
+        phase = plan.phases[0]
+        assert phase.phase_id is None
+        assert phase.phase_id_source == "none"
