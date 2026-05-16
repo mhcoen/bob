@@ -391,11 +391,12 @@ class TestResolveTaskContext:
         phase_id: str | None = "phase_001",
         phase_id_source: str = "explicit_comment",
         subsections: tuple[Subsection, ...] = (),
+        ordinal: int = 1,
     ) -> Phase:
         return Phase(
             phase_id=phase_id,
             phase_id_source=phase_id_source,
-            ordinal=1,
+            ordinal=ordinal,
             keyword="Stage",
             title="Core",
             prose="",
@@ -571,3 +572,170 @@ class TestResolveTaskContext:
         plan = _plan(phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),))
         assert resolve_task_context(plan, "T-000001").label == "T-000001"
         assert resolve_task_context(plan, "missing").label == "missing"
+
+    def test_resolves_positional_label_two_tokens(self) -> None:
+        # mcloop's task_label emits "N.M" for stage-headed root tasks
+        # ("5.2" = the second root task in Stage 5). Positional
+        # resolution finds the phase by ordinal and indexes into
+        # phase.tasks (1-based).
+        t1 = _task(task_id="T-000001")
+        t2 = _task(task_id="T-000002", line_number=2)
+        t3 = _task(task_id="T-000003", line_number=3)
+        plan = _plan(
+            phases=(
+                self._phase_with_id(
+                    tasks=(t1, t2, t3),
+                    phase_id="phase_005",
+                    ordinal=5,
+                ),
+            )
+        )
+        ctx = resolve_task_context(plan, "5.2")
+        assert ctx.task_id == "T-000002"
+        assert ctx.phase_id == "phase_005"
+        assert ctx.phase_id_source == "explicit_comment"
+        assert ctx.label == "5.2"
+
+    def test_resolves_positional_label_three_tokens(self) -> None:
+        # "1.3.2" = Stage 1, root task 3, child task 2. Descent uses
+        # task.children, not subsections.
+        child1 = _task(task_id="T-000010", indent_level=2, line_number=10)
+        child2 = _task(task_id="T-000011", indent_level=2, line_number=11)
+        root3 = _task(
+            task_id="T-000003",
+            line_number=3,
+            children=(child1, child2),
+        )
+        plan = _plan(
+            phases=(
+                self._phase_with_id(
+                    tasks=(
+                        _task(task_id="T-000001"),
+                        _task(task_id="T-000002", line_number=2),
+                        root3,
+                    ),
+                ),
+            )
+        )
+        ctx = resolve_task_context(plan, "1.3.2")
+        assert ctx.task_id == "T-000011"
+        assert ctx.phase_id == "phase_001"
+
+    def test_positional_uses_phase_ordinal_not_document_index(self) -> None:
+        # Phase.ordinal is the integer parsed from "Stage N"/"Phase N",
+        # not the document position. A plan that opens at "Stage 3"
+        # has phases[0].ordinal == 3, and "3.1" must resolve there.
+        target = _task(task_id="T-000005")
+        phase_three = self._phase_with_id(
+            tasks=(target,), phase_id="phase_003", ordinal=3
+        )
+        plan = _plan(phases=(phase_three,))
+        ctx = resolve_task_context(plan, "3.1")
+        assert ctx.task_id == "T-000005"
+        assert ctx.phase_id == "phase_003"
+
+    def test_positional_compat_task_resolves_without_id(self) -> None:
+        # Positional resolution must work on pre-migration plans where
+        # tasks carry no task_id; that is the main case it serves
+        # because once IDs exist, mcloop will hand IDs to the
+        # resolver directly.
+        compat = _task(task_id=None, text="bring up scaffold")
+        plan = _plan(phases=(self._phase_with_id(tasks=(compat,)),))
+        ctx = resolve_task_context(plan, "1.1")
+        assert ctx.task_id is None
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "explicit_comment"
+
+    def test_positional_out_of_range_root_falls_through(self) -> None:
+        # "1.99" with only one root task: positional resolution must
+        # not silently match the last task. It returns None, which
+        # then falls through to id/text matching, which also misses,
+        # producing a none-shaped context.
+        plan = _plan(phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),))
+        ctx = resolve_task_context(plan, "1.99")
+        assert ctx.task_id is None
+        assert ctx.phase_id is None
+        assert ctx.phase_id_source == "none"
+        assert ctx.label == "1.99"
+
+    def test_positional_out_of_range_child_falls_through(self) -> None:
+        # Indexes are checked at every level: a valid root pick
+        # followed by an out-of-range child returns the none-shaped
+        # context, not the parent task.
+        parent = _task(task_id="T-000001", children=(_task(task_id="T-000010"),))
+        plan = _plan(phases=(self._phase_with_id(tasks=(parent,)),))
+        ctx = resolve_task_context(plan, "1.1.5")
+        assert ctx.task_id is None
+        assert ctx.phase_id is None
+
+    def test_positional_missing_phase_falls_through(self) -> None:
+        # "9.1" against a plan whose phases are ordinal 1, 2 must
+        # not match — there is no phase 9.
+        p1 = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        p2 = self._phase_with_id(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        ctx = resolve_task_context(_plan(phases=(p1, p2)), "9.1")
+        assert ctx.task_id is None
+        assert ctx.phase_id is None
+
+    def test_positional_does_not_descend_into_subsections(self) -> None:
+        # Mcloop's task_label puts subsection tasks under a different
+        # "stage" string (the subsection heading), so they never carry
+        # the parent stage's N.M label. The resolver mirrors that:
+        # positional descent walks phase.tasks only, not subsections.
+        sub_task = _task(task_id="T-000010", text="manual step")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_task,), line_number=19)
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),), subsections=(sub,)
+        )
+        # "1.2" would be the second root task, but there is only one,
+        # and the subsection task must not be reached this way.
+        ctx = resolve_task_context(_plan(phases=(phase,)), "1.2")
+        assert ctx.task_id is None
+        assert ctx.phase_id is None
+
+    def test_bare_number_is_not_a_positional_label(self) -> None:
+        # The pattern requires at least one dot. A bare "1" falls
+        # through to id/text matching, where it only matches a task
+        # whose id is "1" or whose text starts with "1: " etc.
+        labeled = _task(task_id=None, text="1: top-level")
+        plan = _plan(phases=(self._phase_with_id(tasks=(labeled,)),))
+        ctx = resolve_task_context(plan, "1")
+        # Resolved through the text-prefix path, not positional.
+        assert ctx.task_id is None
+        assert ctx.phase_id == "phase_001"
+        # And a bare "1" with no text/id match in the plan stays
+        # none-shaped (no accidental "first root task" interpretation).
+        empty_phase = self._phase_with_id(tasks=(_task(task_id="T-000001"),))
+        miss = resolve_task_context(_plan(phases=(empty_phase,)), "2")
+        assert miss.task_id is None
+        assert miss.phase_id is None
+
+    def test_positional_tokenizes_does_not_substring_scan(self) -> None:
+        # Substring scan would conflate "1.3" with "1.30" (the way
+        # ``label_token in line`` did for T-NNNNNN ids — design doc
+        # 7.2 caveat). Tokenization makes 1.3 = phase 1, task 3,
+        # period — never "anything whose label starts with 1.3".
+        # If only three root tasks exist, "1.30" must miss.
+        plan = _plan(
+            phases=(
+                self._phase_with_id(
+                    tasks=(
+                        _task(task_id="T-000001"),
+                        _task(task_id="T-000002", line_number=2),
+                        _task(task_id="T-000003", line_number=3),
+                    ),
+                ),
+            )
+        )
+        assert resolve_task_context(plan, "1.3").task_id == "T-000003"
+        miss = resolve_task_context(plan, "1.30")
+        assert miss.task_id is None
+        assert miss.phase_id is None

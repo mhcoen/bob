@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 from bob_tools.planfile.model import (
@@ -11,6 +12,8 @@ from bob_tools.planfile.model import (
     Task,
     TaskContext,
 )
+
+_POSITIONAL_LABEL_RE = re.compile(r"^\d+(?:\.\d+)+$")
 
 
 def bug_count(plan: Plan) -> int:
@@ -127,6 +130,61 @@ def _task_matches_label(task: Task, ref: str) -> bool:
     return any(task.text.startswith(ref + sep) for sep in (":", ")", " ", "\t"))
 
 
+def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, Task] | None:
+    """Resolve a positional label like ``1.3.2`` to ``(phase, task)``.
+
+    Mirrors mcloop's ``task_label`` output (``checklist.py``): the first
+    dot-separated token is the phase ordinal as printed in the
+    ``Stage N`` / ``Phase N`` heading (i.e. ``Phase.ordinal``); each
+    subsequent token is a 1-based positional index into the task tree.
+    The second token picks a root task from ``phase.tasks``, the third
+    picks a child of that task, and so on. Subsection tasks are
+    intentionally not addressable by positional label — they sit under
+    a sub-heading whose stage number is empty in mcloop, so mcloop never
+    produces ``N.M`` labels for them. Mirroring that here keeps the
+    resolver consistent with the strings mcloop actually emits.
+
+    Returns ``None`` when ``label`` is not in ``N.M[.K...]`` form (the
+    pattern is anchored — at least two dot-separated all-numeric
+    tokens), when no phase has the requested ordinal, or when any
+    positional index along the path is out of range. Bare ``N`` (no
+    dots) is intentionally not a positional label: it would be too
+    easy to collide with an unrelated single-digit literal in
+    ``task.text``, and mcloop's ``task_label`` always emits at least
+    a stage-plus-position pair for stage-headed sections.
+
+    Tokenization is explicit: ``label.split(".")`` and integer
+    conversion under the anchored regex above. The resolver MUST NOT
+    fall back to ``ref in task.text``-style substring scanning — that
+    is the bug the design doc section 7.2 caveat calls out and the
+    reason this helper exists.
+    """
+    if _POSITIONAL_LABEL_RE.match(label) is None:
+        return None
+    parts = [int(token) for token in label.split(".")]
+    phase_ordinal, *task_indexes = parts
+
+    matched_phase: Phase | None = None
+    for phase in plan.phases:
+        if phase.ordinal == phase_ordinal:
+            matched_phase = phase
+            break
+    if matched_phase is None:
+        return None
+
+    current_tasks: tuple[Task, ...] = matched_phase.tasks
+    matched_task: Task | None = None
+    for index in task_indexes:
+        if index < 1 or index > len(current_tasks):
+            return None
+        matched_task = current_tasks[index - 1]
+        current_tasks = matched_task.children
+
+    if matched_task is None:
+        return None
+    return matched_phase, matched_task
+
+
 def _iter_phase_tasks_with_phase(plan: Plan) -> Iterator[tuple[Task, Phase]]:
     """Yield every ``(task, phase)`` pair for tasks inside a phase.
 
@@ -168,8 +226,29 @@ def resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext:
     ``plan_phase_count`` is always populated from ``len(plan.phases)``
     so the ordinal-fallback shim has the count it needs without a
     second pass over the plan.
+
+    Positional labels (``N.M[.K...]``, as emitted by mcloop's
+    ``task_label``) are tried first and bypass the task-walk
+    entirely: tokenized index lookup is unambiguous, so a
+    well-formed positional reference cannot be confused with a
+    ``task_id`` or with task text — see :func:`_resolve_positional_label`
+    for the contract. When the format does not match, when no phase
+    has the requested ordinal, or when an index along the path is out
+    of range, positional resolution returns ``None`` and the walk
+    falls through to ``task_id`` / text matching.
     """
     plan_phase_count = len(plan.phases)
+
+    positional = _resolve_positional_label(plan, task_label_or_id)
+    if positional is not None:
+        phase, task = positional
+        return TaskContext(
+            task_id=task.task_id,
+            phase_id=phase.phase_id,
+            phase_id_source=phase.phase_id_source,
+            label=task_label_or_id,
+            plan_phase_count=plan_phase_count,
+        )
 
     for task, phase in _iter_phase_tasks_with_phase(plan):
         if _task_matches_label(task, task_label_or_id):
