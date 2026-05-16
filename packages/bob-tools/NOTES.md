@@ -122,6 +122,48 @@
   the tag-level cases. Stage 3 strict mode is the right place to add
   the rejections the task description anticipated.
 
+- 2026-05-16 [BUG re-attempt from task 2.8] Re-running the four check
+  commands surfaced a pre-existing `ruff` RUF022 failure on
+  `bob_tools/planfile/__init__.py`: the `__all__` list was committed
+  unsorted in commit f067460 (where the file was first added) and the
+  Stage-2 group needed isort-style ASCII-alphabetical ordering. Fixed
+  by re-sorting that group; the commented Stage-3+ entries were left
+  in declaration order because they are inactive. Also stripped an
+  unused `# noqa: BLE001` on `except Exception as exc:` in
+  `tests/manual/check_compat_read.py` (RUF100): BLE001 is not in our
+  enabled set (`E,F,W,I,B,UP,RUF`), so the directive was dead. The
+  bug-fix payload (the `bug_count` API, the helper script, and the
+  `TestBugCount` cases) from the previous attempt was left intact —
+  only the lint cleanup the previous attempt left unfinished was
+  applied here.
+
+- 2026-05-16 [BUG from task 2.8] The BUGS.md entry filed against task 2.8
+  was truncated by mcloop's `flat_obs[:200] + "..."` capture (see
+  `mcloop/main.py:1218-1226`); the captured 200 chars covered only the
+  python one-liner up to ``p.bugs is no`` and cut off the user's actual
+  observation. Re-running the one-liner against all three target files
+  (`/Users/mhcoen/proj/duplo/PLAN.md`, `/Users/mhcoen/proj/mcloop/PLAN.md`,
+  `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`) shows the parser succeeds
+  cleanly with phase counts 8, 10, 2 and ``bugs is not None`` False for
+  all three (none of those files has a literal ``## Bugs`` heading). The
+  reproducible failure mode the bug entry *most likely* refers to is the
+  ambiguity of the printed output: ``bugs=False`` is the same string for
+  "no Bugs section in the file" and "Bugs section is present but empty",
+  and task 2.8's stated expectations have ``mcloop/PLAN.md ... bugs=true``
+  (which the file does not satisfy because mcloop keeps its bug list in a
+  sibling ``BUGS.md`` file, not inside PLAN.md). The fix has two parts:
+  (1) a new ``bug_count(plan) -> int`` in ``operations.py`` so callers
+  can print a concrete count instead of the ambiguous bool, and (2) a
+  manual verification helper at
+  ``bob_tools/planfile/tests/manual/check_compat_read.py`` that the
+  Stage 2 USER task can invoke with ``python -m
+  bob_tools.planfile.tests.manual.check_compat_read`` to print
+  ``OK <path> phases=<n> bugs=<true|false> bug_count=<n>`` per file
+  (matching the helper-script task the user added in PLAN.md after this
+  bug fired). Tests in ``TestBugCount`` pin the three states (no
+  section, empty section, populated section) so the disambiguation
+  cannot regress.
+
 ## Hypotheses
 
 ## Eliminated

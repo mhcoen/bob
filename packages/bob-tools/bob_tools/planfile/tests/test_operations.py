@@ -30,7 +30,7 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
-from bob_tools.planfile.operations import validate_plan
+from bob_tools.planfile.operations import bug_count, validate_plan
 
 
 def _task(
@@ -250,3 +250,52 @@ class TestValidatePlan:
         assert exc_info.value.messages == [
             "task line 42 references unknown dep T-000999",
         ]
+
+
+class TestBugCount:
+    """``bug_count`` disambiguates the three Bugs-section states.
+
+    The verification one-liner from task 2.8 used ``p.bugs is not None``
+    which printed ``bugs=False`` for both "no Bugs section" and
+    "Bugs section present but empty" — the same string carried two
+    very different meanings. ``bug_count`` separates them: an absent
+    section reports ``0``, an empty section also reports ``0`` but
+    paired with ``p.bugs is not None == True``, and a populated section
+    reports the actual task count.
+    """
+
+    def test_no_bugs_section_returns_zero(self) -> None:
+        plan = _plan()
+        assert bug_count(plan) == 0
+        assert plan.bugs is None
+
+    def test_empty_bugs_section_returns_zero(self) -> None:
+        plan = _plan(bugs=BugsSection(tasks=(), line_number=10))
+        assert bug_count(plan) == 0
+        # The Bugs section is present even though the count is zero; the
+        # ``bugs=true bug_count=0`` pair distinguishes this case from a
+        # plan with no Bugs heading at all.
+        assert plan.bugs is not None
+
+    def test_populated_bugs_section_returns_task_count(self) -> None:
+        plan = _plan(
+            bugs=BugsSection(
+                tasks=(
+                    _task(task_id="T-000900", line_number=20),
+                    _task(task_id="T-000901", line_number=21),
+                    _task(task_id="T-000902", line_number=22),
+                ),
+                line_number=19,
+            ),
+        )
+        assert bug_count(plan) == 3
+
+    def test_bug_count_does_not_count_nested_children(self) -> None:
+        # ``bug_count`` reports root-level bug tasks only. A bug task
+        # with nested subtasks counts as one, matching how the
+        # verification command reports "phases" (root phase count, not
+        # task totals).
+        child = _task(task_id="T-000902", indent_level=2, line_number=22)
+        root = _task(task_id="T-000901", children=(child,), line_number=21)
+        plan = _plan(bugs=BugsSection(tasks=(root,), line_number=20))
+        assert bug_count(plan) == 1

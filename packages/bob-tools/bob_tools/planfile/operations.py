@@ -7,6 +7,22 @@ from collections.abc import Iterator
 from bob_tools.planfile.model import Plan, PlanValidationError, Task
 
 
+def bug_count(plan: Plan) -> int:
+    """Return the number of bug tasks in ``plan``.
+
+    Returns ``0`` when ``plan.bugs is None`` (no Bugs section was parsed)
+    and the count of top-level bug tasks otherwise. Verification scripts
+    use this to surface a concrete count rather than the ambiguous
+    ``bugs={p.bugs is not None}`` boolean (where ``bugs=False`` can be
+    misread as "the Bugs section exists but is empty" instead of "no
+    Bugs section was found"). The count covers root tasks only; nested
+    subtask counts are left for callers that need them.
+    """
+    if plan.bugs is None:
+        return 0
+    return len(plan.bugs.tasks)
+
+
 def _iter_tasks(tasks: tuple[Task, ...]) -> Iterator[Task]:
     """Yield every task in ``tasks``, descending into ``children`` first."""
     for task in tasks:

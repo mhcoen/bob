@@ -28,21 +28,26 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
+from bob_tools.planfile.operations import bug_count
 from bob_tools.planfile.parser import parse_plan
 
 __all__ = [
-    # Stage 2 — parser + typed model (live)
-    "parse_plan",
-    "Plan",
-    "Phase",
-    "Subsection",
+    # Stage 2 — parser + typed model (live). Sorted ASCII-alphabetically
+    # to satisfy ruff RUF022; the leading-comment grouping that used to
+    # cluster types vs. errors vs. functions is reflected in module
+    # docstrings rather than __all__ ordering.
     "BugsSection",
-    "Task",
-    "RuledOut",
-    "TaskStatus",
+    "Phase",
+    "Plan",
+    "PlanInconsistencyError",
     "PlanSyntaxError",
     "PlanValidationError",
-    "PlanInconsistencyError",
+    "RuledOut",
+    "Subsection",
+    "Task",
+    "TaskStatus",
+    "bug_count",
+    "parse_plan",
     # Stage 3 — strict-mode parser additions (no new public names;
     # parse_plan(strict=True) is the surface)
     # Stage 4 — renderer
