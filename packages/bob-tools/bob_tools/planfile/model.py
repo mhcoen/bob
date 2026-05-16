@@ -125,6 +125,42 @@ class Plan:
     source_path: Path | None
 
 
+@dataclass(frozen=True)
+class TaskContext:
+    """Result of resolving a task reference against a parsed :class:`Plan`.
+
+    Returned by :func:`bob_tools.planfile.operations.resolve_task_context`.
+    Per design doc section 7.1 the resolver is the single source of
+    truth for "given a task reference, which phase does it belong to";
+    ``ledger_emit.resolve_phase_id`` becomes a thin shim that reads
+    ``phase_id`` and ``phase_id_source`` off this dataclass.
+
+    Fields:
+
+    - ``task_id``: the resolved task's stable ``T-NNNNNN`` id, or ``None``
+      when the lookup matched a compat-mode task (no id) or matched
+      nothing.
+    - ``phase_id``: the containing phase's id, or ``None`` when the task
+      lives in the Bugs section or could not be resolved.
+    - ``phase_id_source``: how the containing phase's id was determined.
+      ``"explicit_comment"`` / ``"explicit_header"`` for resolved phase
+      tasks, ``"none"`` for bug tasks or unresolved references. The
+      shim in ``ledger_emit`` collapses both ``explicit_*`` values to
+      ``"explicit"`` for its ``PhaseIdResolution.source`` field.
+    - ``label``: the input reference, echoed back so callers can include
+      it in diagnostics without re-threading the original string.
+    - ``plan_phase_count``: ``len(plan.phases)``, snapshotted at resolve
+      time so the ordinal-fallback shim does not need a second pass
+      over the plan.
+    """
+
+    task_id: str | None
+    phase_id: str | None
+    phase_id_source: str
+    label: str
+    plan_phase_count: int
+
+
 class PlanSyntaxError(Exception):
     """Raised on malformed PLAN.md syntax. Carries line/column locator."""
 

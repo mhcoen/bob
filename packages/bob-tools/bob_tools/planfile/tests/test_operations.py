@@ -28,9 +28,15 @@ from bob_tools.planfile.model import (
     PlanValidationError,
     Subsection,
     Task,
+    TaskContext,
     TaskStatus,
 )
-from bob_tools.planfile.operations import _find_task_by_id, bug_count, validate_plan
+from bob_tools.planfile.operations import (
+    _find_task_by_id,
+    bug_count,
+    resolve_task_context,
+    validate_plan,
+)
 
 
 def _task(
@@ -360,3 +366,208 @@ class TestFindTaskById:
         plan = _plan(phases=(_phase(tasks=(shorter, longer)),))
         assert _find_task_by_id(plan, "T-000001") is shorter
         assert _find_task_by_id(plan, "T-0000010") is longer
+
+
+class TestResolveTaskContext:
+    """``resolve_task_context`` is the single task → phase resolver.
+
+    Replaces the substring-scan that ``find_explicit_phase_id_for_task``
+    does today (design doc section 7.1). The contract is:
+
+      - Match by ``task_id`` exact equality first (the canonical path).
+      - Fall back to the parsed task's text — exact match or label-with-
+        separator prefix — so pre-id PLAN.md files still resolve.
+      - Bugs section tasks are findable but report ``phase_id=None``
+        and ``phase_id_source="none"`` since bugs have no phase.
+      - Unresolved input returns a none-shaped context (no exception).
+      - ``plan_phase_count`` is always ``len(plan.phases)`` so the
+        ledger_emit shim does not need a second pass over the plan.
+    """
+
+    def _phase_with_id(
+        self,
+        *,
+        tasks: tuple[Task, ...],
+        phase_id: str | None = "phase_001",
+        phase_id_source: str = "explicit_comment",
+        subsections: tuple[Subsection, ...] = (),
+    ) -> Phase:
+        return Phase(
+            phase_id=phase_id,
+            phase_id_source=phase_id_source,
+            ordinal=1,
+            keyword="Stage",
+            title="Core",
+            prose="",
+            subsections=subsections,
+            tasks=tasks,
+            line_number=5,
+        )
+
+    def test_resolves_by_task_id_exact_match(self) -> None:
+        target = _task(task_id="T-000002")
+        phase = self._phase_with_id(tasks=(_task(task_id="T-000001"), target))
+        plan = _plan(phases=(phase,))
+        ctx = resolve_task_context(plan, "T-000002")
+        assert ctx == TaskContext(
+            task_id="T-000002",
+            phase_id="phase_001",
+            phase_id_source="explicit_comment",
+            label="T-000002",
+            plan_phase_count=1,
+        )
+
+    def test_resolves_nested_child_to_containing_phase(self) -> None:
+        child = _task(task_id="T-000002", indent_level=2)
+        parent = _task(task_id="T-000001", children=(child,))
+        plan = _plan(phases=(self._phase_with_id(tasks=(parent,)),))
+        ctx = resolve_task_context(plan, "T-000002")
+        assert ctx.task_id == "T-000002"
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "explicit_comment"
+
+    def test_resolves_subsection_task_to_parent_phase(self) -> None:
+        # Subsections are humans-only grouping (design doc Q5); their
+        # tasks share the parent phase's id.
+        sub_task = _task(task_id="T-000010", line_number=20)
+        sub = Subsection(title="Manual", prose="", tasks=(sub_task,), line_number=19)
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),), subsections=(sub,)
+        )
+        ctx = resolve_task_context(_plan(phases=(phase,)), "T-000010")
+        assert ctx.phase_id == "phase_001"
+        assert ctx.task_id == "T-000010"
+
+    def test_explicit_header_source_is_propagated(self) -> None:
+        # The shim in ledger_emit collapses both explicit_* variants to
+        # "explicit"; the resolver must surface the parser's value so
+        # the shim has the raw signal to collapse.
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_002",
+            phase_id_source="explicit_header",
+        )
+        ctx = resolve_task_context(_plan(phases=(phase,)), "T-000001")
+        assert ctx.phase_id == "phase_002"
+        assert ctx.phase_id_source == "explicit_header"
+
+    def test_phase_with_none_source_propagates_none(self) -> None:
+        phase = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id=None,
+            phase_id_source="none",
+        )
+        ctx = resolve_task_context(_plan(phases=(phase,)), "T-000001")
+        assert ctx.phase_id is None
+        assert ctx.phase_id_source == "none"
+        # The match still happened — task_id is populated even though
+        # the phase has no id.
+        assert ctx.task_id == "T-000001"
+
+    def test_unresolved_reference_returns_none_context(self) -> None:
+        plan = _plan(phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),))
+        ctx = resolve_task_context(plan, "T-000999")
+        assert ctx == TaskContext(
+            task_id=None,
+            phase_id=None,
+            phase_id_source="none",
+            label="T-000999",
+            plan_phase_count=1,
+        )
+
+    def test_bugs_task_resolves_with_none_phase(self) -> None:
+        bug = _task(task_id="T-000900", line_number=100)
+        plan = _plan(
+            phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),),
+            bugs=BugsSection(tasks=(bug,), line_number=99),
+        )
+        ctx = resolve_task_context(plan, "T-000900")
+        # Found the task (so task_id is populated) but it sits outside
+        # any phase, so the phase_id fields stay in "none" shape.
+        assert ctx.task_id == "T-000900"
+        assert ctx.phase_id is None
+        assert ctx.phase_id_source == "none"
+        assert ctx.plan_phase_count == 1
+
+    def test_plan_phase_count_reflects_full_plan(self) -> None:
+        # plan_phase_count is a snapshot of len(plan.phases) regardless
+        # of which phase the matched task lives in; the ordinal-shim
+        # needs this to bounds-check its ordinal_index argument.
+        phase_one = self._phase_with_id(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        phase_two = self._phase_with_id(
+            tasks=(_task(task_id="T-000002"),), phase_id="phase_002"
+        )
+        plan = _plan(phases=(phase_one, phase_two))
+        assert resolve_task_context(plan, "T-000001").plan_phase_count == 2
+        assert resolve_task_context(plan, "T-000002").plan_phase_count == 2
+        assert resolve_task_context(plan, "T-000999").plan_phase_count == 2
+
+    def test_resolves_label_prefix_with_separator(self) -> None:
+        # Pre-id PLAN.md files use duplo-style labels at the start of
+        # the task text. ``task-001`` must resolve to the task whose
+        # text is ``task-001: ...`` even though the task carries no id.
+        labeled = _task(task_id=None, text="task-001: Bring up scaffold")
+        plan = _plan(phases=(self._phase_with_id(tasks=(labeled,)),))
+        ctx = resolve_task_context(plan, "task-001")
+        assert ctx.task_id is None
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "explicit_comment"
+
+    def test_label_prefix_requires_a_separator(self) -> None:
+        # Bare substring matching is the bug the resolver was created
+        # to fix: ``task-001`` must NOT resolve to ``task-0010: ...``.
+        # Only ``ref`` followed by a structural separator counts.
+        overlap = _task(task_id=None, text="task-0010: Adjacent label")
+        plan = _plan(phases=(self._phase_with_id(tasks=(overlap,)),))
+        ctx = resolve_task_context(plan, "task-001")
+        assert ctx.task_id is None
+        assert ctx.phase_id is None
+        assert ctx.phase_id_source == "none"
+
+    def test_task_id_prefix_overlap_does_not_misresolve(self) -> None:
+        # The canonical regression: ``T-000001`` is a substring of
+        # ``T-0000010``. resolve_task_context must keep them distinct.
+        shorter = _task(task_id="T-000001", text="short id")
+        longer = _task(task_id="T-0000010", text="long id", line_number=2)
+        plan = _plan(phases=(self._phase_with_id(tasks=(shorter, longer)),))
+        assert resolve_task_context(plan, "T-000001").task_id == "T-000001"
+        assert resolve_task_context(plan, "T-0000010").task_id == "T-0000010"
+
+    def test_first_match_wins_in_document_order(self) -> None:
+        # When two tasks would both legitimately match the same
+        # reference — one by task_id, one by text-prefix — the
+        # resolver returns the first match in document order. Pin
+        # the contract so the behavior cannot drift to "id-match
+        # always wins" (which would require a second pass) or
+        # "text-match always wins" without a deliberate change.
+        text_first = _task(task_id=None, text="ref-token: incidental match")
+        id_second = _task(task_id="ref-token", text="other text", line_number=2)
+        plan = _plan(phases=(self._phase_with_id(tasks=(text_first, id_second)),))
+        ctx = resolve_task_context(plan, "ref-token")
+        assert ctx.task_id is None
+        assert ctx.phase_id == "phase_001"
+
+    def test_phase_tasks_searched_before_bugs(self) -> None:
+        # If the same label could match both a phase task and a bug
+        # task, the phase match wins (it has a real phase_id). The
+        # bug-search pass only fires when the phase pass yields
+        # nothing.
+        phase_hit = _task(task_id="dup-id", text="phase task")
+        bug_hit = _task(task_id="dup-id", text="bug task", line_number=99)
+        plan = _plan(
+            phases=(self._phase_with_id(tasks=(phase_hit,)),),
+            bugs=BugsSection(tasks=(bug_hit,), line_number=98),
+        )
+        ctx = resolve_task_context(plan, "dup-id")
+        assert ctx.phase_id == "phase_001"
+        assert ctx.phase_id_source == "explicit_comment"
+
+    def test_label_field_echoes_input(self) -> None:
+        # The label field is informational — callers use it to thread
+        # the original reference into diagnostics without re-stashing
+        # it. Echo on hit and on miss alike.
+        plan = _plan(phases=(self._phase_with_id(tasks=(_task(task_id="T-000001"),)),))
+        assert resolve_task_context(plan, "T-000001").label == "T-000001"
+        assert resolve_task_context(plan, "missing").label == "missing"

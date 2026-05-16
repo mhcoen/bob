@@ -26,9 +26,10 @@ from bob_tools.planfile.model import (
     RuledOut,
     Subsection,
     Task,
+    TaskContext,
     TaskStatus,
 )
-from bob_tools.planfile.operations import bug_count
+from bob_tools.planfile.operations import bug_count, resolve_task_context
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import canonicalize, render_plan
 
@@ -46,11 +47,13 @@ __all__ = [
     "RuledOut",
     "Subsection",
     "Task",
+    "TaskContext",
     "TaskStatus",
     "bug_count",
     "canonicalize",
     "parse_plan",
     "render_plan",
+    "resolve_task_context",
     # Stage 3 — strict-mode parser additions (no new public names;
     # parse_plan(strict=True) is the surface)
     # Stage 4 — renderer (render_plan + canonicalize live)
@@ -62,10 +65,8 @@ __all__ = [
     # "reset_task",
     # "add_task",
     # "replace_phase",
-    # "resolve_task_context",
     # "check_consistency",
     # "Settlement",
-    # "TaskContext",
     # Stage 6 — file I/O
     # "load",
     # "save",
