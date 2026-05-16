@@ -18,12 +18,12 @@ line.
    - [x] In both strict and compat mode: when a heading matches this regex but not the stage-or-phase ordinal regex (because the id is non-numeric, e.g. phase_001), accept it, set `Phase.phase_id` to the captured id, and `Phase.phase_id_source` to "explicit_header". Per design doc section 7.1.
    - [x] Tests: a heading with a non-numeric phase id parses with that id and source "explicit_header"; a heading with a numeric ordinal parses with that ordinal and phase_id None unless a comment follows (then "explicit_comment"); the canonicalizer eventually rewrites explicit_header to explicit_comment, but the parser preserves both forms as input.
 
-- [ ] Stable task IDs
+- [x] Stable task IDs
    - [x] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
    - [x] In compat mode: presence of a task ID is recorded on `Task.task_id` but absence is accepted.
    - [x] In strict mode: absence of a task ID raises `PlanSyntaxError` with the exact message format from design doc section 9: "expected task id like T-000123 after checkbox marker".
    - [x] Tokenization: the library MUST NOT use substring matching to find tasks by ID. Implement `_find_task_by_id(plan, task_id)` that walks the parsed tree. Per design doc section 7.2 caveat about substring matching.
-   - [ ] Tests: a task line with a stable ID parses with that ID; a task line without an ID parses with task_id None in compat mode and raises in strict mode; `_find_task_by_id` distinguishes T-000001 from T-0000010.
+   - [x] Tests: a task line with a stable ID parses with that ID; a task line without an ID parses with task_id None in compat mode and raises in strict mode; `_find_task_by_id` distinguishes T-000001 from T-0000010.
 
 - [ ] Ordinal fallback for unattributed phases
    - [ ] When neither a phase-id comment nor the legacy header form provides an id, leave `Phase.phase_id` as None and `Phase.phase_id_source` as "none". The Stage 5 `resolve_task_context` function is what maps None to an ordinal fallback at resolve time.
