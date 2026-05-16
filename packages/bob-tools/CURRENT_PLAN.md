@@ -44,7 +44,7 @@ mcloop's substring matching.
    - [x] Tests: single-line deps with one or more IDs; deps attached to nested subtasks; missing target ID surfaces in `validate_plan`. Per design doc section 6 and Phase A scope in section 8.
 
 - [ ] Assemble the parse tree
-   - [ ] Implement `parse_plan(text: str, *, strict: bool = False, source_path: Path | None = None) -> Plan`. The `strict` parameter is wired but defaults to False (compat mode); strict-mode behavior is added in Stage 3.
+   - [x] Implement `parse_plan(text: str, *, strict: bool = False, source_path: Path | None = None) -> Plan`. The `strict` parameter is wired but defaults to False (compat mode); strict-mode behavior is added in Stage 3.
    - [ ] State machine: walk lines once, tracking the current phase (or bugs section), the current subsection within a phase, and a stack of open tasks (by indent). Each task line opens or closes scopes by indent comparison, matching mcloop's logic in `parse`.
    - [ ] Project title: the first H1 heading seen. Preamble: prose between the H1 and the first phase or bugs heading. Phase prose: prose between a phase heading and its first task or subsection. Subsection prose: prose between a sub-heading and its first task.
    - [ ] On a syntax violation in compat mode, raise `PlanSyntaxError(message, line, column, path)` with a message that quotes the offending line.
