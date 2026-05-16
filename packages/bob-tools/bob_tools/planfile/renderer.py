@@ -30,6 +30,7 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
+from bob_tools.planfile.parser import parse_plan
 
 _STATUS_CHAR: dict[TaskStatus, str] = {
     TaskStatus.TODO: " ",
@@ -71,6 +72,19 @@ def render_plan(plan: Plan) -> str:
         lines.pop()
 
     return "\n".join(lines) + "\n"
+
+
+def canonicalize(text: str) -> str:
+    """Return ``text`` reformatted in canonical PLAN.md form.
+
+    Defined as ``render_plan(parse_plan(text))`` per design doc section
+    3.2: lossless formatting only. Does not assign task IDs and does not
+    add ``<!-- phase_id: ... -->`` comments — that identity-mutating
+    step is :func:`bob_tools.planfile.operations.migrate`. Input without
+    IDs renders without IDs (compatibility output); input that already
+    has IDs round-trips unchanged.
+    """
+    return render_plan(parse_plan(text))
 
 
 def _render_phase_into(lines: list[str], phase: Phase) -> None:
