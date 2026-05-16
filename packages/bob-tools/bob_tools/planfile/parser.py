@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NoReturn, Protocol, TypeVar
+from typing import NoReturn, Protocol
 
 from bob_tools.planfile.model import (
     BugsSection,
@@ -583,14 +583,11 @@ class _HasIndentLevel(Protocol):
     def indent_level(self) -> int: ...
 
 
-_T = TypeVar("_T", bound=_HasIndentLevel)
-
-
-def _attach_ruledout(
+def _attach_ruledout[T: _HasIndentLevel](
     indent: int,
-    stack: Sequence[_T],
-    root_tasks: Sequence[_T],
-) -> _T | None:
+    stack: Sequence[T],
+    root_tasks: Sequence[T],
+) -> T | None:
     """Resolve the task a ``[RULEDOUT]`` line should attach to.
 
     Mirrors mcloop's ``parse`` (``checklist.py`` lines 189-204): walk
@@ -610,10 +607,10 @@ def _attach_ruledout(
     return None
 
 
-def _attach_deps(
+def _attach_deps[T: _HasIndentLevel](
     indent: int,
-    stack: Sequence[_T],
-) -> tuple[_T | None, bool]:
+    stack: Sequence[T],
+) -> tuple[T | None, bool]:
     """Resolve the task a ``@deps`` sibling line should attach to.
 
     Walks the open-ancestor stack from innermost (top) to outermost.
