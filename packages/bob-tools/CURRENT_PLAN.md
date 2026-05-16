@@ -14,8 +14,8 @@ doc section 9: validate, fmt, next, done, fail.
    - [x] Exit codes: 0 success; 1 invalid plan; 2 task not found; 3 other error.
    - [x] Tests: each subcommand with a fixture file; exit codes; output formats.
 
-- [ ] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
+- [x] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
+- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
 
 - [ ] Verify Stage 7 leaves the repo green.
