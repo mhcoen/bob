@@ -21,7 +21,7 @@
 
 - [ ] Generative property tests
    - [x] Add `tests/test_generative.py`. Implement a small Plan generator using stdlib (no Hypothesis dependency): random small valid trees with random phase counts, random task counts per phase, random tag combinations, random deps among declared IDs. Per Codex's pile-5 acceptance test gap.
-   - [ ] Properties: `parse(render(plan))` equals `plan` modulo line numbers; task IDs in the rendered plan are unique; `next_tasks` returns tasks in the expected canonical order (defer this property to after Stage 5 lands `next_tasks`).
+   - [x] Properties: `parse(render(plan))` equals `plan` modulo line numbers; task IDs in the rendered plan are unique; `next_tasks` returns tasks in the expected canonical order (defer this property to after Stage 5 lands `next_tasks`).
    - [ ] Run 100 random plans per property by default; bump to 1000 in a slow-mode pytest marker.
 
 - [ ] Canonicalization function
