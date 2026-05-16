@@ -179,7 +179,10 @@ def _render_task_lines(task: Task, *, depth: int) -> list[str]:
         body_parts.append(f"[{key}: {value}]")
 
     body = " ".join(body_parts)
-    lines = [f"{indent}- [{status_char}] {body}".rstrip()]
+    line = f"{indent}- [{status_char}] {body}".rstrip()
+    if task.task_id is not None and body == f"{task.task_id}:":
+        line += " "
+    lines = [line]
 
     if task.deps:
         lines.append(f"{child_indent}@deps " + " ".join(task.deps))
