@@ -855,6 +855,155 @@ class TestParsePlanProse:
         assert plan.phases[0].tasks == ()
 
 
+class TestParsePlanMinimalValidPlan:
+    """End-to-end tests on hand-crafted whole-document inputs.
+
+    Earlier classes drive individual responsibilities of ``parse_plan``
+    (state machine, prose accumulators, syntax errors). This class
+    closes the loop with realistic minimal plans that exercise every
+    structural region together — title, preamble, phase prose, phase
+    tasks, subsection, Bugs section — and pins the compat-mode
+    tolerances we keep for parity with mcloop's ``parse``.
+
+    Two of the cases listed in the task description for this increment
+    (missing H1 raises; tasks before any phase land in an implicit
+    phase zero) describe behavior the compat parser does **not**
+    implement. Stage 2 is compat mode and stays permissive in those
+    cases; Stage 3's strict mode will tighten both. The tests below
+    pin the actual compat-mode behavior so a future strict-mode
+    refactor cannot silently change it. See NOTES.md [2.5.5].
+    """
+
+    def test_minimal_valid_plan_parses_correctly(self) -> None:
+        text = (
+            "# Demo Project\n"
+            "\n"
+            "Intro paragraph.\n"
+            "\n"
+            "## Stage 1: Core\n"
+            "\n"
+            "The goal is X.\n"
+            "\n"
+            "- [ ] T-000001: first task\n"
+            "- [x] T-000002: second task\n"
+            "\n"
+            "### Manual verification\n"
+            "\n"
+            "- [ ] T-000003: [USER] verify by hand\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            "- [ ] T-000009: crash on empty input\n"
+        )
+        plan = parse_plan(text)
+
+        assert plan.project_title == "Demo Project"
+        assert plan.preamble == "Intro paragraph."
+        assert plan.magic_version is None
+        assert plan.source_path is None
+
+        assert len(plan.phases) == 1
+        phase = plan.phases[0]
+        assert phase.ordinal == 1
+        assert phase.keyword == "Stage"
+        assert phase.title == "Core"
+        assert phase.prose == "The goal is X."
+        assert tuple(t.text for t in phase.tasks) == ("first task", "second task")
+        assert phase.tasks[0].task_id == "T-000001"
+        assert phase.tasks[0].status is TaskStatus.TODO
+        assert phase.tasks[1].task_id == "T-000002"
+        assert phase.tasks[1].status is TaskStatus.DONE
+
+        assert len(phase.subsections) == 1
+        manual = phase.subsections[0]
+        assert manual.title == "Manual verification"
+        assert tuple(t.text for t in manual.tasks) == ("verify by hand",)
+        assert manual.tasks[0].flag_tags == ("USER",)
+
+        assert plan.bugs is not None
+        assert tuple(t.text for t in plan.bugs.tasks) == ("crash on empty input",)
+        assert plan.bugs.tasks[0].task_id == "T-000009"
+
+    def test_missing_h1_does_not_raise_in_compat_mode(self) -> None:
+        # Compat mode follows mcloop's ``parse``, which has no H1 concept
+        # and never errors on its absence. ``project_title`` falls back
+        # to the empty string. Strict mode (Stage 3) will require an H1
+        # and raise PlanSyntaxError when it is missing.
+        plan = parse_plan("## Stage 1: Core\n- [ ] task\n")
+        assert plan.project_title == ""
+        assert plan.preamble == ""
+        assert len(plan.phases) == 1
+        assert plan.phases[0].tasks[0].text == "task"
+
+    def test_tasks_before_any_phase_dropped_not_implicit_phase_zero(self) -> None:
+        # The Stage 2 task description floats "implicit phase zero" as
+        # the compat-mode home for orphan tasks. The typed model has no
+        # phase-zero slot, and ``Phase`` requires an ordinal heading;
+        # the current implementation drops these lines silently to match
+        # mcloop's effective ``stage=""`` behavior (the parsed tasks are
+        # discarded by downstream consumers that expect a stage). Pinned
+        # here so that strict mode (Stage 3) — which will raise — is a
+        # deliberate change rather than an accidental one.
+        text = "- [ ] orphan one\n- [ ] orphan two\n## Stage 1: Core\n- [ ] real\n"
+        plan = parse_plan(text)
+        assert len(plan.phases) == 1
+        assert tuple(t.text for t in plan.phases[0].tasks) == ("real",)
+
+    def test_bugs_section_after_phases_is_recognized(self) -> None:
+        # The Bugs heading at any heading level closes the active phase
+        # and opens the bugs section; subsequent tasks live there until
+        # EOF (no further phase heading is expected after Bugs per the
+        # grammar, but the parser does not enforce that in compat mode).
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] phase one task\n"
+            "## Stage 2: Polish\n"
+            "- [ ] phase two task\n"
+            "## Bugs\n"
+            "- [ ] bug one\n"
+            "- [x] bug two\n"
+        )
+        plan = parse_plan(text)
+        assert len(plan.phases) == 2
+        assert tuple(t.text for t in plan.phases[0].tasks) == ("phase one task",)
+        assert tuple(t.text for t in plan.phases[1].tasks) == ("phase two task",)
+        assert plan.bugs is not None
+        assert tuple(t.text for t in plan.bugs.tasks) == ("bug one", "bug two")
+        assert plan.bugs.tasks[0].status is TaskStatus.TODO
+        assert plan.bugs.tasks[1].status is TaskStatus.DONE
+
+    def test_multiple_subsections_each_preserve_their_tasks(self) -> None:
+        # Each ``###`` opens a fresh subsection scope and captures the
+        # following tasks until the next subsection or phase boundary.
+        # Indent inheritance is per-subsection: the indent stack is
+        # cleared at the subsection boundary so child tasks in one
+        # subsection do not bleed into the next.
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] direct phase task\n"
+            "### First sub\n"
+            "- [ ] sub-1-a\n"
+            "  - [ ] sub-1-a-child\n"
+            "- [x] sub-1-b\n"
+            "### Second sub\n"
+            "- [ ] sub-2-a\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert tuple(t.text for t in phase.tasks) == ("direct phase task",)
+        assert len(phase.subsections) == 2
+
+        first, second = phase.subsections
+        assert first.title == "First sub"
+        assert tuple(t.text for t in first.tasks) == ("sub-1-a", "sub-1-b")
+        assert tuple(c.text for c in first.tasks[0].children) == ("sub-1-a-child",)
+        assert first.tasks[1].status is TaskStatus.DONE
+
+        assert second.title == "Second sub"
+        assert tuple(t.text for t in second.tasks) == ("sub-2-a",)
+        assert second.tasks[0].children == ()
+
+
 class TestParsePlanCompatModeSyntaxErrors:
     """Compat-mode raises :class:`PlanSyntaxError` on genuine syntax breakage.
 

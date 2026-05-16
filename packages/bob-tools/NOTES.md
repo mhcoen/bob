@@ -86,6 +86,25 @@
   message-quoting convention (backticks around the offending line) so
   Stage 3's strict-mode call sites can reuse the same format.
 
+- 2026-05-15 [2.5.5] Two cases listed in the Stage-2.5.5 task description do
+  not match what compat-mode actually does, and the new
+  ``TestParsePlanMinimalValidPlan`` class pins the actual behavior
+  rather than the described one:
+  1. "a missing H1 raises" — compat mode does not raise. mcloop's
+     ``parse`` has no H1 concept at all, so there is no precedent to
+     preserve, but our compat parser also chose silent tolerance
+     (``project_title`` falls back to ``""``). Strict mode in Stage 3
+     should require an H1 and raise ``PlanSyntaxError`` on absence.
+  2. "tasks before any phase land in an implicit phase zero" — the
+     typed ``Plan`` model has no phase-zero slot, and ``Phase``
+     requires an ordinal pulled from a heading. The 2.5.2 decision
+     (documented above) was to drop orphan tasks silently to mirror
+     mcloop's effective ``stage=""`` behavior. Stage 3 strict mode
+     will raise. If a future task asks us to actually surface these
+     tasks somewhere, the typed model needs a new container (e.g. an
+     orphan-tasks tuple on ``Plan``); deferring until that need is
+     concrete.
+
 ## Hypotheses
 
 ## Eliminated
