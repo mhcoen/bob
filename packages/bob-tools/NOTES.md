@@ -215,6 +215,17 @@
   now no precedent has surfaced and the design doc does not require
   it.
 
+- 2026-05-16 [3.5.2] Contract-pinning task; the implementing agent in
+  3.5.1 wrote the full test class `TestMagicLineForcesStrict`
+  (`bob_tools/planfile/tests/test_parser.py:1690-1746`) covering all
+  three cases this task requires: magic-present forces strict (with the
+  caller omitting `strict=` and with the caller explicitly passing
+  `strict=False`), magic-absent keeps compat default, and explicit
+  `strict=True` without a magic line still raises. A sanity test for
+  magic-present + ids-present parsing cleanly is also there. No new
+  tests needed; this entry records that the 3.5.2 contract is already
+  pinned and the check commands were re-run to confirm.
+
 ## Hypotheses
 
 ## Eliminated
