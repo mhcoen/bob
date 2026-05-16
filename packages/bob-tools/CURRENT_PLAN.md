@@ -30,7 +30,7 @@ line.
    - [x] Tests: a phase with no id source has phase_id None and source "none".
 
 - [ ] Magic line gates strict mode by default
-   - [ ] When the magic line is present, default `strict` to True even if the caller passed `strict=False`. When absent, default to compat. Explicit caller-supplied `strict=True` overrides.
+   - [x] When the magic line is present, default `strict` to True even if the caller passed `strict=False`. When absent, default to compat. Explicit caller-supplied `strict=True` overrides.
    - [ ] Tests: magic present implies strict; magic absent implies compat; explicit strict=True with no magic still strict.
 
 - [ ] Write the Stage 3 verification helper script. Create `bob_tools/planfile/tests/manual/check_strict_reject.py`. The script imports `parse_plan` and `PlanSyntaxError`, then for each of `/Users/mhcoen/proj/duplo/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.md` calls `parse_plan(text, strict=True)`. Expected outcome is rejection: for each file it prints either `REJECTED <path> at line=<n> col=<m>` (the correct result) or `PARSED <path> (UNEXPECTED - strict mode should have rejected this)` and exits non-zero. The script takes no arguments and hardcodes the two paths.

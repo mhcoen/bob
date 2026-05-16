@@ -254,3 +254,5 @@ a1c07d9: Updated task ID parsing to capture the full line after the ID, enabling
 176bec4: Added strict mode enforcement for mandatory task IDs in plan files. Tasks without a T-000123-style ID now raise a PlanSyntaxError with a specific message and location. Compat mode remains unchanged, allowing missing IDs.
 
 0f731a9: Added a helper function to find tasks by exact ID match, preventing substring confusion where similar IDs like T-000001 and T-0000010 would be incorrectly conflated. Updated tests to verify the function works across all plan sections and correctly handles prefix overlaps.
+
+d02cfa5: The parser now automatically enforces strict mode when a plan file includes the magic version line, ensuring files that opt into the strict format are parsed correctly regardless of the caller's flag. This prevents silent failures when a plan declares itself strict but the caller forgets to enable strict mode. The caller's explicit strict flag is still honored when no magic line is present.
