@@ -46,6 +46,31 @@
   `key:value` shape and both could be observed as a trailing token. Per
   design doc grammar `Annot ← WS "[" Key ":" WS Value "]"` the post-colon
   WS is required, so this is faithful to spec, not a workaround.
+- 2026-05-15 [2.5.2] The state machine in `parse_plan` resolves a handful
+  of ambiguities the design doc leaves open; flagging here so 2.5.4
+  (syntax-error reporting) and strict mode in Stage 3 can revisit:
+  1. Orphan tasks/`@deps`/`[RULEDOUT]` before any phase or Bugs heading
+     are silently dropped. The grammar `Plan ← Magic Preamble? PhaseOrBugs+`
+     forbids tasks outside a section, but mcloop's parser accepts them
+     (with `stage=""`). Strict mode should raise `PlanSyntaxError` here.
+  2. A `###` subsection heading appearing inside a Bugs section is
+     silently ignored (no scope change). The grammar
+     `BugsSection ← "##" WS "Bugs" NL Item*` excludes subsections;
+     strict mode could error.
+  3. The phase `keyword` field is normalized to title case
+     (`"Stage"` / `"Phase"`) regardless of how the heading was
+     written. Design doc Q4 ("How are Stage and Phase reconciled?")
+     recommends the canonicalizer not rewrite the keyword; if the
+     canonical form must round-trip the original case, the parser
+     needs to preserve it and a separate `keyword_original_case`
+     field (or similar) becomes necessary. Left as title case for now
+     because that's what the typed model needs and Q4 only constrains
+     the rendered output.
+  4. Stack is `clear()`-ed at every phase/Bugs/subsection boundary,
+     matching mcloop. Consequence: an indented task immediately after
+     a section heading becomes a root of the new section, not a child
+     of any task in the previous section. Verified intentional via the
+     `test_new_phase_resets_indent_stack` test.
 
 ## Hypotheses
 

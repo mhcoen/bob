@@ -40,6 +40,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from bob_tools.planfile.model import TaskStatus
 from bob_tools.planfile.parser import (
     _CHECKBOX_RE,
     _DEPS_RE,
@@ -50,6 +51,7 @@ from bob_tools.planfile.parser import (
     _extract_flag_tags,
     _parse_ruledout_line,
     _parse_task_line,
+    parse_plan,
 )
 
 
@@ -515,3 +517,217 @@ class TestTagInteractions:
         assert tags == ()
         assert action is None
         assert after_action == text
+
+
+class TestParsePlanStateMachine:
+    """End-to-end tests for the parse_plan walker.
+
+    The state machine in 2.5.2 is responsible for the section-vs-task
+    bookkeeping that earlier building blocks do not own: routing tasks
+    into the right phase or subsection, opening/closing the indent
+    stack at phase/subsection/bugs boundaries, and dispatching ``@deps``
+    and ``[RULEDOUT]`` siblings to the parent task. Tests below
+    exercise each of those responsibilities independently and then in
+    combination on a small but representative plan.
+    """
+
+    def test_empty_text_returns_empty_plan(self) -> None:
+        plan = parse_plan("")
+        assert plan.phases == ()
+        assert plan.bugs is None
+        assert plan.project_title == ""
+
+    def test_single_phase_with_tasks(self) -> None:
+        text = "## Stage 1: Core\n\n- [ ] first task\n- [x] second task\n"
+        plan = parse_plan(text)
+        assert len(plan.phases) == 1
+        phase = plan.phases[0]
+        assert phase.ordinal == 1
+        assert phase.keyword == "Stage"
+        assert phase.title == "Core"
+        assert phase.line_number == 1
+        assert len(phase.tasks) == 2
+        assert phase.tasks[0].text == "first task"
+        assert phase.tasks[0].status is TaskStatus.TODO
+        assert phase.tasks[0].line_number == 3
+        assert phase.tasks[1].status is TaskStatus.DONE
+
+    def test_phase_heading_keyword_normalized(self) -> None:
+        # "Phase" and "Stage" are accepted interchangeably and the
+        # keyword captures which form was used (capitalized).
+        plan = parse_plan("# Phase 2: Implementation\n- [ ] x\n")
+        assert plan.phases[0].keyword == "Phase"
+        assert plan.phases[0].ordinal == 2
+        assert plan.phases[0].title == "Implementation"
+
+    def test_phase_with_non_bare_digit_id_is_not_a_phase_heading(self) -> None:
+        # `## Phase phase_001:` is the legacy strict-form heading; per
+        # design doc section 2.5 it does NOT match the bare-digit
+        # STAGE_RE and so is invisible to the compat parser. The tasks
+        # that follow have no enclosing phase and are dropped.
+        text = "## Phase phase_001: Core\n- [ ] orphan task\n"
+        plan = parse_plan(text)
+        assert plan.phases == ()
+        assert plan.bugs is None
+
+    def test_indent_stack_builds_task_tree(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] parent\n"
+            "  - [ ] child a\n"
+            "    - [ ] grandchild\n"
+            "  - [ ] child b\n"
+            "- [ ] second root\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert len(phase.tasks) == 2
+        parent, second_root = phase.tasks
+        assert parent.text == "parent"
+        assert second_root.text == "second root"
+        assert len(parent.children) == 2
+        child_a, child_b = parent.children
+        assert child_a.text == "child a"
+        assert child_b.text == "child b"
+        assert len(child_a.children) == 1
+        assert child_a.children[0].text == "grandchild"
+
+    def test_subsection_captures_following_tasks(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] phase task\n"
+            "\n"
+            "### Manual verification\n"
+            "- [ ] sub task one\n"
+            "- [ ] sub task two\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert len(phase.tasks) == 1
+        assert phase.tasks[0].text == "phase task"
+        assert len(phase.subsections) == 1
+        sub = phase.subsections[0]
+        assert sub.title == "Manual verification"
+        assert tuple(t.text for t in sub.tasks) == ("sub task one", "sub task two")
+
+    def test_new_phase_resets_indent_stack(self) -> None:
+        # An indented task in the second phase must be treated as a
+        # root of that phase, not as a child of the previous phase's
+        # last task. (mcloop's parser does this via stack.clear().)
+        text = (
+            "## Stage 1: A\n- [ ] one\n  - [ ] one-child\n## Stage 2: B\n  - [ ] two\n"
+        )
+        plan = parse_plan(text)
+        assert len(plan.phases) == 2
+        assert len(plan.phases[0].tasks) == 1
+        assert plan.phases[0].tasks[0].children[0].text == "one-child"
+        assert len(plan.phases[1].tasks) == 1
+        assert plan.phases[1].tasks[0].text == "two"
+        assert plan.phases[1].tasks[0].children == ()
+
+    def test_bugs_section_collects_tasks(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] phase task\n"
+            "## Bugs\n"
+            "- [ ] crash on empty input\n"
+            "- [x] fixed memory leak\n"
+        )
+        plan = parse_plan(text)
+        assert plan.bugs is not None
+        assert tuple(t.text for t in plan.bugs.tasks) == (
+            "crash on empty input",
+            "fixed memory leak",
+        )
+        # The phase still owns its own task; bugs is a peer section.
+        assert plan.phases[0].tasks[0].text == "phase task"
+
+    def test_task_body_classification_is_applied(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            '- [ ] T-000001: [BATCH] do thing [feat: "x"]\n'
+            "- [ ] T-000002: [AUTO:run_cli] mcloop --dry-run\n"
+        )
+        plan = parse_plan(text)
+        first, second = plan.phases[0].tasks
+        assert first.task_id == "T-000001"
+        assert first.flag_tags == ("BATCH",)
+        assert first.annotations == (("feat", '"x"'),)
+        assert first.text == "do thing"
+        assert second.task_id == "T-000002"
+        assert second.action_tag == ("run_cli", "mcloop --dry-run")
+        assert second.text == ""
+
+    def test_ruledout_attaches_to_parent_task(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] parent\n"
+            "  [RULEDOUT] tried restart\n"
+            "  [RULEDOUT] tried reinstall\n"
+        )
+        plan = parse_plan(text)
+        parent = plan.phases[0].tasks[0]
+        assert tuple(r.text for r in parent.ruled_out) == (
+            "tried restart",
+            "tried reinstall",
+        )
+
+    def test_deps_attaches_to_preceding_task(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] T-000001: first\n"
+            "- [ ] T-000002: second\n"
+            "  @deps T-000001\n"
+        )
+        plan = parse_plan(text)
+        first, second = plan.phases[0].tasks
+        assert first.deps == ()
+        assert second.deps == ("T-000001",)
+
+    def test_combined_phase_subsection_bugs_round_trip_structure(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] T-000001: [BATCH] parent\n"
+            "  - [ ] T-000002: child a\n"
+            "    [RULEDOUT] tried polling\n"
+            "  - [ ] T-000003: child b\n"
+            "    @deps T-000002\n"
+            "\n"
+            "### Manual verification\n"
+            "- [ ] T-000004: [USER] run smoke test\n"
+            "\n"
+            "## Bugs\n"
+            "- [ ] T-000009: crash on empty PLAN.md\n"
+        )
+        plan = parse_plan(text)
+        assert len(plan.phases) == 1
+        phase = plan.phases[0]
+        parent = phase.tasks[0]
+        assert parent.task_id == "T-000001"
+        assert parent.flag_tags == ("BATCH",)
+        child_a, child_b = parent.children
+        assert child_a.task_id == "T-000002"
+        assert tuple(r.text for r in child_a.ruled_out) == ("tried polling",)
+        assert child_b.deps == ("T-000002",)
+        assert len(phase.subsections) == 1
+        manual = phase.subsections[0]
+        assert manual.title == "Manual verification"
+        assert manual.tasks[0].flag_tags == ("USER",)
+        assert plan.bugs is not None
+        assert plan.bugs.tasks[0].task_id == "T-000009"
+
+    def test_tasks_before_any_section_are_dropped_in_compat_mode(self) -> None:
+        # No phase or bugs heading has been seen yet, so a task line is
+        # an orphan. Compat mode drops silently; strict mode (2.5.4)
+        # will surface this as a PlanSyntaxError. Either way no tasks
+        # appear on the resulting Plan.
+        plan = parse_plan("- [ ] orphan\n## Stage 1: Core\n- [ ] real\n")
+        assert len(plan.phases) == 1
+        assert tuple(t.text for t in plan.phases[0].tasks) == ("real",)
+
+    def test_source_path_passes_through(self) -> None:
+        from pathlib import Path
+
+        path = Path("/tmp/PLAN.md")
+        plan = parse_plan("## Stage 1: Core\n- [ ] x\n", source_path=path)
+        assert plan.source_path == path
