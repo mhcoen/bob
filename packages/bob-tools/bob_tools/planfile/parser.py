@@ -117,16 +117,22 @@ def parse_plan(
     opens or closes scopes by indent comparison, matching mcloop's logic
     in ``checklist.py:parse``. ``@deps`` and ``[RULEDOUT]`` sibling
     lines are routed via :func:`_attach_deps` and :func:`_attach_ruledout`
-    and accumulated on the parent task. 2.5.4 (this) raises
+    and accumulated on the parent task. 2.5.4 raises
     :class:`PlanSyntaxError` on syntax violations even in compat mode:
     today, an ``@deps`` line that cannot attach to any preceding task
     in the current section. The orphan ``@deps`` case has no semantic
     interpretation and no mcloop-tolerance to preserve (mcloop never
     recognized ``@deps`` at all). The error message quotes the offending
     line so the location is unambiguous to the human fixing the file.
+    2.6.1 (this) runs :func:`_check_structural_sanity` first: it scans
+    the raw lines for duplicate H1 titles, multiple Bugs sections, and
+    duplicate phase/stage ordinals before any structural parsing
+    happens, so the typed model never has to represent a corrupted
+    document. Mirrors mcloop's pre-parse corruption check.
     """
     del strict
     lines = text.splitlines()
+    _check_structural_sanity(lines, source_path)
 
     phases_b: list[_PhaseBuilder] = []
     bugs_b: _BugsBuilder | None = None
@@ -286,6 +292,98 @@ def parse_plan(
         phases=tuple(p.freeze() for p in phases_b),
         bugs=bugs_b.freeze() if bugs_b is not None else None,
         source_path=source_path,
+    )
+
+
+def _check_structural_sanity(
+    lines: list[str],
+    source_path: Path | None,
+) -> None:
+    """Scan ``lines`` for structural corruption signals before parsing.
+
+    Three anomalies are flagged, mirroring mcloop's
+    ``_check_structural_sanity`` (``mcloop/checklist.py``):
+
+    1. Duplicate H1 headings with identical title text — typically a
+       botched insertion that left the original tail in place,
+       producing two copies of the document's top header.
+    2. Multiple Bugs sections (any heading level) — there should
+       only ever be one.
+    3. Duplicate phase/stage ordinals across stage headers — two
+       headers numbered ``Phase 2``, for example. This breaks any
+       label that prefixes with the stage number and almost always
+       signals merged content from two attempts at the same phase.
+
+    Each anomaly has been observed in real PLAN.md corruption
+    incidents and none has a legitimate use; auto-fixing is
+    deliberately not attempted because mutating an already-corrupted
+    plan risks compounding the corruption rather than recovering it.
+    Raises :class:`PlanSyntaxError` whose message lists every anomaly
+    found, with one-based source line numbers, so the user can locate
+    and fix the corruption by hand.
+    """
+    h1_titles: dict[str, list[int]] = {}
+    bugs_lines: list[int] = []
+    stage_nums: dict[int, list[int]] = {}
+
+    for i, line in enumerate(lines):
+        # Order matters: a single-hash ``# Phase 1: Bootstrapping``
+        # is matched by both ``_STAGE_RE`` and ``_H1_RE``. A header is
+        # either a stage header OR a plain H1 OR a Bugs header — never
+        # two of those at once. Check stage first so ``# Phase N`` is
+        # not double-counted as an H1 duplicate and a stage duplicate.
+        stage_match = _STAGE_RE.match(line)
+        if stage_match is not None:
+            stage_nums.setdefault(int(stage_match.group("num")), []).append(i)
+            continue
+
+        if _BUGS_RE.match(line):
+            bugs_lines.append(i)
+            continue
+
+        h1_match = _H1_RE.match(line)
+        if h1_match is not None:
+            # ``_H1_RE`` requires a single leading ``#``; the explicit
+            # ``not startswith("## ")`` guard is belt-and-suspenders so
+            # the intent (true H1 only) is visible in the reader's eye.
+            if line.startswith("# ") and not line.startswith("## "):
+                title = h1_match.group(1).strip()
+                h1_titles.setdefault(title, []).append(i)
+
+    problems: list[tuple[int, str]] = []
+
+    for title, line_nums in h1_titles.items():
+        if len(line_nums) > 1:
+            locs = ", ".join(str(n + 1) for n in line_nums)
+            problems.append(
+                (
+                    line_nums[0] + 1,
+                    f"duplicate top-level heading '# {title}' at lines {locs}",
+                )
+            )
+
+    if len(bugs_lines) > 1:
+        locs = ", ".join(str(n + 1) for n in bugs_lines)
+        problems.append((bugs_lines[0] + 1, f"multiple Bugs sections at lines {locs}"))
+
+    for num, line_nums in stage_nums.items():
+        if len(line_nums) > 1:
+            locs = ", ".join(str(n + 1) for n in line_nums)
+            problems.append(
+                (line_nums[0] + 1, f"duplicate Phase/Stage {num} at lines {locs}")
+            )
+
+    if not problems:
+        return
+
+    problems.sort(key=lambda p: p[0])
+    first_line = problems[0][0]
+    body = "\n  - ".join(msg for _, msg in problems)
+    raise PlanSyntaxError(
+        f"structural corruption detected:\n  - {body}",
+        first_line,
+        1,
+        source_path,
     )
 
 

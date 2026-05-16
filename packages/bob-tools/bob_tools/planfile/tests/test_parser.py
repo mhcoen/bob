@@ -1049,3 +1049,126 @@ class TestParsePlanCompatModeSyntaxErrors:
         rendered = str(exc_info.value)
         assert rendered.startswith("PLAN.md invalid at line 1, column 1: ")
         assert "@deps T-000001" in rendered
+
+
+class TestCheckStructuralSanity:
+    """Pre-parse corruption check rejects three anomalies (mcloop parity).
+
+    ``_check_structural_sanity`` is run at the start of ``parse_plan``
+    and raises :class:`PlanSyntaxError` on duplicate H1 titles, multiple
+    Bugs sections (any heading level), and duplicate phase/stage
+    ordinals. The rationale (no auto-fix; mutating a corrupted plan
+    risks compounding the corruption) is preserved from mcloop.
+    """
+
+    def test_duplicate_h1_titles_raise(self) -> None:
+        text = "# My Project\n\n# My Project\n## Stage 1: Core\n- [ ] x\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert err.line == 1
+        assert "duplicate top-level heading '# My Project'" in err.message
+        assert "lines 1, 3" in err.message
+
+    def test_distinct_h1_titles_do_not_raise(self) -> None:
+        # Two different H1 titles are still anomalous in strict mode
+        # (only one H1 is allowed) but are not caught here — the check
+        # targets *identical* duplicates, which is mcloop's specific
+        # corruption signal. Distinct-but-multiple is handled by strict
+        # mode in Stage 3, not by this corruption pre-check.
+        text = "# Project A\n\n# Project B\n## Stage 1: Core\n- [ ] x\n"
+        parse_plan(text)
+
+    def test_multiple_bugs_sections_raise(self) -> None:
+        text = (
+            "# Project\n"
+            "## Stage 1: Core\n"
+            "- [ ] x\n"
+            "## Bugs\n"
+            "- [ ] bug a\n"
+            "## Bugs\n"
+            "- [ ] bug b\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "multiple Bugs sections" in err.message
+        assert "lines 4, 6" in err.message
+
+    def test_multiple_bugs_sections_at_different_heading_levels_raise(self) -> None:
+        # ``_BUGS_RE`` matches any heading level whose title is ``Bugs``;
+        # mixing ``## Bugs`` and ``### Bugs`` still trips the check.
+        text = "## Stage 1: Core\n- [ ] x\n## Bugs\n- [ ] one\n### Bugs\n- [ ] two\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        assert "multiple Bugs sections" in exc_info.value.message
+
+    def test_duplicate_phase_ordinals_raise(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] first\n"
+            "## Stage 2: Polish\n"
+            "- [ ] second\n"
+            "## Stage 1: Repeat\n"
+            "- [ ] third\n"
+        )
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "duplicate Phase/Stage 1" in err.message
+        assert "lines 1, 5" in err.message
+
+    def test_duplicate_ordinal_across_stage_and_phase_keyword_raise(self) -> None:
+        # Mcloop treats the keyword as cosmetic; ``Stage 2`` and
+        # ``Phase 2`` both contribute ordinal 2. The check uses the
+        # captured numeric group, not the keyword, so the duplicate is
+        # detected regardless of which spelling each header used.
+        text = "## Stage 2: A\n- [ ] x\n## Phase 2: B\n- [ ] y\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        assert "duplicate Phase/Stage 2" in exc_info.value.message
+
+    def test_h1_phase_heading_not_double_counted(self) -> None:
+        # ``# Phase 1: ...`` matches both ``_H1_RE`` and ``_STAGE_RE``.
+        # The check classifies it as a stage header (not an H1) so a
+        # single such header is not a duplicate of either kind. Mirrors
+        # mcloop's check order (STAGE_RE first, then BUGS_RE, then H1).
+        text = "# Phase 1: Core\n- [ ] x\n"
+        parse_plan(text)
+
+    def test_clean_plan_does_not_raise(self) -> None:
+        text = (
+            "# My Project\n\n"
+            "## Stage 1: Core\n"
+            "- [ ] a\n"
+            "## Stage 2: Polish\n"
+            "- [ ] b\n"
+            "## Bugs\n"
+            "- [ ] c\n"
+        )
+        plan = parse_plan(text)
+        assert plan.project_title == "My Project"
+        assert len(plan.phases) == 2
+        assert plan.bugs is not None
+
+    def test_error_carries_source_path(self) -> None:
+        path = Path("/tmp/PLAN.md")
+        text = "# Dup\n# Dup\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text, source_path=path)
+        assert exc_info.value.path == path
+
+    def test_error_aggregates_all_problems_in_message(self) -> None:
+        # When multiple corruption signals are present, the single
+        # raised error lists all of them so the user does not have to
+        # re-run after each fix. The reported line is the earliest one
+        # so locators stay monotonic.
+        text = "# Dup\n# Dup\n## Stage 1: A\n## Stage 1: B\n## Bugs\n## Bugs\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert "duplicate top-level heading '# Dup'" in err.message
+        assert "duplicate Phase/Stage 1" in err.message
+        assert "multiple Bugs sections" in err.message
+        # Earliest anomaly is the H1 duplicate at line 1.
+        assert err.line == 1
