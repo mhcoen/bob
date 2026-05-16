@@ -28,6 +28,9 @@ include = ["bob_tools*"]
 addopts = "-n auto"
 timeout = 60
 testpaths = ["bob_tools/ledger/tests", "bob_tools/planfile/tests"]
+markers = [
+    "slow: marks tests as slow; auto-skipped unless invoked with -m slow",
+]
 
 [tool.ruff]
 target-version = "py312"

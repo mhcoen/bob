@@ -18,8 +18,9 @@ and the two round-trip properties from PLAN.md 4.3.2:
 
 The third 4.3.2 property — ``next_tasks`` returns tasks in canonical
 order — is deferred to a follow-up because ``next_tasks`` lands in
-Stage 5. PLAN.md 4.3.3 will bump the per-property iteration count
-from the default (handful of seeds) to 100 default / 1000 slow-marker.
+Stage 5. Per PLAN.md 4.3.3 each property runs 100 seeds by default;
+the ``slow``-marked parametrization bumps to 1000 and is auto-skipped
+unless ``pytest -m slow`` is requested.
 
 Generator design choices that keep round-trip well-behaved:
 
@@ -45,6 +46,8 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from bob_tools.planfile import parse_plan, render_plan
 from bob_tools.planfile.model import (
     BugsSection,
@@ -67,6 +70,13 @@ _STATUS_CHOICES: tuple[TaskStatus, ...] = (
     TaskStatus.FAILED,
 )
 _KEYWORD_CHOICES: tuple[str, ...] = ("Stage", "Phase")
+
+_DEFAULT_ITERATIONS = 100
+_SLOW_ITERATIONS = 1000
+_ITERATIONS_PARAM: tuple[object, ...] = (
+    pytest.param(_DEFAULT_ITERATIONS, id="default"),
+    pytest.param(_SLOW_ITERATIONS, id="slow", marks=pytest.mark.slow),
+)
 _WORDS: tuple[str, ...] = (
     "alpha",
     "beta",
@@ -452,7 +462,8 @@ def test_generator_produces_structurally_sound_plan() -> None:
         validate_plan(reparsed)
 
 
-def test_parse_render_plan_equals_plan_modulo_line_numbers() -> None:
+@pytest.mark.parametrize("iterations", _ITERATIONS_PARAM)
+def test_parse_render_plan_equals_plan_modulo_line_numbers(iterations: int) -> None:
     """Property: ``parse(render(plan))`` equals ``plan`` modulo line numbers.
 
     The "modulo" set is what :func:`normalize_positions` collapses —
@@ -465,8 +476,12 @@ def test_parse_render_plan_equals_plan_modulo_line_numbers() -> None:
     only the re-parsed side gains anything; running it on both sides is
     cheaper than asserting that and keeps the oracle symmetric with the
     fixture-based ``test_parse_render_parse_idempotent``.
+
+    Runs ``_DEFAULT_ITERATIONS`` (100) seeds by default; the
+    ``slow``-marked parametrization bumps to ``_SLOW_ITERATIONS`` (1000)
+    and is auto-skipped unless ``pytest -m slow`` is requested.
     """
-    for seed in range(8):
+    for seed in range(iterations):
         rng = random.Random(seed)
         plan = generate_plan(rng)
         reparsed = parse_plan(render_plan(plan))
@@ -475,7 +490,8 @@ def test_parse_render_plan_equals_plan_modulo_line_numbers() -> None:
         )
 
 
-def test_rendered_plan_has_unique_task_ids() -> None:
+@pytest.mark.parametrize("iterations", _ITERATIONS_PARAM)
+def test_rendered_plan_has_unique_task_ids(iterations: int) -> None:
     """Property: every task in the rendered plan has a distinct ``task_id``.
 
     Re-parses the rendered text and walks the resulting Plan, asserting
@@ -484,8 +500,12 @@ def test_rendered_plan_has_unique_task_ids() -> None:
     duplicates an id, and a parser bug that conflates two T-NNNNNN
     strings — both of which the round-trip equality property would also
     catch but only at the cost of a less-targeted failure message.
+
+    Runs ``_DEFAULT_ITERATIONS`` (100) seeds by default; the
+    ``slow``-marked parametrization bumps to ``_SLOW_ITERATIONS`` (1000)
+    and is auto-skipped unless ``pytest -m slow`` is requested.
     """
-    for seed in range(8):
+    for seed in range(iterations):
         rng = random.Random(seed)
         plan = generate_plan(rng)
         reparsed = parse_plan(render_plan(plan))
