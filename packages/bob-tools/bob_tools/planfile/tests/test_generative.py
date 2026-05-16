@@ -7,11 +7,19 @@ ruled out by the design): randomness is sourced from a caller-supplied
 :class:`random.Random` so any failure can be reproduced from the seed.
 
 Per Codex's pile-5 acceptance test gap, the generator drives property
-tests that explore beyond the hand-crafted fixtures. This module is the
-generator + invariants of the generator itself; the round-trip
-properties (``parse(render(plan)) == plan``, unique IDs in render
-output) are written against ``generate_plan`` in subsequent tasks
-(PLAN.md 4.3.2 / 4.3.3).
+tests that explore beyond the hand-crafted fixtures. This module
+contains the generator, an invariant-check on the generator itself,
+and the two round-trip properties from PLAN.md 4.3.2:
+
+* ``parse(render(plan)) == plan`` modulo the fields normalized by
+  :func:`bob_tools.planfile.renderer.normalize_positions` (line
+  numbers, ``Task.indent_level``, and ``Phase.phase_id_source``).
+* Task IDs in the rendered plan are unique.
+
+The third 4.3.2 property — ``next_tasks`` returns tasks in canonical
+order — is deferred to a follow-up because ``next_tasks`` lands in
+Stage 5. PLAN.md 4.3.3 will bump the per-property iteration count
+from the default (handful of seeds) to 100 default / 1000 slow-marker.
 
 Generator design choices that keep round-trip well-behaved:
 
@@ -48,6 +56,7 @@ from bob_tools.planfile.model import (
     TaskStatus,
 )
 from bob_tools.planfile.operations import validate_plan
+from bob_tools.planfile.renderer import normalize_positions
 
 _FLAG_TAG_CHOICES: tuple[str, ...] = ("USER", "BATCH")
 _ANNOTATION_KEY_CHOICES: tuple[str, ...] = ("feat", "fix")
@@ -441,3 +450,46 @@ def test_generator_produces_structurally_sound_plan() -> None:
             f"seed={seed}: rendered plan lost ids on re-parse"
         )
         validate_plan(reparsed)
+
+
+def test_parse_render_plan_equals_plan_modulo_line_numbers() -> None:
+    """Property: ``parse(render(plan))`` equals ``plan`` modulo line numbers.
+
+    The "modulo" set is what :func:`normalize_positions` collapses —
+    ``line_number`` (the rendered text has its own layout),
+    ``Task.indent_level`` (renderer canonicalizes to two-space-per-level),
+    and ``Phase.phase_id_source`` (renderer migrates legacy
+    ``explicit_header`` to ``explicit_comment``). The generator already
+    emits plans in canonical form for those fields, so applying
+    ``normalize_positions`` to the original is effectively a no-op and
+    only the re-parsed side gains anything; running it on both sides is
+    cheaper than asserting that and keeps the oracle symmetric with the
+    fixture-based ``test_parse_render_parse_idempotent``.
+    """
+    for seed in range(8):
+        rng = random.Random(seed)
+        plan = generate_plan(rng)
+        reparsed = parse_plan(render_plan(plan))
+        assert normalize_positions(reparsed) == normalize_positions(plan), (
+            f"seed={seed}: parse(render(plan)) != plan modulo line numbers"
+        )
+
+
+def test_rendered_plan_has_unique_task_ids() -> None:
+    """Property: every task in the rendered plan has a distinct ``task_id``.
+
+    Re-parses the rendered text and walks the resulting Plan, asserting
+    that no two tasks (across phases, subsections, the Bugs section, and
+    nested children) share an id. Catches a renderer bug that drops or
+    duplicates an id, and a parser bug that conflates two T-NNNNNN
+    strings — both of which the round-trip equality property would also
+    catch but only at the cost of a less-targeted failure message.
+    """
+    for seed in range(8):
+        rng = random.Random(seed)
+        plan = generate_plan(rng)
+        reparsed = parse_plan(render_plan(plan))
+        rendered_ids = _collect_task_ids(reparsed)
+        assert len(rendered_ids) == len(set(rendered_ids)), (
+            f"seed={seed}: duplicate task ids in rendered plan: {rendered_ids}"
+        )
