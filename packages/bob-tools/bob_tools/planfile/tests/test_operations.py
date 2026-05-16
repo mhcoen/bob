@@ -1967,6 +1967,38 @@ class TestCheckConsistency:
             "lifecycle event is work_observed",
         ]
 
+    def test_failed_but_most_recent_is_work_observed_raises(self) -> None:
+        # Symmetric variant of the commit_landed case: a USER/AUTO task
+        # whose work was observed but whose checkbox was later flipped
+        # to FAILED contradicts the ledger. Pinned separately so the
+        # work_observed → DONE row of `_EVENT_TYPE_TO_EXPECTED_STATUS`
+        # cannot regress without a test failure.
+        target = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_work_observed_event("0001", attributed_task_id="T-000001")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is FAILED but most recent "
+            "lifecycle event is work_observed",
+        ]
+
+    def test_todo_but_most_recent_is_commit_landed_raises(self) -> None:
+        # Symmetric variant of the work_observed case: a commit landed
+        # for the task but PLAN.md no longer reflects it. Pinned
+        # separately so the commit_landed → DONE row of
+        # `_EVENT_TYPE_TO_EXPECTED_STATUS` cannot regress without a
+        # test failure.
+        target = _task(task_id="T-000001", status=TaskStatus.TODO)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        events = [_commit_landed_event("0001", attributed_task_id="T-000001")]
+        with pytest.raises(PlanInconsistencyError) as exc_info:
+            check_consistency(plan, events)
+        assert exc_info.value.messages == [
+            "task T-000001 checkbox is TODO but most recent "
+            "lifecycle event is commit_landed",
+        ]
+
     def test_todo_after_test_failed_is_intentional_reset(self) -> None:
         # Per design doc §5: "Resetting [!] to [ ] via retry → no
         # ledger event; it is an operator decision to retry existing
