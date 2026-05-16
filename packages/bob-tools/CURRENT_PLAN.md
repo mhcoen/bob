@@ -3,7 +3,7 @@
 - [ ] Create the `bob_tools/planfile/` package
    - [x] Create `bob_tools/planfile/__init__.py` with a package docstring and an explicit `__all__` listing the public exports the library will eventually expose: parse_plan, render_plan, validate_plan, canonicalize, migrate, next_tasks, complete_task, fail_task, reset_task, add_task, replace_phase, resolve_task_context, check_consistency, load, save, update, Plan, Phase, Task, Settlement, TaskContext, RuledOut, TaskStatus, PlanSyntaxError, PlanValidationError, PlanInconsistencyError. Names that don't exist yet can be commented out; they get uncommented as stages add them.
    - [x] Create empty modules `model.py`, `parser.py`, `renderer.py`, `operations.py`, `fileio.py`, `cli.py` with one-line docstrings naming what each will own. Source: design doc section 3.1.
-   - [ ] Create `bob_tools/planfile/tests/__init__.py` (empty) and `bob_tools/planfile/tests/conftest.py` with a fixtures directory pointer.
+   - [x] Create `bob_tools/planfile/tests/__init__.py` (empty) and `bob_tools/planfile/tests/conftest.py` with a fixtures directory pointer.
    - [ ] Update `pyproject.toml`: add `"bob_tools/planfile/tests"` to `[tool.pytest.ini_options].testpaths` so pytest discovers planfile tests alongside ledger tests.
 
 - [ ] [BATCH] Define core dataclasses in `model.py`

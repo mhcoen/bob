@@ -20,3 +20,5 @@
 ## Eliminated
 
 4026da1: Created six empty planfile modules (model.py, parser.py, renderer.py, operations.py, fileio.py, cli.py) with one-line docstrings as specified in the design. Discovered that task 1.1.1 was marked complete but never created the __init__.py file, documented this in NOTES.md. All four check commands (ruff check, ruff format, pytest, mypy) passed cleanly.
+
+91bc7df: Added test infrastructure for the planfile module. Created an empty __init__.py and a conftest.py with a fixtures directory pointer for future test fixtures. All code quality checks (ruff, pytest, mypy) passed successfully.
