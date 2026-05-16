@@ -287,6 +287,50 @@
   tests needed; this entry records that the 3.5.2 contract is already
   pinned and the check commands were re-run to confirm.
 
+- 2026-05-16 [5.4.1-5.4.7] Same recurring failure mode flagged for tasks
+  1.1.1, 2.1.1-2.1.5, and 4.1.1-4.1.11: task `[5.1.1-5.1.8]` (Settlement
+  dataclass + `migrate`) was never executed — the session-history entry
+  shows an 8-second session ending with "Ready. What would you like to
+  work on?" and no `Complete:` commit follows `11367f2` (the "next:
+  5.1.1-5.1.8" checkpoint). `Settlement` was unimplemented when this
+  session started, but task 5.4 depends on it ("the settlement for the
+  direct task uses the kind policy above"). This session implemented
+  `Settlement` and `Outcome` in `model.py` as a prerequisite for the
+  5.4 mutation operations, but did NOT implement `migrate` — that
+  belongs to the 5.1 scope. A future session will need to revisit 5.1
+  to add `migrate` and any 5.1-specific tests (idempotency,
+  partial-migration ID assignment for non-contiguous existing IDs,
+  phase-id ordinal assignment). The Settlement kind-policy tests
+  required by 5.1.1-5.1.8 step 2-6 are covered indirectly through
+  `TestCompleteTask` and `TestFailTask` in this session, but the
+  Settlement dataclass-construction tests from 5.1.1-5.1.8 step 8 are
+  not — they were never written and are not strictly necessary because
+  Settlement is a frozen dataclass with no behavior of its own (per
+  the project rule against testing trivial dataclass additions).
+
+- 2026-05-16 [5.4.1-5.4.7] The kind policy from the 5.1.1-5.1.8 task
+  description treats AUTO action tasks and successfully-verified USER
+  tasks as `work_observed`; the implementation in
+  `_direct_completion_kind` uses the disjunction
+  `task.action_tag is not None or "USER" in task.flag_tags`. A task
+  that is both BATCH and USER (unlikely but representable) settles as
+  `work_observed`. A task that is BATCH alone (the common case of a
+  BATCH parent surfaced as a unit by `next_tasks`) settles as
+  `commit_landed` — the BATCH flag is a scheduling hint, not an
+  evidence-of-commit signal, so the default applies.
+
+- 2026-05-16 [5.4.1-5.4.7] `complete_task`'s cascade walks ancestors
+  innermost-first. The recursion appends the new (DONE) parent to
+  `ancestors` after walking its children, so by the time the recursion
+  unwinds the list reads [innermost, ..., outermost]. This matches the
+  design doc section 5 wording "from innermost outward" and the
+  three-Settlement test for the BATCH chain. An ancestor whose status
+  was already DONE before the call is not re-added to the list, even
+  if its children are now all DONE — the cascade fires on a
+  transition, not on observation of a final state. This guards against
+  duplicate `kind="none"` Settlements when the operation is called
+  twice on an already-completed subtree.
+
 ## Hypotheses
 
 ## Eliminated

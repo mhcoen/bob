@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 
 class TaskStatus(Enum):
@@ -165,6 +166,57 @@ class TaskContext:
     phase_id_source: str
     label: str
     plan_phase_count: int
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Optional caller-supplied context that enriches a :class:`Settlement`.
+
+    Mutating operations accept an ``outcome`` so callers (mcloop, duplo)
+    can pass through the runner's observations — primarily the
+    ``failure_kind`` label that ends up on a ``test_failed`` Settlement.
+    Fields are individually optional; new fields land here as concrete
+    consumer use-cases appear, rather than being speculated up front.
+    """
+
+    failure_kind: str | None = None
+
+
+@dataclass(frozen=True)
+class Settlement:
+    """Outcome of a mutating operation, summarized for ledger emission.
+
+    Per design doc section 5: every ``complete_task`` / ``fail_task`` /
+    ``reset_task`` returns the new Plan paired with one or more
+    Settlement values describing what happened, so the ledger_emit shim
+    has structured data instead of having to diff the plan tree.
+
+    ``kind`` selects how the consumer should react:
+
+    - ``"commit_landed"``: direct success of a commit-producing task
+      (no AUTO action tag, no USER flag). Ledger event required.
+    - ``"work_observed"``: direct success of an AUTO action task or a
+      successfully verified USER task (no commit involved). Ledger
+      event still required so downstream replays observe the success.
+    - ``"test_failed"``: direct task failure. ``failure_kind`` carries
+      the failure category supplied by the caller (or
+      ``"max_retries_exceeded"`` when the caller did not pass an
+      :class:`Outcome`). Ledger event required.
+    - ``"none"``: derived parent completion. A parent task was
+      auto-checked because all of its children are now DONE; this is
+      bookkeeping (the parent's state is a function of its children's
+      state) and the ledger does not need a new event. Reset-to-TODO
+      also produces a ``"none"`` settlement: per design doc section 5,
+      reset is an operator decision to retry existing work, not new
+      evidence about implementation.
+    """
+
+    kind: Literal["commit_landed", "test_failed", "work_observed", "none"]
+    task_id: str | None
+    phase_id: str | None
+    summary: str
+    failure_kind: str | None
+    ledger_event_required: bool
 
 
 class PlanSyntaxError(Exception):

@@ -23,9 +23,11 @@ import pytest
 
 from bob_tools.planfile.model import (
     BugsSection,
+    Outcome,
     Phase,
     Plan,
     PlanValidationError,
+    Settlement,
     Subsection,
     Task,
     TaskContext,
@@ -33,8 +35,13 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.operations import (
     _find_task_by_id,
+    add_task,
     bug_count,
+    complete_task,
+    fail_task,
     next_tasks,
+    replace_phase,
+    reset_task,
     resolve_task_context,
     validate_plan,
 )
@@ -1220,3 +1227,428 @@ class TestNextTasks:
         plan = _plan(phases=(_phase_with_tasks(tasks=(a, b)),))
         assert next_tasks(plan, limit=2) == [a, b]
         assert next_tasks(plan, limit=1) == [a]
+
+
+class TestCompleteTask:
+    """``complete_task`` flips a task to DONE and reports settlements.
+
+    Pins the kind policy from design doc section 5 (plain task →
+    ``commit_landed``; AUTO action / USER → ``work_observed``; derived
+    parent completion → ``"none"``) and the innermost-outward ordering
+    of derived Settlements when an ancestor chain auto-completes.
+    """
+
+    def test_returns_done_plan_and_commit_landed_settlement(self) -> None:
+        # Plain task (no AUTO action_tag, no USER flag) = commit-producing.
+        target = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        new_plan, settlements = complete_task(plan, "T-000001")
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.DONE
+        assert settlements == (
+            Settlement(
+                kind="commit_landed",
+                task_id="T-000001",
+                phase_id="phase_001",
+                summary="do thing",
+                failure_kind=None,
+                ledger_event_required=True,
+            ),
+        )
+
+    def test_input_plan_not_mutated(self) -> None:
+        # Plan is a frozen dataclass — mutation is rejected by Python
+        # at attribute-assignment time. Pin the observable property
+        # instead: the original Plan's task statuses don't change.
+        target = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        complete_task(plan, "T-000001")
+        assert plan.phases[0].tasks[0].status == TaskStatus.TODO
+
+    def test_user_task_settles_as_work_observed(self) -> None:
+        # USER-flagged task: verified manually, no commit produced.
+        target = _task(task_id="T-000001", flag_tags=("USER",), text="manual step")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        _new_plan, settlements = complete_task(plan, "T-000001")
+        assert settlements[0].kind == "work_observed"
+        assert settlements[0].ledger_event_required is True
+
+    def test_auto_action_task_settles_as_work_observed(self) -> None:
+        # AUTO action tasks emit work observations rather than commits.
+        target = _task(
+            task_id="T-000001",
+            action_tag=("run_cli", "./scripts/x.sh"),
+            text="run script",
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        _new_plan, settlements = complete_task(plan, "T-000001")
+        assert settlements[0].kind == "work_observed"
+
+    def test_unknown_task_id_raises(self) -> None:
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="T-000999"):
+            complete_task(plan, "T-000999")
+
+    def test_parent_auto_completes_when_all_children_done(self) -> None:
+        # Completing the last unchecked child of a parent: derived
+        # Settlement for the parent comes after the direct settlement.
+        done_child = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+        )
+        live_child = _task(task_id="T-000011", indent_level=2, line_number=3)
+        parent = _task(task_id="T-000001", children=(done_child, live_child))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan, settlements = complete_task(plan, "T-000011")
+        assert len(settlements) == 2
+        # Direct first.
+        assert settlements[0].task_id == "T-000011"
+        assert settlements[0].kind == "commit_landed"
+        # Derived parent next.
+        assert settlements[1].task_id == "T-000001"
+        assert settlements[1].kind == "none"
+        assert settlements[1].ledger_event_required is False
+        # Plan reflects the parent's auto-completion.
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.DONE
+
+    def test_parent_not_auto_completed_when_sibling_still_todo(self) -> None:
+        # A parent stays TODO when at least one sibling of the completed
+        # child remains incomplete. Only the direct Settlement returns.
+        live_a = _task(task_id="T-000010", indent_level=2, line_number=2)
+        live_b = _task(task_id="T-000011", indent_level=2, line_number=3)
+        parent = _task(task_id="T-000001", children=(live_a, live_b))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan, settlements = complete_task(plan, "T-000010")
+        assert len(settlements) == 1
+        assert settlements[0].task_id == "T-000010"
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.TODO
+
+    def test_chain_of_two_batch_parents_yields_three_settlements(self) -> None:
+        # Task description spec: completing the last unchecked child of
+        # a chain of two BATCH parents returns three Settlements
+        # (direct + two derived) in innermost-outward order. The cascade
+        # is parent-state-driven (any all-DONE parent auto-completes);
+        # BATCH-ness is the surfacing strategy, not the cascade trigger.
+        leaf_done = _task(
+            task_id="T-000100",
+            status=TaskStatus.DONE,
+            indent_level=4,
+            line_number=4,
+        )
+        leaf_live = _task(
+            task_id="T-000101",
+            indent_level=4,
+            line_number=5,
+        )
+        inner = _task(
+            task_id="T-000010",
+            text="inner batch",
+            flag_tags=("BATCH",),
+            indent_level=2,
+            line_number=3,
+            children=(leaf_done, leaf_live),
+        )
+        outer = _task(
+            task_id="T-000001",
+            text="outer batch",
+            flag_tags=("BATCH",),
+            children=(inner,),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(outer,)),))
+        new_plan, settlements = complete_task(plan, "T-000101")
+        assert len(settlements) == 3
+        # Direct first (commit_landed because the leaf is plain).
+        assert settlements[0].task_id == "T-000101"
+        assert settlements[0].kind == "commit_landed"
+        assert settlements[0].ledger_event_required is True
+        # Innermost derived ancestor: the inner BATCH parent.
+        assert settlements[1].task_id == "T-000010"
+        assert settlements[1].kind == "none"
+        assert settlements[1].ledger_event_required is False
+        # Outermost derived ancestor: the outer BATCH parent.
+        assert settlements[2].task_id == "T-000001"
+        assert settlements[2].kind == "none"
+        assert settlements[2].ledger_event_required is False
+        # Both parents reflect their auto-completion in the new plan.
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.DONE
+        assert new_plan.phases[0].tasks[0].children[0].status == TaskStatus.DONE
+
+    def test_cascade_does_not_repeat_already_done_ancestor(self) -> None:
+        # A parent whose status was already DONE before this call does
+        # not yield a derived Settlement when its (now-DONE) children
+        # would have triggered the cascade — the parent didn't "become"
+        # complete on this call, it was already there.
+        leaf_done = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+        )
+        leaf_live = _task(task_id="T-000011", indent_level=2, line_number=3)
+        # Parent is DONE (inconsistent hand-edit state — children include
+        # a TODO leaf but the parent box is already checked).
+        parent = _task(
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            children=(leaf_done, leaf_live),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        _new_plan, settlements = complete_task(plan, "T-000011")
+        assert len(settlements) == 1
+        assert settlements[0].task_id == "T-000011"
+
+    def test_completes_task_in_bugs_section(self) -> None:
+        # Bug tasks have no containing phase; phase_id on the
+        # Settlement stays None.
+        bug = _task(task_id="T-000900", line_number=100, text="kernel panic")
+        plan = _plan(bugs=BugsSection(tasks=(bug,), line_number=99))
+        new_plan, settlements = complete_task(plan, "T-000900")
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.DONE
+        assert settlements[0].phase_id is None
+        assert settlements[0].task_id == "T-000900"
+
+    def test_completes_subsection_task(self) -> None:
+        # A task inside a subsection lives in the parent phase for
+        # phase_id purposes; the cascade does not promote subsections
+        # (they have no status), but the immediate-parent check still
+        # works against root-level subsection tasks (no children, no
+        # cascade).
+        sub_task = _task(task_id="T-000010", line_number=20, text="manual step")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_task,), line_number=19)
+        phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), subsections=(sub,)
+        )
+        plan = _plan(phases=(phase,))
+        new_plan, settlements = complete_task(plan, "T-000010")
+        assert new_plan.phases[0].subsections[0].tasks[0].status == TaskStatus.DONE
+        assert settlements[0].phase_id == "phase_001"
+
+
+class TestFailTask:
+    """``fail_task`` flips a task to FAILED with a ``test_failed`` Settlement."""
+
+    def test_marks_failed_and_returns_test_failed_settlement(self) -> None:
+        target = _task(task_id="T-000001", text="run thing")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        new_plan, settlements = fail_task(plan, "T-000001", reason="exit 1 from runner")
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.FAILED
+        assert settlements == (
+            Settlement(
+                kind="test_failed",
+                task_id="T-000001",
+                phase_id="phase_001",
+                summary="exit 1 from runner",
+                failure_kind="max_retries_exceeded",
+                ledger_event_required=True,
+            ),
+        )
+
+    def test_outcome_failure_kind_overrides_default(self) -> None:
+        target = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(target,)),))
+        _new_plan, settlements = fail_task(
+            plan,
+            "T-000001",
+            reason="hook failed",
+            outcome=Outcome(failure_kind="precommit_hook"),
+        )
+        assert settlements[0].failure_kind == "precommit_hook"
+
+    def test_does_not_cascade_into_parent(self) -> None:
+        # Failing a child must not auto-complete the parent, even when
+        # every other child is DONE. Per design doc section 5: a failed
+        # child leaves its ancestors stuck, not done.
+        done_sibling = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+        )
+        failing = _task(task_id="T-000011", indent_level=2, line_number=3)
+        parent = _task(task_id="T-000001", children=(done_sibling, failing))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan, settlements = fail_task(plan, "T-000011", reason="bad exit")
+        assert len(settlements) == 1
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.TODO
+
+    def test_unknown_task_id_raises(self) -> None:
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="T-000999"):
+            fail_task(plan, "T-000999", reason="missing")
+
+
+class TestResetTask:
+    """``reset_task`` flips FAILED → TODO with a ``none``-kind Settlement."""
+
+    def test_failed_to_todo_with_none_settlement(self) -> None:
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED, text="retry me")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed,)),))
+        new_plan, settlements = reset_task(plan, "T-000001")
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.TODO
+        assert settlements == (
+            Settlement(
+                kind="none",
+                task_id="T-000001",
+                phase_id="phase_001",
+                summary="retry me",
+                failure_kind=None,
+                ledger_event_required=False,
+            ),
+        )
+
+    def test_unknown_task_id_raises(self) -> None:
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="T-000999"):
+            reset_task(plan, "T-000999")
+
+
+class TestAddTask:
+    """``add_task`` appends new tasks with globally-unique sequential IDs."""
+
+    def test_appends_to_phase_root_tasks(self) -> None:
+        existing = _task(task_id="T-000001", text="first")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(existing,)),))
+        new_plan = add_task(plan, "phase_001", text="second")
+        added = new_plan.phases[0].tasks[1]
+        assert added.text == "second"
+        assert added.status == TaskStatus.TODO
+        # Existing task untouched.
+        assert new_plan.phases[0].tasks[0].task_id == "T-000001"
+
+    def test_assigns_next_sequential_id(self) -> None:
+        a = _task(task_id="T-000003")
+        b = _task(task_id="T-000007", line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(a, b)),))
+        new_plan = add_task(plan, "phase_001", text="next")
+        assert new_plan.phases[0].tasks[-1].task_id == "T-000008"
+
+    def test_assigns_first_id_when_plan_is_empty(self) -> None:
+        # An empty phase (no existing T-NNNNNN tasks): the first id is
+        # T-000001, not T-000000.
+        plan = _plan(phases=(_phase_with_tasks(tasks=()),))
+        new_plan = add_task(plan, "phase_001", text="first")
+        assert new_plan.phases[0].tasks[0].task_id == "T-000001"
+
+    def test_id_search_covers_nested_and_bug_tasks(self) -> None:
+        # Max-id scan must descend into children and the bugs section,
+        # otherwise a deeply nested or bug-scope id would be re-issued
+        # to the new task and break global uniqueness.
+        deep = _task(task_id="T-000050", indent_level=2, line_number=10)
+        parent = _task(task_id="T-000005", children=(deep,))
+        bug = _task(task_id="T-000200", line_number=100)
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(parent,)),),
+            bugs=BugsSection(tasks=(bug,), line_number=99),
+        )
+        new_plan = add_task(plan, "phase_001", text="next")
+        assert new_plan.phases[0].tasks[-1].task_id == "T-000201"
+
+    def test_nests_under_parent_id(self) -> None:
+        parent = _task(task_id="T-000001", text="parent")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan = add_task(plan, "phase_001", text="child", parent_id="T-000001")
+        children = new_plan.phases[0].tasks[0].children
+        assert len(children) == 1
+        assert children[0].text == "child"
+        assert children[0].task_id == "T-000002"
+
+    def test_nests_under_subsection_parent(self) -> None:
+        # parent_id may resolve inside a subsection; add_task must fall
+        # through phase root tasks before searching subsections.
+        sub_parent = _task(task_id="T-000010", line_number=20, text="sub parent")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_parent,), line_number=19)
+        phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), subsections=(sub,)
+        )
+        plan = _plan(phases=(phase,))
+        new_plan = add_task(
+            plan, "phase_001", text="manual sub-step", parent_id="T-000010"
+        )
+        assert (
+            new_plan.phases[0].subsections[0].tasks[0].children[-1].text
+            == "manual sub-step"
+        )
+
+    def test_unknown_phase_raises(self) -> None:
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="phase_999"):
+            add_task(plan, "phase_999", text="anywhere")
+
+    def test_unknown_parent_in_phase_raises(self) -> None:
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="T-000999"):
+            add_task(plan, "phase_001", text="orphan", parent_id="T-000999")
+
+    def test_deps_propagated_to_new_task(self) -> None:
+        dep = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(dep,)),))
+        new_plan = add_task(plan, "phase_001", text="next", deps=("T-000001",))
+        assert new_plan.phases[0].tasks[-1].deps == ("T-000001",)
+
+
+class TestReplacePhase:
+    """``replace_phase`` substitutes a whole Phase object by id."""
+
+    def test_replaces_named_phase_with_new_phase_object(self) -> None:
+        original = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000050", text="reauthored"),),
+            phase_id="phase_001",
+        )
+        new_plan = replace_phase(_plan(phases=(original,)), "phase_001", new_phase)
+        assert new_plan.phases[0] is new_phase
+
+    def test_other_phases_preserved(self) -> None:
+        keep_first = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        replace_target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        keep_last = _phase_with_tasks(
+            tasks=(_task(task_id="T-000003"),),
+            phase_id="phase_003",
+            ordinal=3,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000099", text="fresh"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(keep_first, replace_target, keep_last))
+        new_plan = replace_phase(plan, "phase_002", new_phase)
+        # Untouched phases keep identity.
+        assert new_plan.phases[0] is keep_first
+        assert new_plan.phases[2] is keep_last
+        assert new_plan.phases[1] is new_phase
+
+    def test_bugs_section_unchanged(self) -> None:
+        bugs = BugsSection(
+            tasks=(_task(task_id="T-000900", line_number=99),),
+            line_number=98,
+        )
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),),
+            bugs=bugs,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),), phase_id="phase_001"
+        )
+        new_plan = replace_phase(plan, "phase_001", new_phase)
+        assert new_plan.bugs is bugs
+
+    def test_unknown_phase_raises(self) -> None:
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_999"
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
+        with pytest.raises(ValueError, match="phase_999"):
+            replace_phase(plan, "phase_999", new_phase)
