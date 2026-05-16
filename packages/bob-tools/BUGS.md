@@ -35,4 +35,3 @@ No fixes available (2 hidden fixes can be enabled with the `--unsafe-fixes` opti
 ```
 
 Offending construct: both helpers are generic functions using the module-level `_T = TypeVar("_T")` style in signatures with `Sequence[_T]` and `_T` return values. Required end state: `.venv/bin/ruff check .` is clean; `.venv/bin/pytest -q` still reports 353 passing tests; `.venv/bin/mypy --strict bob_tools` still passes.
-- [ ] Fix issue reported during task 3.7: Ran python -m bob_tools.planfile.tests.manual.check_strict_reject. Both files rejected in strict mode as expected: | REJECTED /Users/mhcoen/proj/duplo/PLAN.md at line=33 col=7 | REJECTED /Users/mhcoen...
