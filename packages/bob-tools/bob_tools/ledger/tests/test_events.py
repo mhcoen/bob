@@ -123,9 +123,7 @@ class TestUuid7:
 
     def test_is_well_formed_rejects_v4(self) -> None:
         # A v4-style UUID; version nibble is 4.
-        assert not is_well_formed_event_id(
-            "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-        )
+        assert not is_well_formed_event_id("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
     def test_time_prefix_is_monotonic_within_burst(self) -> None:
         ids = [uuid7() for _ in range(64)]

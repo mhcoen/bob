@@ -563,9 +563,7 @@ def iter_validation_errors(raw: dict[str, Any]) -> list[str]:
 def validate_event_id_format(value: str) -> None:
     """Standalone runtime check; useful when constructing events."""
     if not is_well_formed_event_id(value):
-        raise EventSchemaError(
-            f"event_id {value!r} is not a well-formed UUIDv7"
-        )
+        raise EventSchemaError(f"event_id {value!r} is not a well-formed UUIDv7")
 
 
 # Re-export the third-party error so callers can catch via this module

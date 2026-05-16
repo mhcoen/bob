@@ -252,12 +252,8 @@ class TestSeqPersistence:
                 run_id="r-1",
             )
         # Per-writer files exist with their last used seq.
-        assert (
-            (tmp_path / WRITERS_DIRNAME / "w-A.seq").read_text() == "2"
-        )
-        assert (
-            (tmp_path / WRITERS_DIRNAME / "w-B.seq").read_text() == "1"
-        )
+        assert (tmp_path / WRITERS_DIRNAME / "w-A.seq").read_text() == "2"
+        assert (tmp_path / WRITERS_DIRNAME / "w-B.seq").read_text() == "1"
 
     def test_seq_file_is_atomic_via_replace(self, tmp_path: Path) -> None:
         s = Storage(tmp_path, writer_id="w-1")

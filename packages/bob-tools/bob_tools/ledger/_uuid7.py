@@ -48,13 +48,7 @@ def uuid7() -> str:
 
     # Pack the fields into 128 bits.
     ts48 = now_ms & ((1 << 48) - 1)
-    raw = (
-        (ts48 << 80)
-        | (0x7 << 76)
-        | (seq12 << 64)
-        | (0x2 << 62)
-        | rand62
-    )
+    raw = (ts48 << 80) | (0x7 << 76) | (seq12 << 64) | (0x2 << 62) | rand62
     hex_str = f"{raw:032x}"
     return (
         f"{hex_str[0:8]}-{hex_str[8:12]}-{hex_str[12:16]}-"

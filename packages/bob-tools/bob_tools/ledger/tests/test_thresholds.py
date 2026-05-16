@@ -139,9 +139,7 @@ class TestEmpty:
 
 class TestUnattributableCommit:
     def test_positive_unattributed_commit_fires(self) -> None:
-        ev = _make(
-            EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None)
-        )
+        ev = _make(EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None))
         crossings = _eval([ev])
         assert len(crossings) == 1
         c = crossings[0]
@@ -164,14 +162,11 @@ class TestUnattributableCommit:
         )
         crossings = _eval([start, commit])
         assert all(
-            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT for c in crossings
         )
 
     def test_idempotent(self) -> None:
-        ev = _make(
-            EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None)
-        )
+        ev = _make(EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None))
         a = _eval([ev])
         b = _eval([ev])
         assert a == b
@@ -196,8 +191,7 @@ class TestUnattributableCommit:
         )
         crossings = _eval([ev])
         assert all(
-            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT for c in crossings
         )
 
 
@@ -222,9 +216,7 @@ class TestPhaseAbandoned:
         cs = [c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_ABANDONED]
         assert len(cs) == 1
         assert cs[0].evidence_event_ids == (e2.event_id,)
-        assert (
-            cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PHASE
-        )
+        assert cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PHASE
 
     def test_negative_no_abandon_no_fire(self) -> None:
         ev = _make(
@@ -232,9 +224,7 @@ class TestPhaseAbandoned:
             make_phase_started_payload(phase_id="p1", title="x"),
         )
         crossings = _eval([ev])
-        assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_ABANDONED for c in crossings
-        )
+        assert all(c.rule_id is not ThresholdRuleId.PHASE_ABANDONED for c in crossings)
 
     def test_idempotent(self) -> None:
         e1 = _make(
@@ -268,10 +258,7 @@ class TestPhaseAbandoned:
             writer_id="duplo-reauthor-host-1234-abcd",
         )
         crossings = _eval([e1, e2])
-        assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_ABANDONED
-            for c in crossings
-        )
+        assert all(c.rule_id is not ThresholdRuleId.PHASE_ABANDONED for c in crossings)
 
     def test_config_flag_off_does_not_skip_reauthor_emitted(self) -> None:
         """Test escape hatch: setting
@@ -292,14 +279,9 @@ class TestPhaseAbandoned:
         )
         crossings = _eval(
             [e1, e2],
-            params=ThresholdParams(
-                skip_reauthor_emitted_lifecycle_events=False
-            ),
+            params=ThresholdParams(skip_reauthor_emitted_lifecycle_events=False),
         )
-        assert any(
-            c.rule_id is ThresholdRuleId.PHASE_ABANDONED
-            for c in crossings
-        )
+        assert any(c.rule_id is ThresholdRuleId.PHASE_ABANDONED for c in crossings)
 
 
 # ---------------------------------------------------------------------
@@ -340,9 +322,7 @@ class TestPhaseSuperseded:
                 )
             ]
         )
-        assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_SUPERSEDED for c in crossings
-        )
+        assert all(c.rule_id is not ThresholdRuleId.PHASE_SUPERSEDED for c in crossings)
 
     def test_idempotent(self) -> None:
         e1 = _make(
@@ -387,10 +367,7 @@ class TestPhaseSuperseded:
             writer_id="duplo-reauthor-host-1234-abcd",
         )
         crossings = _eval([e1, e2, e3])
-        assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_SUPERSEDED
-            for c in crossings
-        )
+        assert all(c.rule_id is not ThresholdRuleId.PHASE_SUPERSEDED for c in crossings)
 
 
 # ---------------------------------------------------------------------
@@ -414,9 +391,7 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval([e1, e2])
         cs = [
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
         ]
         assert len(cs) == 1
         assert cs[0].evidence_event_ids == (e2.event_id,)
@@ -450,9 +425,7 @@ class TestPhaseTopologyChanged:
         ]
         crossings = _eval(evs)
         cs = [
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
         ]
         assert len(cs) == 1
         assert cs[0].evidence_event_ids == (evs[3].event_id,)
@@ -464,8 +437,7 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval([ev])
         assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED for c in crossings
         )
 
     def test_idempotent(self) -> None:
@@ -508,8 +480,7 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval([e1, e2])
         assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED for c in crossings
         )
 
     def test_skips_reauthor_emitted_merge_by_default(self) -> None:
@@ -530,8 +501,7 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval([e1, e2])
         assert all(
-            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.PHASE_TOPOLOGY_CHANGED for c in crossings
         )
 
     def test_fires_on_non_reauthor_emitted_split(self) -> None:
@@ -555,8 +525,7 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval([e1, e2])
         assert any(
-            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
-            for c in crossings
+            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED for c in crossings
         )
 
     def test_config_flag_off_fires_on_reauthor_emitted(self) -> None:
@@ -580,13 +549,10 @@ class TestPhaseTopologyChanged:
         )
         crossings = _eval(
             [e1, e2],
-            params=ThresholdParams(
-                skip_reauthor_emitted_lifecycle_events=False
-            ),
+            params=ThresholdParams(skip_reauthor_emitted_lifecycle_events=False),
         )
         assert any(
-            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
-            for c in crossings
+            c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED for c in crossings
         )
 
 
@@ -606,14 +572,10 @@ class TestInvariantDeclared:
             ),
         )
         crossings = _eval([ev])
-        cs = [
-            c for c in crossings if c.rule_id is ThresholdRuleId.INVARIANT_DECLARED
-        ]
+        cs = [c for c in crossings if c.rule_id is ThresholdRuleId.INVARIANT_DECLARED]
         assert len(cs) == 1
         assert cs[0].evidence_event_ids == (ev.event_id,)
-        assert (
-            cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PLAN
-        )
+        assert cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PLAN
 
     def test_negative(self) -> None:
         crossings = _eval([])
@@ -657,16 +619,10 @@ class TestAssumptionFalsified:
             seq=1,
         )
         crossings = _eval([e1, e2])
-        cs = [
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.ASSUMPTION_FALSIFIED
-        ]
+        cs = [c for c in crossings if c.rule_id is ThresholdRuleId.ASSUMPTION_FALSIFIED]
         assert len(cs) == 1
         assert cs[0].evidence_event_ids == (e2.event_id,)
-        assert (
-            cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PHASE
-        )
+        assert cs[0].recommended_action is ThresholdRecommendedAction.REAUTHOR_PHASE
 
     def test_negative_declared_only(self) -> None:
         ev = _make(
@@ -679,8 +635,7 @@ class TestAssumptionFalsified:
         )
         crossings = _eval([ev])
         assert all(
-            c.rule_id is not ThresholdRuleId.ASSUMPTION_FALSIFIED
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.ASSUMPTION_FALSIFIED for c in crossings
         )
 
     def test_idempotent(self) -> None:
@@ -733,9 +688,7 @@ class TestExploratoryCountExceeded:
         # count rule's crossings.
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         crossings = _eval(evs, params=params)
         assert len(crossings) == 1
@@ -750,9 +703,7 @@ class TestExploratoryCountExceeded:
         evs = _exploratory_log(4)
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         assert _eval(evs, params=params) == []
 
@@ -770,9 +721,7 @@ class TestExploratoryCountExceeded:
         ]
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         assert _eval(evs, params=params) == []
 
@@ -792,9 +741,7 @@ class TestExploratoryCountExceeded:
         ]
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         assert _eval([start, *attributed], params=params) == []
 
@@ -802,9 +749,7 @@ class TestExploratoryCountExceeded:
         evs = _exploratory_log(6)
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         assert _eval(evs, params=params) == _eval(evs, params=params)
 
@@ -883,9 +828,7 @@ class TestSinceCountBased:
     def _params() -> ThresholdParams:
         return ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
 
     def test_count_at_since_3_now_6_fires(self) -> None:
@@ -988,16 +931,13 @@ class TestMultiRule:
 
 class TestDisabledRule:
     def test_disabled_rule_does_not_fire(self) -> None:
-        ev = _make(
-            EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None)
-        )
+        ev = _make(EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None))
         params = ThresholdParams(
             enabled_rules=ALL_RULES - {ThresholdRuleId.UNATTRIBUTABLE_COMMIT}
         )
         crossings = _eval([ev], params=params)
         assert all(
-            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT for c in crossings
         )
 
     def test_other_rules_unaffected_by_disable(self) -> None:
@@ -1024,9 +964,7 @@ class TestDisabledRule:
         assert ThresholdRuleId.PHASE_ABANDONED in rule_ids
 
     def test_empty_enabled_rules_returns_no_crossings(self) -> None:
-        ev = _make(
-            EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None)
-        )
+        ev = _make(EventType.COMMIT_LANDED, _commit_payload(attributed_phase_id=None))
         params = ThresholdParams(enabled_rules=frozenset())
         assert _eval([ev], params=params) == []
 
@@ -1189,8 +1127,7 @@ class TestCrossCutting:
         )
         crossings = _eval([ev])
         assert all(
-            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT
-            for c in crossings
+            c.rule_id is not ThresholdRuleId.UNATTRIBUTABLE_COMMIT for c in crossings
         )
 
 
@@ -1199,9 +1136,7 @@ class TestCrossCutting:
 # ---------------------------------------------------------------------
 
 
-def _seed_unattributed_commits(
-    storage: Storage, *, n: int = 1
-) -> list[Event]:
+def _seed_unattributed_commits(storage: Storage, *, n: int = 1) -> list[Event]:
     """Append n unattributed commit_landed events. Returns the
     captured Events so tests can read their event_ids."""
     out: list[Event] = []
@@ -1220,16 +1155,12 @@ def _seed_unattributed_commits(
 
 
 class TestRecordCrossings:
-    def test_emits_one_threshold_crossed_per_crossing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_emits_one_threshold_crossed_per_crossing(self, tmp_path: Path) -> None:
         storage = Storage(tmp_path, writer_id="w-1")
         # Two unattributed commits → two rule-1 crossings.
         commits = _seed_unattributed_commits(storage, n=2)
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         assert len(crossings) == 2
 
         emitted_ids = record_crossings(storage, crossings, run_id="rec")
@@ -1251,9 +1182,7 @@ class TestRecordCrossings:
         storage = Storage(tmp_path, writer_id="w-1")
         _seed_unattributed_commits(storage, n=3)
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted_ids = record_crossings(storage, crossings, run_id="rec")
 
         # The emitted ids appear on disk in the same order as the
@@ -1267,9 +1196,7 @@ class TestRecordCrossings:
         assert on_disk_order == emitted_ids
         # And: the n-th emitted event references the n-th crossing's
         # evidence.
-        for emitted, crossing in zip(
-            threshold_events_in_order, crossings, strict=True
-        ):
+        for emitted, crossing in zip(threshold_events_in_order, crossings, strict=True):
             assert (
                 tuple(emitted.payload["triggering_event_ids"])
                 == crossing.evidence_event_ids
@@ -1279,9 +1206,7 @@ class TestRecordCrossings:
         storage = Storage(tmp_path, writer_id="w-1")
         _seed_unattributed_commits(storage, n=2)
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
 
         first = record_crossings(storage, crossings, run_id="rec")
         assert len(first) == 2
@@ -1305,9 +1230,7 @@ class TestRecordCrossings:
         ]
         assert len(threshold_events) == 2
 
-    def test_partial_idempotent_only_new_crossings_emit(
-        self, tmp_path: Path
-    ) -> None:
+    def test_partial_idempotent_only_new_crossings_emit(self, tmp_path: Path) -> None:
         storage = Storage(tmp_path, writer_id="w-1")
         _seed_unattributed_commits(storage, n=2)
         events = storage.read_all()
@@ -1354,9 +1277,7 @@ class TestRecordCrossings:
         events_pre = storage.read_all()
         state_pre = project(events_pre)
 
-        crossings = evaluate_thresholds(
-            state_pre, events_pre, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(state_pre, events_pre, ThresholdParams())
         record_crossings(storage, crossings, run_id="rec")
 
         events_post = storage.read_all()
@@ -1367,12 +1288,9 @@ class TestRecordCrossings:
         assert state_post.invariants == state_pre.invariants
         assert state_post.assumptions == state_pre.assumptions
         assert state_post.human_decisions == state_pre.human_decisions
+        assert state_post.findings_unattributed == state_pre.findings_unattributed
         assert (
-            state_post.findings_unattributed == state_pre.findings_unattributed
-        )
-        assert (
-            state_post.orphaned_design_reasoning
-            == state_pre.orphaned_design_reasoning
+            state_post.orphaned_design_reasoning == state_pre.orphaned_design_reasoning
         )
         assert (
             state_post.orphaned_design_reasoning_count
@@ -1390,9 +1308,7 @@ class TestRecordCrossings:
         storage = Storage(tmp_path, writer_id="w-1")
         commits = _seed_unattributed_commits(storage, n=1)
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         record_crossings(storage, crossings, run_id="rec")
 
         all_events = storage.read_all()
@@ -1417,9 +1333,7 @@ class TestRecordCrossings:
         assert emitted == []
         # No threshold_crossed events on disk.
         all_events = storage.read_all()
-        assert not any(
-            e.type is EventType.THRESHOLD_CROSSED for e in all_events
-        )
+        assert not any(e.type is EventType.THRESHOLD_CROSSED for e in all_events)
 
     def test_empty_run_id_raises(self, tmp_path: Path) -> None:
         storage = Storage(tmp_path, writer_id="w-1")

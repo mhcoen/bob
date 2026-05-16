@@ -120,9 +120,7 @@ class ThresholdParams:
     """
 
     exploratory_commit_limit: int = 5
-    enabled_rules: frozenset[ThresholdRuleId] = field(
-        default_factory=lambda: ALL_RULES
-    )
+    enabled_rules: frozenset[ThresholdRuleId] = field(default_factory=lambda: ALL_RULES)
     skip_reauthor_emitted_lifecycle_events: bool = True
 
 
@@ -259,9 +257,7 @@ def _evaluate_unattributable_commit(
                 severity=ThresholdSeverity.TRIGGER_REAUTHOR,
                 evidence_event_ids=(ev.event_id,),
                 recommended_action=ThresholdRecommendedAction.REAUTHOR_PLAN,
-                summary=(
-                    f"commit {commit} landed with no attributed phase"
-                ),
+                summary=(f"commit {commit} landed with no attributed phase"),
                 detected_at_event_id=ev.event_id,
             )
         )
@@ -381,9 +377,7 @@ def _evaluate_invariant_declared(
                 severity=ThresholdSeverity.TRIGGER_REAUTHOR,
                 evidence_event_ids=(inv.declared_event_id,),
                 recommended_action=ThresholdRecommendedAction.REAUTHOR_PLAN,
-                summary=(
-                    f"new invariant {inv.invariant_id}: {inv.statement}"
-                ),
+                summary=(f"new invariant {inv.invariant_id}: {inv.statement}"),
                 detected_at_event_id=inv.declared_event_id,
             )
         )
@@ -453,10 +447,7 @@ def _evaluate_exploratory_count_exceeded(
             severity=ThresholdSeverity.TRIGGER_REAUTHOR,
             evidence_event_ids=(transition_ev.event_id,),
             recommended_action=ThresholdRecommendedAction.REAUTHOR_PLAN,
-            summary=(
-                f"exploratory commit count reached {limit}"
-                f" (limit={limit})"
-            ),
+            summary=(f"exploratory commit count reached {limit} (limit={limit})"),
             detected_at_event_id=transition_ev.event_id,
         )
     ]
@@ -506,34 +497,22 @@ def evaluate_thresholds(
     crossings: list[ThresholdCrossing] = []
 
     if ThresholdRuleId.UNATTRIBUTABLE_COMMIT in enabled:
-        crossings.extend(
-            _evaluate_unattributable_commit(sorted_events, since)
-        )
+        crossings.extend(_evaluate_unattributable_commit(sorted_events, since))
     skip_reauthor = params.skip_reauthor_emitted_lifecycle_events
     if ThresholdRuleId.PHASE_ABANDONED in enabled:
-        crossings.extend(
-            _evaluate_phase_abandoned(
-                sorted_events, since, skip_reauthor
-            )
-        )
+        crossings.extend(_evaluate_phase_abandoned(sorted_events, since, skip_reauthor))
     if ThresholdRuleId.PHASE_SUPERSEDED in enabled:
         crossings.extend(
-            _evaluate_phase_superseded(
-                sorted_events, since, skip_reauthor
-            )
+            _evaluate_phase_superseded(sorted_events, since, skip_reauthor)
         )
     if ThresholdRuleId.PHASE_TOPOLOGY_CHANGED in enabled:
         crossings.extend(
-            _evaluate_phase_topology_changed(
-                sorted_events, since, skip_reauthor
-            )
+            _evaluate_phase_topology_changed(sorted_events, since, skip_reauthor)
         )
     if ThresholdRuleId.INVARIANT_DECLARED in enabled:
         crossings.extend(_evaluate_invariant_declared(state, since))
     if ThresholdRuleId.ASSUMPTION_FALSIFIED in enabled:
-        crossings.extend(
-            _evaluate_assumption_falsified(sorted_events, since)
-        )
+        crossings.extend(_evaluate_assumption_falsified(sorted_events, since))
     if ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED in enabled:
         crossings.extend(
             _evaluate_exploratory_count_exceeded(

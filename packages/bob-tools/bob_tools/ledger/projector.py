@@ -242,9 +242,7 @@ class PlanState:
                 for d in raw.get("human_decisions") or []
             ],
             findings_unattributed=list(raw.get("findings_unattributed") or []),
-            orphaned_design_reasoning=list(
-                raw.get("orphaned_design_reasoning") or []
-            ),
+            orphaned_design_reasoning=list(raw.get("orphaned_design_reasoning") or []),
             orphaned_design_reasoning_count=int(
                 raw.get("orphaned_design_reasoning_count") or 0
             ),
@@ -460,9 +458,7 @@ def project(events: Iterable[Event]) -> PlanState:
 
     # Finalize. Deterministic ordering across all output collections so
     # ``project(shuffle(events)) == project(events)``.
-    state.phases = sorted(
-        phase_by_id.values(), key=lambda ph: ph.created_event_id
-    )
+    state.phases = sorted(phase_by_id.values(), key=lambda ph: ph.created_event_id)
     state.assumptions = sorted(
         assumption_by_id.values(), key=lambda ar: ar.declared_event_id
     )
@@ -477,9 +473,7 @@ def project(events: Iterable[Event]) -> PlanState:
 # ---------------------------------------------------------------------
 
 
-def _apply_phase_started(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_phase_started(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     p = ev.payload
     phase_id = p["phase_id"]
     if phase_id in phase_by_id:
@@ -514,9 +508,7 @@ def _apply_phase_lifecycle(
     ph.modification_history.append(ev.event_id)
 
 
-def _apply_phase_superseded(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_phase_superseded(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     p = ev.payload
     old = phase_by_id.get(p["phase_id"])
     if old is not None:
@@ -535,9 +527,7 @@ def _apply_phase_superseded(
             new_phase.lineage.predecessors.append(p["phase_id"])
 
 
-def _apply_phase_split(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_phase_split(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     p = ev.payload
     old = phase_by_id.get(p["phase_id"])
     if old is None:
@@ -549,9 +539,7 @@ def _apply_phase_split(
     old.modification_history.append(ev.event_id)
 
 
-def _apply_phase_merged(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_phase_merged(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     p = ev.payload
     target = p["into_phase_id"]
     for old_id in p["merged_phase_ids"]:
@@ -570,9 +558,7 @@ def _apply_phase_merged(
         merged_target.modification_history.append(ev.event_id)
 
 
-def _apply_commit_landed(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_commit_landed(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     attributed = ev.payload.get("attributed_phase_id")
     if not isinstance(attributed, str) or not attributed:
         return
@@ -607,9 +593,7 @@ def _apply_finding_observed(
     state.findings_unattributed.append(ev.event_id)
 
 
-def _apply_work_observed(
-    ev: Event, phase_by_id: dict[str, PhaseRecord]
-) -> None:
+def _apply_work_observed(ev: Event, phase_by_id: dict[str, PhaseRecord]) -> None:
     phase_id = ev.payload.get("phase_id")
     if not isinstance(phase_id, str) or not phase_id:
         return

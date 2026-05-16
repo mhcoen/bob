@@ -124,9 +124,7 @@ class TestSingleWriterHappyPath:
         )
         s.append(
             event_type=EventType.PHASE_STARTED,
-            payload=make_phase_started_payload(
-                phase_id="p2_redux", title="t2 redux"
-            ),
+            payload=make_phase_started_payload(phase_id="p2_redux", title="t2 redux"),
             run_id="run-1",
         )
 
@@ -203,9 +201,7 @@ class TestSingleWriterHappyPath:
         state, events = _round_trip(tmp_path)
         crossings = evaluate_thresholds(state, events, ThresholdParams())
 
-        rule_counts: Counter[ThresholdRuleId] = Counter(
-            c.rule_id for c in crossings
-        )
+        rule_counts: Counter[ThresholdRuleId] = Counter(c.rule_id for c in crossings)
         assert rule_counts[ThresholdRuleId.UNATTRIBUTABLE_COMMIT] == 5
         assert rule_counts[ThresholdRuleId.PHASE_ABANDONED] == 1
         assert rule_counts[ThresholdRuleId.PHASE_SUPERSEDED] == 1
@@ -216,33 +212,23 @@ class TestSingleWriterHappyPath:
 
         # Spot-check evidence_event_ids against the captured ids.
         abandon = next(
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.PHASE_ABANDONED
+            c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_ABANDONED
         )
         assert abandon.evidence_event_ids == (abandon_ev.event_id,)
         topo = next(
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
+            c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_TOPOLOGY_CHANGED
         )
         assert topo.evidence_event_ids == (split_ev.event_id,)
         super_crossing = next(
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.PHASE_SUPERSEDED
+            c for c in crossings if c.rule_id is ThresholdRuleId.PHASE_SUPERSEDED
         )
         assert super_crossing.evidence_event_ids == (super_ev.event_id,)
         invariant_crossing = next(
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.INVARIANT_DECLARED
+            c for c in crossings if c.rule_id is ThresholdRuleId.INVARIANT_DECLARED
         )
         assert invariant_crossing.evidence_event_ids == (invariant_ev.event_id,)
         falsify_crossing = next(
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.ASSUMPTION_FALSIFIED
+            c for c in crossings if c.rule_id is ThresholdRuleId.ASSUMPTION_FALSIFIED
         )
         assert falsify_crossing.evidence_event_ids == (falsify_ev.event_id,)
         # Rule 7 evidence is the limit-th unattributed commit
@@ -254,9 +240,7 @@ class TestSingleWriterHappyPath:
             for c in crossings
             if c.rule_id is ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED
         )
-        assert count_crossing.evidence_event_ids == (
-            sorted(unattributed_ids)[4],
-        )
+        assert count_crossing.evidence_event_ids == (sorted(unattributed_ids)[4],)
 
 
 # ---------------------------------------------------------------------
@@ -297,16 +281,12 @@ class TestMultiWriterDeterminism:
             sa = Storage(ledger_dir, writer_id="w-A")
             sa.append(
                 event_type=EventType.PHASE_STARTED,
-                payload=make_phase_started_payload(
-                    phase_id="pA", title="A"
-                ),
+                payload=make_phase_started_payload(phase_id="pA", title="A"),
                 run_id="r",
             )
             sa.append(
                 event_type=EventType.PHASE_ABANDONED,
-                payload=make_phase_abandoned_payload(
-                    phase_id="pA", reason="r"
-                ),
+                payload=make_phase_abandoned_payload(phase_id="pA", reason="r"),
                 run_id="r",
             )
             sa.append(
@@ -321,9 +301,7 @@ class TestMultiWriterDeterminism:
             sb = Storage(ledger_dir, writer_id="w-B")
             sb.append(
                 event_type=EventType.PHASE_STARTED,
-                payload=make_phase_started_payload(
-                    phase_id="pB", title="B"
-                ),
+                payload=make_phase_started_payload(phase_id="pB", title="B"),
                 run_id="r",
             )
             sb.append(
@@ -377,9 +355,7 @@ class TestMultiWriterDeterminism:
 
 
 class TestSinceAcrossWriters:
-    def test_since_writer_a_only_writer_b_events_fire(
-        self, tmp_path: Path
-    ) -> None:
+    def test_since_writer_a_only_writer_b_events_fire(self, tmp_path: Path) -> None:
         # Writer A first, then writer B. Because UUIDv7 is time-
         # ordered and writer B emits strictly after writer A within a
         # single process, writer B's event_ids > writer A's.
@@ -410,13 +386,9 @@ class TestSinceAcrossWriters:
         # Use the LAST writer-A event_id as `since`. Crossings for
         # writer-A events must be suppressed; writer-B's must remain.
         since = a_events[-1].event_id
-        crossings = evaluate_thresholds(
-            state, events, ThresholdParams(), since=since
-        )
+        crossings = evaluate_thresholds(state, events, ThresholdParams(), since=since)
         unattributable = [
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
+            c for c in crossings if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
         ]
         evidence_ids = {c.evidence_event_ids[0] for c in unattributable}
         for ev in a_events:
@@ -450,9 +422,7 @@ class TestStorageRoundTripAttribution:
         state = project(reread)
         crossings = evaluate_thresholds(state, reread, ThresholdParams())
         unattributable = [
-            c
-            for c in crossings
-            if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
+            c for c in crossings if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
         ]
         assert len(unattributable) == 1
         assert unattributable[0].evidence_event_ids == (ev.event_id,)
@@ -460,9 +430,7 @@ class TestStorageRoundTripAttribution:
             unattributable[0].recommended_action
             is ThresholdRecommendedAction.REAUTHOR_PLAN
         )
-        assert (
-            unattributable[0].severity is ThresholdSeverity.TRIGGER_REAUTHOR
-        )
+        assert unattributable[0].severity is ThresholdSeverity.TRIGGER_REAUTHOR
 
 
 # ---------------------------------------------------------------------
@@ -555,9 +523,7 @@ class TestCountAcrossWriters:
         state, events = _round_trip(tmp_path)
         params = ThresholdParams(
             exploratory_commit_limit=5,
-            enabled_rules=frozenset(
-                {ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}
-            ),
+            enabled_rules=frozenset({ThresholdRuleId.EXPLORATORY_COUNT_EXCEEDED}),
         )
         crossings = evaluate_thresholds(state, events, params)
         assert len(crossings) == 1
@@ -580,9 +546,7 @@ class TestRecordCrossingsIntegration:
     """Slice B part 2 integration: writes by record_crossings must
     survive a fresh Storage instance and a clean projector replay."""
 
-    def test_record_crossings_round_trip_via_disk(
-        self, tmp_path: Path
-    ) -> None:
+    def test_record_crossings_round_trip_via_disk(self, tmp_path: Path) -> None:
         # Stage a sequence with multiple rule triggers so the recorded
         # threshold_crossed payload exercises non-trivial fields.
         writer = Storage(tmp_path, writer_id="w-1")
@@ -611,9 +575,7 @@ class TestRecordCrossingsIntegration:
 
         events_pre = writer.read_all()
         state_pre = project(events_pre)
-        crossings = evaluate_thresholds(
-            state_pre, events_pre, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(state_pre, events_pre, ThresholdParams())
         assert len(crossings) == 3
 
         emitted_ids = record_crossings(writer, crossings, run_id="r")
@@ -641,12 +603,9 @@ class TestRecordCrossingsIntegration:
         assert state_post.invariants == state_pre.invariants
         assert state_post.assumptions == state_pre.assumptions
         assert state_post.human_decisions == state_pre.human_decisions
+        assert state_post.findings_unattributed == state_pre.findings_unattributed
         assert (
-            state_post.findings_unattributed == state_pre.findings_unattributed
-        )
-        assert (
-            state_post.orphaned_design_reasoning
-            == state_pre.orphaned_design_reasoning
+            state_post.orphaned_design_reasoning == state_pre.orphaned_design_reasoning
         )
         assert (
             state_post.orphaned_design_reasoning_count
@@ -667,17 +626,15 @@ class TestRecordCrossingsIntegration:
         # the in-memory ThresholdCrossing object, not persisted in
         # the ledger event. Slice C looks up severity and
         # recommended_action from rule_id.
-        recorded_by_rule = {
-            e.payload["rule_id"]: e for e in threshold_events
-        }
+        recorded_by_rule = {e.payload["rule_id"]: e for e in threshold_events}
         assert recorded_by_rule.keys() == {
             "phase_abandoned",
             "invariant_declared",
             "unattributable_commit",
         }
-        assert recorded_by_rule["phase_abandoned"].payload[
-            "triggering_event_ids"
-        ] == [abandon_ev.event_id]
+        assert recorded_by_rule["phase_abandoned"].payload["triggering_event_ids"] == [
+            abandon_ev.event_id
+        ]
         assert recorded_by_rule["invariant_declared"].payload[
             "triggering_event_ids"
         ] == [invariant_ev.event_id]
@@ -729,9 +686,7 @@ class TestRecordCrossingsIntegration:
         # Filter to only unattributable_commit so the count is exact
         # (writer-B has not added new events of its own).
         unattributable = [
-            c
-            for c in crossings_b
-            if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
+            c for c in crossings_b if c.rule_id is ThresholdRuleId.UNATTRIBUTABLE_COMMIT
         ]
         assert len(unattributable) == 3
 
@@ -745,9 +700,7 @@ class TestRecordCrossingsIntegration:
         ]
         assert len(threshold_events) == 3
 
-    def test_record_crossings_payload_survives_jsonl(
-        self, tmp_path: Path
-    ) -> None:
+    def test_record_crossings_payload_survives_jsonl(self, tmp_path: Path) -> None:
         # Construct a synthetic crossing whose summary contains
         # unicode glyphs that are commonly mishandled by careless
         # serializers (curly quotes, em-dashes, a non-BMP emoji,
@@ -780,9 +733,7 @@ class TestRecordCrossingsIntegration:
 
         reader = Storage(tmp_path, writer_id="reader")
         events = reader.read_all()
-        threshold_events = [
-            e for e in events if e.type is EventType.THRESHOLD_CROSSED
-        ]
+        threshold_events = [e for e in events if e.type is EventType.THRESHOLD_CROSSED]
         assert len(threshold_events) == 1
         recorded = threshold_events[0]
 
@@ -790,9 +741,7 @@ class TestRecordCrossingsIntegration:
         assert recorded.payload["rule_id"] == "phase_abandoned"
         # triggering_event_ids preserves order; stored as list per
         # the JSON Schema.
-        assert recorded.payload["triggering_event_ids"] == list(
-            ordered_evidence
-        )
+        assert recorded.payload["triggering_event_ids"] == list(ordered_evidence)
         # The unicode summary survives JSONL serialization byte-for-
         # byte: no escaping artifacts, no NFC/NFD normalization, no
         # quote-style swap.
