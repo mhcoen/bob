@@ -38,11 +38,15 @@ Rules for the plan:
   Do NOT use [BATCH] if any subtask is marked [USER] or [AUTO];
   McLoop handles this automatically by stopping the batch at
   those boundaries, but the intent should be clear in the plan.
-- Any task that requires visual confirmation, manual interaction,
-  or human judgment (e.g. running the app and visually confirming
-  behavior, Cmd-Q to quit) must be prefixed with the USER tag in
-  square brackets. McLoop will pause on these tasks and wait for
-  the human to perform and confirm them.
+- Reserve [USER] only for genuinely human-only checks with no
+  scriptable form, such as visual or physical confirmation. A
+  runnable verification command, test, or script must never be a
+  [USER] task. For scriptable verification, first add a normal task
+  to create a helper script that hardcodes paths, takes no args,
+  prints progress, and exits non-zero on failure; then add a
+  [AUTO:run_cli] task that invokes that helper with an absolute
+  command path. McLoop will pause only on true [USER] tasks and
+  wait for the human to perform and confirm them.
 - Do NOT include a platform, language, prerequisites, or
   build-system description paragraph at the top of the phase.
   That information is written once in the PLAN.md project
@@ -122,6 +126,10 @@ for a developer to act on without ambiguity.
   to be executed without design decisions, mark the parent step
   with [BATCH] so McLoop combines the subtasks into a single
   session for efficiency.
+- Reserve [USER] only for genuinely human-only checks with no
+  scriptable form. Runnable verification must be expressed as a
+  helper-script creation step plus an [AUTO:run_cli] step that
+  invokes the helper with an absolute command path.
 
 ## Success criteria
 A checklist of observable outcomes that confirm this phase is complete and working.

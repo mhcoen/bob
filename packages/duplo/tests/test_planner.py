@@ -665,10 +665,11 @@ class TestPhaseSystemPromptAnnotations:
             "  task checkboxes."
         ) in _PHASE_SYSTEM
 
-    def test_system_prompt_marks_visual_confirmation_tasks_with_user_tag(self):
-        assert "USER" in _PHASE_SYSTEM
-        assert "visual confirmation" in _PHASE_SYSTEM
-        assert "McLoop will pause" in _PHASE_SYSTEM
+    def test_system_prompt_reserves_user_for_human_only_checks(self):
+        assert "Reserve [USER] only for genuinely human-only checks" in _PHASE_SYSTEM
+        assert "runnable verification command, test, or script must never" in _PHASE_SYSTEM
+        assert "[AUTO:run_cli] task" in _PHASE_SYSTEM
+        assert "McLoop will pause only on true [USER] tasks" in _PHASE_SYSTEM
 
 
 class TestNextPhaseSystemPromptAnnotations:
@@ -683,6 +684,11 @@ class TestNextPhaseSystemPromptAnnotations:
 
     def test_system_prompt_no_annotation_for_scaffolding(self):
         assert "no annotation" in _NEXT_PHASE_SYSTEM.lower()
+
+    def test_system_prompt_reserves_user_for_human_only_checks(self):
+        assert "Reserve [USER] only for genuinely human-only checks" in _NEXT_PHASE_SYSTEM
+        assert "Runnable verification must be expressed" in _NEXT_PHASE_SYSTEM
+        assert "[AUTO:run_cli] step" in _NEXT_PHASE_SYSTEM
 
 
 _SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
