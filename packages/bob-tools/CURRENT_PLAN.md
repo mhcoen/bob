@@ -35,6 +35,6 @@ line.
 
 - [x] Write the Stage 3 verification helper script. Create `bob_tools/planfile/tests/manual/check_strict_reject.py`. The script imports `parse_plan` and `PlanSyntaxError`, then for each of `/Users/mhcoen/proj/duplo/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.md` calls `parse_plan(text, strict=True)`. Expected outcome is rejection: for each file it prints either `REJECTED <path> at line=<n> col=<m>` (the correct result) or `PARSED <path> (UNEXPECTED - strict mode should have rejected this)` and exits non-zero. The script takes no arguments and hardcodes the two paths.
 
-- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_strict_reject
+- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_strict_reject
 
 - [ ] Verify Stage 3 leaves the repo green.
