@@ -21,7 +21,7 @@ line.
 - [ ] Stable task IDs
    - [x] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
    - [x] In compat mode: presence of a task ID is recorded on `Task.task_id` but absence is accepted.
-   - [ ] In strict mode: absence of a task ID raises `PlanSyntaxError` with the exact message format from design doc section 9: "expected task id like T-000123 after checkbox marker".
+   - [x] In strict mode: absence of a task ID raises `PlanSyntaxError` with the exact message format from design doc section 9: "expected task id like T-000123 after checkbox marker".
    - [ ] Tokenization: the library MUST NOT use substring matching to find tasks by ID. Implement `_find_task_by_id(plan, task_id)` that walks the parsed tree. Per design doc section 7.2 caveat about substring matching.
    - [ ] Tests: a task line with a stable ID parses with that ID; a task line without an ID parses with task_id None in compat mode and raises in strict mode; `_find_task_by_id` distinguishes T-000001 from T-0000010.
 

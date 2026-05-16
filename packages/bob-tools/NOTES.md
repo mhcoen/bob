@@ -250,3 +250,5 @@ e346b0e: Implemented `validate_plan` in `operations.py`, which checks that every
 846d956: Added support for ledger-form phase headings (e.g., "## Phase phase_001: Title") in planfile parsing. These non-numeric identifiers are now recognized as explicit phase IDs, with ordinals assigned positionally. The change ensures compatibility with legacy ledger formats while preserving existing behavior for numeric headings.
 
 a1c07d9: Updated task ID parsing to capture the full line after the ID, enabling proper handling of annotations and tags. The regex now extracts digits and remaining text separately, ensuring the canonical T-NNNNNN format is preserved.
+
+176bec4: Added strict mode enforcement for mandatory task IDs in plan files. Tasks without a T-000123-style ID now raise a PlanSyntaxError with a specific message and location. Compat mode remains unchanged, allowing missing IDs.
