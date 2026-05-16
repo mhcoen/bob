@@ -53,6 +53,12 @@ def _digest(path: Path) -> str:
     ids=lambda p: f"{p.parent.name}/{p.name}",
 )
 def test_existing_plan_fmt_is_fixed_point(source_path: Path) -> None:
+    if not source_path.is_file():
+        pytest.skip(
+            f"source PLAN.md not present at {source_path}; "
+            "this round-trip check only runs in the dev environment "
+            "where the sibling projects are checked out"
+        )
     text = source_path.read_text()
     plan = parse_plan(text)
     migrated = migrate(plan)
@@ -75,6 +81,14 @@ def test_source_files_are_untouched() -> None:
     pipeline acquired write access to the source file and would corrupt
     the user's working state.
     """
+    missing = [p for p in SOURCE_PATHS if not p.is_file()]
+    if missing:
+        pytest.skip(
+            "source PLAN.md(s) not present: "
+            f"{', '.join(str(p) for p in missing)}; "
+            "this on-disk-hash guard only runs in the dev environment "
+            "where the sibling projects are checked out"
+        )
     digests_before = {p: _digest(p) for p in SOURCE_PATHS}
     for path in SOURCE_PATHS:
         text = path.read_text()
