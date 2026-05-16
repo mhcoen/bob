@@ -2,6 +2,36 @@
 
 ## Observations
 
+- 2026-05-16 [7.2] The Stage 7 verification helper expects
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan` to exist, but the
+  bob-tools package is not installed in the venv (only its
+  declaration sits in `pyproject.toml` under `[project.scripts]`).
+  Running `python -m bob_tools.planfile.tests.manual.check_cli_end_to_end`
+  in the current tree fails with the pre-flight check
+  ("`bob-plan` not found"). Resolving the verification requires a
+  one-time `pip install -e .` into the venv; the script intentionally
+  does not run `pip` itself because per the global CLAUDE.md
+  instruction no package installer may be invoked from a session.
+- 2026-05-16 [7.2] Running `bob-plan fmt` on
+  `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` produces a non-additive
+  diff in two ways the Stage 7 verifier flags: (a) the six nested
+  example-flow bullets under the "Clearer terminal output" task
+  (lines 110-115 of the source — they use `  - "..."` with no
+  checkbox) are dropped by the parser/renderer round-trip and
+  therefore disappear from the formatted file; (b) the blank lines
+  between top-level task bullets in Stage 2 are collapsed by the
+  renderer. The verifier also reports that post-fmt
+  `bob-plan validate` exits 1 because line 243's
+  `- [x] [RULEDOUT] tag for recording failed approaches in PLAN.md`
+  is treated as a task body whose leading bracket `[RULEDOUT]` is
+  flagged as an unknown tag (the `[RULEDOUT]` sibling-line form is a
+  different production). All three are pre-existing
+  parser/renderer/validator behaviors, not Stage 7 CLI bugs; the
+  verifier surfaces them honestly per its "additive-only" contract,
+  and the underlying fix belongs upstream (likely a future fmt
+  pass that escapes or preserves no-checkbox bullets and a
+  validator rule that lets `[RULEDOUT]` lead a task body when the
+  trailing text describes the tag's purpose).
 - 2026-05-15 [1.1.2] Task 1.1.1 (`bob_tools/planfile/__init__.py`) is marked
   `[x]` in CURRENT_PLAN.md, but the file does not exist on disk. Verified
   by `git show --stat dd60b01` and `git show --stat 54e117a`: the only
