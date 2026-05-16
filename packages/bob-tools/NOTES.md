@@ -215,6 +215,40 @@
   now no precedent has surfaced and the design doc does not require
   it.
 
+- 2026-05-16 [4.2.1] The renderer parent BATCH [4.1.1-4.1.11] was never
+  executed in the prior session — same failure mode flagged for tasks
+  1.1.1 (2026-05-15 entry) and 2.1.1-2.1.5: the orchestra-run log shows
+  the agent exited in ~9 seconds with "Ready. What would you like me to
+  work on?" and the orchestrator still advanced to 4.2.1. Property tests
+  cannot exist without a renderer, so this session implemented
+  `renderer.py` and the public `render_plan` wiring as a prerequisite,
+  then the two property tests in `tests/test_roundtrip.py`. Both 4.1
+  and 4.2 should be checked together.
+
+- 2026-05-16 [4.2.1] PLAN.md line 163 ("Phase rendering: ... blank line,
+  then subsections in order, then tasks in order") is in the wrong order
+  for the parser semantics: a `###` subsection captures every following
+  task until the next subsection or phase boundary, so if subsections
+  rendered before phase-level tasks, those phase-level tasks would be
+  re-parsed into the last subsection and the round-trip would fail. The
+  renderer therefore emits tasks first, then subsections. The design
+  doc may need this clarified; flagging here rather than altering the
+  PLAN.md description (the PLAN.md/design-doc reconciliation rule says
+  the design doc wins, but I have not consulted it).
+
+- 2026-05-16 [4.2.1] `normalize_positions` in `renderer.py` collapses
+  three fields that legitimately differ across parse-render-parse
+  cycles: `line_number` (rendered text has its own layout),
+  `Task.indent_level` (renderer canonicalizes to 2-space-per-level),
+  and `Phase.phase_id_source` (renderer migrates `"explicit_header"`
+  to `"explicit_comment"` per design doc section 7.1). The 4.2.1 task
+  description only mentions ignoring line numbers; the wider normalize
+  set is required for `ledger_phase_header.md` to round-trip, and the
+  helper docstring documents this. If a stricter equality check is
+  preferred, the ledger fixture can be moved out of
+  `test_parse_render_parse_idempotent` (the canonical-form
+  fixed-point test still passes on it without normalization).
+
 - 2026-05-16 [3.5.2] Contract-pinning task; the implementing agent in
   3.5.1 wrote the full test class `TestMagicLineForcesStrict`
   (`bob_tools/planfile/tests/test_parser.py:1690-1746`) covering all

@@ -30,6 +30,7 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.operations import bug_count
 from bob_tools.planfile.parser import parse_plan
+from bob_tools.planfile.renderer import render_plan
 
 __all__ = [
     # Stage 2 — parser + typed model (live). Sorted ASCII-alphabetically
@@ -48,10 +49,10 @@ __all__ = [
     "TaskStatus",
     "bug_count",
     "parse_plan",
+    "render_plan",
     # Stage 3 — strict-mode parser additions (no new public names;
     # parse_plan(strict=True) is the surface)
-    # Stage 4 — renderer
-    # "render_plan",
+    # Stage 4 — renderer (render_plan live; canonicalize lands later)
     # "canonicalize",
     # Stage 5 — operations
     # "migrate",
