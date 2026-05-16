@@ -246,3 +246,5 @@ e346b0e: Implemented `validate_plan` in `operations.py`, which checks that every
 3435ed6: Added support for format-version magic line and phase-id comments. The parser now recognizes a leading `<!-- bob-plan-format: 1 -->` line to enable strict mode, and can attach explicit phase IDs via `<!-- phase_id: ... -->` comments placed after phase headings. Unrecognized format versions raise an error, and phase-id comments are only captured when they appear on their own line before any tasks.
 
 5f55495: Added support for ledger-form phase headings, allowing phase identifiers like "phase_001" instead of bare integers. This ensures consistency with the ledger emission library's parsing rules.
+
+846d956: Added support for ledger-form phase headings (e.g., "## Phase phase_001: Title") in planfile parsing. These non-numeric identifiers are now recognized as explicit phase IDs, with ordinals assigned positionally. The change ensures compatibility with legacy ledger formats while preserving existing behavior for numeric headings.
