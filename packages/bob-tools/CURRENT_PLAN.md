@@ -33,7 +33,7 @@ mcloop's substring matching.
    - [x] Tests covering each tag family in isolation, in combination, and absent. Edge cases: nested brackets in annotation values; tag-like substrings in task description text are treated as prose, never as tags.
 
 - [ ] Parse RULEDOUT sibling lines
-   - [ ] Implement `_parse_ruledout_line(line, line_number)` returning a raw RuledOut record. A line is a RULEDOUT line when its stripped form starts with the literal RULEDOUT bracket token. Per mcloop's `parse` function.
+   - [x] Implement `_parse_ruledout_line(line, line_number)` returning a raw RuledOut record. A line is a RULEDOUT line when its stripped form starts with the literal RULEDOUT bracket token. Per mcloop's `parse` function.
    - [ ] Implement attachment logic: a RULEDOUT line attaches to the nearest task with strictly less indent. If no such task exists in the current phase, attach to the most recent root task (matches mcloop's fallback in `parse`).
    - [ ] Tests: a RULEDOUT line attaches to a parent task by indent; a top-level RULEDOUT line attaches to the most recent root task; multiple RULEDOUT lines on one task collected in order.
 
