@@ -1,3 +1,2 @@
 ## Bugs
 
-- [x] Fix issue reported during task 2.8: python -c "from bob_tools.planfile import parse_plan; from pathlib import Path; p = parse_plan(Path('/Users/mhcoen/proj/duplo/PLAN.md').read_text()); print(f'phases={len(p.phases)}, bugs={p.bugs is no...
