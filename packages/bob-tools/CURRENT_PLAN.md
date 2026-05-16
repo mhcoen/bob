@@ -1,20 +1,63 @@
-## Stage 1: Scaffolding and types
+## Stage 2: Compat-mode parser
 
-- [x] Create the `bob_tools/planfile/` package
-   - [x] Create `bob_tools/planfile/__init__.py` with a package docstring and an explicit `__all__` listing the public exports the library will eventually expose: parse_plan, render_plan, validate_plan, canonicalize, migrate, next_tasks, complete_task, fail_task, reset_task, add_task, replace_phase, resolve_task_context, check_consistency, load, save, update, Plan, Phase, Task, Settlement, TaskContext, RuledOut, TaskStatus, PlanSyntaxError, PlanValidationError, PlanInconsistencyError. Names that don't exist yet can be commented out; they get uncommented as stages add them.
-   - [x] Create empty modules `model.py`, `parser.py`, `renderer.py`, `operations.py`, `fileio.py`, `cli.py` with one-line docstrings naming what each will own. Source: design doc section 3.1.
-   - [x] Create `bob_tools/planfile/tests/__init__.py` (empty) and `bob_tools/planfile/tests/conftest.py` with a fixtures directory pointer.
-   - [x] Update `pyproject.toml`: add `"bob_tools/planfile/tests"` to `[tool.pytest.ini_options].testpaths` so pytest discovers planfile tests alongside ledger tests.
+The compat-mode parser reads PLAN.md files in the format mcloop's
+`checklist.py` accepts today: no stable task IDs, no phase-id
+comments, no magic-line. This is what every existing PLAN.md uses.
+Strict-mode additions come in Stage 3.
 
-- [x] [BATCH] Define core dataclasses in `model.py`
-   - [x] Define `TaskStatus` as an `enum.Enum` with members `TODO`, `DONE`, `FAILED`. Map the checkbox markers: space character to TODO, lowercase x and uppercase X both to DONE, exclamation mark to FAILED. Per design doc section 2.1.
-   - [x] Define `RuledOut` dataclass with fields `text: str` and `line_number: int`. Per design doc section 4.2 and section 11 question 3.
-   - [x] Define `Task` dataclass (frozen) with fields: `task_id: str | None` (None in compat mode pre-migration), `text: str`, `status: TaskStatus`, `flag_tags: tuple[str, ...]` (members are bare names "USER" and "BATCH", no brackets), `action_tag: tuple[str, str] | None` (the pair is action name and args string), `annotations: tuple[tuple[str, str], ...]` (key-value pairs for feat and fix annotations), `deps: tuple[str, ...]` (task IDs this task depends on; empty when none declared), `children: tuple[Task, ...]`, `ruled_out: tuple[RuledOut, ...]`, `indent_level: int`, `line_number: int`.
-   - [x] Define `Phase` dataclass (frozen) with fields: `phase_id: str | None`, `phase_id_source: str` (one of "explicit_comment", "explicit_header", "ordinal", "none"), `ordinal: int`, `keyword: str` (either "Stage" or "Phase"), `title: str`, `prose: str`, `subsections: tuple[Subsection, ...]`, `tasks: tuple[Task, ...]`, `line_number: int`. Per design doc section 2.5 and section 7.1.
-   - [x] Define `Subsection` dataclass (frozen) with fields: `title: str`, `prose: str`, `tasks: tuple[Task, ...]`, `line_number: int`. Per design doc section 11 question 5.
-   - [x] Define `BugsSection` dataclass (frozen) with fields: `tasks: tuple[Task, ...]`, `line_number: int`. Per design doc section 6.
-   - [x] Define `Plan` dataclass (frozen) with fields: `magic_version: int | None` (from the bob-plan-format comment), `project_title: str`, `preamble: str`, `phases: tuple[Phase, ...]`, `bugs: BugsSection | None`, `source_path: Path | None` (for error messages).
-   - [x] Define exceptions: `PlanSyntaxError(message, line, column, path)` with a `__str__` matching the format in design doc section 9 ("PLAN.md invalid at line N, column M: ..."), `PlanValidationError(messages: list[str])`, `PlanInconsistencyError(messages: list[str])`.
-   - [x] Write tests in `bob_tools/planfile/tests/test_model.py` that exercise dataclass construction, frozen behavior (mutation raises), and exception `__str__` formatting.
+Source of truth for compat-mode acceptance:
+`/Users/mhcoen/proj/mcloop/mcloop/checklist.py`. The parser entry
+point is `parse` and the structural-sanity check is
+`_check_structural_sanity`. Verified citations are in design doc
+section 2.1 and section 2.2; refer to those by function name rather
+than line number since line numbers drift across edits.
 
-- [ ] Verify Stage 1 leaves the repo green: ruff check, pytest, and mypy strict all pass.
+Important policy difference from mcloop, per design doc section 4.3:
+operational tags are recognized only in the leading position of a
+task line, not anywhere in the task text. This is stricter than
+mcloop's substring matching.
+
+- [ ] [BATCH] Parse stage and phase headings
+   - [ ] In `parser.py`, implement `_parse_heading(line, line_number)` that recognizes the pattern `^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b` (matches mcloop's `STAGE_RE`). Return (ordinal, keyword, title) or None.
+   - [ ] Implement `_parse_bugs_heading(line)` matching `^#+\s+Bugs\s*$` (mcloop's `BUGS_RE`). Return True or False.
+   - [ ] Implement `_parse_h1(line)` matching `^#\s+(.+)$` for the project title.
+   - [ ] Implement `_parse_subsection(line)` matching `^###\s+(.+)$` for sub-grouping headings such as Manual verification headings.
+   - [ ] Tests in `tests/test_parser.py`: each heading type matches; case-insensitive on stage and phase; bare digits required after the stage or phase keyword. A heading like `## Phase phase_001:` does not match this regex — that strict-mode form is handled in Stage 3.
+
+- [ ] [BATCH] Parse task lines (compat mode, leading-position tag rule)
+   - [ ] Implement `_CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")` matching mcloop's `CHECKBOX_RE`.
+   - [ ] Implement `_parse_task_line(line, line_number)` returning a raw record with indent, status_char, text, line_number — or None.
+   - [ ] Implement `_extract_flag_tags(text)` returning a pair of (flag_tags tuple, remaining_text). Flag tags are recognized only at the leading position of the text, immediately after a stable ID if present. Specifically, scan from the start: if the next token is the bracketed form for USER or for BATCH, consume it and continue scanning; stop at the first non-flag-tag token. Flag tags appearing later in the text are prose, not tags. Per design doc section 4.3.
+   - [ ] Implement `_extract_action_tag(text)` returning a pair of (action_tag or None, remaining_text). The action-tag pattern is the bracketed form starting with "AUTO:" followed by a word character sequence. Recognized only at the leading position after any flag tags. Argument string is the text from the closing bracket to end of line. Non-leading occurrences are prose.
+   - [ ] Implement `_extract_annotations(text)` returning a pair of (annotations tuple, remaining_text). Annotations are bracketed key-colon-value patterns at the end of the line. Keys observed today: `feat`, `fix`. Per design doc section 4.3.
+   - [ ] Tests covering each tag family in isolation, in combination, and absent. Edge cases: nested brackets in annotation values; tag-like substrings in task description text are treated as prose, never as tags.
+
+- [ ] Parse RULEDOUT sibling lines
+   - [ ] Implement `_parse_ruledout_line(line, line_number)` returning a raw RuledOut record. A line is a RULEDOUT line when its stripped form starts with the literal RULEDOUT bracket token. Per mcloop's `parse` function.
+   - [ ] Implement attachment logic: a RULEDOUT line attaches to the nearest task with strictly less indent. If no such task exists in the current phase, attach to the most recent root task (matches mcloop's fallback in `parse`).
+   - [ ] Tests: a RULEDOUT line attaches to a parent task by indent; a top-level RULEDOUT line attaches to the most recent root task; multiple RULEDOUT lines on one task collected in order.
+
+- [ ] Parse @deps lines
+   - [ ] Implement `_DEPS_RE = re.compile(r"^(\s*)@deps\s+(.+)$")`. The captured tail is whitespace-separated task IDs of the form T-NNNNNN (no trailing colon — bare IDs).
+   - [ ] A `@deps` line attaches to the immediately preceding task line at strictly lesser indent. A `@deps` line at the same indent as its task is also accepted (lenient) and emits a validation warning.
+   - [ ] Validation: every referenced ID must exist in the plan; otherwise raise `PlanValidationError` from `validate_plan` (not at parse time — parse only structures, validate checks references).
+   - [ ] Tests: single-line deps with one or more IDs; deps attached to nested subtasks; missing target ID surfaces in `validate_plan`. Per design doc section 6 and Phase A scope in section 8.
+
+- [ ] Assemble the parse tree
+   - [ ] Implement `parse_plan(text: str, *, strict: bool = False, source_path: Path | None = None) -> Plan`. The `strict` parameter is wired but defaults to False (compat mode); strict-mode behavior is added in Stage 3.
+   - [ ] State machine: walk lines once, tracking the current phase (or bugs section), the current subsection within a phase, and a stack of open tasks (by indent). Each task line opens or closes scopes by indent comparison, matching mcloop's logic in `parse`.
+   - [ ] Project title: the first H1 heading seen. Preamble: prose between the H1 and the first phase or bugs heading. Phase prose: prose between a phase heading and its first task or subsection. Subsection prose: prose between a sub-heading and its first task.
+   - [ ] On a syntax violation in compat mode, raise `PlanSyntaxError(message, line, column, path)` with a message that quotes the offending line.
+   - [ ] Tests: a hand-crafted minimal valid plan parses correctly; a missing H1 raises; tasks before any phase land in an implicit phase zero (mcloop tolerates this — see `parse` function and PLAN.EXAMPLE.md fixtures in mcloop); a Bugs section after phases is recognized; subsections inside a phase preserve their tasks.
+
+- [ ] Structural sanity check
+   - [ ] Implement `_check_structural_sanity(parsed_plan)` raising `PlanSyntaxError` on duplicate H1 titles, multiple Bugs sections (any heading level), or duplicate phase/stage ordinals. Per mcloop's `_check_structural_sanity` function; the rationale (no auto-fix) is preserved.
+   - [ ] Tests: each corruption pattern detected with the offending line numbers in the error message.
+
+- [ ] [BATCH] Malformed-input rejection coverage
+   - [ ] Add a parameterized test class `tests/test_parser_rejections.py` exercising each rejection condition with a minimal failing fixture: duplicate H1, multiple Bugs sections, duplicate phase ordinals, malformed annotations (unclosed bracket, missing colon, empty value), action tag without colon, action tag with empty action name. Per Codex's pile-5 acceptance test gap.
+   - [ ] Each test asserts on the specific error message and the line number where the error was detected.
+
+- [ ] [USER] Verify compat-mode parser reads existing PLAN.md files without error. From a shell, run `python -c "from bob_tools.planfile import parse_plan; from pathlib import Path; p = parse_plan(Path('/Users/mhcoen/proj/duplo/PLAN.md').read_text()); print(f'phases={len(p.phases)}, bugs={p.bugs is not None}')"`. Then do the same for `/Users/mhcoen/proj/mcloop/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`. Report the phase counts. No exceptions should be raised. Expected counts: duplo has 8 phases, mcloop has at least 7 stages plus a Bugs section, PLAN.EXAMPLE has 2 stages.
+
+- [ ] Verify Stage 2 leaves the repo green.
