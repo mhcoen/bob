@@ -10,7 +10,9 @@ Stage 2 task-line recognizers and tag extractors:
     sibling lines and returns indent, body, and source line number.
   - ``_attach_ruledout`` resolves the attachment target for a RULEDOUT
     line: nearest strictly-less-indented open ancestor, with fallback
-    to the most recent root task (mcloop's ``parse`` parity).
+    to the most recent root task (mcloop's ``parse`` parity). The
+    parse-then-attach composition test confirms multiple RULEDOUT
+    lines on one task are collected in source order.
   - ``_extract_flag_tags`` consumes leading ``[USER]`` / ``[BATCH]``
     tokens, in isolation and combination, and leaves non-leading
     occurrences as prose (design doc section 4.3).
@@ -181,6 +183,38 @@ class TestAttachRuledOut:
         root = _FakeTask(indent_level=0, name="root")
         attached = _attach_ruledout(2, [], [root])
         assert attached is root
+
+    def test_multiple_ruledouts_on_one_task_collected_in_order(self) -> None:
+        # Compose the building blocks the orchestration layer will use:
+        # parse each [RULEDOUT] line, route it to its parent via
+        # _attach_ruledout, then append to the parent's list. Three
+        # sibling RULEDOUTs at the child indent must all land on the
+        # same parent and stay in source order.
+        root = _FakeTask(indent_level=0, name="root")
+        child = _FakeTask(indent_level=2, name="child")
+        stack = [root, child]
+        roots = [root]
+
+        lines = [
+            ("    [RULEDOUT] first approach", 10),
+            ("    [RULEDOUT] second approach", 11),
+            ("    [RULEDOUT] third approach", 12),
+        ]
+        collected: dict[str, list[tuple[str, int]]] = {}
+        for raw_line, line_number in lines:
+            rec = _parse_ruledout_line(raw_line, line_number)
+            assert rec is not None
+            target = _attach_ruledout(len(rec.indent), stack, roots)
+            assert target is child
+            collected.setdefault(target.name, []).append((rec.text, rec.line_number))
+
+        assert collected == {
+            "child": [
+                ("first approach", 10),
+                ("second approach", 11),
+                ("third approach", 12),
+            ],
+        }
 
 
 class TestExtractFlagTags:
