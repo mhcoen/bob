@@ -731,3 +731,126 @@ class TestParsePlanStateMachine:
         path = Path("/tmp/PLAN.md")
         plan = parse_plan("## Stage 1: Core\n- [ ] x\n", source_path=path)
         assert plan.source_path == path
+
+
+class TestParsePlanProse:
+    """Tests for project title, preamble, phase prose, and subsection prose.
+
+    Per design doc section 4.1 grammar, prose is allowed in three places:
+    after the H1 (the preamble), after a phase heading (phase prose),
+    and after a ``###`` subsection heading (subsection prose). Each
+    region ends at the next structural boundary — phase/bugs heading
+    for the preamble, first task or subsection for phase prose, and
+    first task for subsection prose.
+    """
+
+    def test_h1_sets_project_title(self) -> None:
+        plan = parse_plan("# My Project\n## Stage 1: Core\n")
+        assert plan.project_title == "My Project"
+        assert plan.preamble == ""
+
+    def test_no_h1_means_empty_title(self) -> None:
+        plan = parse_plan("## Stage 1: Core\n- [ ] x\n")
+        assert plan.project_title == ""
+        assert plan.preamble == ""
+
+    def test_h2_with_stage_keyword_does_not_match_h1(self) -> None:
+        # `## Stage 1: Core` is consumed by the phase regex before the
+        # H1 check runs, so it does not leak into the title slot.
+        plan = parse_plan("## Stage 1: Core\n- [ ] x\n")
+        assert plan.project_title == ""
+        assert len(plan.phases) == 1
+
+    def test_preamble_between_h1_and_phase(self) -> None:
+        text = "# Project\n\nIntro paragraph.\n\n## Stage 1: Core\n- [ ] task\n"
+        plan = parse_plan(text)
+        assert plan.project_title == "Project"
+        assert plan.preamble == "Intro paragraph."
+
+    def test_preamble_multi_paragraph_preserves_blank_lines(self) -> None:
+        text = (
+            "# Project\n\nFirst paragraph.\n\nSecond paragraph.\n\n## Stage 1: Core\n"
+        )
+        plan = parse_plan(text)
+        assert plan.preamble == "First paragraph.\n\nSecond paragraph."
+
+    def test_preamble_ends_at_bugs_heading(self) -> None:
+        # Per the grammar, the preamble is followed by ``PhaseOrBugs+`` —
+        # a bugs section is just as valid a terminator as a phase.
+        text = "# Project\nIntro.\n## Bugs\n- [ ] crash\n"
+        plan = parse_plan(text)
+        assert plan.preamble == "Intro."
+        assert plan.bugs is not None
+        assert plan.bugs.tasks[0].text == "crash"
+
+    def test_phase_prose_between_heading_and_first_task(self) -> None:
+        text = "## Stage 1: Core\n\nThe goal is X.\n\n- [ ] task\n"
+        plan = parse_plan(text)
+        assert plan.phases[0].prose == "The goal is X."
+
+    def test_phase_prose_ends_at_subsection(self) -> None:
+        text = (
+            "## Stage 1: Core\n\nPhase intro.\n\n### Manual verification\n- [ ] check\n"
+        )
+        plan = parse_plan(text)
+        phase = plan.phases[0]
+        assert phase.prose == "Phase intro."
+        assert phase.subsections[0].prose == ""
+
+    def test_subsection_prose_between_heading_and_first_task(self) -> None:
+        text = (
+            "## Stage 1: Core\n"
+            "- [ ] phase task\n"
+            "### Manual verification\n"
+            "\n"
+            "Run by hand.\n"
+            "\n"
+            "- [ ] check\n"
+        )
+        plan = parse_plan(text)
+        sub = plan.phases[0].subsections[0]
+        assert sub.prose == "Run by hand."
+
+    def test_no_prose_when_task_immediately_follows_heading(self) -> None:
+        text = "# Project\n## Stage 1: Core\n- [ ] task\n"
+        plan = parse_plan(text)
+        assert plan.preamble == ""
+        assert plan.phases[0].prose == ""
+
+    def test_lines_before_h1_are_dropped(self) -> None:
+        # Outside any active prose region, prose is dropped — matches the
+        # grammar (Preamble requires an H1 anchor).
+        text = "noise line\n# Project\nIntro.\n## Stage 1: Core\n"
+        plan = parse_plan(text)
+        assert plan.project_title == "Project"
+        assert plan.preamble == "Intro."
+
+    def test_prose_after_first_task_in_phase_is_dropped(self) -> None:
+        # Phase prose is "between the phase heading and the first task
+        # or subsection". Lines after the first task close the
+        # accumulator and are dropped in compat mode.
+        text = "## Stage 1: Core\n- [ ] task\nstray prose\n"
+        plan = parse_plan(text)
+        assert plan.phases[0].prose == ""
+        assert plan.phases[0].tasks[0].text == "task"
+
+    def test_multiple_phases_each_get_own_prose(self) -> None:
+        text = (
+            "## Stage 1: A\n"
+            "Prose A.\n"
+            "- [ ] task A\n"
+            "## Stage 2: B\n"
+            "Prose B.\n"
+            "- [ ] task B\n"
+        )
+        plan = parse_plan(text)
+        assert plan.phases[0].prose == "Prose A."
+        assert plan.phases[1].prose == "Prose B."
+
+    def test_phase_prose_at_end_of_file_without_tasks(self) -> None:
+        # Final phase has prose but no task to close the accumulator —
+        # the end-of-input close handler must still finalize it.
+        text = "## Stage 1: Core\n\nLone prose.\n"
+        plan = parse_plan(text)
+        assert plan.phases[0].prose == "Lone prose."
+        assert plan.phases[0].tasks == ()

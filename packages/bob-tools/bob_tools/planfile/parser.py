@@ -71,6 +71,15 @@ _BUGS_RE = re.compile(r"^#+\s+Bugs\s*$", re.IGNORECASE)
 # group following tasks until another subsection or phase ends them.
 _SUBSECTION_RE = re.compile(r"^###\s+(.+?)\s*$")
 
+# H1 project-title heading: exactly one ``#`` followed by free title
+# text. Per design doc section 4.1 grammar ``Preamble ← H1 NL Prose?``.
+# H2 (``##``) is consumed earlier by `_STAGE_RE` / `_BUGS_RE`; this
+# regex requires a single leading ``#`` so multi-hash headings cannot
+# match here. Recognized only before the first phase or bugs heading;
+# subsequent H1 lines (malformed in strict mode, dropped in compat
+# mode) fall through to the active prose accumulator.
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
+
 # Leading task ID: ``T-NNNNNN:`` followed by mandatory whitespace.
 # Per design doc section 4.2 grammar ``TaskId ← TaskRef ":" WS``.
 # Recognized only at the start of the task body, before any flag tags.
@@ -91,15 +100,23 @@ def parse_plan(
     enables the format additions in design doc section 4 (magic line,
     mandatory ``T-NNNNNN:`` ids, ``<!-- phase_id: ... -->`` comments).
 
-    Stage 2.5.1 wired the signature; 2.5.2 (this) walks ``text`` line
-    by line, tracking the current phase (or bugs section), the current
-    subsection within a phase, and a stack of open tasks by indent.
-    Each task line opens or closes scopes by indent comparison, matching
-    mcloop's logic in ``checklist.py:parse``. ``@deps`` and
+    Stage 2.5.1 wired the signature; 2.5.2 walks ``text`` line by line,
+    tracking the current phase (or bugs section), the current subsection
+    within a phase, and a stack of open tasks by indent. 2.5.3 (this)
+    extracts the project title from the first H1 and accumulates prose
+    in three regions: the preamble (after the H1, before the first
+    phase or bugs heading), phase prose (after a phase heading, before
+    the first task or subsection), and subsection prose (after a ``###``
+    heading, before the first task). Prose-region accumulators close
+    when the relevant boundary line is consumed; lines outside any
+    active accumulator (e.g. a task line before any phase, or prose
+    after the first task in a phase) are dropped silently in compat
+    mode. Each task line opens or closes scopes by indent comparison,
+    matching mcloop's logic in ``checklist.py:parse``. ``@deps`` and
     ``[RULEDOUT]`` sibling lines are routed via :func:`_attach_deps`
     and :func:`_attach_ruledout` and accumulated on the parent task.
-    Project title and preamble prose extraction land in 2.5.3;
-    syntax-error reporting in 2.5.4; strict-mode behavior in Stage 3.
+    Syntax-error reporting lands in 2.5.4; strict-mode behavior in
+    Stage 3.
     """
     del strict
     lines = text.splitlines()
@@ -111,11 +128,33 @@ def parse_plan(
     in_bugs = False
     stack: list[_TaskBuilder] = []
 
+    project_title = ""
+    project_title_seen = False
+    preamble_lines: list[str] = []
+    preamble_active = False
+    phase_prose_lines: list[str] | None = None
+    subsection_prose_lines: list[str] | None = None
+
+    def _close_subsection_prose() -> None:
+        nonlocal subsection_prose_lines
+        if subsection_prose_lines is not None and current_subsection is not None:
+            current_subsection.prose = _finalize_prose(subsection_prose_lines)
+        subsection_prose_lines = None
+
+    def _close_phase_prose() -> None:
+        nonlocal phase_prose_lines
+        if phase_prose_lines is not None and current_phase is not None:
+            current_phase.prose = _finalize_prose(phase_prose_lines)
+        phase_prose_lines = None
+
     for idx, line in enumerate(lines):
         line_number = idx + 1
 
         heading = _parse_phase_heading(line)
         if heading is not None:
+            _close_subsection_prose()
+            _close_phase_prose()
+            preamble_active = False
             ordinal, keyword, title = heading
             current_phase = _PhaseBuilder(
                 ordinal=ordinal,
@@ -127,9 +166,13 @@ def parse_plan(
             current_subsection = None
             in_bugs = False
             stack.clear()
+            phase_prose_lines = []
             continue
 
         if _BUGS_RE.match(line):
+            _close_subsection_prose()
+            _close_phase_prose()
+            preamble_active = False
             bugs_b = _BugsBuilder(line_number=line_number)
             current_phase = None
             current_subsection = None
@@ -137,15 +180,30 @@ def parse_plan(
             stack.clear()
             continue
 
+        if current_phase is None and not in_bugs:
+            h1_m = _H1_RE.match(line)
+            if h1_m is not None:
+                if not project_title_seen:
+                    project_title = h1_m.group(1).strip()
+                    project_title_seen = True
+                    preamble_active = True
+                    continue
+                # Subsequent H1 falls through to the preamble accumulator
+                # so the raw text is preserved. Strict mode (Stage 3)
+                # will raise on duplicate H1s.
+
         if not in_bugs and current_phase is not None:
             sm = _SUBSECTION_RE.match(line)
             if sm is not None:
+                _close_subsection_prose()
+                _close_phase_prose()
                 current_subsection = _SubsectionBuilder(
                     title=sm.group(1).strip(),
                     line_number=line_number,
                 )
                 current_phase.subsections.append(current_subsection)
                 stack.clear()
+                subsection_prose_lines = []
                 continue
 
         scope_tasks = _current_scope_tasks(
@@ -174,7 +232,19 @@ def parse_plan(
 
         raw = _parse_task_line(line, line_number)
         if raw is None:
+            if preamble_active:
+                preamble_lines.append(line)
+            elif subsection_prose_lines is not None:
+                subsection_prose_lines.append(line)
+            elif phase_prose_lines is not None:
+                phase_prose_lines.append(line)
+            # else: line outside any active prose region (e.g. before
+            # the first H1 or after the first task in a section) —
+            # dropped in compat mode.
             continue
+
+        _close_subsection_prose()
+        _close_phase_prose()
 
         builder = _build_task(raw)
         indent = builder.indent_level
@@ -192,14 +262,35 @@ def parse_plan(
 
         stack.append(builder)
 
+    _close_subsection_prose()
+    _close_phase_prose()
+
     return Plan(
         magic_version=None,
-        project_title="",
-        preamble="",
+        project_title=project_title,
+        preamble=_finalize_prose(preamble_lines),
         phases=tuple(p.freeze() for p in phases_b),
         bugs=bugs_b.freeze() if bugs_b is not None else None,
         source_path=source_path,
     )
+
+
+def _finalize_prose(lines: list[str]) -> str:
+    """Join accumulated prose lines, trimming blank lines from the ends.
+
+    Internal blank lines (paragraph breaks) and any leading/trailing
+    whitespace within a non-blank line are preserved — Markdown attaches
+    semantic weight to indent (code blocks, list continuations), so we
+    only strip wholly-blank wrapper lines rather than calling
+    ``str.strip()`` on the joined text.
+    """
+    start = 0
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    end = len(lines)
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join(lines[start:end])
 
 
 def _parse_phase_heading(line: str) -> tuple[int, str, str] | None:
