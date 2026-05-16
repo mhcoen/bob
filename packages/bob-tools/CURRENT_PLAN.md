@@ -13,10 +13,10 @@ line.
    - [x] Update phase parsing: when a phase-id comment line follows a phase heading before any task, set `Phase.phase_id` to that value and `Phase.phase_id_source` to "explicit_comment".
    - [x] Tests: magic line captured; phase-id comment attaches to the immediately preceding phase heading; a phase-id comment not on its own line does not attach to a task's phase (it is a different mechanism — task IDs, not phase IDs).
 
-- [ ] Recognize the legacy `## Phase phase_NNN: Title` heading form
+- [x] Recognize the legacy `## Phase phase_NNN: Title` heading form
    - [x] Implement `_LEDGER_PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")` matching `mcloop/ledger_emit.py`'s `_PHASE_HEADER_RE`. Identical for the same reason.
    - [x] In both strict and compat mode: when a heading matches this regex but not the stage-or-phase ordinal regex (because the id is non-numeric, e.g. phase_001), accept it, set `Phase.phase_id` to the captured id, and `Phase.phase_id_source` to "explicit_header". Per design doc section 7.1.
-   - [ ] Tests: a heading with a non-numeric phase id parses with that id and source "explicit_header"; a heading with a numeric ordinal parses with that ordinal and phase_id None unless a comment follows (then "explicit_comment"); the canonicalizer eventually rewrites explicit_header to explicit_comment, but the parser preserves both forms as input.
+   - [x] Tests: a heading with a non-numeric phase id parses with that id and source "explicit_header"; a heading with a numeric ordinal parses with that ordinal and phase_id None unless a comment follows (then "explicit_comment"); the canonicalizer eventually rewrites explicit_header to explicit_comment, but the parser preserves both forms as input.
 
 - [ ] Stable task IDs
    - [ ] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
