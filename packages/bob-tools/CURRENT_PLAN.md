@@ -50,9 +50,9 @@ mcloop's substring matching.
    - [x] On a syntax violation in compat mode, raise `PlanSyntaxError(message, line, column, path)` with a message that quotes the offending line.
    - [x] Tests: a hand-crafted minimal valid plan parses correctly; a missing H1 raises; tasks before any phase land in an implicit phase zero (mcloop tolerates this — see `parse` function and PLAN.EXAMPLE.md fixtures in mcloop); a Bugs section after phases is recognized; subsections inside a phase preserve their tasks.
 
-- [ ] Structural sanity check
+- [x] Structural sanity check
    - [x] Implement `_check_structural_sanity(parsed_plan)` raising `PlanSyntaxError` on duplicate H1 titles, multiple Bugs sections (any heading level), or duplicate phase/stage ordinals. Per mcloop's `_check_structural_sanity` function; the rationale (no auto-fix) is preserved.
-   - [ ] Tests: each corruption pattern detected with the offending line numbers in the error message.
+   - [x] Tests: each corruption pattern detected with the offending line numbers in the error message.
 
 - [ ] [BATCH] Malformed-input rejection coverage
    - [ ] Add a parameterized test class `tests/test_parser_rejections.py` exercising each rejection condition with a minimal failing fixture: duplicate H1, multiple Bugs sections, duplicate phase ordinals, malformed annotations (unclosed bracket, missing colon, empty value), action tag without colon, action tag with empty action name. Per Codex's pile-5 acceptance test gap.
