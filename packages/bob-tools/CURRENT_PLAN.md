@@ -19,10 +19,10 @@
    - [x] `test_render_parse_render_stable`: for each fixture plan, `render(parse(render(plan)))` equals `render(plan)`. This is the canonical-form fixed-point property.
    - [x] Fixtures live in `bob_tools/planfile/tests/fixtures/` as markdown files; the test loads them at runtime.
 
-- [ ] Generative property tests
+- [x] Generative property tests
    - [x] Add `tests/test_generative.py`. Implement a small Plan generator using stdlib (no Hypothesis dependency): random small valid trees with random phase counts, random task counts per phase, random tag combinations, random deps among declared IDs. Per Codex's pile-5 acceptance test gap.
    - [x] Properties: `parse(render(plan))` equals `plan` modulo line numbers; task IDs in the rendered plan are unique; `next_tasks` returns tasks in the expected canonical order (defer this property to after Stage 5 lands `next_tasks`).
-   - [ ] Run 100 random plans per property by default; bump to 1000 in a slow-mode pytest marker.
+   - [x] Run 100 random plans per property by default; bump to 1000 in a slow-mode pytest marker.
 
 - [ ] Canonicalization function
    - [ ] Implement `canonicalize(text: str) -> str` as `render_plan(parse_plan(text))`. Lossless formatting only. Does not assign IDs or add phase-id comments — that is the `migrate` operation in Stage 5. Per design doc section 3.2.
