@@ -72,6 +72,20 @@
      of any task in the previous section. Verified intentional via the
      `test_new_phase_resets_indent_stack` test.
 
+- 2026-05-15 [2.5.4] Compat-mode syntax errors are scoped narrowly. The
+  task description says "raise PlanSyntaxError on syntax violations in
+  compat mode", but most of the candidates (orphan tasks, prose outside
+  accumulators, `### subsection` inside Bugs) have established mcloop
+  precedent for being silently tolerated and so stay dropped in compat
+  mode (deferred to strict mode in Stage 3, per the 2.5.2 NOTES entry).
+  The one case that does raise in compat mode is an orphan `@deps` line
+  with no preceding task to attach to: `@deps` is a planfile-introduced
+  feature with no mcloop history, so there is no compat behavior to
+  preserve, and the keyword has no semantic interpretation absent a
+  target task. The `_raise_syntax_error` helper centralizes the
+  message-quoting convention (backticks around the offending line) so
+  Stage 3's strict-mode call sites can reuse the same format.
+
 ## Hypotheses
 
 ## Eliminated

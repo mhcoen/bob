@@ -6,12 +6,13 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import NoReturn, Protocol, TypeVar
 
 from bob_tools.planfile.model import (
     BugsSection,
     Phase,
     Plan,
+    PlanSyntaxError,
     RuledOut,
     Subsection,
     Task,
@@ -102,21 +103,27 @@ def parse_plan(
 
     Stage 2.5.1 wired the signature; 2.5.2 walks ``text`` line by line,
     tracking the current phase (or bugs section), the current subsection
-    within a phase, and a stack of open tasks by indent. 2.5.3 (this)
-    extracts the project title from the first H1 and accumulates prose
-    in three regions: the preamble (after the H1, before the first
-    phase or bugs heading), phase prose (after a phase heading, before
-    the first task or subsection), and subsection prose (after a ``###``
-    heading, before the first task). Prose-region accumulators close
-    when the relevant boundary line is consumed; lines outside any
-    active accumulator (e.g. a task line before any phase, or prose
-    after the first task in a phase) are dropped silently in compat
-    mode. Each task line opens or closes scopes by indent comparison,
-    matching mcloop's logic in ``checklist.py:parse``. ``@deps`` and
-    ``[RULEDOUT]`` sibling lines are routed via :func:`_attach_deps`
-    and :func:`_attach_ruledout` and accumulated on the parent task.
-    Syntax-error reporting lands in 2.5.4; strict-mode behavior in
-    Stage 3.
+    within a phase, and a stack of open tasks by indent. 2.5.3 extracts
+    the project title from the first H1 and accumulates prose in three
+    regions: the preamble (after the H1, before the first phase or bugs
+    heading), phase prose (after a phase heading, before the first task
+    or subsection), and subsection prose (after a ``###`` heading,
+    before the first task). Prose-region accumulators close when the
+    relevant boundary line is consumed; lines outside any active
+    accumulator (e.g. a task line before any phase, or prose after the
+    first task in a phase) are dropped silently in compat mode (the
+    orphan-task case matches mcloop, which assigns ``stage=""`` rather
+    than erroring; strict mode in Stage 3 will raise). Each task line
+    opens or closes scopes by indent comparison, matching mcloop's logic
+    in ``checklist.py:parse``. ``@deps`` and ``[RULEDOUT]`` sibling
+    lines are routed via :func:`_attach_deps` and :func:`_attach_ruledout`
+    and accumulated on the parent task. 2.5.4 (this) raises
+    :class:`PlanSyntaxError` on syntax violations even in compat mode:
+    today, an ``@deps`` line that cannot attach to any preceding task
+    in the current section. The orphan ``@deps`` case has no semantic
+    interpretation and no mcloop-tolerance to preserve (mcloop never
+    recognized ``@deps`` at all). The error message quotes the offending
+    line so the location is unambiguous to the human fixing the file.
     """
     del strict
     lines = text.splitlines()
@@ -226,8 +233,15 @@ def parse_plan(
         if dm is not None:
             indent = len(dm.group(1))
             target, _lenient = _attach_deps(indent, stack)
-            if target is not None:
-                target.deps.extend(dm.group(2).split())
+            if target is None:
+                _raise_syntax_error(
+                    "@deps line has no preceding task to attach to",
+                    line_text=line,
+                    line_number=line_number,
+                    source_path=source_path,
+                    column=indent + 1,
+                )
+            target.deps.extend(dm.group(2).split())
             continue
 
         raw = _parse_task_line(line, line_number)
@@ -257,8 +271,8 @@ def parse_plan(
         elif scope_tasks is not None:
             scope_tasks.append(builder)
         # else: task line before any phase/bugs — silently dropped in
-        # compat mode; strict mode (2.5.4) will surface this as a
-        # PlanSyntaxError.
+        # compat mode (matches mcloop, which assigns ``stage=""``);
+        # strict mode (Stage 3) will surface this as a PlanSyntaxError.
 
         stack.append(builder)
 
@@ -272,6 +286,34 @@ def parse_plan(
         phases=tuple(p.freeze() for p in phases_b),
         bugs=bugs_b.freeze() if bugs_b is not None else None,
         source_path=source_path,
+    )
+
+
+def _raise_syntax_error(
+    message: str,
+    *,
+    line_text: str,
+    line_number: int,
+    source_path: Path | None,
+    column: int = 1,
+) -> NoReturn:
+    """Raise :class:`PlanSyntaxError` with the offending line quoted.
+
+    Per the design doc section 9 contract, the error carries
+    ``(message, line, column, path)``; ``__str__`` formats them as
+    ``PLAN.md invalid at line N, column M: <message>``. The task
+    description for 2.5.4 adds: the message itself must quote the
+    offending line so the human reading the error can see exactly which
+    text triggered the rejection without having to open the file. The
+    quoted form uses backticks rather than ``repr()`` because the line
+    has already had its trailing newline stripped by ``splitlines()``,
+    so there is no escape-sequence ambiguity to disambiguate.
+    """
+    raise PlanSyntaxError(
+        f"{message}: `{line_text}`",
+        line_number,
+        column,
+        source_path,
     )
 
 

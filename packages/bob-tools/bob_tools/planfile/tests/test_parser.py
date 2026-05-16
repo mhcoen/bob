@@ -37,10 +37,11 @@ Stage 2 task-line recognizers and tag extractors:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
-from bob_tools.planfile.model import TaskStatus
+from bob_tools.planfile.model import PlanSyntaxError, TaskStatus
 from bob_tools.planfile.parser import (
     _CHECKBOX_RE,
     _DEPS_RE,
@@ -718,16 +719,14 @@ class TestParsePlanStateMachine:
 
     def test_tasks_before_any_section_are_dropped_in_compat_mode(self) -> None:
         # No phase or bugs heading has been seen yet, so a task line is
-        # an orphan. Compat mode drops silently; strict mode (2.5.4)
-        # will surface this as a PlanSyntaxError. Either way no tasks
-        # appear on the resulting Plan.
+        # an orphan. Compat mode drops silently to match mcloop's
+        # parser, which assigns ``stage=""`` rather than erroring.
+        # Strict mode (Stage 3) will surface this as a PlanSyntaxError.
         plan = parse_plan("- [ ] orphan\n## Stage 1: Core\n- [ ] real\n")
         assert len(plan.phases) == 1
         assert tuple(t.text for t in plan.phases[0].tasks) == ("real",)
 
     def test_source_path_passes_through(self) -> None:
-        from pathlib import Path
-
         path = Path("/tmp/PLAN.md")
         plan = parse_plan("## Stage 1: Core\n- [ ] x\n", source_path=path)
         assert plan.source_path == path
@@ -854,3 +853,50 @@ class TestParsePlanProse:
         plan = parse_plan(text)
         assert plan.phases[0].prose == "Lone prose."
         assert plan.phases[0].tasks == ()
+
+
+class TestParsePlanCompatModeSyntaxErrors:
+    """Compat-mode raises :class:`PlanSyntaxError` on genuine syntax breakage.
+
+    Compat mode is intentionally lenient about cases mcloop's parser
+    accepted (orphan tasks before any phase, prose outside accumulators,
+    etc.). But a ``@deps`` line with no preceding task to attach to has
+    no semantic interpretation — the keyword means "this task depends
+    on" and there is no task. mcloop never recognized ``@deps`` at all,
+    so there is no compat behavior to preserve. The parser raises
+    :class:`PlanSyntaxError` with the offending line quoted in the
+    message and the source line/column populated.
+    """
+
+    def test_orphan_deps_line_before_any_task_raises(self) -> None:
+        text = "## Stage 1: Core\n  @deps T-000001\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        err = exc_info.value
+        assert err.line == 2
+        assert err.column == 3
+        assert "no preceding task" in err.message
+        assert "`  @deps T-000001`" in err.message
+
+    def test_orphan_deps_with_no_phase_raises(self) -> None:
+        # Even before any section, a stray @deps is malformed: there is
+        # no plausible target. The orphan-task tolerance does not extend
+        # here because @deps has no mcloop precedent.
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("@deps T-000001\n")
+        assert exc_info.value.line == 1
+        assert exc_info.value.column == 1
+
+    def test_syntax_error_carries_source_path(self) -> None:
+        path = Path("/tmp/PLAN.md")
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("@deps T-000001\n", source_path=path)
+        assert exc_info.value.path == path
+
+    def test_syntax_error_str_format_matches_design_doc(self) -> None:
+        # Section 9 contract: "PLAN.md invalid at line N, column M: ..."
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("@deps T-000001\n")
+        rendered = str(exc_info.value)
+        assert rendered.startswith("PLAN.md invalid at line 1, column 1: ")
+        assert "@deps T-000001" in rendered
