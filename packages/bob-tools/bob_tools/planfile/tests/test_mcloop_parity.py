@@ -29,17 +29,41 @@ this module asserts agreement on every coarse-grained structural
 fact the two parsers should see identically on a compat-mode plan:
 phase/stage ordinals, presence of a Bugs section with content,
 per-phase task counts, and per-task ``[RULEDOUT]`` attachment counts.
-For the operational tags (USER, BATCH, AUTO) the assertion is the
-``bob ⊆ mcloop`` subset relation rather than full equality: bob_tools
-recognizes tags only at the leading position, while mcloop substring-
-matches them anywhere in the task body. The reverse-direction gaps
-(mcloop classifies a prose-mention as tagged; bob_tools does not) are
-the one documented divergence acknowledged in design doc section 4.3
-and narrowed further in the following Stage 8 task. Asserting the
-subset relation here catches any bob_tools regression that would
-flag a task the substring matcher never saw, without failing the
-parity suite on the prose-mention cases already present in the real
-fixtures.
+
+For the operational tags (USER, BATCH, AUTO) full equality is not
+assertable because the two parsers use different recognizers:
+
+* bob_tools matches each tag only at the leading position of the
+  task text (after any task ID is stripped), per design doc section
+  4.3.
+* mcloop's ``is_user_task``, ``is_batch_task``, and ``is_auto_task``
+  are plain substring checks against ``task.text`` — ``_USER_TAG in
+  task.text``, ``_BATCH_TAG in task.text``, and ``_AUTO_TAG_RE.search
+  (task.text)`` respectively. BATCH gets the exact same substring
+  treatment as USER in ``is_batch_task`` (the design doc's
+  prose-mention divergence note flagged USER explicitly, but the
+  same shape applies to BATCH and AUTO, which is the detail this
+  task pins down).
+
+The asymmetry is therefore one-sided: any task whose body merely
+*mentions* the bracket form (``"marked with [USER]"``, ```"use a
+[BATCH] parent"```, etc.) is tagged by mcloop and not by bob_tools.
+The reverse — bob_tools flagging a task that mcloop's substring
+matcher misses — is impossible by construction: a leading-anchored
+match is necessarily also a substring match. The parity assertion
+encodes this directly:
+
+1. ``bob ⊆ mcloop`` (subset relation) on each of USER / BATCH /
+   AUTO. A violation in this direction would be a bob_tools regression.
+2. For every mcloop-only divergence (mcloop flags it, bob_tools
+   does not), the corresponding bracket literal must be present
+   somewhere in ``task.text``. This is tautologically true given
+   mcloop's definition, so the assertion's job is anchoring the
+   *test's* claim: the only allowed divergences are substring-match
+   prose-mention cases, never some other unrelated disagreement.
+
+Together those two checks express "the parity test allows this
+specific divergence and asserts nothing else differs."
 """
 
 from __future__ import annotations
@@ -66,6 +90,17 @@ _MCLOOP_ROOT = Path("/Users/mhcoen/proj/mcloop")
 # file does not lock in the private name; mcloop's documented header
 # grammar ("Stage N" / "Phase N") is the actual contract being verified.
 _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
+
+# Mirrors of mcloop's tag literals (``_USER_TAG``, ``_BATCH_TAG``,
+# ``_AUTO_TAG_RE``). Used by the parity test to verify that every
+# mcloop-only flag/action divergence is anchored to a bracket literal
+# actually present in the task text — the substring-match
+# prose-mention signature. Defined locally rather than imported from
+# mcloop's underscore-prefixed constants so this test does not lock
+# in mcloop's private names; mcloop's tag grammar is the contract.
+_LITERAL_USER_RE = re.compile(r"\[USER\]")
+_LITERAL_BATCH_RE = re.compile(r"\[BATCH\]")
+_LITERAL_AUTO_RE = re.compile(r"\[AUTO:\w+\]")
 
 
 def _load_mcloop_checklist() -> Any | None:
@@ -401,6 +436,7 @@ def test_compat_parse_matches_mcloop(source_path: Path) -> None:
     ruledout_mismatches: list[tuple[int, int, int]] = []
     status_mismatches: list[tuple[int, str, str]] = []
     flag_subset_violations: list[tuple[int, str]] = []
+    unexplained_mc_only: list[tuple[int, str, str]] = []
 
     for ln in sorted(bob_by_line):
         b = bob_by_line[ln]
@@ -420,15 +456,45 @@ def test_compat_parse_matches_mcloop(source_path: Path) -> None:
         # substring matcher misses would imply a bob_tools parser bug,
         # because mcloop's substring is necessarily a superset of any
         # leading-anchored match. The reverse direction (mcloop=True,
-        # bob=False) is the prose-mention divergence handled by the
-        # next Stage 8 task.
-        for tag, bob_has, mc_has in (
-            ("USER", "USER" in b.flag_tags, checklist.is_user_task(m)),
-            ("BATCH", "BATCH" in b.flag_tags, checklist.is_batch_task(m)),
-            ("AUTO", b.action_tag is not None, checklist.is_auto_task(m)),
-        ):
+        # bob=False) is the documented prose-mention divergence: the
+        # mcloop literal (``[USER]`` / ``[BATCH]`` / ``[AUTO:...]``)
+        # appears somewhere in the task text but not at the leading
+        # position, so mcloop's plain-substring matcher fires while
+        # bob_tools' leading-anchored matcher does not.
+        flag_checks = (
+            (
+                "USER",
+                "USER" in b.flag_tags,
+                checklist.is_user_task(m),
+                _LITERAL_USER_RE,
+            ),
+            (
+                "BATCH",
+                "BATCH" in b.flag_tags,
+                checklist.is_batch_task(m),
+                _LITERAL_BATCH_RE,
+            ),
+            (
+                "AUTO",
+                b.action_tag is not None,
+                checklist.is_auto_task(m),
+                _LITERAL_AUTO_RE,
+            ),
+        )
+        for tag, bob_has, mc_has, literal_re in flag_checks:
             if bob_has and not mc_has:
                 flag_subset_violations.append((ln, tag))
+            elif mc_has and not bob_has:
+                # The mcloop-only direction is allowed only as a
+                # substring-match prose mention: the bracket literal
+                # must be present somewhere in the raw task text.
+                # mcloop's classifier defines this tautologically, so
+                # a failure here means we are no longer reading the
+                # same task on each side (line-number drift in one
+                # parser, an mcloop API change, or a bob_tools
+                # text-stripping bug that erased the bracket entirely).
+                if not literal_re.search(m.text):
+                    unexplained_mc_only.append((ln, tag, m.text))
 
     assert not status_mismatches, (
         f"per-task checkbox status disagrees on {source_path} "
@@ -443,4 +509,13 @@ def test_compat_parse_matches_mcloop(source_path: Path) -> None:
         f"misses on {source_path} (line, tag): {flag_subset_violations}. "
         f"This would mean bob_tools recognized a tag mcloop could not "
         f"have seen, which contradicts the bob⊆mcloop subset relation."
+    )
+    assert not unexplained_mc_only, (
+        f"mcloop classifies tasks on {source_path} that bob_tools does "
+        f"not, without the corresponding bracket literal appearing in "
+        f"the raw task text. The only allowed mcloop-only divergence is "
+        f"the substring-match prose-mention case; an mcloop-only flag "
+        f"with no bracket literal in the text means the two parsers are "
+        f"disagreeing on something other than substring-vs-leading "
+        f"anchoring. (line, tag, text): {unexplained_mc_only}"
     )
