@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol, TypeVar
 
 # Checkbox line: indent, status marker, body text. Matches mcloop's
 # CHECKBOX_RE so loose-edited PLAN.md files parse identically.
@@ -90,6 +92,45 @@ def _parse_ruledout_line(line: str, line_number: int) -> _RawRuledOut | None:
         text=m.group(2).strip(),
         line_number=line_number,
     )
+
+
+class _HasIndentLevel(Protocol):
+    """Anything with an integer ``indent_level`` attribute.
+
+    Used by :func:`_attach_ruledout` so it can resolve attachment over
+    either the eventual frozen ``Task`` model objects or the mutable
+    builder records the parser uses while constructing them.
+    """
+
+    @property
+    def indent_level(self) -> int: ...
+
+
+_T = TypeVar("_T", bound=_HasIndentLevel)
+
+
+def _attach_ruledout(
+    indent: int,
+    stack: Sequence[_T],
+    root_tasks: Sequence[_T],
+) -> _T | None:
+    """Resolve the task a ``[RULEDOUT]`` line should attach to.
+
+    Mirrors mcloop's ``parse`` (``checklist.py`` lines 189-204): walk
+    the open-ancestor stack from innermost to outermost and return the
+    first task whose indent is strictly less than the RULEDOUT line's
+    indent. If no such ancestor exists in the current phase, fall back
+    to the most recent root task (mcloop's "orphan" handling). Returns
+    ``None`` only when both ``stack`` and ``root_tasks`` are empty —
+    i.e. a stray ``[RULEDOUT]`` before any task in the phase, which
+    the caller should drop.
+    """
+    for task in reversed(stack):
+        if task.indent_level < indent:
+            return task
+    if root_tasks:
+        return root_tasks[-1]
+    return None
 
 
 def _extract_flag_tags(text: str) -> tuple[tuple[str, ...], str]:

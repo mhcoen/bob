@@ -6,6 +6,11 @@ Stage 2 task-line recognizers and tag extractors:
     marker (space, ``x``, ``X``, ``!``); rejects malformed forms.
   - ``_parse_task_line`` returns a raw record on checkbox lines and
     ``None`` on anything else.
+  - ``_parse_ruledout_line`` recognizes leading-position ``[RULEDOUT]``
+    sibling lines and returns indent, body, and source line number.
+  - ``_attach_ruledout`` resolves the attachment target for a RULEDOUT
+    line: nearest strictly-less-indented open ancestor, with fallback
+    to the most recent root task (mcloop's ``parse`` parity).
   - ``_extract_flag_tags`` consumes leading ``[USER]`` / ``[BATCH]``
     tokens, in isolation and combination, and leaves non-leading
     occurrences as prose (design doc section 4.3).
@@ -20,16 +25,27 @@ Stage 2 task-line recognizers and tag extractors:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from bob_tools.planfile.parser import (
     _CHECKBOX_RE,
+    _attach_ruledout,
     _extract_action_tag,
     _extract_annotations,
     _extract_flag_tags,
     _parse_ruledout_line,
     _parse_task_line,
 )
+
+
+@dataclass
+class _FakeTask:
+    """Minimal indent-bearing stand-in for the attachment-logic tests."""
+
+    indent_level: int
+    name: str = ""
 
 
 class TestCheckboxRe:
@@ -126,6 +142,45 @@ class TestParseRuledOutLine:
         assert _parse_ruledout_line("- [ ] regular task", 1) is None
         assert _parse_ruledout_line("", 2) is None
         assert _parse_ruledout_line("## Stage 1", 3) is None
+
+
+class TestAttachRuledOut:
+    def test_nearest_strict_less_indent_wins(self) -> None:
+        root = _FakeTask(indent_level=0, name="root")
+        child = _FakeTask(indent_level=2, name="child")
+        grand = _FakeTask(indent_level=4, name="grand")
+        # RULEDOUT at indent 4 sits as a sibling under `child`
+        # (indent 2): it attaches to `child`, not to `grand` even
+        # though `grand` is deeper in the stack.
+        attached = _attach_ruledout(4, [root, child, grand], [root])
+        assert attached is child
+
+    def test_skips_equal_indent_in_stack(self) -> None:
+        # Equal indent is not "strictly less", so the equal-indent
+        # entry is skipped and the search continues outward.
+        root = _FakeTask(indent_level=0, name="root")
+        same = _FakeTask(indent_level=2, name="same")
+        attached = _attach_ruledout(2, [root, same], [root])
+        assert attached is root
+
+    def test_top_level_falls_back_to_most_recent_root(self) -> None:
+        # A column-0 RULEDOUT after the stack has been popped (e.g.
+        # following a same-indent sibling) finds no strictly-less
+        # ancestor, so it attaches to the last root task.
+        a = _FakeTask(indent_level=0, name="a")
+        b = _FakeTask(indent_level=0, name="b")
+        attached = _attach_ruledout(0, [], [a, b])
+        assert attached is b
+
+    def test_no_ancestors_no_roots_returns_none(self) -> None:
+        # A stray [RULEDOUT] before any task in the phase has nothing
+        # to attach to; the caller is expected to drop it.
+        assert _attach_ruledout(0, [], []) is None
+
+    def test_empty_stack_uses_root_fallback(self) -> None:
+        root = _FakeTask(indent_level=0, name="root")
+        attached = _attach_ruledout(2, [], [root])
+        assert attached is root
 
 
 class TestExtractFlagTags:
