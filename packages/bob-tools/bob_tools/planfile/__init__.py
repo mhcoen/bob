@@ -29,7 +29,7 @@ from bob_tools.planfile.model import (
     TaskContext,
     TaskStatus,
 )
-from bob_tools.planfile.operations import bug_count, resolve_task_context
+from bob_tools.planfile.operations import bug_count, next_tasks, resolve_task_context
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import canonicalize, render_plan
 
@@ -51,6 +51,7 @@ __all__ = [
     "TaskStatus",
     "bug_count",
     "canonicalize",
+    "next_tasks",
     "parse_plan",
     "render_plan",
     "resolve_task_context",
@@ -59,7 +60,7 @@ __all__ = [
     # Stage 4 — renderer (render_plan + canonicalize live)
     # Stage 5 — operations
     # "migrate",
-    # "next_tasks",
+    # next_tasks live (above)
     # "complete_task",
     # "fail_task",
     # "reset_task",

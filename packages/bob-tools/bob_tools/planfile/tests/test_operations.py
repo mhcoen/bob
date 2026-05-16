@@ -34,6 +34,7 @@ from bob_tools.planfile.model import (
 from bob_tools.planfile.operations import (
     _find_task_by_id,
     bug_count,
+    next_tasks,
     resolve_task_context,
     validate_plan,
 )
@@ -47,13 +48,16 @@ def _task(
     indent_level: int = 0,
     line_number: int = 1,
     text: str = "do thing",
+    status: TaskStatus = TaskStatus.TODO,
+    flag_tags: tuple[str, ...] = (),
+    action_tag: tuple[str, str] | None = None,
 ) -> Task:
     return Task(
         task_id=task_id,
         text=text,
-        status=TaskStatus.TODO,
-        flag_tags=(),
-        action_tag=None,
+        status=status,
+        flag_tags=flag_tags,
+        action_tag=action_tag,
         annotations=(),
         deps=deps,
         children=children,
@@ -828,3 +832,391 @@ class TestResolveTaskContext:
         miss = resolve_task_context(plan, "1.30")
         assert miss.task_id is None
         assert miss.phase_id is None
+
+
+def _phase_with_tasks(
+    tasks: tuple[Task, ...],
+    *,
+    phase_id: str = "phase_001",
+    ordinal: int = 1,
+    subsections: tuple[Subsection, ...] = (),
+) -> Phase:
+    return Phase(
+        phase_id=phase_id,
+        phase_id_source="explicit_comment",
+        ordinal=ordinal,
+        keyword="Stage",
+        title="Stage",
+        prose="",
+        subsections=subsections,
+        tasks=tasks,
+        line_number=5,
+    )
+
+
+class TestNextTasks:
+    """``next_tasks`` returns the next actionable tasks per design doc 6.
+
+    Pins the priority/scoping rules and the BATCH parent surfacing.
+    Each scenario uses minimal Plan structures so the test names match
+    the bullet they exercise — bug priority, first-incomplete-phase
+    scope, leaf-before-parent, failed-sibling blocking, ``@deps``
+    blocking and unblocking, and BATCH parent surfacing.
+    """
+
+    def test_returns_first_actionable_task_in_phase(self) -> None:
+        a = _task(task_id="T-000001")
+        b = _task(task_id="T-000002", line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(a, b)),))
+        assert next_tasks(plan) == [a]
+
+    def test_limit_zero_returns_empty(self) -> None:
+        # limit <= 0 short-circuits without walking; the plan is not
+        # inspected. Pin so a future refactor cannot drift to "return
+        # one anyway" or to a slice of the walk.
+        a = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(a,)),))
+        assert next_tasks(plan, limit=0) == []
+        assert next_tasks(plan, limit=-1) == []
+
+    def test_skips_done_tasks(self) -> None:
+        done = _task(task_id="T-000001", status=TaskStatus.DONE)
+        todo = _task(task_id="T-000002", line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(done, todo)),))
+        assert next_tasks(plan) == [todo]
+
+    # Bug priority ----------------------------------------------------
+
+    def test_bug_task_has_absolute_priority_over_phase(self) -> None:
+        # When any bug task is actionable, the phase walk is not even
+        # consulted — design doc section 6 priority list item 1.
+        phase_task = _task(task_id="T-000001")
+        bug = _task(task_id="T-000900", line_number=100, text="kernel panic")
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(phase_task,)),),
+            bugs=BugsSection(tasks=(bug,), line_number=99),
+        )
+        assert next_tasks(plan) == [bug]
+
+    def test_falls_through_to_phase_when_all_bugs_done(self) -> None:
+        # Bugs section exists but every bug task is DONE: phase walk
+        # runs normally. Distinguishes "bugs gate everything" (wrong)
+        # from "bugs gate while any are actionable" (correct).
+        phase_task = _task(task_id="T-000001")
+        finished_bug = _task(
+            task_id="T-000900",
+            line_number=100,
+            status=TaskStatus.DONE,
+        )
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(phase_task,)),),
+            bugs=BugsSection(tasks=(finished_bug,), line_number=99),
+        )
+        assert next_tasks(plan) == [phase_task]
+
+    def test_bugs_scope_does_not_spill_into_phases(self) -> None:
+        # Even when limit > number of actionable bug tasks, the result
+        # stays inside the bugs scope. Pin the "bugs scope is a separate
+        # phase" interpretation against a future drift toward "fill the
+        # limit by mixing bugs and phase tasks".
+        bug = _task(task_id="T-000900", line_number=100)
+        phase_task = _task(task_id="T-000001")
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(phase_task,)),),
+            bugs=BugsSection(tasks=(bug,), line_number=99),
+        )
+        assert next_tasks(plan, limit=5) == [bug]
+
+    # First-incomplete-phase scoping ----------------------------------
+
+    def test_later_phase_invisible_until_current_phase_done(self) -> None:
+        # Phase 1 has unfinished work; Phase 2 has TODO tasks. Only
+        # Phase 1's task surfaces (design doc 6 priority list item 2).
+        phase_one = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        phase_two = _phase_with_tasks(
+            tasks=(_task(task_id="T-000099", text="future work"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(phase_one, phase_two))
+        result = next_tasks(plan)
+        assert len(result) == 1
+        assert result[0].task_id == "T-000001"
+
+    def test_skips_complete_phase_to_next_incomplete(self) -> None:
+        # Phase 1 is fully DONE; Phase 2 has work. The walk advances
+        # past the complete phase and surfaces Phase 2's task.
+        phase_one = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001", status=TaskStatus.DONE),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        target = _task(task_id="T-000002", text="next phase work")
+        phase_two = _phase_with_tasks(
+            tasks=(target,),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(phase_one, phase_two))
+        assert next_tasks(plan) == [target]
+
+    def test_phase_with_failed_task_is_not_complete(self) -> None:
+        # FAILED tasks do not count as complete — a phase with a
+        # failed task is stuck, not done, mirroring mcloop's
+        # _stage_complete semantics. The walk must stay in Phase 1
+        # (and at root level the FAILED task is skipped, surfacing
+        # the next TODO sibling), not advance to Phase 2.
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        todo = _task(task_id="T-000002", line_number=2)
+        phase_one = _phase_with_tasks(
+            tasks=(failed, todo), phase_id="phase_001", ordinal=1
+        )
+        phase_two = _phase_with_tasks(
+            tasks=(_task(task_id="T-000099"),), phase_id="phase_002", ordinal=2
+        )
+        plan = _plan(phases=(phase_one, phase_two))
+        assert next_tasks(plan) == [todo]
+
+    def test_subsection_tasks_searched_within_phase(self) -> None:
+        # Subsection tasks are part of the phase; once the root tasks
+        # are exhausted, the walk continues into each subsection in
+        # document order, all within the same phase scope.
+        root = _task(task_id="T-000001", status=TaskStatus.DONE)
+        sub_task = _task(task_id="T-000010", line_number=20, text="manual step")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_task,), line_number=19)
+        phase = _phase_with_tasks(tasks=(root,), subsections=(sub,))
+        assert next_tasks(_plan(phases=(phase,))) == [sub_task]
+
+    # Leaf-before-parent ----------------------------------------------
+
+    def test_descends_into_children_before_returning_parent(self) -> None:
+        child = _task(task_id="T-000010", indent_level=2, line_number=2)
+        parent = _task(task_id="T-000001", children=(child,))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        assert next_tasks(plan) == [child]
+
+    def test_returns_parent_when_no_actionable_descendant(self) -> None:
+        # All children DONE — mcloop's `_search_tasks` returns the
+        # parent itself in this scenario (the auto-check would normally
+        # promote it but in a hand-edited transient state the parent
+        # may still be unchecked). Pin that fallthrough.
+        done_child = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+        )
+        parent = _task(task_id="T-000001", children=(done_child,))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        assert next_tasks(plan) == [parent]
+
+    # Failed sibling blocking -----------------------------------------
+
+    def test_failed_subtask_blocks_later_subtask_siblings(self) -> None:
+        # Within a child list (is_subtask=True), a FAILED sibling stops
+        # the walk; later TODO siblings under the same parent are
+        # blocked (implicit sequential dependency, design doc 6
+        # priority list item 3 + mcloop `_search_tasks` lines 369-376).
+        failed = _task(
+            task_id="T-000010",
+            status=TaskStatus.FAILED,
+            indent_level=2,
+            line_number=2,
+        )
+        blocked = _task(task_id="T-000011", indent_level=2, line_number=3)
+        parent = _task(task_id="T-000001", children=(failed, blocked))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        # Parent has FAILED child, so parent cannot complete; at root
+        # level the parent's `continue` lets the walk move on, but
+        # nothing else is here, so no actionable task remains.
+        assert next_tasks(plan) == []
+
+    def test_failed_root_task_does_not_block_siblings(self) -> None:
+        # At the root level (is_subtask=False) FAILED is skipped, not
+        # blocking — design doc 6 contract carries through mcloop's
+        # `_search_tasks` distinction.
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        todo = _task(task_id="T-000002", line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed, todo)),))
+        assert next_tasks(plan) == [todo]
+
+    def test_failed_subtask_preceded_by_todo_yields_todo(self) -> None:
+        # Ordering matters: [TODO, FAILED] under one parent yields the
+        # TODO (it was visited first) before the FAILED blocks anything
+        # later. Pin so a future "FAILED scans the whole child list
+        # first" optimization doesn't change observable behavior.
+        first = _task(task_id="T-000010", indent_level=2, line_number=2)
+        failed = _task(
+            task_id="T-000011",
+            status=TaskStatus.FAILED,
+            indent_level=2,
+            line_number=3,
+        )
+        parent = _task(task_id="T-000001", children=(first, failed))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        assert next_tasks(plan) == [first]
+
+    # @deps -----------------------------------------------------------
+
+    def test_dep_blocks_task_until_completed(self) -> None:
+        # Phase A: dep is TODO, dependent task is blocked. The walk
+        # returns the dep itself (it's actionable). Phase B: dep is
+        # DONE, dependent unblocks and is the next actionable task.
+        # Two Plan instances exercise the transition explicitly per
+        # the task description ("at least one test where a task is
+        # unblocked only after its dep is completed").
+        dep_todo = _task(task_id="T-000001")
+        dependent = _task(
+            task_id="T-000002",
+            deps=("T-000001",),
+            line_number=2,
+        )
+        plan_blocked = _plan(phases=(_phase_with_tasks(tasks=(dep_todo, dependent)),))
+        # The dep itself is actionable; the dependent is blocked.
+        assert next_tasks(plan_blocked) == [dep_todo]
+        # limit=5 must still not surface the blocked task.
+        result_high = next_tasks(plan_blocked, limit=5)
+        assert dependent not in result_high
+        assert result_high == [dep_todo]
+
+        dep_done = _task(task_id="T-000001", status=TaskStatus.DONE)
+        plan_unblocked = _plan(phases=(_phase_with_tasks(tasks=(dep_done, dependent)),))
+        assert next_tasks(plan_unblocked) == [dependent]
+
+    def test_unknown_dep_blocks_silently(self) -> None:
+        # Per design doc section 6: unknown deps are validation errors,
+        # not actionability blockers — next_tasks does not raise on
+        # them but still treats the dep as unsatisfied (so the task
+        # stays blocked). Callers run validate_plan to surface the
+        # bad ref explicitly.
+        dependent = _task(
+            task_id="T-000002",
+            deps=("T-NONEXISTENT",),
+            line_number=2,
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(dependent,)),))
+        assert next_tasks(plan) == []
+
+    def test_dep_pointing_at_failed_task_still_blocks(self) -> None:
+        # A FAILED dep is not DONE, so the dependent stays blocked.
+        # The walk also skips the FAILED dep at root level, leaving
+        # no actionable task.
+        failed_dep = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        dependent = _task(
+            task_id="T-000002",
+            deps=("T-000001",),
+            line_number=2,
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed_dep, dependent)),))
+        assert next_tasks(plan) == []
+
+    # BATCH parent surfacing ------------------------------------------
+
+    def test_batch_parent_surfaces_as_single_unit(self) -> None:
+        # A BATCH parent with two actionable children: next_tasks
+        # returns the parent (not the leaf), and the returned parent
+        # carries the batched children. limit=1 still yields just the
+        # one BATCH unit even though it transitively covers two leaves.
+        child1 = _task(task_id="T-000010", indent_level=2, line_number=2)
+        child2 = _task(task_id="T-000011", indent_level=2, line_number=3)
+        batch_parent = _task(
+            task_id="T-000001",
+            text="batch group",
+            flag_tags=("BATCH",),
+            children=(child1, child2),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(batch_parent,)),))
+        result = next_tasks(plan)
+        assert len(result) == 1
+        surfaced = result[0]
+        # Same identity (id, text, tags) as the parent; only children
+        # are replaced with the batched set.
+        assert surfaced.task_id == "T-000001"
+        assert "BATCH" in surfaced.flag_tags
+        assert surfaced.children == (child1, child2)
+
+    def test_batch_stops_at_user_child(self) -> None:
+        # get_batch_children halts at the first [USER] child; that
+        # child is not included in the batch unit (it's a separate
+        # halt-and-prompt). Mirrors mcloop's behavior.
+        child1 = _task(task_id="T-000010", indent_level=2, line_number=2)
+        child2 = _task(
+            task_id="T-000011",
+            indent_level=2,
+            line_number=3,
+            flag_tags=("USER",),
+            text="manual verify",
+        )
+        child3 = _task(task_id="T-000012", indent_level=2, line_number=4)
+        batch_parent = _task(
+            task_id="T-000001",
+            flag_tags=("BATCH",),
+            children=(child1, child2, child3),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(batch_parent,)),))
+        result = next_tasks(plan)
+        assert len(result) == 1
+        assert result[0].children == (child1,)
+
+    def test_batch_stops_at_auto_child(self) -> None:
+        # action_tag is the AUTO surface (per the parser), so a child
+        # with action_tag != None halts batch collection.
+        child1 = _task(task_id="T-000010", indent_level=2, line_number=2)
+        child2 = _task(
+            task_id="T-000011",
+            indent_level=2,
+            line_number=3,
+            action_tag=("run_cli", "./scripts/x.sh"),
+        )
+        child3 = _task(task_id="T-000012", indent_level=2, line_number=4)
+        batch_parent = _task(
+            task_id="T-000001",
+            flag_tags=("BATCH",),
+            children=(child1, child2, child3),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(batch_parent,)),))
+        result = next_tasks(plan)
+        assert result[0].children == (child1,)
+
+    def test_batch_skips_done_children(self) -> None:
+        # Already-DONE children are skipped over but counted toward
+        # seen_non_failed, matching mcloop's get_batch_children.
+        done = _task(
+            task_id="T-000010",
+            indent_level=2,
+            line_number=2,
+            status=TaskStatus.DONE,
+        )
+        live1 = _task(task_id="T-000011", indent_level=2, line_number=3)
+        live2 = _task(task_id="T-000012", indent_level=2, line_number=4)
+        batch_parent = _task(
+            task_id="T-000001",
+            flag_tags=("BATCH",),
+            children=(done, live1, live2),
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(batch_parent,)),))
+        result = next_tasks(plan)
+        assert result[0].children == (live1, live2)
+
+    def test_non_batch_parent_yields_leaf_not_parent(self) -> None:
+        # Without the BATCH flag, the standard leaf-before-parent rule
+        # applies — the child is returned directly, not the parent.
+        child = _task(task_id="T-000010", indent_level=2, line_number=2)
+        parent = _task(task_id="T-000001", children=(child,))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        assert next_tasks(plan) == [child]
+
+    # Limit behavior --------------------------------------------------
+
+    def test_limit_two_returns_two_independent_leaves(self) -> None:
+        # Two unrelated TODO root tasks; limit=2 returns both, in
+        # document order. limit=1 returns just the first.
+        a = _task(task_id="T-000001")
+        b = _task(task_id="T-000002", line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(a, b)),))
+        assert next_tasks(plan, limit=2) == [a, b]
+        assert next_tasks(plan, limit=1) == [a]
