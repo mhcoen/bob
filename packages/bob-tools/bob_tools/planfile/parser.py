@@ -183,9 +183,18 @@ def parse_plan(
     design doc section 9 ("expected task id like T-000123 after checkbox
     marker"). Compat mode preserves today's behavior (``task_id`` is
     ``None`` and parsing continues).
+    3.5.1 (this) couples ``strict`` to the magic line: when
+    ``<!-- bob-plan-format: N -->`` is detected, the effective ``strict``
+    is forced to ``True`` regardless of what the caller passed, so a
+    plan that opts in to the strict format is parsed under strict rules
+    without the caller having to coordinate the two flags. Absence of
+    the magic line keeps the caller's value (default ``False``); an
+    explicit ``strict=True`` is honored regardless.
     """
     lines = text.splitlines()
     magic_version = _detect_magic_line(lines, source_path)
+    if magic_version is not None:
+        strict = True
     _check_structural_sanity(lines, source_path)
 
     phases_b: list[_PhaseBuilder] = []

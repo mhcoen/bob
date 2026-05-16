@@ -1316,7 +1316,10 @@ class TestMagicLine:
     """
 
     def test_magic_line_captured_as_version(self) -> None:
-        text = "<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] x\n"
+        # Magic line forces strict mode (3.5.1), so the task carries a
+        # ``T-NNNNNN:`` id even though the caller did not pass
+        # ``strict=True`` — otherwise this would raise.
+        text = "<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] T-000001: x\n"
         plan = parse_plan(text)
         assert plan.magic_version == 1
         assert plan.project_title == "P"
@@ -1682,3 +1685,62 @@ class TestTaskIdInStrictMode:
         # Sanity: strict-mode wiring did not change compat-mode behavior.
         plan = parse_plan("## Stage 1: Core\n- [ ] no id\n")
         assert plan.phases[0].tasks[0].task_id is None
+
+
+class TestMagicLineForcesStrict:
+    """3.5.1: magic line presence upgrades the effective ``strict``.
+
+    The magic line is the user's opt-in to the strict-form grammar
+    (design doc section 4.1). Honoring it implicitly means a caller that
+    forgets to pass ``strict=True`` still gets strict-form parsing for
+    a plan that declared itself strict-form. The reverse — magic-line
+    absent — keeps the caller's value, so today's compat-mode callers
+    do not silently start raising on the same input.
+    """
+
+    _MISSING_ID_MSG = "expected task id like T-000123 after checkbox marker"
+
+    def test_magic_line_present_forces_strict_when_caller_omitted(self) -> None:
+        # No explicit ``strict=`` argument and the task lacks a
+        # ``T-NNNNNN:`` id, so under compat the parser would accept it.
+        # The magic line upgrades to strict and the parser raises.
+        text = "<!-- bob-plan-format: 1 -->\n## Stage 1: Core\n- [ ] no id\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text)
+        assert exc_info.value.message == self._MISSING_ID_MSG
+
+    def test_magic_line_present_forces_strict_over_explicit_false(self) -> None:
+        # An explicit ``strict=False`` does not turn off strict mode when
+        # the file itself opts in via the magic line. The contract is
+        # "magic line wins"; the caller's flag is only consulted when no
+        # magic line is present.
+        text = "<!-- bob-plan-format: 1 -->\n## Stage 1: Core\n- [ ] no id\n"
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan(text, strict=False)
+        assert exc_info.value.message == self._MISSING_ID_MSG
+
+    def test_magic_line_absent_keeps_compat_default(self) -> None:
+        # Without a magic line and without an explicit ``strict=True``,
+        # the parser stays in compat mode — today's mcloop-shaped PLAN.md
+        # files that lack task ids must keep parsing.
+        plan = parse_plan("## Stage 1: Core\n- [ ] no id\n")
+        assert plan.phases[0].tasks[0].task_id is None
+
+    def test_explicit_strict_true_without_magic_still_strict(self) -> None:
+        # Strict mode can be requested independently of the magic line;
+        # a caller that knows it is parsing strict-form input (e.g. the
+        # ledger emitter) can ask for strict checks even on a file that
+        # never bothered to include the magic line.
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("## Stage 1: Core\n- [ ] no id\n", strict=True)
+        assert exc_info.value.message == self._MISSING_ID_MSG
+
+    def test_magic_line_present_with_ids_parses_cleanly(self) -> None:
+        # The companion sanity check: a strict-form plan whose tasks all
+        # carry ids parses without raising under the implicit-strict
+        # upgrade. Pins that the upgrade is scoped to enforcement, not
+        # to gating valid input.
+        text = "<!-- bob-plan-format: 1 -->\n## Stage 1: Core\n- [ ] T-000001: ok\n"
+        plan = parse_plan(text)
+        assert plan.magic_version == 1
+        assert plan.phases[0].tasks[0].task_id == "T-000001"
