@@ -20,13 +20,13 @@ so derived parent completion is explicit.
    - [x] When the task's containing phase has `phase_id_source` equal to "none", fill in the ordinal-derived id (the n-th phase in document order) and set source to "ordinal". Per design doc section 2.4 and 7.1.
    - [x] Tests: lookup by ID; lookup by label; ordinal fallback when no explicit phase_id; raises a clear error for an unknown task.
 
-- [ ] [BATCH] Implement next_tasks preserving mcloop's find_next semantics
-   - [ ] Implement `next_tasks(plan: Plan, *, limit: int = 1) -> list[Task]` per design doc section 6.
-   - [ ] Priority: tasks in the Bugs section first (absolute), then first-incomplete-phase scope.
-   - [ ] Actionability: status is TODO; every dep listed in the task's @deps is DONE; no failed ancestor; if children, return first actionable child before parent. Per `_search_tasks` in mcloop's checklist.
-   - [ ] Failed sibling blocking: in the depth-first walk, a failed subtask blocks all later siblings under the same parent. Root-level failed tasks are skipped, not blocking. Per `_search_tasks` exactly.
-   - [ ] BATCH parent surfacing: when the next actionable leaf is a child of a BATCH parent, return the parent as a single Task with its actionable children attached (caller iterates). Match the `get_batch_children` semantics in mcloop's checklist: consecutive unchecked children until a USER child or AUTO child stops collection.
-   - [ ] Tests: each priority rule exercised in isolation; failed-sibling blocking; leaf-before-parent; BATCH returns parent unit; later phases invisible until current phase done; bug priority; @deps blocking exercised with at least one test where a task is unblocked only after its dep is completed.
+- [x] [BATCH] Implement next_tasks preserving mcloop's find_next semantics
+   - [x] Implement `next_tasks(plan: Plan, *, limit: int = 1) -> list[Task]` per design doc section 6.
+   - [x] Priority: tasks in the Bugs section first (absolute), then first-incomplete-phase scope.
+   - [x] Actionability: status is TODO; every dep listed in the task's @deps is DONE; no failed ancestor; if children, return first actionable child before parent. Per `_search_tasks` in mcloop's checklist.
+   - [x] Failed sibling blocking: in the depth-first walk, a failed subtask blocks all later siblings under the same parent. Root-level failed tasks are skipped, not blocking. Per `_search_tasks` exactly.
+   - [x] BATCH parent surfacing: when the next actionable leaf is a child of a BATCH parent, return the parent as a single Task with its actionable children attached (caller iterates). Match the `get_batch_children` semantics in mcloop's checklist: consecutive unchecked children until a USER child or AUTO child stops collection.
+   - [x] Tests: each priority rule exercised in isolation; failed-sibling blocking; leaf-before-parent; BATCH returns parent unit; later phases invisible until current phase done; bug priority; @deps blocking exercised with at least one test where a task is unblocked only after its dep is completed.
 
 - [ ] [BATCH] Mutation operations returning tuples of Settlements
    - [ ] Implement `complete_task(plan, task_id, outcome=None) -> tuple[Plan, tuple[Settlement, ...]]`. Flips status to DONE. The settlement for the direct task uses the kind policy above. If the parent (and grandparent, transitively) becomes complete because all children are now DONE, add a derived `kind="none"` Settlement for each newly-completed ancestor. Order in the returned tuple: direct settlement first, then derived ancestors from innermost outward.
