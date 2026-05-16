@@ -1,40 +1,31 @@
-## Stage 3: Strict-mode parser
+## Stage 4: Renderer
 
-Strict mode requires the format additions in design doc section 4.1
-and 4.2: the magic line, stable task IDs, and the phase-id comment.
-The parser still accepts compat-mode input when strict is false;
-strict mode is opt-in or triggered by the presence of the magic
-line.
+- [ ] [BATCH] Implement `render_plan(plan: Plan) -> str`
+   - [ ] Render order: magic line (if present in the input or required by strict output mode), blank line, project H1, blank line, preamble (if any), blank line, each phase in order, then bugs section if present.
+   - [ ] Phase rendering: heading line `## {keyword} {ordinal}: {title}`, then on the next line the phase-id comment if `phase_id_source != "none"`, then blank line, then prose (if any), then blank line, then subsections in order, then tasks in order.
+   - [ ] Canonical phase-id position is always the comment form, even when input used the legacy header form. The renderer is what migrates legacy header to comment per design doc section 7.1.
+   - [ ] Task rendering: `{indent}- [{status_char}] {task_id_prefix}{flag_tag_block}{action_tag_block}{text} {annotations}`. Status char: TODO renders as space, DONE as x, FAILED as exclamation mark. Flag tags ordered by source position; action tag immediately after flag tags. Annotations at end of line, separated by spaces.
+   - [ ] When `task_id` is None (compat-mode plan being rendered without identity migration), omit the task-id prefix. This is the same plan a compat-mode parse produced, rendered back unchanged.
+   - [ ] @deps line rendering: when a task has non-empty `deps`, render `{child_indent}@deps {id} {id} ...` on the line immediately after the task line.
+   - [ ] Subsection rendering: blank line, sub-heading, blank line, prose (if any), blank line, tasks in order.
+   - [ ] Bugs section rendering: blank line, the Bugs H2 heading, blank line, tasks in order.
+   - [ ] Indentation: 2 spaces per nesting level. Canonical, per design doc section 4.2 Notes.
+   - [ ] Trailing newline at end of file. Always exactly one.
+   - [ ] Tests: render output matches a hand-written fixture byte-for-byte for a small Plan; output ends with exactly one newline; indentation always 2 spaces regardless of input indentation.
 
-- [x] [BATCH] Recognize the format magic line and phase-id comment
-   - [x] Implement `_MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")`. Capture the version integer.
-   - [x] Implement `_PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*([A-Za-z0-9_]+)\s*-->")` matching `mcloop/ledger_emit.py`'s regex of the same name. The two libraries must use identical regexes so they cannot disagree.
-   - [x] Update `parse_plan` to capture the magic line when it appears as the first non-blank line and store the version in `Plan.magic_version`. Absence is not an error (compat mode); presence with an unrecognized version raises `PlanSyntaxError`.
-   - [x] Update phase parsing: when a phase-id comment line follows a phase heading before any task, set `Phase.phase_id` to that value and `Phase.phase_id_source` to "explicit_comment".
-   - [x] Tests: magic line captured; phase-id comment attaches to the immediately preceding phase heading; a phase-id comment not on its own line does not attach to a task's phase (it is a different mechanism — task IDs, not phase IDs).
+- [ ] Round-trip property tests
+   - [ ] Implement two property tests in `tests/test_roundtrip.py`:
+   - [ ] `test_parse_render_parse_idempotent`: for each fixture text, `parse(render(parse(text)))` equals `parse(text)` on the Plan value (ignoring line_number fields which differ between iterations). Fixtures are hand-crafted small plans covering each tag, each heading form, each status, the bugs section, subsections, RULEDOUT lines, and @deps lines.
+   - [ ] `test_render_parse_render_stable`: for each fixture plan, `render(parse(render(plan)))` equals `render(plan)`. This is the canonical-form fixed-point property.
+   - [ ] Fixtures live in `bob_tools/planfile/tests/fixtures/` as markdown files; the test loads them at runtime.
 
-- [x] Recognize the legacy `## Phase phase_NNN: Title` heading form
-   - [x] Implement `_LEDGER_PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")` matching `mcloop/ledger_emit.py`'s `_PHASE_HEADER_RE`. Identical for the same reason.
-   - [x] In both strict and compat mode: when a heading matches this regex but not the stage-or-phase ordinal regex (because the id is non-numeric, e.g. phase_001), accept it, set `Phase.phase_id` to the captured id, and `Phase.phase_id_source` to "explicit_header". Per design doc section 7.1.
-   - [x] Tests: a heading with a non-numeric phase id parses with that id and source "explicit_header"; a heading with a numeric ordinal parses with that ordinal and phase_id None unless a comment follows (then "explicit_comment"); the canonicalizer eventually rewrites explicit_header to explicit_comment, but the parser preserves both forms as input.
+- [ ] Generative property tests
+   - [ ] Add `tests/test_generative.py`. Implement a small Plan generator using stdlib (no Hypothesis dependency): random small valid trees with random phase counts, random task counts per phase, random tag combinations, random deps among declared IDs. Per Codex's pile-5 acceptance test gap.
+   - [ ] Properties: `parse(render(plan))` equals `plan` modulo line numbers; task IDs in the rendered plan are unique; `next_tasks` returns tasks in the expected canonical order (defer this property to after Stage 5 lands `next_tasks`).
+   - [ ] Run 100 random plans per property by default; bump to 1000 in a slow-mode pytest marker.
 
-- [x] Stable task IDs
-   - [x] Implement `_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")`. Apply to the task text after stripping the checkbox but before extracting tags.
-   - [x] In compat mode: presence of a task ID is recorded on `Task.task_id` but absence is accepted.
-   - [x] In strict mode: absence of a task ID raises `PlanSyntaxError` with the exact message format from design doc section 9: "expected task id like T-000123 after checkbox marker".
-   - [x] Tokenization: the library MUST NOT use substring matching to find tasks by ID. Implement `_find_task_by_id(plan, task_id)` that walks the parsed tree. Per design doc section 7.2 caveat about substring matching.
-   - [x] Tests: a task line with a stable ID parses with that ID; a task line without an ID parses with task_id None in compat mode and raises in strict mode; `_find_task_by_id` distinguishes T-000001 from T-0000010.
+- [ ] Canonicalization function
+   - [ ] Implement `canonicalize(text: str) -> str` as `render_plan(parse_plan(text))`. Lossless formatting only. Does not assign IDs or add phase-id comments — that is the `migrate` operation in Stage 5. Per design doc section 3.2.
+   - [ ] Test: `canonicalize(canonicalize(text))` equals `canonicalize(text)` for every fixture. Test: tasks without IDs in the input have no IDs in the output (canonicalize does not migrate).
 
-- [x] Ordinal fallback for unattributed phases
-   - [x] When neither a phase-id comment nor the legacy header form provides an id, leave `Phase.phase_id` as None and `Phase.phase_id_source` as "none". The Stage 5 `resolve_task_context` function is what maps None to an ordinal fallback at resolve time.
-   - [x] Tests: a phase with no id source has phase_id None and source "none".
-
-- [x] Magic line gates strict mode by default
-   - [x] When the magic line is present, default `strict` to True even if the caller passed `strict=False`. When absent, default to compat. Explicit caller-supplied `strict=True` overrides.
-   - [x] Tests: magic present implies strict; magic absent implies compat; explicit strict=True with no magic still strict.
-
-- [x] Write the Stage 3 verification helper script. Create `bob_tools/planfile/tests/manual/check_strict_reject.py`. The script imports `parse_plan` and `PlanSyntaxError`, then for each of `/Users/mhcoen/proj/duplo/PLAN.md` and `/Users/mhcoen/proj/mcloop/PLAN.md` calls `parse_plan(text, strict=True)`. Expected outcome is rejection: for each file it prints either `REJECTED <path> at line=<n> col=<m>` (the correct result) or `PARSED <path> (UNEXPECTED - strict mode should have rejected this)` and exits non-zero. The script takes no arguments and hardcodes the two paths.
-
-- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_strict_reject
-
-- [ ] Verify Stage 3 leaves the repo green.
+- [ ] Verify Stage 4 leaves the repo green.
