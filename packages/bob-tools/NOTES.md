@@ -252,3 +252,5 @@ e346b0e: Implemented `validate_plan` in `operations.py`, which checks that every
 a1c07d9: Updated task ID parsing to capture the full line after the ID, enabling proper handling of annotations and tags. The regex now extracts digits and remaining text separately, ensuring the canonical T-NNNNNN format is preserved.
 
 176bec4: Added strict mode enforcement for mandatory task IDs in plan files. Tasks without a T-000123-style ID now raise a PlanSyntaxError with a specific message and location. Compat mode remains unchanged, allowing missing IDs.
+
+0f731a9: Added a helper function to find tasks by exact ID match, preventing substring confusion where similar IDs like T-000001 and T-0000010 would be incorrectly conflated. Updated tests to verify the function works across all plan sections and correctly handles prefix overlaps.
