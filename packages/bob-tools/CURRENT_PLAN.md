@@ -6,12 +6,12 @@ The parser still accepts compat-mode input when strict is false;
 strict mode is opt-in or triggered by the presence of the magic
 line.
 
-- [ ] [BATCH] Recognize the format magic line and phase-id comment
-   - [ ] Implement `_MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")`. Capture the version integer.
-   - [ ] Implement `_PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*([A-Za-z0-9_]+)\s*-->")` matching `mcloop/ledger_emit.py`'s regex of the same name. The two libraries must use identical regexes so they cannot disagree.
-   - [ ] Update `parse_plan` to capture the magic line when it appears as the first non-blank line and store the version in `Plan.magic_version`. Absence is not an error (compat mode); presence with an unrecognized version raises `PlanSyntaxError`.
-   - [ ] Update phase parsing: when a phase-id comment line follows a phase heading before any task, set `Phase.phase_id` to that value and `Phase.phase_id_source` to "explicit_comment".
-   - [ ] Tests: magic line captured; phase-id comment attaches to the immediately preceding phase heading; a phase-id comment not on its own line does not attach to a task's phase (it is a different mechanism — task IDs, not phase IDs).
+- [x] [BATCH] Recognize the format magic line and phase-id comment
+   - [x] Implement `_MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")`. Capture the version integer.
+   - [x] Implement `_PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*([A-Za-z0-9_]+)\s*-->")` matching `mcloop/ledger_emit.py`'s regex of the same name. The two libraries must use identical regexes so they cannot disagree.
+   - [x] Update `parse_plan` to capture the magic line when it appears as the first non-blank line and store the version in `Plan.magic_version`. Absence is not an error (compat mode); presence with an unrecognized version raises `PlanSyntaxError`.
+   - [x] Update phase parsing: when a phase-id comment line follows a phase heading before any task, set `Phase.phase_id` to that value and `Phase.phase_id_source` to "explicit_comment".
+   - [x] Tests: magic line captured; phase-id comment attaches to the immediately preceding phase heading; a phase-id comment not on its own line does not attach to a task's phase (it is a different mechanism — task IDs, not phase IDs).
 
 - [ ] Recognize the legacy `## Phase phase_NNN: Title` heading form
    - [ ] Implement `_LEDGER_PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")` matching `mcloop/ledger_emit.py`'s `_PHASE_HEADER_RE`. Identical for the same reason.
