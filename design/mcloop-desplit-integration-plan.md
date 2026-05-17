@@ -653,6 +653,60 @@ post-B1); (iv) byte-identical emitted ledger event stream. Gate:
 full mcloop suite + bob-tools `test_mcloop_parity.py` +
 `check_cli_end_to_end.py` + `check_duplo_generated_fmt.py` green.
 
+### B1+B3 pre-flight result (2026-05-17; scratch copy only)
+
+Freeze invariants rechecked on current `/Users/mhcoen/proj/mcloop/PLAN.md`:
+`rg -n "@deps" PLAN.md` and `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md`
+both returned no matches.
+
+B1 migration artifact was generated only under
+`/tmp/mcloop-b1b3-preflight/`: `PLAN.original.md`,
+`PLAN.migrated.md`, and `PLAN.migration.diff`. The full unified diff
+has 878 lines and SHA-256
+`d4920465e2bba875bdc9b2fe874196875ad1b83c92f8f1f466caa9cafff8c5a7`.
+Transformation counts: 376 checkbox task IDs added; 10
+`<!-- phase_id: phase_NNN -->` comments added; 0 magic-format lines
+added; 286 checkbox indentation changes (3-space nested tasks to
+2-space canonical nesting); blank-line normalization net -1 line
+(40 removed, 39 added); task order unchanged, so no
+phase-tasks-before-subsections reordering occurred on the current
+file.
+
+B1 verification: `validate_plan(parse_plan(migrated))` passed;
+`render_plan(parse_plan(migrated)) == migrated` was true. Structural
+compare `checklist.parse(original)` vs `_planfile_compat.parse(migrated)`
+reported 376 tasks on both sides, no text/status/child-count
+differences, and 286 accepted indentation-only differences. The only
+classification differences were the accepted §2(d) DONE prose
+`[BATCH]` mentions at current `PLAN.md:341`, `:359`, and `:439`
+(legacy checklist classifies them as BATCH by substring; planfile
+does not); all are `[x]`.
+
+B3 behavior-preservation pre-flight at the shim API boundary passed:
+representative next-task selection matched; representative nested
+task labels matched (`1.2.1`); BATCH child selection for "Add
+reviewer module" matched; `check_off` and `mark_failed` each changed
+exactly one migrated checkbox line; and a representative ledger
+event-stream replay for identical inputs produced byte-identical
+`test_failed` payloads.
+
+Recorded-replay harness caveat: the named integration harness could
+not currently serve as the B3 proof without runtime wiring/repair.
+Without `MCLOOP_INTEGRATION=1`, the five named integration files
+reported `21 skipped`. With `MCLOOP_INTEGRATION=1`, current source
+reported `7 passed, 14 failed in 4.36s`; several stub tests invoked
+the real `claude_code_agent:opus` path and failed with `Not logged in
+· Please run /login`, while failing-task/resume tests also did not
+observe the expected PLAN.md checkbox mutation. No runtime files were
+modified by this pre-flight.
+
+Recommendation: **NO-GO for the irreversible B1+B3 cutover until the
+recorded-replay harness is repaired/adapted or the plan explicitly
+accepts the shim API-boundary proof as the replacement gate.** The B1
+canonicalization artifact itself is internally consistent and the
+shim API-boundary parity checks pass, but the plan's stated B3
+run-loop replay gate is not presently executable as a proof.
+
 ### Stage B4 — Interrupt/lifecycle path onto planfile
 
 B4.1 `lifecycle._check_interrupted`/`_write_ruledout_to_plan`/
