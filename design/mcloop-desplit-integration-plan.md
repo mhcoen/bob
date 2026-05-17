@@ -1,6 +1,7 @@
 # McLoop de-split: parity audit and behavior-preserving integration plan
 
-Status: design/planning only. No implementation performed. Every claim
+Status: design/planning document; completed implementation steps are
+recorded inline with commit hashes. Every claim
 below was verified by reading source on this machine; citations are
 `file:symbol` (and explicit line constants where the file numbers them).
 The governing constraint is restated verbatim from the source design
@@ -503,26 +504,32 @@ found in 39 source files`; `pytest -q` → `567 passed, 2 skipped in
 1.12s`; `check_cli_end_to_end` exit 0; `check_duplo_generated_fmt`
 exit 0; `test_mcloop_parity.py` → `3 passed in 0.76s`. *(Decision:
 deterministic API addition — Codex/Claude, not routed.)*
-B0.2 Build the **mcloop scheduler/mutation shim module**
-(`mcloop/_planfile_compat.py`, name TBD by Codex) but do not wire it
-into `run_loop` yet. It exposes checklist-shaped functions backed by
-planfile: `parse`, `find_next`, `check_off`, `mark_failed`,
+B0.2 **DONE in mcloop commit `117f3ac`**: built the mcloop
+scheduler/mutation shim module `mcloop/_planfile_compat.py` but did
+not wire it into `run_loop`. It exposes checklist-shaped functions
+backed by planfile: `parse`, `find_next`, `check_off`, `mark_failed`,
 `clear_failed_markers`, `is_user_task`/`is_auto_task`/`is_batch_task`,
 `get_batch_children`, `count_unchecked`, `find_parent`,
 `get_eliminated`, `task_label`, `has_unchecked_bugs`,
 `user_task_instructions`, `parse_auto_task`, `purge_completed_bugs`.
-Shim obligations from §2: BATCH return-shape normalization (2c);
-`ConcurrentUpdateError` bounded-retry wrapper (2g);
-`fail_task`-only-on-retry-exhaustion (2e); USER/AUTO/BATCH classified
-via `flag_tags`/`action_tag` (2d).
-B0.3 Verification: unit tests for the shim asserting, on copies of
-`mcloop/PLAN.md` and `mcloop/PLAN.EXAMPLE.md`, that
-`shim.find_next`/`check_off`/`mark_failed` produce the **same task
-selection and same resulting checkbox state** as the live
-`checklist` equivalents, task-for-task. This reuses the §0.3 parity
-methodology at the *operation* level (the existing test covers
-parsing only). Gate: full mcloop suite green; shim tests green.
-mcloop runtime unchanged (shim unused).
+Shim obligations from §2 are implemented: BATCH return-shape
+normalization (2c); `ConcurrentUpdateError` bounded-retry wrapper
+(2g; two retries, three total attempts); retry-exhaustion-only
+`fail_task` boundary (2e); USER/AUTO/BATCH classified via
+`flag_tags`/`action_tag` (2d).
+B0.3 **DONE for the B0.2 shim in mcloop commit `117f3ac`**:
+`tests/test_planfile_compat.py` adds operation-level parity tests on
+copies of `mcloop/PLAN.md` and `mcloop/PLAN.EXAMPLE.md` for
+`find_next`, `check_off`, `mark_failed`, `clear_failed_markers`,
+classification, `get_batch_children`, `count_unchecked`,
+`find_parent`, ID-required mutation, `purge_completed_bugs`, and the
+additive-only import proof. Verification on commit `117f3ac`: `ruff
+check .` clean; `ruff format --check .` → `99 files already
+formatted`; `mypy --config-file pyproject.toml mcloop` → `Success:
+no issues found in 45 source files`; `pytest -q` → `1745 passed, 38
+skipped in 12.39s`; shim-only tests → `11 passed in 0.83s`. mcloop
+runtime unchanged: `rg -n "_planfile_compat" mcloop --glob
+'!_planfile_compat.py'` returns no matches.
 
 ### Stage B1 — One-time authoritative-PLAN.md canonicalization+migration (atomic with B3; reviewed)
 
