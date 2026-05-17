@@ -125,37 +125,45 @@ def resolve_phase_id(
     task_label: str,
     ordinal_index: int | None = None,
 ) -> PhaseIdResolution:
-    """Resolve a task to a phase_id.
+    """Resolve a task to a phase_id through ``bob_tools.planfile``.
 
-    The resolution order is the explicit-required / ordinal-degraded
-    contract from the Slice D design (Q3 resolution):
-
-    1. Explicit: locate ``task_label`` inside PLAN.md and return the
-       phase_id of the nearest preceding ``## Phase phase_NNN:``
-       header. Production path.
-    2. Ordinal degraded: when the explicit lookup yields nothing,
-       map the task's ordinal index (caller-supplied) to the n-th
-       phase header in PLAN.md. Returns ``source="ordinal"`` so the
-       caller can emit a finding_observed event recording the
-       degradation.
-    3. None: task is not associated with any planned phase. Returns
-       ``source="none"``.
+    Stage B2 keeps this public signature and return type stable while
+    moving lookup onto parsed plan entries. ``ordinal_index`` is the
+    explicit opt-in for the old degraded ordinal path; callers that omit
+    it (notably ``main._ledger_settle``) preserve today's
+    ``source="none"`` emission for pre-migration plans with no explicit
+    phase ids.
     """
     if not plan_path.exists():
         return PhaseIdResolution(phase_id=None, source="none", plan_phase_count=0)
     plan_text = plan_path.read_text(encoding="utf-8")
-    phase_ids = parse_plan_phase_ids(plan_text)
-    plan_phase_count = len(phase_ids)
+    from bob_tools.planfile import parse_plan, resolve_task_context
 
-    explicit = find_explicit_phase_id_for_task(plan_text, task_label)
-    if explicit is not None:
+    plan = parse_plan(plan_text, source_path=plan_path)
+    ctx = resolve_task_context(plan, task_label)
+    plan_phase_count = ctx.plan_phase_count
+
+    if ctx.phase_id_source in {"explicit_comment", "explicit_header"}:
         return PhaseIdResolution(
-            phase_id=explicit, source="explicit", plan_phase_count=plan_phase_count
+            phase_id=ctx.phase_id,
+            source="explicit",
+            plan_phase_count=plan_phase_count,
         )
 
-    if ordinal_index is not None and 0 <= ordinal_index < plan_phase_count:
+    if ctx.phase_id_source == "ordinal" and ordinal_index is not None:
         return PhaseIdResolution(
-            phase_id=phase_ids[ordinal_index],
+            phase_id=ctx.phase_id,
+            source="ordinal",
+            plan_phase_count=plan_phase_count,
+        )
+
+    if (
+        ctx.phase_id_source == "none"
+        and ordinal_index is not None
+        and 0 <= ordinal_index < plan_phase_count
+    ):
+        return PhaseIdResolution(
+            phase_id=f"phase_{ordinal_index + 1:03d}",
             source="ordinal",
             plan_phase_count=plan_phase_count,
         )

@@ -124,6 +124,20 @@ class TestResolvePhaseId:
         assert result.source == "explicit"
         assert result.plan_phase_count == 2
 
+    def test_explicit_comment_resolution(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "# Demo\n\n"
+            "## Stage 1: Setup\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [ ] task-001: do the thing\n",
+            encoding="utf-8",
+        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-001")
+        assert result.phase_id == "phase_001"
+        assert result.source == "explicit"
+        assert result.plan_phase_count == 1
+
     def test_ordinal_fallback(self, tmp_path: Path) -> None:
         plan_path = self._write_plan(
             tmp_path, [("phase_001", "task-001"), ("phase_002", "task-002")]
@@ -131,6 +145,30 @@ class TestResolvePhaseId:
         result = resolve_phase_id(plan_path=plan_path, task_label="task-999", ordinal_index=1)
         assert result.phase_id == "phase_002"
         assert result.source == "ordinal"
+
+    def test_no_explicit_id_plan_collapses_ordinal_to_none_without_opt_in(
+        self, tmp_path: Path
+    ) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "# Demo\n\n## Stage 1: Setup\n\n- [ ] task-001: do the thing\n",
+            encoding="utf-8",
+        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-001")
+        assert result.phase_id is None
+        assert result.source == "none"
+        assert result.plan_phase_count == 1
+
+    def test_no_explicit_id_plan_can_opt_in_to_ordinal(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "# Demo\n\n## Stage 1: Setup\n\n- [ ] task-001: do the thing\n",
+            encoding="utf-8",
+        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-001", ordinal_index=0)
+        assert result.phase_id == "phase_001"
+        assert result.source == "ordinal"
+        assert result.plan_phase_count == 1
 
     def test_ordinal_out_of_range(self, tmp_path: Path) -> None:
         plan_path = self._write_plan(tmp_path, [("phase_001", "task-001")])
@@ -149,6 +187,20 @@ class TestResolvePhaseId:
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text("# Old-style plan\n\n- [ ] task-001\n")
         result = resolve_phase_id(plan_path=plan_path, task_label="task-001", ordinal_index=0)
+        assert result.phase_id is None
+        assert result.source == "none"
+
+    def test_task_id_match_is_exact_not_substring_prefix(self, tmp_path: Path) -> None:
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "<!-- bob-plan-format: 1 -->\n\n"
+            "# Demo\n\n"
+            "## Stage 1: Setup\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [ ] T-0000010: only longer id exists\n",
+            encoding="utf-8",
+        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="T-000001")
         assert result.phase_id is None
         assert result.source == "none"
 
@@ -428,3 +480,49 @@ class TestRecordPhaseIdFallback:
         )
         assert ev_id is None
         assert storage.read_all() == []
+
+    def test_no_explicit_id_resolution_emits_no_fallback_event(self, tmp_path: Path) -> None:
+        from bob_tools.ledger import EventType, Storage
+
+        from mcloop.ledger_emit import (
+            TaskOutcome,
+            emit_task_lifecycle_events,
+            record_phase_id_fallback,
+        )
+
+        plan_path = tmp_path / "PLAN.md"
+        plan_path.write_text(
+            "# Demo\n\n## Stage 1: Setup\n\n- [ ] task-001: do the thing\n",
+            encoding="utf-8",
+        )
+        storage = Storage(tmp_path / "ledger", writer_id="mcloop-test")
+        resolution = resolve_phase_id(plan_path=plan_path, task_label="task-001")
+        assert resolution.phase_id is None
+        assert resolution.source == "none"
+        assert (
+            record_phase_id_fallback(
+                storage=storage,
+                task_label="task-001",
+                resolution=resolution,
+                run_id="test-run-fb",
+            )
+            is None
+        )
+        ids = emit_task_lifecycle_events(
+            storage=storage,
+            task_label="task-001",
+            phase_id=resolution.phase_id,
+            outcome=TaskOutcome(
+                success=False,
+                abandoned=False,
+                summary="pytest failed",
+                changed_files=(),
+                failure_kind="pytest",
+            ),
+            project_dir=tmp_path,
+            run_id="test-run-fb",
+        )
+        assert len(ids) == 1
+        events = storage.read_all()
+        assert [event.type for event in events] == [EventType.TEST_FAILED]
+        assert events[0].payload["phase_id"] is None
