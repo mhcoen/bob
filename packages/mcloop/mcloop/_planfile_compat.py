@@ -1,0 +1,439 @@
+"""Checklist-shaped adapter backed by ``bob_tools.planfile``.
+
+This module is intentionally additive and unused by runtime code in Stage B0.2.
+It gives the later de-split cutover a checklist-compatible surface while keeping
+the current ``mcloop.checklist`` contract visible in one place.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from bob_tools.planfile import (
+    BugsSection,
+    ConcurrentUpdateError,
+    Plan,
+    TaskStatus,
+    clear_failed,
+    complete_task,
+    fail_task,
+    load,
+    parse_plan,
+    update,
+)
+from bob_tools.planfile import Task as PlanTask
+
+CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
+_STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
+_UPDATE_RETRIES = 2
+
+
+@dataclass
+class Task:
+    """Checklist-compatible task value translated from ``planfile.Task``."""
+
+    text: str
+    checked: bool
+    failed: bool
+    line_number: int
+    indent_level: int
+    stage: str = ""
+    children: list[Task] = field(default_factory=list)
+    eliminated: list[str] = field(default_factory=list)
+    body: str = ""
+    task_id: str | None = None
+    flag_tags: tuple[str, ...] = ()
+    action_tag: tuple[str, str] | None = None
+
+
+def _stage_name(keyword: str, ordinal: int, title: str) -> str:
+    return f"{keyword} {ordinal}: {title}" if title else f"{keyword} {ordinal}"
+
+
+def _task_text(task: PlanTask) -> str:
+    parts: list[str] = [f"[{tag}]" for tag in task.flag_tags]
+    if task.action_tag is not None:
+        action, args = task.action_tag
+        parts.append(f"[AUTO:{action}]")
+        if args:
+            parts.append(args)
+    elif task.text:
+        parts.append(task.text)
+    for key, value in task.annotations:
+        parts.append(f"[{key}: {value}]")
+    return " ".join(parts)
+
+
+def _body_from_trailing_lines(task: PlanTask) -> str:
+    body_lines = list(task.trailing_lines)
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    while body_lines and not body_lines[-1].strip():
+        body_lines.pop()
+    return "\n".join(body_lines)
+
+
+def _convert_task(task: PlanTask, stage: str) -> Task:
+    return Task(
+        text=_task_text(task),
+        checked=task.status == TaskStatus.DONE,
+        failed=task.status == TaskStatus.FAILED,
+        line_number=max(task.line_number - 1, 0),
+        indent_level=task.indent_level,
+        stage=stage,
+        children=[_convert_task(child, stage) for child in task.children],
+        eliminated=[f"[RULEDOUT] {entry.text}" for entry in task.ruled_out],
+        body=_body_from_trailing_lines(task) if "USER" in task.flag_tags else "",
+        task_id=task.task_id,
+        flag_tags=task.flag_tags,
+        action_tag=task.action_tag,
+    )
+
+
+def _tasks_from_plan(plan: Plan) -> list[Task]:
+    tasks: list[Task] = []
+    for phase in plan.phases:
+        stage = _stage_name(phase.keyword, phase.ordinal, phase.title)
+        tasks.extend(_convert_task(task, stage) for task in phase.tasks)
+        for subsection in phase.subsections:
+            tasks.extend(_convert_task(task, stage) for task in subsection.tasks)
+    if plan.bugs is not None:
+        tasks.extend(_convert_task(task, "Bugs") for task in plan.bugs.tasks)
+    return tasks
+
+
+def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
+    """Read a plan file and return checklist-shaped tasks.
+
+    ``check_structure`` is accepted for signature parity with
+    ``mcloop.checklist.parse``. ``bob_tools.planfile.parse_plan`` always runs
+    its structural sanity check, so ``False`` cannot suppress corruption checks
+    in this adapter.
+    """
+    _ = check_structure
+    p = Path(path)
+    return _tasks_from_plan(parse_plan(p.read_text(), source_path=p))
+
+
+def count_unchecked(tasks: list[Task]) -> int:
+    return sum(
+        (0 if task.checked or task.failed else 1) + count_unchecked(task.children)
+        for task in tasks
+    )
+
+
+def get_eliminated(tasks: list[Task], target: Task) -> list[str]:
+    result: list[str] = []
+
+    def search(task_list: list[Task], inherited: list[str]) -> bool:
+        for task in task_list:
+            combined = inherited + task.eliminated
+            if task is target:
+                result.extend(combined)
+                return True
+            if search(task.children, combined):
+                return True
+        return False
+
+    search(tasks, [])
+    return result
+
+
+def find_parent(tasks: list[Task], target: Task) -> Task | None:
+    def search(task_list: list[Task]) -> Task | None:
+        for task in task_list:
+            if target in task.children:
+                return task
+            found = search(task.children)
+            if found is not None:
+                return found
+        return None
+
+    return search(tasks)
+
+
+def _get_stages(tasks: list[Task]) -> list[str]:
+    stages: list[str] = []
+
+    def collect(task_list: list[Task]) -> None:
+        for task in task_list:
+            if task.stage and task.stage != "Bugs" and task.stage not in stages:
+                stages.append(task.stage)
+            collect(task.children)
+
+    collect(tasks)
+    return stages
+
+
+def _stage_complete(tasks: list[Task], stage: str) -> bool:
+    def check(task_list: list[Task]) -> bool:
+        for task in task_list:
+            if task.stage == stage and not task.checked:
+                return False
+            if not check(task.children):
+                return False
+        return True
+
+    return check(tasks)
+
+
+def _current_stage(tasks: list[Task]) -> str | None:
+    for stage in _get_stages(tasks):
+        if not _stage_complete(tasks, stage):
+            return stage
+    return None
+
+
+def _search_tasks(
+    task_list: list[Task],
+    *,
+    is_subtask: bool = False,
+    required_stage: str | None = None,
+    skip_stages: set[str] | None = None,
+) -> Task | None:
+    for task in task_list:
+        if task.failed:
+            if is_subtask:
+                return None
+            continue
+        if task.checked:
+            continue
+        if skip_stages and task.stage in skip_stages:
+            continue
+        if required_stage is not None and task.stage != required_stage:
+            continue
+
+        if task.children:
+            child = _search_tasks(
+                task.children,
+                is_subtask=True,
+                required_stage=required_stage,
+                skip_stages=skip_stages,
+            )
+            if child is not None:
+                return child
+            if any(child_task.failed for child_task in task.children):
+                if is_subtask:
+                    return None
+                continue
+            return task
+
+        return task
+    return None
+
+
+def _search_in_stage(tasks: list[Task], stage: str) -> Task | None:
+    return _search_tasks(tasks, required_stage=stage)
+
+
+def find_next(tasks: list[Task]) -> Task | None:
+    """Return the next leaf task, normalizing planfile BATCH surfacing.
+
+    Parity §2(c): ``bob_tools.planfile.next_tasks`` surfaces BATCH parents,
+    while current mcloop ``find_next`` returns the first actionable leaf so
+    ``run_loop`` can rediscover the parent and call ``get_batch_children``.
+    The shim keeps the checklist return shape.
+    """
+    bug_task = _search_in_stage(tasks, "Bugs")
+    if bug_task is not None:
+        return bug_task
+
+    active_stage = _current_stage(tasks)
+    has_stages = bool(_get_stages(tasks))
+    return _search_tasks(
+        tasks,
+        required_stage=active_stage if has_stages else None,
+        skip_stages={"Bugs"},
+    )
+
+
+def has_unchecked_bugs(tasks: list[Task]) -> bool:
+    if _search_in_stage(tasks, "Bugs") is not None:
+        return True
+    if _get_stages(tasks):
+        return False
+
+    def any_unchecked(task_list: list[Task]) -> bool:
+        for task in task_list:
+            if not task.checked and not task.failed:
+                return True
+            if any_unchecked(task.children):
+                return True
+        return False
+
+    return any_unchecked(tasks)
+
+
+def is_user_task(task: Task) -> bool:
+    """Classify USER via planfile flag tags, not substring search (§2(d))."""
+    return "USER" in task.flag_tags
+
+
+def is_batch_task(task: Task) -> bool:
+    """Classify BATCH via planfile flag tags, not substring search (§2(d))."""
+    return "BATCH" in task.flag_tags
+
+
+def is_auto_task(task: Task) -> bool:
+    """Classify AUTO via planfile action tags, not substring search (§2(d))."""
+    return task.action_tag is not None
+
+
+def user_task_instructions(task: Task) -> str:
+    text = task.text.strip()
+    if text == "[USER]":
+        head = ""
+    elif text.startswith("[USER] "):
+        head = text[len("[USER] ") :].strip()
+    else:
+        head = text
+    if task.body:
+        return f"{head}\n{task.body}" if head else task.body
+    return head
+
+
+def get_batch_children(task: Task) -> list[Task]:
+    """Collect batch children with checklist's barrier rules (§2(c))."""
+    batch: list[Task] = []
+    seen_non_failed = False
+    for child in task.children:
+        if child.checked:
+            seen_non_failed = True
+            continue
+        if child.failed:
+            if batch or seen_non_failed:
+                break
+            continue
+        if is_user_task(child) or is_auto_task(child):
+            break
+        batch.append(child)
+    return batch
+
+
+def parse_auto_task(task: Task) -> tuple[str, str]:
+    if task.action_tag is None:
+        return ("", "")
+    return task.action_tag
+
+
+def task_label(tasks: list[Task], target: Task) -> str:
+    stage_num = ""
+    if target.stage:
+        m = _STAGE_NUM_RE.search(target.stage)
+        if m is not None:
+            stage_num = m.group(1)
+
+    stage_tasks = [t for t in tasks if t.stage == target.stage] if stage_num else tasks
+
+    def search(task_list: list[Task], prefix: str) -> str | None:
+        for i, task in enumerate(task_list, 1):
+            label = f"{prefix}{i}" if prefix else str(i)
+            if task is target:
+                return label
+            found = search(task.children, f"{label}.")
+            if found is not None:
+                return found
+        return None
+
+    return search(stage_tasks, f"{stage_num}." if stage_num else "") or "?"
+
+
+def _count_failed(plan: Plan) -> int:
+    return sum(1 for task in _iter_plan_tasks(plan) if task.status == TaskStatus.FAILED)
+
+
+def _iter_plan_tasks(plan: Plan) -> list[PlanTask]:
+    tasks: list[PlanTask] = []
+
+    def add(task_list: tuple[PlanTask, ...]) -> None:
+        for task in task_list:
+            tasks.append(task)
+            add(task.children)
+
+    for phase in plan.phases:
+        add(phase.tasks)
+        for subsection in phase.subsections:
+            add(subsection.tasks)
+    if plan.bugs is not None:
+        add(plan.bugs.tasks)
+    return tasks
+
+
+def _update_with_retry(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
+    """Apply ``operation`` with a bounded retry on concurrent edits (§2(g)).
+
+    Two retries gives three total attempts. Each retry re-loads current bytes
+    and re-derives the mutation by stable task id, preserving mcloop's current
+    "survive an external edit" behavior without spinning indefinitely under hot
+    contention.
+    """
+    last_exc: ConcurrentUpdateError | None = None
+    for _attempt in range(_UPDATE_RETRIES + 1):
+        try:
+            return update(path, operation)
+        except ConcurrentUpdateError as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+def _require_task_id(task: Task, operation: str) -> str:
+    if task.task_id is None:
+        raise ValueError(
+            f"{operation} requires migrated PLAN.md task ids; "
+            "read/select/classify support compat plans, but mutation is "
+            "ID-targeted per planfile.complete_task/fail_task/reset_task"
+        )
+    return task.task_id
+
+
+def check_off(path: str | Path, task: Task) -> None:
+    """Complete ``task`` by id; derived parent completion has no event (§2(e))."""
+    task_id = _require_task_id(task, "check_off")
+    _update_with_retry(Path(path), lambda plan: complete_task(plan, task_id)[0])
+
+
+def mark_failed(path: str | Path, task: Task) -> None:
+    """Mark ``task`` failed by id; callers must reserve this for retry exhaustion.
+
+    Parity §2(e): commit-failure is not represented by this function and must
+    not write a checkbox; the later run_loop shim only calls this on the path
+    that already uses ``checklist.mark_failed`` today.
+    """
+    task_id = _require_task_id(task, "mark_failed")
+    _update_with_retry(Path(path), lambda plan: fail_task(plan, task_id, "failed")[0])
+
+
+def clear_failed_markers(path: str | Path) -> int:
+    p = Path(path)
+    if not p.exists():
+        return 0
+    before = load(p)
+    count = _count_failed(before)
+    if count == 0:
+        return 0
+    _update_with_retry(p, clear_failed)
+    return count
+
+
+def _drop_done_bug_tasks(plan: Plan) -> Plan:
+    if plan.bugs is None:
+        return plan
+    open_tasks = tuple(task for task in plan.bugs.tasks if task.status is not TaskStatus.DONE)
+    return dataclasses.replace(
+        plan,
+        bugs=BugsSection(tasks=open_tasks, line_number=plan.bugs.line_number),
+    )
+
+
+def purge_completed_bugs(path: str | Path) -> None:
+    """Delete DONE bug entries using planfile atomic update (§D3).
+
+    Delete-vs-retain history is intentionally out of scope here; this preserves
+    the current live-queue semantics and moves only the write primitive.
+    """
+    _update_with_retry(Path(path), _drop_done_bug_tasks)
