@@ -15,26 +15,33 @@ section and from the parity findings in §2.
 
 ## 0. State verification (confirmed from source, not assumed)
 
-0.1 **planfile surface is live and complete as claimed.**
-`bob-tools/bob_tools/planfile/__init__.py` exports the full surface
-(`parse_plan`, `render_plan`/`canonicalize`, `validate_plan`,
-`migrate`, `next_tasks`, `complete_task`, `fail_task`, `reset_task`,
-`add_task`, `replace_phase`, `resolve_task_context`,
-`check_consistency`, `load`/`save`/`update`, model types,
-`Settlement`, `Outcome`). `bob-tools/PLAN.md` Stages 1–8 are all
-`[x]`; Stage 9 is the DEFERRED bugfile layer with no checkboxes by
-design (`PLAN.md` tail, "Stage 9: DEFERRED"). Stage 6 fileio is
-implemented with `fcntl.flock` `LOCK_EX` on a sidecar lock, atomic
-`tempfile`+`fsync`+`os.replace`, and `update()` mid-flight
-byte-comparison raising `ConcurrentUpdateError`
-(`bob_tools/planfile/fileio.py`).
+0.1 **planfile surface is live and complete as claimed, with one
+corrected export detail.**
+`bob-tools/bob_tools/planfile/__init__.py:19-48` imports, and
+`:50-84` exports, the runtime surface used by this migration
+(`parse_plan`,
+`render_plan`/`canonicalize`, `migrate`, `next_tasks`,
+`complete_task`, `fail_task`, `reset_task`, `add_task`,
+`replace_phase`, `resolve_task_context`, `check_consistency`,
+`load`/`save`/`update`, model types, `Settlement`, `Outcome`).
+`validate_plan` exists at `operations.py:202` but is **not** exported
+from `bob_tools.planfile.__init__`; callers that need it must import
+it from `bob_tools.planfile.operations` or go through the CLI.
+`bob-tools/PLAN.md` Stages 1–8 are all `[x]`; Stage 9 is the
+DEFERRED bugfile layer with no checkbox tasks by design
+(`PLAN.md:293-295`). Stage 6 fileio is implemented with
+`fcntl.flock` `LOCK_EX` on a sidecar lock
+(`fileio.py:89-106`), atomic `tempfile`+`fsync`+`os.replace`
+(`:109-135`), and `update()` mid-flight byte-comparison raising
+`ConcurrentUpdateError` (`:156-188`).
 
 0.2 **planfile is editable-installed into mcloop's venv (confirmed).**
 `mcloop/.venv/lib/python3.13/site-packages/__editable__.bob_tools-0.1.0.pth`
 loads `__editable___bob_tools_0_1_0_finder.py`, whose
-`MAPPING = {'bob_tools': '/Users/mhcoen/proj/bob-tools/bob_tools'}`.
-`import bob_tools.planfile` from mcloop's runtime resolves to the live
-source tree. (`bob_tools-0.1.0.dist-info` also present.)
+`MAPPING = {'bob_tools': '/Users/mhcoen/proj/bob-tools/bob_tools'}`
+at finder line 9. `import bob_tools.planfile` from mcloop's runtime
+resolves to the live source tree. (`bob_tools-0.1.0.dist-info` also
+present.)
 
 0.3 **Empirical parser parity already exists and passes.**
 `bob-tools/bob_tools/planfile/tests/test_mcloop_parity.py` imports the
@@ -42,10 +49,16 @@ live `mcloop.checklist` and asserts, on the real
 `/Users/mhcoen/proj/{duplo,mcloop}/PLAN.md` and
 `mcloop/PLAN.EXAMPLE.md`, structural equality of: task positions,
 indent levels, checkbox status, bugs-section presence/count, phase
-ordinals, per-phase task counts, per-task `[RULEDOUT]` counts. It
-encodes exactly one allowed divergence (the USER/BATCH/AUTO
-substring-vs-leading case; see §2(d)) and asserts nothing else
-differs. This test is the parser half of the acceptance bar and is
+ordinals, per-phase task counts, per-task `[RULEDOUT]` counts
+(`test_mcloop_parity.py:343-520`). It encodes the one-sided
+`bob ⊆ mcloop` operational-tag allowance (`:454-497`): current
+mcloop USER is anchored, so live divergence is only possible for
+BATCH/AUTO prose mentions (§2(d)), while the test still guards all
+three tags against bob-side over-recognition. It asserts nothing else
+differs. It currently passes in this dev environment:
+`PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q -p no:cacheprovider
+bob_tools/planfile/tests/test_mcloop_parity.py` → `3 passed in
+0.73s`. This test is the parser half of the acceptance bar and is
 reused, not re-derived, below.
 
 0.4 **Phase B contract (quoted from `bob/design/planfile.md` §8).**
@@ -97,16 +110,21 @@ behavioral difference, tagged with remediation: `[planfile-API]`,
 ### (a) Next-task selection
 
 mcloop: `checklist.find_next` → `_search_in_stage(tasks,"Bugs")` first;
-else `current_stage(tasks)` (`checklist.current_stage` →
-`_stage_complete`, which treats a `[!]` task as *not* complete) then
-`_search_tasks(required_stage=active_stage, skip_stages={"Bugs"})`.
-DFS leaf-before-parent and `@deps` are in `checklist._search_tasks`
-(no `@deps` concept exists in mcloop).
+else `current_stage(tasks)` (`checklist.current_stage` at
+`checklist.py:321-333` → `_stage_complete` at `:302-318`, where any
+non-checked task including `[!]` makes the stage incomplete) then
+`_search_tasks(required_stage=active_stage, skip_stages={"Bugs"})`
+(`find_next` at `:440-466`, `_search_in_stage` at `:469-475`).
+DFS leaf-before-parent is in `checklist._search_tasks`
+(`:362-411`); no `@deps` concept exists in mcloop.
 planfile: `operations.next_tasks` → `_walk_actionable(plan.bugs.tasks)`
 first; else first phase failing `_phase_complete` (FAILED ≠ complete,
 mirrors `_stage_complete`), then `_walk_actionable` over `phase.tasks`
 then each `subsection.tasks`. DFS leaf-before-parent in
-`_walk_actionable`; `@deps` via `_deps_satisfied`.
+`_walk_actionable` (`operations.py:591-666`); `@deps` via
+`_deps_satisfied` (`:515-525`); phase completion via
+`_phase_complete` (`:538-547`); top-level selection in
+`next_tasks` (`:669-720`).
 
 - DFS order, first-incomplete-phase scoping, leaf-before-parent:
   **MATCH**. `_walk_actionable` is a line-for-line re-expression of
@@ -139,17 +157,20 @@ then each `subsection.tasks`. DFS leaf-before-parent in
 
 ### (b) Failed-sibling blocking
 
-mcloop `checklist._search_tasks`: `if task.failed: if is_subtask:
-return None; continue` (root-level failed skipped, not blocking later
-roots; subtask failed blocks later siblings under the same parent);
-parent-with-failed-child: `if any(c.failed for c in task.children):
-if is_subtask: return None; continue`. Top-level call uses
-`is_subtask=False`.
-planfile `operations._walk_actionable`: `if task.status==FAILED: if
-is_subtask: return; continue`; and the no-actionable-descendant branch
-`if any(c.status==FAILED for c in task.children): if is_subtask:
-return; continue`. `next_tasks` passes `is_subtask=False` for
-`phase.tasks`, each `sub.tasks`, and `plan.bugs.tasks`.
+mcloop `checklist._search_tasks` (`checklist.py:362-411`):
+`if task.failed: if is_subtask: return None; continue` at `:375-382`
+(root-level failed skipped, not blocking later roots; subtask failed
+blocks later siblings under the same parent); parent-with-failed-child:
+`if any(c.failed for c in task.children): if is_subtask: return None;
+continue` at `:402-407`. Top-level `find_next` calls
+`_search_tasks(..., is_subtask=False)` at `:462-466`.
+planfile `operations._walk_actionable` (`operations.py:591-666`):
+`if task.status==FAILED: if is_subtask: return; continue` at
+`:622-626`; and the no-actionable-descendant branch `if any(c.status
+== FAILED for c in task.children): if is_subtask: return; continue`
+at `:657-665`. `next_tasks` passes `is_subtask=False` for
+`plan.bugs.tasks` at `:703-706`, and for `phase.tasks` / each
+`sub.tasks` at `:713-719`.
 
 **MATCH.** Identical control flow including the root-skip /
 subtask-block asymmetry and the failed-child-blocks-parent rule.
@@ -162,12 +183,14 @@ then computes `parent = find_parent(tasks, task)` and, if
 to assemble the batch. Selection logic in
 `checklist.get_batch_children`: skip DONE (set `seen_non_failed`),
 FAILED → break if `batch or seen_non_failed` else continue,
-`is_user_task`/`is_auto_task` child → break, else append.
+`is_user_task`/`is_auto_task` child → break, else append
+(`checklist.py:695-719`; `is_batch_task` at `:686-692`).
 planfile: `next_tasks` surfaces the **parent** itself —
 `_walk_actionable` does `dataclasses.replace(task,
 children=_get_batch_children(task))` when `"BATCH" in task.flag_tags`
-and drains the child iterator. `operations._get_batch_children` is a
-line-for-line mirror of `checklist.get_batch_children`.
+and drains the child iterator (`operations.py:636-649`).
+`operations._get_batch_children` (`:550-575`) mirrors
+`checklist.get_batch_children`.
 
 - Batch child *selection*: **MATCH** (`_get_batch_children` ==
   `get_batch_children`).
@@ -187,12 +210,12 @@ line-for-line mirror of `checklist.get_batch_children`.
 ### (d) USER/AUTO/BATCH classification
 
 mcloop: `checklist.is_user_task` = `text == "[USER]" or
-text.startswith("[USER] ")` (anchored; this is the post-Defect-C
-form, confirmed in current source). `checklist.is_auto_task` =
-`_AUTO_TAG_RE.search(task.text)` (substring, anywhere).
-`checklist.is_batch_task` = `"[BATCH]" in task.text` (substring,
-anywhere). `[USER]`/`[AUTO]`/`[BATCH]` constants at
-`checklist.py:22–24`.
+text.startswith("[USER] ")` (`checklist.py:633-642`; anchored; this
+is the post-Defect-C form, confirmed in current source).
+`checklist.is_auto_task` = `_AUTO_TAG_RE.search(task.text)`
+(`:722-729`, substring, anywhere). `checklist.is_batch_task` =
+`"[BATCH]" in task.text` (`:686-692`, substring, anywhere).
+`[USER]`/`[BATCH]`/`[AUTO]` constants/regex at `checklist.py:25-27`.
 planfile: parser extracts `flag_tags`/`action_tag` **leading-only**
 after stripping a leading `T-NNNNNN:` (`parser._extract_flag_tags`,
 `_extract_action_tag`, `_build_task`). USER = `"USER" in
@@ -203,22 +226,30 @@ task.flag_tags`; AUTO = `task.action_tag is not None`; BATCH =
 - AUTO, BATCH: **DIVERGENCE [accepted-doc]**, one-directional `bob ⊆
   mcloop`. mcloop's substring matchers classify prose-mention tasks
   (a task whose body merely contains `[BATCH]`/`[AUTO:x]`) as
-  batch/auto; planfile does not. This is exactly the divergence
-  `test_mcloop_parity.py` already isolates and asserts is the *only*
-  difference on the real fixtures. planfile is the more-correct
-  behavior. Acceptance: keep the existing parity test as the
-  regression guard; the swap intentionally adopts the corrected
-  classification, and the pre-swap PLAN.md is audited (the parity
-  test already passes on `mcloop/PLAN.md`, so no live prose-mention
-  task is currently misclassified).
+  batch/auto; planfile does not. This is the live divergence guarded
+  by `test_mcloop_parity.py`: the test's module docstring still
+  describes USER as substring-matched, but its executable assertions
+  call the current anchored `checklist.is_user_task` and the substring
+  `is_batch_task`/`is_auto_task` (`test_mcloop_parity.py:454-497`).
+  The test currently passes on the three real fixtures (§0.3), so no
+  unaccounted live prose-mention task is currently misclassified.
+  planfile is the more-correct behavior. Acceptance: keep the parity
+  test as the regression guard; the swap intentionally adopts the
+  corrected classification.
 - **HIGH-SEVERITY interaction with task IDs.** `is_user_task` checks
   raw `task.text`. After `migrate()` prepends `T-000NNN:`, the line
   body is `T-000NNN: [USER] …`, which does **not** satisfy
   `text == "[USER]"` nor `startswith("[USER] ")` → mcloop's
-  `is_user_task` returns **False** for every USER task; the
-  `_collect_body` `[USER]` body capture in `checklist.parse` also
-  breaks. `is_auto_task`/`is_batch_task` survive (they `search`/`in`
-  anywhere). `STAGE_RE` survives (bare digits unaffected). Net:
+  `is_user_task` returns **False** for every USER task
+  (`checklist.py:633-642`); the `_collect_body` `[USER]` body capture
+  in `checklist.parse` also breaks because parse collects the body
+  only when `text == _USER_TAG or text.startswith(f"{_USER_TAG} ")`
+  (`checklist.py:210-228`). planfile strips a leading task ID before
+  tag extraction (`parser.py:668-688`) and then recognizes only
+  leading flag/action tags (`parser.py:849-885`). `is_auto_task`/
+  `is_batch_task` survive the ID prefix in current mcloop because
+  they `search`/`in` anywhere. `STAGE_RE` survives (bare digits
+  unaffected). Net:
   running `bob-plan fmt` (= `parse;migrate;save`) on the authoritative
   PLAN.md while mcloop still uses `checklist` **silently breaks USER
   task handling**. This is the central ordering constraint and the
@@ -233,26 +264,37 @@ mcloop: `checklist.check_off` writes one `[x]` line via
 `_find_task_line` (stale-line-tolerant: line number, then text+indent
 +stage fallback, prefer unchecked), then `_auto_check_parents`
 re-parses (`check_structure=False`) and silently `[x]`-marks any
-parent whose children are all checked — **no ledger event**.
+parent whose children are all checked — **no ledger event**
+(`checklist.py:478-558`, `_auto_check_parents` at `:771-797`).
 `main.run_loop` standard success: `check_off(active_file, task)` then
 `_ledger_settle(label, TaskOutcome(success=True, …))` →
 `resolve_phase_id` + `emit_task_lifecycle_events`, which emits
 `commit_landed` **only if `_git_head_sha` is non-None**
-(`ledger_emit.emit_task_lifecycle_events`). `[AUTO]` and successful
+(`main.py:1681-1722`; `ledger_emit.emit_task_lifecycle_events` at
+`ledger_emit.py:376-475`, git gate at `:461-465`). `[AUTO]` and successful
 `[USER]` tasks are checked off with **no `_ledger_settle` call**
 (verified: the `is_auto_task`/`is_user_task` branches in `run_loop`
-call `check_off`/`completed.append`/`ctx.add`/`notify` only).
+call `check_off`/`completed.append`/`ctx.add`/`notify` only:
+`main.py:1201-1224` and `:1226-1255`).
 Commit-failure path: `_ledger_settle(failure_kind="commit_failed")`
-but **no `mark_failed`** before the terminal break. Retry exhaustion:
-`mark_failed` then `_ledger_settle(success=False, abandoned=True,
-failure_kind="max_retries_exceeded")`.
+but **no `mark_failed`** before the terminal break
+(`main.py:1660-1673`). Retry exhaustion: `mark_failed` then
+`_ledger_settle(success=False, abandoned=True,
+failure_kind="max_retries_exceeded")` (`main.py:1769-1786`).
 planfile: `complete_task` → `(plan, (direct, *derived))`. `direct`
 kind via `_direct_completion_kind`: `action_tag is not None or
 "USER" in flag_tags → "work_observed"` else `"commit_landed"`,
 `ledger_event_required=True`. Derived parents → `kind="none"`,
 `ledger_event_required=False`. `fail_task` → single `"test_failed"`,
 `failure_kind` from `Outcome` or `"max_retries_exceeded"`, `cascade=
-False`. `reset_task` → `"none"`, no event.
+False`. `reset_task` → `"none"`, no event. All three resolve by
+`task_id` via `_find_task_by_id` (`operations.py:107-122`), and
+missing IDs or missing matches raise `ValueError` in
+`complete_task` (`:933-935`), `fail_task` (`:983-985`), and
+`reset_task` (`:1016-1018`). Status application and derived parent
+cascade are in `_flip_in_tree`/`_apply_status_to_plan`
+(`:727-875`); Settlement shapes are in `_direct_completion_kind` and
+the three public ops (`:879-1030`).
 
 - Derived parent completion (no event): **MATCH**. mcloop's silent
   `_auto_check_parents` ≡ planfile's `ledger_event_required=False`
@@ -301,14 +343,18 @@ False`. `reset_task` → `"none"`, no event.
 ### (f) Failure marking & reset
 
 mcloop: `checklist.mark_failed` rewrites `[ ]→[!]` or `[x]/[X]→[!]`
-(handles Claude pre-checking), no parent cascade.
+(handles Claude pre-checking), no parent cascade
+(`checklist.py:565-596`).
 `checklist.clear_failed_markers` (on `--retry`) regex-rewrites every
 `^(\s*)- \[!\] ` → `- [ ] ` across the *active files*
 (`CURRENT_PLAN.md` + `BUGS.md`), returns a count, anchored so prose
-containing `- [!]` is not corrupted.
+containing `- [!]` is not corrupted (`checklist.py:599-624`).
 planfile: `fail_task` → FAILED regardless of prior status,
 `cascade=False`. `reset_task` → single task FAILED→TODO by ID,
-`kind="none"`.
+`kind="none"` (`operations.py:964-1030`). There is no bulk
+`clear_failed` export in `bob_tools.planfile.__all__`
+(`__init__.py:50-84`) and no `clear_failed` symbol in
+`operations.py`, so B0.1 is required.
 
 - `mark_failed` semantics (mark even if `[x]`, no cascade):
   **MATCH** (`fail_task` flips to FAILED unconditionally,
@@ -328,16 +374,22 @@ planfile: `fail_task` → FAILED regardless of prior status,
 ### (g) Plan mutation safety
 
 mcloop: `checklist.check_off`/`mark_failed`/`clear_failed_markers`/
-`_auto_check_parents` and all of `plan_split` do `read_text →
-mutate → write_text` — non-atomic, unlocked, single-line edits.
+`_auto_check_parents` do `read_text → mutate → write_text`
+(`checklist.py:547-558`, `:572-596`, `:608-623`, `:781-797`) —
+non-atomic, unlocked, single-line edits. `plan_split` uses the same
+plain file rewrite model for `CURRENT_PLAN.md`/PLAN.md extraction and
+transition: it imports checklist at `plan_split.py:21-28`, defines
+the split filenames at `:31-33`, writes the active file in
+`ensure_current_plan` (`:182-205`), and replaces it during
+`transition_phase` (`:214-240`).
 Concurrency contract is a printed warning ("Do not edit
 CURRENT_PLAN.md or BUGS.md while mcloop is running"); resilience to
 external edits comes only from `_find_task_line`'s stale-line
-fallback.
+fallback (`checklist.py:478-537`).
 planfile: `fileio.save` = atomic tempfile+fsync+`os.replace` under
 `fcntl.flock` `LOCK_EX` on a sidecar `.lock`; `fileio.update` =
 load → lock → re-read → byte-compare → `ConcurrentUpdateError` on
-external change → apply → save.
+external change → apply → save (`fileio.py:89-188`).
 
 - Atomicity/locking: **DIVERGENCE [mcloop-adapt], strictly safer.**
   Adopting `update()` adds crash-safety mcloop never had. The only
@@ -357,7 +409,9 @@ external change → apply → save.
   then-subsections ordering. mcloop's `check_off` today changes
   **exactly one line**. `mcloop/PLAN.md` is human-edited,
   git-tracked, uses **3-space** subtask indent and `## Stage N:`
-  headings with no IDs/comments (verified: `mcloop/PLAN.md` head).
+  headings with no IDs/comments (verified: `mcloop/PLAN.md:14-21`;
+  grep finds `## Stage` and 3-space task indents, and no `T-NNNNNN:`
+  or `phase_id` markers anywhere in the file).
   The "lossless canonicalize" invariant
   (`render(parse(x))==x` fixed point, `bob/design/planfile.md`
   §3.2; round-trip Stage 8 tests) guarantees the fixed point only on
@@ -379,26 +433,30 @@ split-file model.
 
 | Module | Coupling | Disposition |
 |---|---|---|
-| `mcloop/plan_split.py` | imports `checklist.{BUGS_RE,CHECKBOX_RE,STAGE_RE,_stage_complete,get_stages,parse}`; defines `MASTER_PLAN/CURRENT_PLAN/BUGS_FILE`, `extract_next_phase`, `_extract_stage_content`, `_extract_flat_tasks`, `get_current_phase_name`, `mark_phase_complete`, `ensure_current_plan`, `ensure_bugs_file`, `transition_phase` | **DELETE in full** (terminal stage) |
-| `mcloop/main.py` | imports ~18 names from `checklist` + `{BUGS_FILE,CURRENT_PLAN,ensure_bugs_file,ensure_current_plan,get_current_phase_name,transition_phase}` from `plan_split`; `run_loop` reads/writes `CURRENT_PLAN.md`+`BUGS.md` as active files, PLAN.md as master via `plan_split`; phase transition, `--retry` clear, interrupt `active_paths`, startup "Do not edit CURRENT_PLAN.md" message | **Primary migration site** (Stages B2–B5) |
-| `mcloop/lifecycle.py` | imports `checklist.{CHECKBOX_RE,Task,mark_failed,parse}`; `_check_interrupted(active_paths=[bugs,current_plan,master])`, `_write_ruledout_to_plan` (CHECKBOX_RE), `_all_tasks`, skip/describe mutate first split file containing the task | **Migration site** (Stage B4): re-point to planfile types/ops; collapse `active_paths` to `[BUGS.md, PLAN.md]` |
-| `mcloop/output.py` | imports `checklist.{Task,count_unchecked,current_stage,find_next,get_stages}`; `_dry_run`, `_print_summary` | **Migration site** (Stage B3/B5): `find_next→next_tasks`, `count_unchecked`→model walk; `_dry_run` reimplemented against `Plan` (no direct `current_stage`/`get_stages` analog) |
-| `mcloop/investigate_cmd.py` | imports `checklist.{Task,parse}` for *generated worktree investigation plans* (`investigator.generate_plan` output: `## ` non-Stage headings + `- [ ] N. text`), not CURRENT_PLAN/PLAN.md | **Separate, lower-risk site** (Stage B5): re-point `parse→parse_plan`; verify the generated-plan format parses (its `## Bug Description` etc. headings are non-Stage → orphan/preamble in planfile; may require `generate_plan` to emit a Stage heading or a planfile compat allowance — pin a test) |
-| `mcloop/maintain.py` | imports `checklist.CHECKBOX_RE` only, for `MAINTAIN.md` `parse_invariants` — **not** PLAN.md, **not** the split | Decoupled from de-split. Keep a local regex or move `CHECKBOX_RE` to a shared constant when `checklist` is deleted. Not a CURRENT_PLAN coupling. |
-| `mcloop/ledger_emit.py` | does **not** import `checklist`; owns `_PHASE_HEADER_RE`/`_PHASE_ID_COMMENT_RE`, `find_explicit_phase_id_for_task`, `resolve_phase_id`, `parse_plan_phase_ids` | **Shim site** (Stage B2): `resolve_phase_id` becomes a `resolve_task_context` shim (design §7.1) |
-| `mcloop/{run_summary,checks,runner}.py` | **No coupling** (verified). `runner` consumes a precomputed `eliminated` list (`main` computes `get_eliminated`); RULEDOUT reaches the prompt via `_build_*_prompt`'s "RULED OUT APPROACHES" block — design doc's cited `runner.py:376-385/422-431/482-491` line numbers are stale but the behavior holds | No change |
-| `mcloop/{errors,sync_cmd,audit,claude_md_sync,dep_validator,investigator,code_edit}.py` | reference `"PLAN.md"`/`"BUGS.md"` *string literals* only (`errors._insert_bugs_section`, `sync_cmd` text diff, `audit` report file); no `checklist`/`plan_split` import | No change (string literals; not API-coupled) |
+| `mcloop/plan_split.py` | imports `checklist.{BUGS_RE,CHECKBOX_RE,STAGE_RE,_stage_complete,get_stages,parse}` at `plan_split.py:21-28`; defines `MASTER_PLAN/CURRENT_PLAN/BUGS_FILE` at `:31-33`; owns `extract_next_phase` (`:36-59`), `_extract_stage_content` (`:62-84`), `_extract_flat_tasks` (`:87-123`), `get_current_phase_name` (`:126-135`), `mark_phase_complete` (`:138-179`), `ensure_current_plan` (`:182-205`), `ensure_bugs_file` (`:208-211`), `transition_phase` (`:214-240`) | **DELETE in full** (terminal stage) |
+| `mcloop/main.py` | imports checklist names at `main.py:17-40` and `plan_split.{BUGS_FILE,CURRENT_PLAN,ensure_bugs_file,ensure_current_plan,get_current_phase_name,transition_phase}` at `:107-114`; `run_loop` binds `master_path/current_plan_path/bugs_path` at `:689-693`, clears failed markers in active files at `:695-703`, passes interrupt `active_paths=[bugs,current,master]` at `:713-724`, and prints the split warning at `:1042-1048` | **Primary migration site** (Stages B2–B5) |
+| `mcloop/lifecycle.py` | imports `checklist.{CHECKBOX_RE,Task,mark_failed,parse}` at `lifecycle.py:14-19`; `_check_interrupted` documents `active_paths` including `BUGS.md, CURRENT_PLAN.md, PLAN.md` at `:76-87` and uses them at `:103`; `_all_tasks` is `:240-245`; `_write_ruledout_to_plan` uses `CHECKBOX_RE` to insert `[RULEDOUT]` at `:248-261` | **Migration site** (Stage B4): re-point to planfile types/ops; collapse `active_paths` to `[BUGS.md, PLAN.md]` |
+| `mcloop/output.py` | imports `checklist.{Task,count_unchecked,current_stage,find_next,get_stages}` at `output.py:10-16`; `_dry_run` uses `get_stages/current_stage/find_next` at `:21-46`; `_print_summary` counts remaining via `count_unchecked` at `:114-150` | **Migration site** (Stage B3/B5): `find_next→next_tasks`, `count_unchecked`→model walk; `_dry_run` reimplemented against `Plan` (no direct `current_stage`/`get_stages` analog) |
+| `mcloop/investigate_cmd.py` | imports `checklist.{Task,parse}` at `investigate_cmd.py:19-20` for *generated worktree investigation plans*: appends verification tasks to `PLAN.md` at `:286-290`, parses generated `PLAN.md` for status at `:378-386`, and writes generated `PLAN.md` at `:634-637`; not a CURRENT_PLAN split coupling | **Separate, lower-risk site** (Stage B5): re-point `parse→parse_plan`; verify the generated-plan format parses (its `## Bug Description` etc. headings are non-Stage → orphan/preamble in planfile; may require `generate_plan` to emit a Stage heading or a planfile compat allowance — pin a test) |
+| `mcloop/maintain.py` | imports `checklist.CHECKBOX_RE` at `maintain.py:13`; `parse_invariants` uses it for `MAINTAIN.md` unchecked invariant lines at `:66-82` — **not** PLAN.md, **not** the split | Decoupled from de-split. Keep a local regex or move `CHECKBOX_RE` to a shared constant when `checklist` is deleted. Not a CURRENT_PLAN coupling. |
+| `mcloop/ledger_emit.py` | does **not** import `checklist`; owns `parse_plan_phase_ids` (`ledger_emit.py:72-89`), `find_explicit_phase_id_for_task` (`:92-119`), and `resolve_phase_id` (`:122-145` and following) using `_PHASE_HEADER_RE`/`_PHASE_ID_COMMENT_RE` | **Shim site** (Stage B2): `resolve_phase_id` becomes a `resolve_task_context` shim (design §7.1) |
+| `mcloop/{run_summary,checks,runner}.py` | **No checklist/plan_split import** (verified). `runner` consumes a precomputed `eliminated` list (`main` computes `get_eliminated`); RULEDOUT reaches prompts through `_build_*_prompt`'s "RULED OUT APPROACHES" blocks at `runner.py:376-385`, `:422-431`, `:482-488`, and `run_task(... eliminated=...)` at `:523-536` | No change |
+| `mcloop/{errors,sync_cmd,audit,claude_md_sync,dep_validator,investigator,review_integration,code_edit}.py` | reference `"PLAN.md"`/`"BUGS.md"` *string literals* only where relevant (`errors.py:138-139` legacy PLAN insertion and `:218-230` BUGS insertion, `sync_cmd.py:1-73` PLAN sync text/diff, `audit.py:39-63/:103-134/:339` audit-report/BUGS handling, `review_integration.py:94/:137` BUGS insertion); no `checklist`/`plan_split` import | No change (string literals; not API-coupled) |
 
-Test deletion/migration surface (verified by directory listing +
-headers): `tests/test_plan_split.py` (delete with `plan_split.py`);
-`tests/test_checklist.py` (parser-behavior tests — retarget to
-planfile or delete once `checklist` is gone);
-`tests/integration/test_checklist_integration.py`,
-`tests/integration/test_subtask_ordering.py` (scheduler integration —
-retain as planfile scheduler-parity tests);
-`tests/test_output.py`, `tests/test_lifecycle.py` (transitively
-checklist-coupled — update with their modules). Empirical guard
-already in bob-tools: `tests/test_mcloop_parity.py`,
+Test deletion/migration surface (verified by imports/headers):
+`tests/test_plan_split.py` imports `mcloop.plan_split` at `:14-20`
+and exercises `CURRENT_PLAN.md` behavior at `:210-230` (delete with
+`plan_split.py`); `tests/test_checklist.py` imports checklist at
+`:3-8` (parser-behavior tests — retarget to planfile or delete once
+`checklist` is gone); `tests/integration/test_checklist_integration.py`
+imports checklist ops at `:5`; `tests/integration/test_subtask_ordering.py`
+drives `run_loop` against PLAN fixtures at `:10-30` (scheduler
+integration — retain as planfile scheduler-parity tests);
+`tests/test_output.py` imports checklist parsing for `_dry_run`
+fixtures at `:98-118`; `tests/test_lifecycle.py` imports `Task` at
+`:26-30` and asserts split-file interrupt behavior at `:804-864`.
+Empirical guard already in bob-tools:
+`tests/test_mcloop_parity.py`,
 `tests/manual/check_duplo_generated_fmt.py`,
 `tests/manual/check_cli_end_to_end.py`.
 
