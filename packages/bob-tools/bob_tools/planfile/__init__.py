@@ -16,7 +16,7 @@ and the CLI are subsequent stages.
 
 from __future__ import annotations
 
-from bob_tools.planfile.fileio import load, save, update
+from bob_tools.planfile.fileio import ConcurrentUpdateError, load, save, update
 from bob_tools.planfile.model import (
     BugsSection,
     Outcome,
@@ -52,6 +52,7 @@ __all__ = [
     # the grouping by stage that used to live here is recorded in module
     # docstrings instead of __all__ ordering.
     "BugsSection",
+    "ConcurrentUpdateError",
     "Outcome",
     "Phase",
     "Plan",
