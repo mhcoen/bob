@@ -260,9 +260,9 @@ doc section 9: validate, fmt, next, done, fail.
    - [x] Exit codes: 0 success; 1 invalid plan; 2 task not found; 3 other error.
    - [x] Tests: each subcommand with a fixture file; exit codes; output formats.
 
-- [ ] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
+- [x] Write the Stage 7 verification helper script. Create `bob_tools/planfile/tests/manual/check_cli_end_to_end.py`. The script copies `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan validate` expecting failure before formatting, then runs `fmt`, `validate` expecting success, and `next`. It asserts exit codes and asserts the diff is additive-only: task IDs, phase-id comments, indentation normalization, and the format magic line. It hardcodes all paths, takes no arguments, exits non-zero on any failure, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
+- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_cli_end_to_end
 
 - [x] Verify Stage 7 leaves the repo green.
 
@@ -284,9 +284,9 @@ new parser agrees with mcloop on every existing fixture.
    - [x] Assert structural agreement on: stage and phase ordinals; bugs section presence; task counts per phase; flag-tag presence on each task (USER and BATCH); action-tag presence; RULEDOUT attachments; checkbox status for each task. Cross the two trees by position (since stable IDs are present in one but not the other).
    - [x] Document one known divergence: mcloop's substring matcher classifies prose-mention tasks as USER, BATCH, or AUTO tasks (mcloop substring-matches BATCH the same way it does USER, in `is_batch_task`); bob_tools.planfile does not. The parity test allows this specific divergence and asserts nothing else differs.
 
-- [ ] Write the Stage 8 verification helper script. Create `bob_tools/planfile/tests/manual/check_duplo_generated_fmt.py`. The script globs `/Users/mhcoen/proj/*/.duplo`, picks the first parent directory that also has a `PLAN.md`, copies that plan to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan fmt` on the copy, and diffs source against copy. It asserts only additive changes: task IDs, phase-id comments, indentation normalization, and the format magic line; task structure, tag set, and task order must be unchanged. On semantic divergence it appends a precise entry to `/Users/mhcoen/proj/bob-tools/BUGS.md` and exits non-zero. It hardcodes all paths, takes no arguments, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
+- [x] Write the Stage 8 verification helper script. Create `bob_tools/planfile/tests/manual/check_duplo_generated_fmt.py`. The script globs `/Users/mhcoen/proj/*/.duplo`, picks the first parent directory that also has a `PLAN.md`, copies that plan to `/tmp`, runs `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan fmt` on the copy, and diffs source against copy. It asserts only additive changes: task IDs, phase-id comments, indentation normalization, and the format magic line; task structure, tag set, and task order must be unchanged. On semantic divergence it appends a precise entry to `/Users/mhcoen/proj/bob-tools/BUGS.md` and exits non-zero. It hardcodes all paths, takes no arguments, prints progress to stdout at least every few seconds, and gives every subprocess an explicit short timeout.
 
-- [ ] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_duplo_generated_fmt
+- [x] [AUTO:run_cli] /Users/mhcoen/proj/bob-tools/.venv/bin/python -m bob_tools.planfile.tests.manual.check_duplo_generated_fmt
 
 - [x] Final verification: run the full pytest suite with mypy strict and ruff check. All green. Then run `pip install -e /Users/mhcoen/proj/bob-tools` and verify `bob-plan --help` lists all subcommands.
 
