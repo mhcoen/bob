@@ -74,6 +74,16 @@ def _normalize_pytest(cmd: str) -> str:
     return cmd
 
 
+def _resolve_project_venv_command(project_dir: Path, parts: list[str]) -> list[str]:
+    """Prefer ``<project>/.venv/bin/<tool>`` for bare check executables."""
+    if not parts or "/" in parts[0]:
+        return parts
+    candidate = project_dir / ".venv" / "bin" / parts[0]
+    if candidate.exists():
+        return [str(candidate), *parts[1:]]
+    return parts
+
+
 def get_check_commands(project_dir: str | Path) -> list[str]:
     """Return the check commands for this project without running them."""
     project_dir = Path(project_dir)
@@ -307,6 +317,7 @@ def run_checks(
             parts = shlex.split(cmd)
         except ValueError:
             return False, "Malformed command (unmatched quotes)"
+        parts = _resolve_project_venv_command(project_dir, parts)
         try:
             result = subprocess.run(
                 parts,

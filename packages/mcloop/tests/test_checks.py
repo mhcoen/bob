@@ -247,6 +247,21 @@ def test_run_checks_config_overrides_autodetect(tmp_path):
     assert result.passed
 
 
+def test_run_checks_resolves_bare_config_command_to_project_venv(tmp_path, monkeypatch):
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    pytest_path = venv_bin / "pytest"
+    pytest_path.write_text("#!/bin/sh\nprintf 'venv pytest\\n'\n")
+    pytest_path.chmod(0o755)
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["pytest -q"]}))
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    result = run_checks(tmp_path)
+
+    assert result.passed
+    assert "venv pytest" in result.output
+
+
 def test_run_checks_no_commands(tmp_path):
     result = run_checks(tmp_path)
     assert result.passed
