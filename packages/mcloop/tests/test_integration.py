@@ -299,7 +299,7 @@ _CHECKS_FAIL = CheckResult(passed=False, output="FAILED", command="pytest")
 def test_noop_task_checks_fail_treated_as_failure(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """No file changes + checks fail: treated as failure, marked [!]."""
+    """No file changes without acceptance evidence fails before global checks."""
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
@@ -309,10 +309,10 @@ def test_noop_task_checks_fail_treated_as_failure(
     # No-op + checks fail is a terminal failure (no retry)
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    # Checks run once on the no-changes path
-    assert mock_checks.call_count == 1
-    content = (md.parent / "CURRENT_PLAN.md").read_text()
-    assert "- [!] Already done task" in content
+    mock_checks.assert_not_called()
+    content = md.read_text()
+    assert "- [ ] Already done task" in content
+    assert "- [x] Already done task" not in content
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
@@ -325,26 +325,26 @@ def test_noop_task_checks_fail_treated_as_failure(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_noop_task_checks_pass_auto_checks(
+def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """No file changes + checks pass: auto-check the task."""
+    """No file changes + global green is not task-specific acceptance evidence."""
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
     result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert result.ok
+    assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    # run_checks called once for no-changes path + once for end-of-run full suite
-    assert mock_checks.call_count == 2
+    mock_checks.assert_not_called()
     content = md.read_text()
-    assert "- [x] Already done task" in content
+    assert "- [ ] Already done task" in content
+    assert "- [x] Already done task" not in content
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("All tasks completed!", "info")
+    assert calls[0] == ("Giving up on: Already done task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -391,20 +391,22 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_non_bug_noop_still_auto_checks(
+def test_single_task_noop_false_positive_does_not_check_off_without_acceptance_evidence(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """Regression pin: plan-task no-op + checks-pass still auto-checks."""
+    """Defect A regression: single task no-op + global green does not check off."""
     md = _make_project(tmp_path, "- [ ] Already done plan task\n")
     mock_run.return_value = _ok_run_result()
 
     result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert result.ok
+    assert not result.ok
     assert mock_run.call_count == 1
+    mock_checks.assert_not_called()
     mock_commit.assert_not_called()
     content = md.read_text()
-    assert "- [x] Already done plan task" in content
+    assert "- [ ] Already done plan task" in content
+    assert "- [x] Already done plan task" not in content
 
 
 @patch("mcloop.main.notify")

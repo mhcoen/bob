@@ -10,6 +10,7 @@ import pytest
 
 import mcloop.lifecycle as lifecycle_mod
 from mcloop.audit import AuditResult, _run_audit_fix_cycle, _run_single_audit_round
+from mcloop.checklist import Task
 from mcloop.errors import (
     _MAX_FIX_ATTEMPTS,
     _check_errors_json,
@@ -2090,7 +2091,10 @@ def test_run_loop_no_audit_skips_audit(tmp_path):
 
     with (
         patch("mcloop.main._checkpoint"),
-        patch("mcloop.main.parse", return_value=[]),
+        patch(
+            "mcloop.main.parse",
+            return_value=[Task("[AUTO:run_cli] python -m pytest", True, False, 0, 0)],
+        ),
         patch(
             "mcloop.main.run_checks",
             return_value=MagicMock(passed=True, command="", output=""),
@@ -2119,7 +2123,10 @@ def test_run_loop_audit_called_by_default(tmp_path):
 
     with (
         patch("mcloop.main._checkpoint"),
-        patch("mcloop.main.parse", return_value=[]),
+        patch(
+            "mcloop.main.parse",
+            return_value=[Task("[AUTO:run_cli] python -m pytest", True, False, 0, 0)],
+        ),
         patch(
             "mcloop.main.run_checks",
             return_value=MagicMock(passed=True, command="", output=""),
@@ -6198,7 +6205,10 @@ def test_run_loop_no_bugs_runs_normally(tmp_path):
         patch("mcloop.main._push_or_die"),
         patch("mcloop.main._kill_orphan_sessions"),
         patch("mcloop.main._ensure_git"),
-        patch("mcloop.main.parse", return_value=[]),
+        patch(
+            "mcloop.main.parse",
+            return_value=[Task("[AUTO:run_cli] python -m pytest", True, False, 0, 0)],
+        ),
         patch(
             "mcloop.main.run_checks",
             return_value=MagicMock(passed=True, command="", output=""),
@@ -6653,6 +6663,31 @@ def test_run_batch_combines_text(tmp_path):
         assert "2. Add feature B" in prompt
 
 
+def test_batch_noop_false_positive_does_not_check_off_without_acceptance_evidence(
+    tmp_path,
+):
+    """Defect A regression: batch no-op + global green does not check off."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.check_off") as mock_check_off,
+    ):
+        mock_run.return_value = MagicMock(success=True, output="already satisfied")
+        mock_checks.return_value = MagicMock(passed=True)
+
+        status, reason = _run_batch(**args)
+
+    assert status == "failed"
+    assert "no acceptance evidence" in reason
+    mock_checks.assert_not_called()
+    mock_check_off.assert_not_called()
+
+
 def test_run_batch_success_checks_off_children(tmp_path):
     """On success, _run_batch checks off all children and returns 'success'."""
     args = _make_batch_args(tmp_path)
@@ -6744,7 +6779,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
 
 
 def test_run_batch_noop_auto_checks(tmp_path):
-    """No changes but checks pass: auto-check all children."""
+    """No changes plus global green alone must not auto-check children."""
     args = _make_batch_args(tmp_path)
 
     with (
@@ -6760,9 +6795,11 @@ def test_run_batch_noop_auto_checks(tmp_path):
 
         result = _run_batch(**args)
 
-        assert result[0] == "success"
-        assert mock_check_off.call_count == 2
-        assert len(args["completed"]) == 2
+        assert result[0] == "failed"
+        assert "no acceptance evidence" in result[1]
+        mock_checks.assert_not_called()
+        mock_check_off.assert_not_called()
+        assert len(args["completed"]) == 0
 
 
 def test_run_loop_batch_detection(tmp_path):
@@ -7220,7 +7257,7 @@ def test_run_batch_autofix_metadata_only_fails(tmp_path):
 
 
 def test_run_batch_autofix_no_uncommitted_succeeds(tmp_path):
-    """_run_batch proceeds normally when _changed_files is empty and no uncommitted changes."""
+    """No changed files/no uncommitted changes still needs acceptance evidence."""
     args = _make_batch_args(tmp_path)
 
     with (
@@ -7237,8 +7274,9 @@ def test_run_batch_autofix_no_uncommitted_succeeds(tmp_path):
 
         result = _run_batch(**args)
 
-        # No meaningful changes path: auto-success if checks pass
-        assert result[0] == "success"
+        assert result[0] == "failed"
+        assert "no acceptance evidence" in result[1]
+        mock_checks.assert_not_called()
 
 
 def test_individual_task_autofix_metadata_only_retries(tmp_path):

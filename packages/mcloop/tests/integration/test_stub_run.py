@@ -461,13 +461,13 @@ def test_stub_batch_failure_falls_back_to_individual(tmp_path):
 
 
 # -------------------------------------------------------------------
-# Test 8: no-op task (no file changes, checks pass) gets auto-checked
+# Test 8: explicit read-only task (no file changes) gets checked off
 # -------------------------------------------------------------------
 
 
 @pytest.mark.integration
 def test_stub_no_file_changes_checks_pass_auto_checked(tmp_path):
-    """Stub exits 0 but creates no files → task auto-checked if checks pass."""
+    """Stub exits 0 but creates no files for an explicit read-only task."""
     scenario = {
         "tasks": [
             {
@@ -479,7 +479,7 @@ def test_stub_no_file_changes_checks_pass_auto_checked(tmp_path):
     }
     plan_md, scenario_path = _setup_repo(
         tmp_path,
-        "- [ ] Verify everything works\n",
+        "- [ ] Verify everything works; do not modify any files\n",
         scenario,
     )
 

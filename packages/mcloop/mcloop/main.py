@@ -215,6 +215,16 @@ def _is_readonly_task(task_text: str) -> bool:
     return any(phrase in text for phrase in _READONLY_TASK_PHRASES)
 
 
+def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
+    """Return True if a checked [AUTO]/[USER] task can evidence acceptance."""
+    for task in tasks:
+        if task.checked and (is_auto_task(task) or is_user_task(task)):
+            return True
+        if _has_checked_acceptance_task(task.children):
+            return True
+    return False
+
+
 def main() -> None:
     import atexit
     import traceback
@@ -455,33 +465,14 @@ def _run_batch(
         return "failed", _tail(result.output, 50)
 
     if not _has_meaningful_changes(project_dir):
-        # No changes, check if work was already done
-        noop_check = run_checks(project_dir)
-        if noop_check.passed:
-            for child in batch_children:
-                check_off(checklist_path, child)
-                lbl = _task_label(tasks, child)
-                completed.append(f"{lbl}) {child.text}")
-            elapsed = _format_elapsed(time.monotonic() - task_start)
-            print(
-                f"Batch already satisfied (no changes needed) [{elapsed}]",
-                flush=True,
-            )
-            ctx.add(
-                label_range,
-                combined_text,
-                elapsed,
-                result.output,
-            )
-            return "success", ""
+        # A batch is implementation work. A globally green suite is not
+        # acceptance evidence that the batch's required work or tests
+        # came into existence.
         print(
-            formatting.error_msg("Batch produced no changes and checks failed"),
+            formatting.error_msg("Batch produced no changes and no acceptance evidence"),
             flush=True,
         )
-        return "failed", (
-            f"Batch produced no changes. Checks still failing: {noop_check.command}\n"
-            + _tail(noop_check.output, 50)
-        )
+        return "failed", "Batch produced no file changes and no acceptance evidence"
 
     _lifecycle._current_phase = "checks"
     run_autofix(project_dir)
@@ -955,6 +946,7 @@ def run_loop(
     stopped_early: str = ""  # "stage" or "one" when a stop flag caused the exit
     completed_stage: str = ""  # Set by phase transition when a phase completes
     batch_exhausted: set[str] = set()
+    acceptance_evidence_phases: set[str] = set()
     current_model = model or _load_mcloop_config().get("model")
     primary_model = current_model
 
@@ -1093,6 +1085,20 @@ def run_loop(
 
         # Phase transition: current plan fully checked, try next phase
         if task is None and not bug_only:
+            if (
+                active_phase_name
+                and active_phase_name not in acceptance_evidence_phases
+                and not _has_checked_acceptance_task(plan_tasks)
+            ):
+                terminal_failure = (
+                    f"Stage completion lacks executed acceptance evidence: {active_phase_name}"
+                )
+                print(
+                    formatting.error_msg(terminal_failure),
+                    flush=True,
+                )
+                notify(terminal_failure, level="error")
+                break
             # Run full test suite at phase boundary
             print(
                 formatting.system_msg("Running full test suite (phase boundary)..."),
@@ -1182,6 +1188,8 @@ def run_loop(
             action, args = parse_auto_task(task)
             response = _handle_auto_task(label, action, args)
             check_off(active_file, task)
+            if active_file == current_plan_path and active_phase_name:
+                acceptance_evidence_phases.add(active_phase_name)
             completed.append(f"{label}) {task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[AUTO:{action}] {args[:60]}")
@@ -1208,6 +1216,8 @@ def run_loop(
                 passed = True  # No observation = user skipped
             if passed:
                 check_off(active_file, task)
+                if active_file == current_plan_path and active_phase_name:
+                    acceptance_evidence_phases.add(active_phase_name)
                 completed.append(f"{label}) {task.text}")
                 ctx.add(label, task.text, "0s", response)
                 notify(f"[USER] {instructions[:80]}")
@@ -1286,6 +1296,8 @@ def run_loop(
                     if batch_handled == "success":
                         break
                 if batch_handled == "success":
+                    if active_file == current_plan_path and active_phase_name:
+                        acceptance_evidence_phases.add(active_phase_name)
                     continue
                 # Batch exhausted its retries. Mark the parent and every
                 # child as failed, record the failure, and stop the run.
@@ -1511,48 +1523,18 @@ def run_loop(
                             flush=True,
                         )
                         break
-                    # Non-bug tasks: no file changes — but maybe the work
-                    # was already done. Run checks: if they pass, auto-check.
-                    noop_check = run_checks(project_dir)
-                    if noop_check.passed:
-                        check_off(active_file, task)
-                        elapsed = _format_elapsed(
-                            time.monotonic() - task_start,
-                        )
-                        completed.append(f"{label}) {task.text}")
-                        print(
-                            "Task already satisfied (no changes needed)",
-                            flush=True,
-                        )
-                        print(
-                            formatting.task_complete(label, elapsed),
-                            flush=True,
-                        )
-                        ctx.add(label, task.text, elapsed, result.output)
-                        success = True
-                        break
-                    # No-op + checks fail: distinguish "deliberately
-                    # read-only task" from "editor failed to make required
-                    # changes". The synthesizer can author tasks that are
-                    # by design no-ops (e.g., "capture baseline by running
-                    # ./run.sh --help; do not modify any files"); for
-                    # those, expecting checks to pass is wrong because
-                    # the surrounding project state hasn't been built
-                    # yet (no tests, stub CLI, etc.). The text heuristic
-                    # catches the common phrasings the synthesizer uses
-                    # for read-only tasks.
                     if _is_readonly_task(task.text):
-                        check_off(active_file, task)
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
+                        check_off(active_file, task)
+                        if active_file == current_plan_path and active_phase_name:
+                            acceptance_evidence_phases.add(active_phase_name)
                         completed.append(f"{label}) {task.text}")
                         print(
                             formatting.system_msg(
-                                "Task is a read-only no-op by design"
-                                " (text says do-not-modify or capture-"
-                                "baseline); treating as success despite"
-                                f" failing checks: {noop_check.command}"
+                                "Task is a read-only no-op by design; treating as"
+                                " executed acceptance evidence"
                             ),
                             flush=True,
                         )
@@ -1563,15 +1545,16 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    # No-op + checks fail + task wasn't read-only by
-                    # design: editor was supposed to make changes but
-                    # didn't. Terminal failure (no retry).
+                    # Non-read-only no-op: editor was supposed to make
+                    # changes or produce a dedicated verification artifact,
+                    # but didn't. A globally green suite is not acceptance
+                    # evidence for this task.
                     last_error = (
-                        "Session produced no file changes."
-                        f" Checks failing: {noop_check.command}\n" + _tail(noop_check.output, 30)
+                        "Session produced no file changes and no task-specific"
+                        " acceptance evidence."
                     )
                     print(
-                        formatting.error_msg("No-op task with failing checks"),
+                        formatting.error_msg("No-op task without acceptance evidence"),
                         flush=True,
                     )
                     break
@@ -1668,6 +1651,8 @@ def run_loop(
                     _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
                     check_off(active_file, task)
+                    if active_file == current_plan_path and active_phase_name:
+                        acceptance_evidence_phases.add(active_phase_name)
                     elapsed = _format_elapsed(
                         time.monotonic() - task_start,
                     )
