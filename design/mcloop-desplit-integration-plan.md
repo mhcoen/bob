@@ -136,22 +136,19 @@ identically to one added to PLAN.md.
 
 1. No `@deps` line is introduced (§2(a)). mcloop's checklist ignores
    dependencies, while planfile scheduling honors them.
-2. No incomplete task line contains a non-leading `[BATCH]`,
-   `[AUTO...]`, or `[USER]` prose mention (§2(d)). Current source
-   verification, run from `/Users/mhcoen/proj/mcloop`:
+2. No incomplete task line contains a non-leading `[BATCH]` or
+   `[AUTO...]` prose mention (§2(d)). USER is intentionally excluded
+   from the guard: §2(d) records USER classification as a confirmed
+   **MATCH** between post-Defect-C `checklist.is_user_task` (anchored
+   at `checklist.py:633-642`) and planfile's leading-only `flag_tags`
+   (`bob_tools/planfile/parser.py:849-865`), so a USER prose mention
+   is classification-inert on both sides and needs no divergence
+   guard. Current source verification, run from
+   `/Users/mhcoen/proj/mcloop`:
    `rg -n "@deps" PLAN.md BUGS.md` returns no matches.
-   `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md BUGS.md`
-   returns no matches on PLAN.md; the one BUGS.md match
-   (`BUGS.md:4`) is the backticked literal ```[USER]``` inside the
-   prose of an incomplete task and is classification-inert because
-   USER is anchored on **both** sides (post-Defect-C
-   `checklist.is_user_task` and planfile leading-only `flag_tags`),
-   so neither matcher classifies that task as USER. The
-   existing prose-mention `[BATCH]`/`[USER]` lines in PLAN.md are
-   DONE, so they are not selected by the scheduler. (The rg pattern
-   keeps `USER` in the alternation as a conservative guard against a
-   future regression of either matcher; under §2(d)'s current
-   verdict only `BATCH`/`AUTO` prose mentions are divergence-relevant.)
+   `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*)\]" PLAN.md BUGS.md`
+   returns no matches. The existing prose-mention `[BATCH]` lines in
+   PLAN.md are DONE, so they are not selected by the scheduler.
 
 ### (a) Next-task selection
 
@@ -700,10 +697,9 @@ full mcloop suite + bob-tools `test_mcloop_parity.py` +
 
 Freeze invariants rechecked on current `/Users/mhcoen/proj/mcloop/PLAN.md`
 and `BUGS.md`: `rg -n "@deps" PLAN.md BUGS.md` and
-`rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md BUGS.md`
-return the one classification-inert backticked `[USER]` mention in
-`BUGS.md:4` and no other matches (see freeze-invariant subsection
-above for why that single match is inert).
+`rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*)\]" PLAN.md BUGS.md`
+both return no matches (USER is excluded from the alternation per
+the freeze-invariant subsection above — confirmed MATCH per §2(d)).
 
 **B1 migration artifact: regenerate immediately before cutover
 review.** The artifact lives under
