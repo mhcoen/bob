@@ -690,22 +690,43 @@ exactly one migrated checkbox line; and a representative ledger
 event-stream replay for identical inputs produced byte-identical
 `test_failed` payloads.
 
-Recorded-replay harness caveat: the named integration harness could
-not currently serve as the B3 proof without runtime wiring/repair.
-Without `MCLOOP_INTEGRATION=1`, the five named integration files
-reported `21 skipped`. With `MCLOOP_INTEGRATION=1`, current source
-reported `7 passed, 14 failed in 4.36s`; several stub tests invoked
-the real `claude_code_agent:opus` path and failed with `Not logged in
-· Please run /login`, while failing-task/resume tests also did not
-observe the expected PLAN.md checkbox mutation. No runtime files were
-modified by this pre-flight.
+Recorded-replay harness repair (commit `3cd8165`): the harness is now
+hermetic without production/runtime changes. Root cause was test-side:
+`runner.run_task` dispatches Claude/default calls through
+`code_edit.invoke_code_edit`, whose `_select_backend(project_dir)` may
+choose orchestra before the direct `_build_command` seam; the old
+stub tests patched only `mcloop.runner._build_command`, so orchestra
+could still reach `claude_code_agent:opus`. The repaired harness
+forces the direct backend in the tests and patches `_build_command`
+there; it also asserts checkbox mutations against `CURRENT_PLAN.md`
+when split mode is active, because current `run_loop` mutates
+`CURRENT_PLAN.md` rather than master `PLAN.md` until phase transition.
+`MCLOOP_INTEGRATION=1 .venv/bin/pytest -q
+tests/integration/test_stub_run.py tests/integration/test_minimal_run.py
+tests/integration/test_subtask_ordering.py
+tests/integration/test_failing_task.py
+tests/integration/test_resume_after_kill.py` was run twice after the
+repair: `21 passed in 1.97s` and `21 passed in 2.07s`.
 
-Recommendation: **NO-GO for the irreversible B1+B3 cutover until the
-recorded-replay harness is repaired/adapted or the plan explicitly
-accepts the shim API-boundary proof as the replacement gate.** The B1
-canonicalization artifact itself is internally consistent and the
-shim API-boundary parity checks pass, but the plan's stated B3
-run-loop replay gate is not presently executable as a proof.
+Failing-task/resume diagnosis: the previously observed missing
+checkbox mutation was not a `_planfile_compat` vs `checklist`
+failure-marking or interrupt/resume divergence. It was harness
+contamination/staleness: non-hermetic stub tests could reach the real
+agent path, and failing/resume tests read master `PLAN.md` even though
+split-mode mutation happens in `CURRENT_PLAN.md`. A scratch comparison
+of the failing-task pattern over an original checklist plan and a
+migrated shim plan selected `Impossible task` on both sides and
+produced `[!]` on both sides. A scratch comparison of the resume
+pattern selected `Create alpha.txt` first on both sides, produced
+`Create alpha.txt=[x]`, `Create beta.txt=[ ]`, `Create gamma.txt=[ ]`
+after the first/interrupted step on both sides, and produced all
+three `[x]` after restart-style completion on both sides.
+
+Recommendation: **GO for the B1+B3 cutover preconditions covered by
+this pre-flight.** The B1 canonicalization artifact is internally
+consistent, shim API-boundary parity checks pass, and the named B3
+recorded-replay harness is now hermetic and deterministic. The
+irreversible cutover itself is still a separate scoped execution step.
 
 ### Stage B4 — Interrupt/lifecycle path onto planfile
 
