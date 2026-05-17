@@ -7,6 +7,18 @@ below was verified by reading source on this machine; citations are
 The governing constraint is restated verbatim from the source design
 doc and is the acceptance bar for the whole effort.
 
+Audit trail (2026-05-17): two independent adversarial reviewers
+(Kimi K2.6, Claude Opus 4.7) re-derived every load-bearing claim
+from current source and converged on zero behavioral defects. Their
+findings reports are at `bob/design/desplit-independent-validation-kimi.md`
+and `bob/design/desplit-independent-validation.md`. Three mechanical
+doc corrections from those reports — extending the §2 freeze
+invariant to scan BUGS.md as well as PLAN.md (B-1), adding
+`tests/test_args.py` to the §2(h) test deletion surface (B-2), and
+replacing the brittle B1 pre-flight SHA fingerprint with a shape
+invariant the human re-verifies just before cutover (B-3) — are
+folded in below.
+
 Authoritative architecture reference: `bob/design/planfile.md` §8
 "Phase B: McLoop migration" and its "Consumer contract" paragraph
 (quoted in §0.2 below). This document derives strictly from that
@@ -109,19 +121,37 @@ behavioral difference, tagged with remediation: `[planfile-API]`,
 
 ### Pre-cutover freeze invariants
 
-From this point until the atomic B1+B3 cutover completes,
-`mcloop/PLAN.md` must preserve the state-dependent assumptions that
-make the accepted-doc divergences inert:
+From this point until the atomic B1+B3 cutover completes, **both**
+`mcloop/PLAN.md` **and** `mcloop/BUGS.md` must preserve the
+state-dependent assumptions that make the accepted-doc divergences
+inert. BUGS.md is in scope because `planfile.next_tasks` walks
+`plan.bugs.tasks` ahead of phase tasks
+(`bob_tools/planfile/operations.py:703-711`) through the same
+`_walk_actionable`/`_deps_satisfied` paths used for phase tasks, and
+mcloop already reads BUGS.md as a separate plan input on every
+iteration (`mcloop/main.py:981`, `:1012`, `:1057`, `:1807`, `:1862`,
+`:1930`, `:1959`). So an `@deps` line or a divergence-relevant
+prose tag added to BUGS.md would trigger the §2(a)/§2(d) divergence
+identically to one added to PLAN.md.
 
 1. No `@deps` line is introduced (§2(a)). mcloop's checklist ignores
    dependencies, while planfile scheduling honors them.
 2. No incomplete task line contains a non-leading `[BATCH]`,
    `[AUTO...]`, or `[USER]` prose mention (§2(d)). Current source
-   verification: `rg -n "@deps" PLAN.md` and `rg -n
-   "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md`
-   run from `/Users/mhcoen/proj/mcloop` both return no matches. The
-   existing prose-mention `[BATCH]`/`[USER]` lines are DONE, so they
-   are not selected by the scheduler.
+   verification, run from `/Users/mhcoen/proj/mcloop`:
+   `rg -n "@deps" PLAN.md BUGS.md` returns no matches.
+   `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md BUGS.md`
+   returns no matches on PLAN.md; the one BUGS.md match
+   (`BUGS.md:4`) is the backticked literal ```[USER]``` inside the
+   prose of an incomplete task and is classification-inert because
+   USER is anchored on **both** sides (post-Defect-C
+   `checklist.is_user_task` and planfile leading-only `flag_tags`),
+   so neither matcher classifies that task as USER. The
+   existing prose-mention `[BATCH]`/`[USER]` lines in PLAN.md are
+   DONE, so they are not selected by the scheduler. (The rg pattern
+   keeps `USER` in the alternation as a conservative guard against a
+   future regression of either matcher; under §2(d)'s current
+   verdict only `BATCH`/`AUTO` prose mentions are divergence-relevant.)
 
 ### (a) Next-task selection
 
@@ -469,18 +499,31 @@ split-file model.
 | `mcloop/{run_summary,checks,runner}.py` | **No checklist/plan_split import** (verified). `runner` consumes a precomputed `eliminated` list (`main` computes `get_eliminated`); RULEDOUT reaches prompts through `_build_*_prompt`'s "RULED OUT APPROACHES" blocks at `runner.py:376-385`, `:422-431`, `:482-488`, and `run_task(... eliminated=...)` at `:523-536` | No change |
 | `mcloop/{errors,sync_cmd,audit,claude_md_sync,dep_validator,investigator,review_integration,code_edit}.py` | reference `"PLAN.md"`/`"BUGS.md"` *string literals* only where relevant (`errors.py:138-139` legacy PLAN insertion and `:218-230` BUGS insertion, `sync_cmd.py:1-73` PLAN sync text/diff, `audit.py:39-63/:103-134/:339` audit-report/BUGS handling, `review_integration.py:94/:137` BUGS insertion); no `checklist`/`plan_split` import | No change (string literals; not API-coupled) |
 
-Test deletion/migration surface (verified by imports/headers):
+Test deletion/migration surface (verified by
+`rg -n "from mcloop\.(checklist|plan_split)" tests`):
 `tests/test_plan_split.py` imports `mcloop.plan_split` at `:14-20`
 and exercises `CURRENT_PLAN.md` behavior at `:210-230` (delete with
 `plan_split.py`); `tests/test_checklist.py` imports checklist at
-`:3-8` (parser-behavior tests — retarget to planfile or delete once
-`checklist` is gone); `tests/integration/test_checklist_integration.py`
-imports checklist ops at `:5`; `tests/integration/test_subtask_ordering.py`
-drives `run_loop` against PLAN fixtures at `:10-30` (scheduler
+`:3` (module-level) plus 10 in-function imports of `Task` /
+`_find_task_line` at `:788, :1144, :1162, :1170, :1171, :1194,
+:1195, :1219, :1220, :1433` (parser-behavior tests — retarget to
+planfile or delete once `checklist` is gone);
+`tests/integration/test_checklist_integration.py` imports checklist
+ops at `:5`; `tests/integration/test_subtask_ordering.py` drives
+`run_loop` against PLAN fixtures at `:10-30` (scheduler
 integration — retain as planfile scheduler-parity tests);
-`tests/test_output.py` imports checklist parsing for `_dry_run`
-fixtures at `:98-118`; `tests/test_lifecycle.py` imports `Task` at
-`:26-30` and asserts split-file interrupt behavior at `:804-864`.
+`tests/test_output.py` imports `checklist.parse` in `_dry_run`
+fixtures at `:99` and `:114`; `tests/test_lifecycle.py` imports
+`Task` at `:27` (in-function) and asserts split-file interrupt
+behavior at `:804+`; `tests/test_args.py` imports
+`from mcloop.checklist import Task` at `:13` (module-level) plus 9
+in-function imports of `parse as parse_checklist` / `parse as
+cl_parse` / `Task` at `:4309, :4340, :5980, :6264, :6276, :6600,
+:9893, :9942, :9988` — **Stage D1 deletion-prerequisite**
+(retarget `Task`/`parse` to `_planfile_compat` or planfile types
+before `mcloop.checklist` is reduced/deleted); **explicitly NOT a
+B1+B3 cutover blocker** since `test_args.py` continues to pass
+against the unchanged `mcloop.checklist` during the cutover.
 Empirical guard already in bob-tools:
 `tests/test_mcloop_parity.py`,
 `tests/manual/check_duplo_generated_fmt.py`,
@@ -655,22 +698,54 @@ full mcloop suite + bob-tools `test_mcloop_parity.py` +
 
 ### B1+B3 pre-flight result (2026-05-17; scratch copy only)
 
-Freeze invariants rechecked on current `/Users/mhcoen/proj/mcloop/PLAN.md`:
-`rg -n "@deps" PLAN.md` and `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md`
-both returned no matches.
+Freeze invariants rechecked on current `/Users/mhcoen/proj/mcloop/PLAN.md`
+and `BUGS.md`: `rg -n "@deps" PLAN.md BUGS.md` and
+`rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md BUGS.md`
+return the one classification-inert backticked `[USER]` mention in
+`BUGS.md:4` and no other matches (see freeze-invariant subsection
+above for why that single match is inert).
 
-B1 migration artifact was generated only under
-`/tmp/mcloop-b1b3-preflight/`: `PLAN.original.md`,
-`PLAN.migrated.md`, and `PLAN.migration.diff`. The full unified diff
-has 878 lines and SHA-256
-`d4920465e2bba875bdc9b2fe874196875ad1b83c92f8f1f466caa9cafff8c5a7`.
-Transformation counts: 376 checkbox task IDs added; 10
-`<!-- phase_id: phase_NNN -->` comments added; 0 magic-format lines
-added; 286 checkbox indentation changes (3-space nested tasks to
-2-space canonical nesting); blank-line normalization net -1 line
-(40 removed, 39 added); task order unchanged, so no
-phase-tasks-before-subsections reordering occurred on the current
-file.
+**B1 migration artifact: regenerate immediately before cutover
+review.** The artifact lives under
+`/Users/mhcoen/proj/bob-tools/.scratch/mcloop-b1b3-preflight/`
+(`/tmp` is forbidden by the workspace scratch policy):
+`PLAN.original.md`, `PLAN.migrated.md`, `PLAN.migration.diff`. The
+diff SHA-256 is **not** the cutover gate — it churns whenever
+`mcloop/PLAN.md` is touched. The gate is the
+transformation-shape invariant below, which must hold on the
+freshly-regenerated artifact at the moment of the cutover commit.
+If any one of these drifts, canonicalization shape itself has
+changed and the cutover must not proceed without re-audit:
+
+- Transformation counts: 376 checkbox task IDs added; 10
+  `<!-- phase_id: phase_NNN -->` comments added; 0 magic-format
+  lines added; 286 checkbox indentation changes (3-space nested
+  tasks to 2-space canonical nesting); blank-line normalization
+  net −1 line; task order unchanged (no
+  phase-tasks-before-subsections reordering on current file).
+- `validate_plan(parse_plan(migrated))` exits clean (no
+  `PlanValidationError`).
+- `render_plan(parse_plan(migrated)) == migrated` (renderer fixed
+  point on migrated bytes).
+- Structural compare `checklist.parse(original)` vs
+  `_planfile_compat.parse(migrated)` reports 376 tasks on both
+  sides, no text/status/child-count differences, and only the four
+  accepted additive delta classes: IDs, phase_id comments, indent
+  normalization, and the three DONE prose-`[BATCH]` lines at
+  `PLAN.md:341, :359, :439` (legacy checklist classifies them as
+  BATCH by substring; planfile does not; all are `[x]` and not
+  scheduler-selectable).
+
+Latest known-good fingerprint (2026-05-17, informational only — do
+**not** treat as a gate; regenerate immediately before cutover):
+`PLAN.original.md` SHA-256
+`56daf92f5e3895048d8d4f970fbcc95cd921363941d48f58c0c632cfd8ca645e`
+(matches current `mcloop/PLAN.md`); `PLAN.migrated.md` SHA-256
+`6e057520b454c4343a043cc072d7710027395530ea691e3ef9206619867dd0e6`;
+`PLAN.migration.diff` SHA-256
+`a3ceecf4a05c58c62b0a7c5c434a4c05df06e1efa1e72d484d1bb253e3860fd6`
+(840 lines, +387/−378, net +9). All four shape invariants above
+re-verified against this artifact on 2026-05-17.
 
 B1 verification: `validate_plan(parse_plan(migrated))` passed;
 `render_plan(parse_plan(migrated)) == migrated` was true. Structural
