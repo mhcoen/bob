@@ -225,6 +225,23 @@ def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
     return False
 
 
+def _auto_response_failed(response: str) -> bool:
+    """Return True when an [AUTO] observation reports an execution failure."""
+    for raw_line in response.splitlines():
+        line = raw_line.strip()
+        if line.startswith("ERROR:"):
+            return True
+        if line.startswith("STATUS:"):
+            status = line.removeprefix("STATUS:").strip().upper()
+            if status.startswith("CRASHED") or status.startswith("HUNG"):
+                return True
+        if line.startswith("exit_code:"):
+            code = line.removeprefix("exit_code:").strip()
+            if code not in {"0"}:
+                return True
+    return False
+
+
 def main() -> None:
     import atexit
     import traceback
@@ -1187,6 +1204,17 @@ def run_loop(
             ctx.update_group(label, has_subtasks)
             action, args = parse_auto_task(task)
             response = _handle_auto_task(label, action, args)
+            if _auto_response_failed(response):
+                failed_task = f"{label}) {task.text}"
+                failed_reason = response
+                terminal_failure = f"AUTO task failed: {task.text}"
+                print(
+                    formatting.error_msg(terminal_failure),
+                    flush=True,
+                )
+                ctx.add(label, task.text, "0s", response)
+                notify(f"[AUTO:{action}] failed: {args[:60]}", level="error")
+                break
             check_off(active_file, task)
             if active_file == current_plan_path and active_phase_name:
                 acceptance_evidence_phases.add(active_phase_name)

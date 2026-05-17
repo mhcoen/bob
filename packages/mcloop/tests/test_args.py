@@ -4312,6 +4312,38 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
     assert tasks[0].checked
 
 
+def test_run_loop_auto_task_nonzero_fails_and_leaves_task_unchecked(tmp_path):
+    """Defect B regression: a nonzero AUTO run_cli result fails the run."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    (tmp_path / ".git").mkdir()
+
+    with (
+        patch(
+            "mcloop.investigate_cmd._dispatch_auto_action",
+            return_value="exit_code: 1\nSTATUS: CRASHED\noutput:\nboom",
+        ) as mock_dispatch,
+        patch("mcloop.main.run_task") as mock_run_task,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+    ):
+        result = run_loop(plan, no_audit=True)
+
+    assert not result.ok
+    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test")
+    mock_run_task.assert_not_called()
+    mock_checks.assert_not_called()
+
+    from mcloop.checklist import parse as parse_checklist
+
+    tasks = parse_checklist(plan)
+    assert not tasks[0].checked
+    assert not tasks[1].checked
+
+
 # --- --fallback-model ---
 
 
