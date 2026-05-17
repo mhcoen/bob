@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,83 @@ def test_existing_plan_fmt_output_validates(source_path: Path) -> None:
     rendered = render_plan(migrated)
     re_parsed = parse_plan(rendered, strict=True)
     validate_plan(re_parsed)
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    SOURCE_PATHS,
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
+def test_existing_plan_fmt_is_lossless(source_path: Path) -> None:
+    """fmt of every real PLAN.md must preserve every source non-blank line.
+
+    Lossless invariant per design doc section 3.2 (planfile.md:268):
+    ``canonicalize(text)`` is lossless formatting. ``bob-plan fmt`` is
+    ``save(path, migrate(parse_plan(read(path))))``; ``migrate`` adds
+    structural identifiers (T-IDs, ``<!-- phase_id: ... -->`` comments)
+    so the post-fmt text contains every source non-blank line plus
+    those additions. A pre-fix renderer dropped non-checkbox prose
+    continuation lines (e.g. mcloop/PLAN.EXAMPLE.md:111-116 example-
+    flow bullets) and intra-section blank-line groupings; this test
+    asserts every non-blank source line survives migration+render
+    (modulo the leading ``T-NNNNNN: `` prefix the renderer adds to
+    each checkbox line).
+
+    Why blank-only comparison: blank-line positions can legitimately
+    shift across the structural additions migrate introduces (a new
+    phase-id comment shifts later lines down by one), so the strict
+    losslessness check focuses on non-blank content. Blank-line
+    preservation per se is exercised by the parse->render->parse
+    fixed point in ``test_existing_plan_fmt_is_fixed_point`` and by
+    the additive-only diff assertion in
+    ``bob_tools/planfile/tests/manual/check_cli_end_to_end.py``.
+    """
+    if not source_path.is_file():
+        pytest.skip(
+            f"source PLAN.md not present at {source_path}; "
+            "this losslessness check only runs in the dev environment "
+            "where the sibling projects are checked out"
+        )
+    text = source_path.read_text()
+    plan = parse_plan(text)
+    migrated = migrate(plan)
+    rendered = render_plan(migrated)
+    # Compare on stripped lines. Legitimate canonical transformations
+    # the renderer applies:
+    #   - Two-space-per-level indentation (design doc section 4.2
+    #     Notes; renderer.py:154-160).
+    #   - ``T-NNNNNN:`` migration prefix on every checkbox line
+    #     (design doc section 3.2 fmt = parse+migrate+save).
+    #   - Heading-level normalization to ``##`` (the compat parser
+    #     accepts any ``#+`` count for stage/phase headings via
+    #     ``_STAGE_RE``; the renderer always emits two hashes).
+    # These are explicit canonical changes — semantically identical,
+    # byte-different. The losslessness invariant guards the
+    # opposite case: source content the parser would otherwise drop.
+    # The lost-content defect targets non-checkbox, non-heading
+    # source lines: markdown sub-bullets, quoted example flow, code
+    # blocks, free prose between tasks. Those must reappear in the
+    # output, possibly stripped of indentation.
+    checkbox_re = re.compile(r"^\s*- \[[ xX!]\] ")
+    heading_re = re.compile(r"^\s*#+\s")
+    rendered_stripped = {line.strip() for line in rendered.splitlines()}
+    missing: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if checkbox_re.match(line):
+            continue
+        if heading_re.match(line):
+            continue
+        if line.strip() not in rendered_stripped:
+            missing.append(line)
+    assert not missing, (
+        f"fmt is not lossless on {source_path}: "
+        f"{len(missing)} non-checkbox non-heading source line(s) "
+        f"absent from the formatted output (this is the prose-"
+        f"continuation/non-task content the lossless invariant "
+        f"guards). First few:\n" + "\n".join(missing[:5])
+    )
 
 
 def test_source_files_are_untouched() -> None:

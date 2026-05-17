@@ -148,3 +148,87 @@ def test_canonicalize_does_not_assign_task_ids(fixture_path: Path) -> None:
         f"canonicalize({fixture_path.name}) altered task identities: "
         f"before={before} after={after}"
     )
+
+
+def test_trailing_prose_continuation_preserved() -> None:
+    """Non-checkbox prose lines under a task survive parse -> render.
+
+    The lost-content defect at mcloop/PLAN.EXAMPLE.md:111-116: a task
+    body ends with "Example flow:" and is followed by markdown sub-
+    bullets (``  - ">>> ..."``) at child indent that have no
+    checkbox. The parser does not model markdown list items as
+    first-class nodes; pre-fix it dropped them and the renderer
+    therefore could not emit them, breaking the lossless-
+    canonicalize invariant of design doc section 3.2
+    (planfile.md:268). Opaque retention on ``Task.trailing_lines``
+    preserves them.
+    """
+    source = (
+        "# Project\n"
+        "\n"
+        "## Stage 1: Outputs\n"
+        "\n"
+        "- [x] Clearer terminal output. Example flow:\n"
+        '  - ">>> [TASK 13.2] Extracting frames..."\n'
+        '  - ">>> [CHECKS] Running ruff check, pytest..."\n'
+        "  - Keep Bash commands visible since they show meaningful actions\n"
+        "\n"
+        "- [x] Reduce notification frequency\n"
+    )
+    plan = parse_plan(source)
+    task = plan.phases[0].tasks[0]
+    assert task.trailing_lines == (
+        '  - ">>> [TASK 13.2] Extracting frames..."',
+        '  - ">>> [CHECKS] Running ruff check, pytest..."',
+        "  - Keep Bash commands visible since they show meaningful actions",
+        "",
+    )
+    rendered = render_plan(plan)
+    for retained in task.trailing_lines:
+        if retained:
+            assert retained in rendered, f"trailing line {retained!r} dropped on render"
+    # Fixed-point: re-parse and re-render must agree byte-for-byte.
+    second = render_plan(parse_plan(rendered))
+    assert second == rendered, (
+        "render(parse(render(plan))) drifted; "
+        "trailing_lines are not stable under round-trip"
+    )
+
+
+def test_intra_section_blank_lines_preserved() -> None:
+    """Blank lines between sibling tasks survive parse -> render.
+
+    Pre-fix the renderer emitted exactly one canonical blank after
+    ``phase.tasks`` regardless of source spacing, collapsing the
+    visual grouping authors use (e.g. mcloop/PLAN.EXAMPLE.md groups
+    sibling task blocks with blank-line separators). With opaque
+    retention the blank line falls into the prior task's
+    ``trailing_lines`` and survives.
+    """
+    source = (
+        "# Project\n"
+        "\n"
+        "## Stage 1: Spacing\n"
+        "\n"
+        "- [x] task A\n"
+        "\n"
+        "- [x] task B\n"
+        "\n"
+        "- [x] task C\n"
+    )
+    plan = parse_plan(source)
+    tasks = plan.phases[0].tasks
+    assert tasks[0].trailing_lines == ("",), tasks[0].trailing_lines
+    assert tasks[1].trailing_lines == ("",), tasks[1].trailing_lines
+    # Last task: trailing blank (line before EOF) is stripped by
+    # render_plan's trailing-blank truncation, so retention here is
+    # incidental — the property being asserted is intra-section
+    # spacing between sibling tasks.
+    rendered = render_plan(plan)
+    expected_prefix = (
+        "# Project\n\n## Stage 1: Spacing\n\n"
+        "- [x] task A\n\n"
+        "- [x] task B\n\n"
+        "- [x] task C\n"
+    )
+    assert rendered.startswith(expected_prefix), rendered

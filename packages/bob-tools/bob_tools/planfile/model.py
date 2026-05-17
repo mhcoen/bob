@@ -53,7 +53,19 @@ class RuledOut:
 
 @dataclass(frozen=True)
 class Task:
-    """A single PLAN.md task entry, including nested children and tags."""
+    """A single PLAN.md task entry, including nested children and tags.
+
+    ``trailing_lines`` is opaque retention of source bytes that appear
+    after the task's structural block (task line + deps + ruled_out +
+    children) and before the next task or section/heading boundary.
+    The parser does not interpret these lines; the renderer emits them
+    verbatim. This preserves non-checkbox prose continuation (markdown
+    sub-bullets the parser does not model as first-class nodes, e.g.
+    mcloop/PLAN.EXAMPLE.md:111-116) and intra-section blank-line
+    grouping, satisfying the design-doc rule that ``canonicalize(text)``
+    is lossless (planfile.md:268). Defaults to ``()`` so plans
+    constructed in tests or operations need not pass it explicitly.
+    """
 
     task_id: str | None
     text: str
@@ -66,6 +78,7 @@ class Task:
     ruled_out: tuple[RuledOut, ...]
     indent_level: int
     line_number: int
+    trailing_lines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

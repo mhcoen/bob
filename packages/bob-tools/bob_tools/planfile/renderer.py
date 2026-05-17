@@ -109,8 +109,12 @@ def _render_phase_into(lines: list[str], phase: Phase) -> None:
 
     for task in phase.tasks:
         lines.extend(_render_task_lines(task, depth=0))
-    if phase.tasks:
-        lines.append("")
+    # Inter-section spacing is carried by the last task's
+    # ``trailing_lines`` (lossless retention), not by a canonical
+    # blank insertion. A constructed plan with no trailing_lines
+    # therefore renders without padding between sections; that
+    # output round-trips through parse->render unchanged, satisfying
+    # the parse(render(plan)) == plan invariant for any plan.
 
     for sub in phase.subsections:
         _render_subsection_into(lines, sub)
@@ -133,8 +137,6 @@ def _render_subsection_into(lines: list[str], sub: Subsection) -> None:
 
     for task in sub.tasks:
         lines.extend(_render_task_lines(task, depth=0))
-    if sub.tasks:
-        lines.append("")
 
 
 def _render_bugs_into(lines: list[str], bugs: BugsSection) -> None:
@@ -143,8 +145,6 @@ def _render_bugs_into(lines: list[str], bugs: BugsSection) -> None:
     lines.append("")
     for task in bugs.tasks:
         lines.extend(_render_task_lines(task, depth=0))
-    if bugs.tasks:
-        lines.append("")
 
 
 def _render_task_lines(task: Task, *, depth: int) -> list[str]:
@@ -195,6 +195,14 @@ def _render_task_lines(task: Task, *, depth: int) -> list[str]:
 
     for child in task.children:
         lines.extend(_render_task_lines(child, depth=depth + 1))
+
+    # Opaque trailing lines: non-structural source content captured
+    # by the parser as belonging to this task's tail (continuation
+    # prose at child indent, intra-section blank-line groupings, ...).
+    # Emitted verbatim AFTER children so re-parse re-attributes them
+    # to this same task. Lossless-canonicalize invariant per design
+    # doc section 3.2 (planfile.md:268).
+    lines.extend(task.trailing_lines)
 
     return lines
 

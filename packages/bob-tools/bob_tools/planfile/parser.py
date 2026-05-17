@@ -210,6 +210,14 @@ def parse_plan(
     preamble_active = False
     phase_prose_lines: list[str] | None = None
     subsection_prose_lines: list[str] | None = None
+    # The most recently parsed task in the current scope. Non-task,
+    # non-structural lines that fall through every other accumulator
+    # are appended to this task's ``trailing_lines`` so they survive
+    # round-trip through render. Reset to ``None`` at every structural
+    # boundary (phase heading, subsection heading, bugs heading, H1)
+    # because trailing content belongs to a task in the current
+    # section, not across section boundaries.
+    last_parsed_task: _TaskBuilder | None = None
 
     def _close_subsection_prose() -> None:
         nonlocal subsection_prose_lines
@@ -243,6 +251,7 @@ def parse_plan(
             in_bugs = False
             stack.clear()
             phase_prose_lines = []
+            last_parsed_task = None
             continue
 
         ledger_heading = _parse_ledger_phase_heading(line)
@@ -264,6 +273,7 @@ def parse_plan(
             in_bugs = False
             stack.clear()
             phase_prose_lines = []
+            last_parsed_task = None
             continue
 
         if _BUGS_RE.match(line):
@@ -275,6 +285,7 @@ def parse_plan(
             current_subsection = None
             in_bugs = True
             stack.clear()
+            last_parsed_task = None
             continue
 
         if current_phase is None and not in_bugs:
@@ -284,6 +295,7 @@ def parse_plan(
                     project_title = h1_m.group(1).strip()
                     project_title_seen = True
                     preamble_active = True
+                    last_parsed_task = None
                     continue
                 # Subsequent H1 falls through to the preamble accumulator
                 # so the raw text is preserved. Strict mode (Stage 3)
@@ -301,6 +313,7 @@ def parse_plan(
                 current_phase.subsections.append(current_subsection)
                 stack.clear()
                 subsection_prose_lines = []
+                last_parsed_task = None
                 continue
 
         scope_tasks = _current_scope_tasks(
@@ -359,9 +372,18 @@ def parse_plan(
                 subsection_prose_lines.append(line)
             elif phase_prose_lines is not None:
                 phase_prose_lines.append(line)
-            # else: line outside any active prose region (e.g. before
-            # the first H1 or after the first task in a section) —
-            # dropped in compat mode.
+            elif last_parsed_task is not None:
+                # No prose accumulator is active because the first
+                # task in this section has already been parsed, so
+                # this non-structural line belongs to the most-recent
+                # task's tail. Captured verbatim (no interpretation)
+                # so the renderer can emit it back in original order
+                # — the lossless-canonicalize invariant in design doc
+                # section 3.2 (planfile.md:268).
+                last_parsed_task.trailing_lines.append(line)
+            # else: line outside any active prose region and before
+            # any task in the current section — dropped in compat
+            # mode (no anchor to retain it on; structurally rare).
             continue
 
         _close_subsection_prose()
@@ -393,6 +415,7 @@ def parse_plan(
         # strict mode (Stage 3) will surface this as a PlanSyntaxError.
 
         stack.append(builder)
+        last_parsed_task = builder
 
     _close_subsection_prose()
     _close_phase_prose()
@@ -948,6 +971,7 @@ class _TaskBuilder:
     deps: list[str] = field(default_factory=list)
     children: list[_TaskBuilder] = field(default_factory=list)
     ruled_out: list[RuledOut] = field(default_factory=list)
+    trailing_lines: list[str] = field(default_factory=list)
 
     def freeze(self) -> Task:
         return Task(
@@ -962,6 +986,7 @@ class _TaskBuilder:
             ruled_out=tuple(self.ruled_out),
             indent_level=self.indent_level,
             line_number=self.line_number,
+            trailing_lines=tuple(self.trailing_lines),
         )
 
 
