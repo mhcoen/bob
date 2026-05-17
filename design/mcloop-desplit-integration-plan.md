@@ -15,18 +15,17 @@ section and from the parity findings in §2.
 
 ## 0. State verification (confirmed from source, not assumed)
 
-0.1 **planfile surface is live and complete as claimed, with one
-corrected export detail.**
-`bob-tools/bob_tools/planfile/__init__.py:19-48` imports, and
-`:50-84` exports, the runtime surface used by this migration
+0.1 **planfile surface is live and complete as claimed.**
+`bob-tools/bob_tools/planfile/__init__.py:19-50` imports, and
+`:52-88` exports, the runtime surface used by this migration
 (`parse_plan`,
 `render_plan`/`canonicalize`, `migrate`, `next_tasks`,
-`complete_task`, `fail_task`, `reset_task`, `add_task`,
-`replace_phase`, `resolve_task_context`, `check_consistency`,
-`load`/`save`/`update`, model types, `Settlement`, `Outcome`).
-`validate_plan` exists at `operations.py:202` but is **not** exported
-from `bob_tools.planfile.__init__`; callers that need it must import
-it from `bob_tools.planfile.operations` or go through the CLI.
+`complete_task`, `fail_task`, `reset_task`, `clear_failed`,
+`add_task`, `replace_phase`, `resolve_task_context`,
+`check_consistency`, `validate_plan`, `load`/`save`/`update`, model
+types, `Settlement`, `Outcome`). `clear_failed` is implemented in
+`operations.py:1058-1097`; `validate_plan` remains implemented at
+`operations.py:202` and is now exported at the package root.
 `bob-tools/PLAN.md` Stages 1–8 are all `[x]`; Stage 9 is the
 DEFERRED bugfile layer with no checkbox tasks by design
 (`PLAN.md:293-295`). Stage 6 fileio is implemented with
@@ -493,11 +492,17 @@ from `bob/design/planfile.md` §8.
 
 ### Stage B0 — Pre-cutover, no mcloop behavior change
 
-B0.1 Add `bob_tools.planfile.clear_failed(plan: Plan) -> Plan`
+B0.1 **DONE in bob-tools commit `f2acceb`**: added
+`bob_tools.planfile.clear_failed(plan: Plan) -> Plan`
 (bulk FAILED→TODO, mirrors `checklist.clear_failed_markers`
 semantics: no event, idempotent). Pure planfile change; covered by
-planfile's own tests. Resolves §2(f). *(Decision: deterministic
-API addition — Codex/Claude, not routed.)*
+planfile's own tests. Resolves §2(f). Verification on commit
+`f2acceb`: `ruff check .` clean; `ruff format --check .` → `39 files
+already formatted`; `mypy --strict bob_tools` → `Success: no issues
+found in 39 source files`; `pytest -q` → `567 passed, 2 skipped in
+1.12s`; `check_cli_end_to_end` exit 0; `check_duplo_generated_fmt`
+exit 0; `test_mcloop_parity.py` → `3 passed in 0.76s`. *(Decision:
+deterministic API addition — Codex/Claude, not routed.)*
 B0.2 Build the **mcloop scheduler/mutation shim module**
 (`mcloop/_planfile_compat.py`, name TBD by Codex) but do not wire it
 into `run_loop` yet. It exposes checklist-shaped functions backed by
