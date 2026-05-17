@@ -3,19 +3,18 @@
 Run as ``python -m bob_tools.planfile.tests.manual.check_cli_end_to_end``.
 
 Copies ``/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md`` to ``/tmp`` so the
-real file is never touched, then runs four CLI invocations in sequence
+real file is never touched, then runs three CLI invocations in sequence
 against the copy:
 
-1. ``bob-plan validate`` — expected to exit ``1``. PLAN.EXAMPLE.md
-   predates the strict-mode magic line and uses ``[RULEDOUT]`` in a
-   leading-tag position, so validation must reject it before
-   formatting.
-2. ``bob-plan fmt`` — expected to exit ``0``. Assigns ``T-NNNNNN``
+1. ``bob-plan fmt`` — expected to exit ``0``. Assigns ``T-NNNNNN``
    ids, emits ``<!-- phase_id: ... -->`` comments, normalizes
    indentation, and writes the format magic line.
-3. ``bob-plan validate`` — expected to exit ``0``. After ``fmt`` the
-   plan is in canonical form and should validate cleanly.
-4. ``bob-plan next`` — expected to exit ``0`` and print
+2. ``bob-plan validate`` — expected to exit ``0``. The
+   fmt-then-validate fixed-point property: render output must
+   re-parse and validate cleanly. A failure here means fmt produced
+   output the validator rejects (the exact regression the previous
+   ``[RULEDOUT]`` defect surfaced).
+3. ``bob-plan next`` — expected to exit ``0`` and print
    ``T-NNNNNN: <text>`` on stdout.
 
 After ``fmt`` the script also asserts the diff against the original is
@@ -52,8 +51,6 @@ SCRATCH = Path("/tmp/bob-plan-stage7-check.PLAN.md")
 # to absorb cold-start latency and a slow disk without letting a stuck
 # process wedge the whole verification run.
 SUBPROCESS_TIMEOUT_S = 15.0
-
-EXIT_INVALID_PLAN = 1
 
 _MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*\d+\s*-->\s*$")
 _PHASE_ID_RE = re.compile(r"^<!--\s*phase_id:\s*\w+\s*-->\s*$")
@@ -117,18 +114,6 @@ def _normalize_after(text: str) -> list[str]:
 def _setup() -> str | None:
     _step(f"copying {SOURCE_PLAN} -> {SCRATCH}")
     shutil.copyfile(SOURCE_PLAN, SCRATCH)
-    return None
-
-
-def _validate_expect_failure() -> str | None:
-    _step(f"running: bob-plan validate {SCRATCH} (expecting exit=1)")
-    result = _run([*CLI_INVOCATION, "validate", str(SCRATCH)])
-    if result.returncode != EXIT_INVALID_PLAN:
-        return (
-            "expected validate to exit 1 before formatting, got "
-            f"{result.returncode}\n{_format_result(result)}"
-        )
-    _step("validate exited 1 as expected (pre-fmt rejection)")
     return None
 
 
@@ -208,7 +193,6 @@ def main() -> int:
 
     steps = (
         _setup,
-        _validate_expect_failure,
         _fmt,
         _validate_expect_success,
         _next,

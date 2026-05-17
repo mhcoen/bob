@@ -370,6 +370,31 @@ class TestValidatePlan:
             "task T-000001 has unknown bracket tag [NEW:thing]",
         ]
 
+    def test_leading_ruledout_is_prose_not_unknown_tag(self) -> None:
+        # ``[RULEDOUT]`` is reserved by the grammar for the sibling-line
+        # construct (design doc section 4.3, planfile.md:415-417). A
+        # task whose title legitimately documents the RULEDOUT feature
+        # (e.g. mcloop/PLAN.EXAMPLE.md:243 "[RULEDOUT] tag for
+        # recording failed approaches in PLAN.md") therefore has the
+        # literal token at the leading position of ``task.text``; that
+        # is prose, not an attempted unknown task tag. Pre-fix the
+        # validator emitted ``unknown bracket tag [RULEDOUT]`` here,
+        # breaking the fmt -> validate fixed-point invariant on every
+        # plan that mentions the feature by name.
+        plan = _plan(
+            phases=(
+                _phase(
+                    tasks=(
+                        _task(
+                            task_id="T-000193",
+                            text="[RULEDOUT] tag for recording failed approaches",
+                        ),
+                    )
+                ),
+            )
+        )
+        validate_plan(plan)
+
     def test_known_tags_in_prose_not_flagged(self) -> None:
         # Lowercase/multi-word brackets are prose, not tag attempts —
         # ``_LEADING_TAG_LIKE_RE`` requires an all-caps identifier of

@@ -36,6 +36,7 @@ from pathlib import Path
 import pytest
 
 from bob_tools.planfile import migrate, parse_plan, render_plan
+from bob_tools.planfile.operations import validate_plan
 
 SOURCE_PATHS: tuple[Path, ...] = (
     Path("/Users/mhcoen/proj/duplo/PLAN.md"),
@@ -81,6 +82,40 @@ def test_existing_plan_fmt_is_fixed_point(source_path: Path) -> None:
             "from the first render. Unified diff "
             "(first render -> second render):\n" + diff
         )
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    SOURCE_PATHS,
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
+def test_existing_plan_fmt_output_validates(source_path: Path) -> None:
+    """fmt output of every real PLAN.md must pass strict ``validate_plan``.
+
+    Closes the fmt -> validate fixed-point gap that
+    :func:`test_existing_plan_fmt_is_fixed_point` does not cover: that
+    test only checks that two successive renders agree, which a plan
+    can satisfy while still containing a construct the validator
+    rejects. The `[RULEDOUT]` defect (mcloop/PLAN.EXAMPLE.md:243 task
+    body begins with the literal token) round-tripped cleanly through
+    parse -> migrate -> render -> parse(strict) -> render but failed
+    strict validation with "unknown bracket tag [RULEDOUT]", surfacing
+    only when the manual Stage 7 verifier exercised the CLI end-to-end.
+    Asserting validate_plan on the rendered output here is the unit-
+    test analogue of that verifier's invariant.
+    """
+    if not source_path.is_file():
+        pytest.skip(
+            f"source PLAN.md not present at {source_path}; "
+            "this fmt -> validate check only runs in the dev environment "
+            "where the sibling projects are checked out"
+        )
+    text = source_path.read_text()
+    plan = parse_plan(text)
+    migrated = migrate(plan)
+    rendered = render_plan(migrated)
+    re_parsed = parse_plan(rendered, strict=True)
+    validate_plan(re_parsed)
 
 
 def test_source_files_are_untouched() -> None:

@@ -59,6 +59,17 @@ _ANNOTATION_KEY_RE = re.compile(r"^[A-Za-z_]\w*:")
 
 _KNOWN_LEADING_FLAGS = frozenset({"USER", "BATCH"})
 
+# Bracket forms reserved by the grammar for non-task-tag constructs.
+# Per design doc section 4.3 (planfile.md:415-417), ``[RULEDOUT]`` is
+# **not** a task tag; it is a sibling line at the child indent under
+# the task it pertains to. When the literal token appears at the
+# leading position of a task body — e.g. a task whose title describes
+# the RULEDOUT feature itself (mcloop/PLAN.EXAMPLE.md:243) — it is
+# prose, not an attempted unknown tag. Flagging it would conflate
+# "unknown task tag" (a real validation concern) with "task title
+# legitimately mentions a reserved keyword" (prose by design).
+_RESERVED_SIBLING_MARKERS = frozenset({"RULEDOUT"})
+
 
 def bug_count(plan: Plan) -> int:
     """Return the number of bug tasks in ``plan``.
@@ -132,8 +143,11 @@ def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
     from the task body, so any tag-shaped bracket form still at the
     leading position of ``task.text`` is by definition unknown to this
     library (either a typo or an attempt to add a new tag without a
-    library change). ``[RULEDOUT]`` is a sibling line, not a task tag,
-    so it never appears at the leading position of a task body.
+    library change). ``[RULEDOUT]`` is a sibling line, not a task tag
+    (design doc section 4.3, planfile.md:415-417); when it appears at
+    the leading position of a task body it is prose (the task title
+    documents the RULEDOUT feature itself), so it is skipped here
+    rather than reported as an unknown tag.
 
     Lowercase bracket forms and multi-word bracket forms are prose
     (``_LEADING_TAG_LIKE_RE`` requires an all-caps identifier of two
@@ -148,6 +162,8 @@ def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
         return
     content = m.group(1)
     if content in _KNOWN_LEADING_FLAGS:
+        return
+    if content in _RESERVED_SIBLING_MARKERS:
         return
     if ":" in content and content.split(":", 1)[0] == "AUTO":
         return
