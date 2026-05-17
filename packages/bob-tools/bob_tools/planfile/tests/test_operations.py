@@ -43,6 +43,7 @@ from bob_tools.planfile.operations import (
     add_task,
     bug_count,
     check_consistency,
+    clear_failed,
     complete_task,
     fail_task,
     next_tasks,
@@ -106,6 +107,14 @@ def _plan(
         bugs=bugs,
         source_path=Path("/tmp/PLAN.md"),
     )
+
+
+def test_package_root_exports_clear_failed_and_validate_plan() -> None:
+    from bob_tools.planfile import clear_failed as exported_clear_failed
+    from bob_tools.planfile import validate_plan as exported_validate_plan
+
+    assert exported_clear_failed is clear_failed
+    assert exported_validate_plan is validate_plan
 
 
 class TestValidatePlan:
@@ -1717,6 +1726,78 @@ class TestResetTask:
         plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
         with pytest.raises(ValueError, match="T-000999"):
             reset_task(plan, "T-000999")
+
+
+class TestClearFailed:
+    """``clear_failed`` bulk-resets FAILED tasks without settlements."""
+
+    def test_phase_task_failed_to_todo(self) -> None:
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed,)),))
+        new_plan = clear_failed(plan)
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.TODO
+
+    def test_subsection_task_failed_to_todo(self) -> None:
+        failed = _task(task_id="T-000010", status=TaskStatus.FAILED)
+        subsection = Subsection(
+            title="Manual",
+            prose="",
+            tasks=(failed,),
+            line_number=9,
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(), subsections=(subsection,)),))
+        new_plan = clear_failed(plan)
+        assert new_plan.phases[0].subsections[0].tasks[0].status == TaskStatus.TODO
+
+    def test_bugs_section_task_failed_to_todo(self) -> None:
+        bug = _task(task_id="T-000900", status=TaskStatus.FAILED)
+        plan = _plan(bugs=BugsSection(tasks=(bug,), line_number=20))
+        new_plan = clear_failed(plan)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_nested_subtask_failed_to_todo(self) -> None:
+        failed_child = _task(
+            task_id="T-000011",
+            status=TaskStatus.FAILED,
+            indent_level=2,
+            line_number=2,
+        )
+        parent = _task(task_id="T-000001", children=(failed_child,))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan = clear_failed(plan)
+        assert new_plan.phases[0].tasks[0].status == TaskStatus.TODO
+        assert new_plan.phases[0].tasks[0].children[0].status == TaskStatus.TODO
+
+    def test_mixed_statuses_only_failed_flip(self) -> None:
+        todo = _task(task_id="T-000001", status=TaskStatus.TODO, line_number=1)
+        done = _task(task_id="T-000002", status=TaskStatus.DONE, line_number=2)
+        failed = _task(task_id="T-000003", status=TaskStatus.FAILED, line_number=3)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(todo, done, failed)),))
+        new_plan = clear_failed(plan)
+        statuses = tuple(task.status for task in new_plan.phases[0].tasks)
+        assert statuses == (TaskStatus.TODO, TaskStatus.DONE, TaskStatus.TODO)
+
+    def test_idempotent(self) -> None:
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed,)),))
+        once = clear_failed(plan)
+        twice = clear_failed(once)
+        assert twice == once
+
+    def test_input_plan_not_mutated(self) -> None:
+        failed = _task(task_id="T-000001", status=TaskStatus.FAILED)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(failed,)),))
+        clear_failed(plan)
+        assert plan.phases[0].tasks[0].status == TaskStatus.FAILED
+
+    def test_no_failed_no_op_returns_equivalent_new_plan(self) -> None:
+        todo = _task(task_id="T-000001", status=TaskStatus.TODO)
+        done = _task(task_id="T-000002", status=TaskStatus.DONE, line_number=2)
+        plan = _plan(phases=(_phase_with_tasks(tasks=(todo, done)),))
+        new_plan = clear_failed(plan)
+        assert new_plan == plan
+        assert new_plan is not plan
 
 
 class TestAddTask:

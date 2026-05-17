@@ -876,6 +876,31 @@ def _apply_status_to_plan(
     )
 
 
+def _clear_failed_in_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], bool]:
+    """Return ``tasks`` with every FAILED task reset to TODO."""
+    new_tasks: list[Task] = []
+    changed = False
+
+    for task in tasks:
+        new_children = task.children
+        if task.children:
+            new_children, children_changed = _clear_failed_in_tasks(task.children)
+            changed = changed or children_changed
+
+        new_status = (
+            TaskStatus.TODO if task.status == TaskStatus.FAILED else task.status
+        )
+        if new_status != task.status or new_children != task.children:
+            new_tasks.append(
+                dataclasses.replace(task, status=new_status, children=new_children)
+            )
+            changed = True
+        else:
+            new_tasks.append(task)
+
+    return tuple(new_tasks), changed
+
+
 def _direct_completion_kind(task: Task) -> str:
     """Pick the Settlement kind for a directly-completed task.
 
@@ -1028,6 +1053,48 @@ def reset_task(plan: Plan, task_id: str) -> tuple[Plan, tuple[Settlement, ...]]:
         ledger_event_required=False,
     )
     return new_plan, (settlement,)
+
+
+def clear_failed(plan: Plan) -> Plan:
+    """Reset every FAILED task in ``plan`` to TODO and return a new plan.
+
+    Mirrors mcloop's bulk ``clear_failed_markers`` retry behavior:
+    every failed checkbox becomes unchecked, DONE and TODO tasks are
+    untouched, no parent cascade is applied, and no ledger Settlement is
+    produced. The operation does not require task ids, so it works on
+    compat-mode plans as well as migrated plans.
+    """
+    new_phases: list[Phase] = []
+    for phase in plan.phases:
+        phase_tasks, phase_tasks_changed = _clear_failed_in_tasks(phase.tasks)
+        new_subsections: list[Subsection] = []
+        subsections_changed = False
+        for subsection in phase.subsections:
+            sub_tasks, sub_changed = _clear_failed_in_tasks(subsection.tasks)
+            subsections_changed = subsections_changed or sub_changed
+            if sub_changed:
+                new_subsections.append(dataclasses.replace(subsection, tasks=sub_tasks))
+            else:
+                new_subsections.append(subsection)
+
+        if phase_tasks_changed or subsections_changed:
+            new_phases.append(
+                dataclasses.replace(
+                    phase,
+                    tasks=phase_tasks,
+                    subsections=tuple(new_subsections),
+                )
+            )
+        else:
+            new_phases.append(phase)
+
+    new_bugs = plan.bugs
+    if plan.bugs is not None:
+        bug_tasks, bugs_changed = _clear_failed_in_tasks(plan.bugs.tasks)
+        if bugs_changed:
+            new_bugs = dataclasses.replace(plan.bugs, tasks=bug_tasks)
+
+    return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
 
 
 def _next_task_id(plan: Plan) -> str:

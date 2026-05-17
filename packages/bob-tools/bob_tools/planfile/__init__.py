@@ -36,6 +36,7 @@ from bob_tools.planfile.operations import (
     add_task,
     bug_count,
     check_consistency,
+    clear_failed,
     complete_task,
     fail_task,
     migrate,
@@ -43,6 +44,7 @@ from bob_tools.planfile.operations import (
     replace_phase,
     reset_task,
     resolve_task_context,
+    validate_plan,
 )
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import canonicalize, render_plan
@@ -69,6 +71,7 @@ __all__ = [
     "bug_count",
     "canonicalize",
     "check_consistency",
+    "clear_failed",
     "complete_task",
     "fail_task",
     "load",
@@ -81,4 +84,5 @@ __all__ = [
     "resolve_task_context",
     "save",
     "update",
+    "validate_plan",
 ]
