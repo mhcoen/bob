@@ -107,6 +107,22 @@ inputs mcloop actually runs against; **DIVERGENCE** = a real
 behavioral difference, tagged with remediation: `[planfile-API]`,
 `[mcloop-adapt]`, or `[accepted-doc]`.
 
+### Pre-cutover freeze invariants
+
+From this point until the atomic B1+B3 cutover completes,
+`mcloop/PLAN.md` must preserve the state-dependent assumptions that
+make the accepted-doc divergences inert:
+
+1. No `@deps` line is introduced (§2(a)). mcloop's checklist ignores
+   dependencies, while planfile scheduling honors them.
+2. No incomplete task line contains a non-leading `[BATCH]`,
+   `[AUTO...]`, or `[USER]` prose mention (§2(d)). Current source
+   verification: `rg -n "@deps" PLAN.md` and `rg -n
+   "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*|USER)\]" PLAN.md`
+   run from `/Users/mhcoen/proj/mcloop` both return no matches. The
+   existing prose-mention `[BATCH]`/`[USER]` lines are DONE, so they
+   are not selected by the scheduler.
+
 ### (a) Next-task selection
 
 mcloop: `checklist.find_next` → `_search_in_stage(tasks,"Bugs")` first;
@@ -136,8 +152,9 @@ then each `subsection.tasks`. DFS leaf-before-parent in
   `all(()) == True`. **DIVERGENCE [accepted-doc]** if a `@deps` line
   is ever added to mcloop's PLAN.md before the swap: it changes
   scheduling under checklist (which ignores it) vs planfile (which
-  gates on it). Mitigation: do not introduce `@deps` into the
-  authoritative PLAN.md until after Stage B3.
+  gates on it). Mitigation: enforce the pre-cutover freeze invariant
+  above; do not introduce `@deps` into the authoritative PLAN.md until
+  after Stage B3.
 - Subsection ordering: **DIVERGENCE [accepted-doc]**. mcloop parses
   linearly; a `### Manual verification` heading is *not* a
   `STAGE_RE`/`BUGS_RE` match (`checklist.parse`), so its tasks stay in
@@ -240,8 +257,9 @@ task.flag_tags`; AUTO = `task.action_tag is not None`; BATCH =
   behavior. Acceptance: keep the parity test as the regression guard
   and assert the true invariant on live fixtures: every
   prose-mention tag-bearing task is DONE, and no incomplete task
-  differs in classification. The swap intentionally adopts the
-  corrected classification. Note: this premise was corrected during
+  differs in classification. This is the §2 pre-cutover freeze
+  invariant; the swap intentionally adopts the corrected
+  classification. Note: this premise was corrected during
   B0.2 (`117f3ac`); the earlier audit wording incorrectly implied
   prose-mention `[BATCH]` tasks were absent rather than present-but-DONE.
 - **HIGH-SEVERITY interaction with task IDs.** `is_user_task` checks
@@ -566,35 +584,36 @@ nothing else.
 
 ### Stage B2 — ledger phase-id resolver shim (independent, pre-cutover-safe)
 
-B2.1 Replace `ledger_emit.resolve_phase_id`'s body with a
-`planfile.resolve_task_context` shim (design §7.1): map
+B2.1 **DONE in mcloop commit `7bf086e`**: replaced
+`ledger_emit.resolve_phase_id`'s body with a
+`planfile.resolve_task_context` shim (design §7.1): maps
 `phase_id_source` `explicit_comment`/`explicit_header → "explicit"`,
-`ordinal → "ordinal"`, `none → "none"`; carry `plan_phase_count`.
-B2.2 **Decision D2 (CONSEQUENTIAL): preserve current degraded
-behavior.** Today `main._ledger_settle` calls `resolve_phase_id`
-**without** `ordinal_index`, so on a plan with no explicit phase ids
-(mcloop's own, pre-B1) it returns `source="none"`,
-`phase_id=None`, and `record_phase_id_fallback` never fires.
-`resolve_task_context` instead *synthesizes* `phase_NNN` with
-`source="ordinal"`, which would (a) emit a `finding_observed`
-`degraded` event and (b) attach `attributed_phase_id` to
-`commit_landed` where today it is `None` — both feed
-`ledger_pause`/threshold evaluation and can trigger reauthor/HardStop.
-Recommended default: the shim collapses `phase_id_source=="ordinal"`
-to `("none", None)` **unless** the caller explicitly opts in, exactly
-reproducing today's emission. Enabling ordinal attribution is
-deferred to Stage B6. *(Recommended conservative default; flagged as
-consequential. The user may override to enable ordinal attribution at
-B2; absent that, B2 is behavior-preserving.)*
-B2.3 Verification: `tests/test_ledger_emit.py` extended — for a plan
-with explicit `<!-- phase_id -->` comments the shim yields the same
-`PhaseIdResolution` the legacy substring resolver yielded; for a
-no-explicit-id plan the shim yields `("none", None)` (parity with
-today). Run `tests/test_integration_slice_d.py`,
-`tests/test_ledger_pause.py`. Gate: identical emitted event stream on
-a fixture replay vs pre-shim. Note this also fixes the design-§7.2
-`T-000001`/`T-0000010` substring hazard (planfile matches parsed
-entries, `operations._task_matches_label`).
+`ordinal → "ordinal"` only when the existing `ordinal_index` argument
+is supplied, and `none → "none"`; carries `plan_phase_count`.
+B2.2 **DONE in mcloop commit `7bf086e`**: Decision D2 preserved.
+`main._ledger_settle` still calls `resolve_phase_id` without
+`ordinal_index` (`main.py:903-906`), so a no-explicit-id plan still
+returns `source="none"`, `phase_id=None`, and
+`record_phase_id_fallback` does not fire. The existing
+`ordinal_index` parameter is the opt-in switch for ordinal attribution;
+enabling that path remains deferred to Stage B6.
+B2.3 **DONE in mcloop commit `7bf086e`**:
+`tests/test_ledger_emit.py` now covers explicit header resolution,
+explicit `<!-- phase_id -->` comment resolution, no-explicit-id
+collapse to `("none", None)`, explicit ordinal opt-in, exact task-ID
+matching (`T-000001` does not match `T-0000010`), and a no-fallback
+event-stream replay that emits only the expected `test_failed` event.
+Verification on commit `7bf086e`: `tests/test_ledger_emit.py` → `27
+passed in 0.99s`; `tests/test_ledger_emit.py
+tests/test_integration_slice_d.py tests/test_ledger_pause.py` → `55
+passed in 1.03s`; full gate: `ruff check .` clean; `ruff format
+--check .` → `99 files already formatted`; `mypy --config-file
+pyproject.toml mcloop` → `Success: no issues found in 45 source
+files`; `pytest -q` → `1750 passed, 38 skipped in 17.98s`. The
+design-§7.2 `T-000001`/`T-0000010` substring hazard is fixed by the
+planfile side: `operations._task_matches_label` uses exact `task_id`
+match or exact/structurally-delimited text match, never raw substring
+matching.
 
 ### Stage B3 — Cutover: scheduler + mutation + classification (atomic with B1)
 
