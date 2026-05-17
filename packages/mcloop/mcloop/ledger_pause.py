@@ -102,16 +102,14 @@ def evaluate_and_maybe_pause(
 
     Returns None when no crossings warrant pausing.
     """
-    from bob_tools.ledger import (
-        evaluate_thresholds,
-        project,
-        record_crossings,
-    )
+    from bob_tools.ledger.projector import project
     from bob_tools.ledger.thresholds import (
         ThresholdParams,
         ThresholdRecommendedAction,
         ThresholdRuleId,
         ThresholdSeverity,
+        evaluate_thresholds,
+        record_crossings,
     )
 
     events = storage.read_all()
@@ -211,7 +209,8 @@ def _extract_target_phase_id(
         # trig.type may be a bob_tools EventType enum or a plain str
         # depending on caller / fixture. Normalize to str via .value
         # when available, else the str() form.
-        trig_type_str = trig_type.value if hasattr(trig_type, "value") else str(trig_type)
+        trig_type_value = getattr(trig_type, "value", None)
+        trig_type_str = str(trig_type_value if trig_type_value is not None else trig_type)
         target = _derivative_target_for_event(trig_type_str, trig_payload)
         if target:
             return target

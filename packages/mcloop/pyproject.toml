@@ -53,8 +53,8 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 # Editable installs of sibling packages (orchestra) use a PEP 660
 # import hook that mypy's analyzer does not follow. Pointing
-# mypy_path at the orchestra source directory (relative to mcloop's
-# repo root, assuming the repos are siblings) lets mypy see the
-# package's py.typed marker and stubs without needing a non-editable
-# install.
-mypy_path = "../orchestra"
+# mypy_path at sibling source directories (relative to mcloop's
+# repo root, assuming the repos are siblings) lets mypy see editable
+# installs that use PEP 660 import hooks without needing non-editable
+# installs.
+mypy_path = "../orchestra:../bob-tools:../duplo"

@@ -405,12 +405,20 @@ def test_is_user_task_without_tag(tmp_path):
     assert not is_user_task(tasks[0])
 
 
-def test_is_user_task_tag_mid_text(tmp_path):
+def test_is_user_task_tag_mid_text_is_prose(tmp_path):
     md = "- [ ] Verify [USER] the window appears\n"
     f = tmp_path / "tasks.md"
     f.write_text(md)
     tasks = parse(f)
-    assert is_user_task(tasks[0])
+    assert not is_user_task(tasks[0])
+
+
+def test_is_user_task_bug_description_mentions_user_tag_not_user_task(tmp_path):
+    md = "- [ ] Fix `[USER]` task body loss at parse time\n"
+    f = tmp_path / "bugs.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert not is_user_task(tasks[0])
 
 
 def test_user_task_instructions_strips_tag(tmp_path):

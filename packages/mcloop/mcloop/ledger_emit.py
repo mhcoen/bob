@@ -185,8 +185,7 @@ def record_phase_id_fallback(
         "to use explicit `## Phase phase_NNN: title` headers",
         file=sys.stderr,
     )
-    from bob_tools.ledger import EventType
-    from bob_tools.ledger.events import make_finding_observed_payload
+    from bob_tools.ledger.events import EventType, make_finding_observed_payload
 
     ev = storage.append(
         event_type=EventType.FINDING_OBSERVED,

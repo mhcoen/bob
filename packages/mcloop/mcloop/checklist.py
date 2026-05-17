@@ -627,19 +627,27 @@ def _check_line(lines: list[str], line_number: int) -> None:
 def is_user_task(task: Task) -> bool:
     """Return True if the task requires user observation.
 
-    Tasks marked with [USER] in their text require the user to
-    perform an action and report back what they observed.
+    Tasks whose text begins with ``[USER]`` require the user to
+    perform an action and report back what they observed. Mentions of
+    ``[USER]`` later in prose are descriptive text, not operational
+    markers.
     """
-    return _USER_TAG in task.text
+    text = task.text.strip()
+    return text == _USER_TAG or text.startswith(f"{_USER_TAG} ")
 
 
 def user_task_instructions(task: Task) -> str:
     """Extract the instruction text from a [USER] task.
 
-    Removes the [USER] tag and returns the remaining text,
+    Removes a leading [USER] tag and returns the remaining text,
     which describes what the user should do and observe.
     """
-    return task.text.replace(_USER_TAG, "").strip()
+    text = task.text.strip()
+    if text == _USER_TAG:
+        return ""
+    if text.startswith(f"{_USER_TAG} "):
+        return text[len(_USER_TAG) :].strip()
+    return text
 
 
 def is_batch_task(task: Task) -> bool:
