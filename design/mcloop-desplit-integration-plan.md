@@ -231,11 +231,19 @@ task.flag_tags`; AUTO = `task.action_tag is not None`; BATCH =
   describes USER as substring-matched, but its executable assertions
   call the current anchored `checklist.is_user_task` and the substring
   `is_batch_task`/`is_auto_task` (`test_mcloop_parity.py:454-497`).
-  The test currently passes on the three real fixtures (§0.3), so no
-  unaccounted live prose-mention task is currently misclassified.
-  planfile is the more-correct behavior. Acceptance: keep the parity
-  test as the regression guard; the swap intentionally adopts the
-  corrected classification.
+  Current `mcloop/PLAN.md` contains three `[BATCH]` prose-mention
+  tasks (`PLAN.md:341`, `:359`, `:439`) and no `[AUTO...]` lines;
+  all three prose-mention tasks are `[x]`, so the substring-vs-leading
+  divergence is observationally inert in the current scheduler state
+  because completed tasks are never selected. There are no incomplete
+  tasks whose classification differs. planfile is the more-correct
+  behavior. Acceptance: keep the parity test as the regression guard
+  and assert the true invariant on live fixtures: every
+  prose-mention tag-bearing task is DONE, and no incomplete task
+  differs in classification. The swap intentionally adopts the
+  corrected classification. Note: this premise was corrected during
+  B0.2 (`117f3ac`); the earlier audit wording incorrectly implied
+  prose-mention `[BATCH]` tasks were absent rather than present-but-DONE.
 - **HIGH-SEVERITY interaction with task IDs.** `is_user_task` checks
   raw `task.text`. After `migrate()` prepends `T-000NNN:`, the line
   body is `T-000NNN: [USER] …`, which does **not** satisfy
@@ -616,8 +624,10 @@ harness drives `run_loop` over a deterministic stub backend
 against a pre-cutover baseline captured on the *original* PLAN.md:
 (i) identical task execution order; (ii) identical final checkbox
 states (modulo the canonical-form bytes already accepted at B1, and
-the accepted §2(d) classification of any prose-mention task — assert
-none exist in the fixture); (iii) **single-line mutation diffs** —
+the accepted §2(d) classification of prose-mention tag-bearing tasks:
+assert every such task in the fixture is DONE and no incomplete task
+differs between checklist substring classification and planfile
+leading-tag classification); (iii) **single-line mutation diffs** —
 each `check_off`/`mark_failed` changes exactly the one task line, no
 reflow (proves the §2(g) whole-file-rewrite risk is neutralized
 post-B1); (iv) byte-identical emitted ledger event stream. Gate:
