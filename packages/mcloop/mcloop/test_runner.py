@@ -115,9 +115,7 @@ def _strip_shell_comment_lines(text: str) -> str:
     """Drop whole-line shell comments. Inline comments after a command
     on the same line are uncommon and rarely contain test-arm patterns;
     we leave them in place rather than parse shell quoting properly."""
-    return "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
 def _runsh_has_test_branch(text: str) -> bool:

@@ -166,9 +166,7 @@ def run_review(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     return _run_review_via_rest(request, config)
 
 
-def _run_review_via_rest(
-    request: ReviewRequest, config: dict
-) -> list[ReviewFinding]:
+def _run_review_via_rest(request: ReviewRequest, config: dict) -> list[ReviewFinding]:
     """Send diff to an OpenAI-compatible endpoint for review.
 
     Config keys (from load_reviewer_config with backend="rest"):
@@ -260,9 +258,7 @@ def _run_review_via_adapter(
     """
     model = str(config.get("model", "") or "")
     project_dir = Path(config.get("project_dir") or Path.cwd())
-    log_dir = Path(
-        config.get("log_dir") or project_dir / ".mcloop" / "logs"
-    )
+    log_dir = Path(config.get("log_dir") or project_dir / ".mcloop" / "logs")
 
     user_msg = _build_user_message(request)
     prompt = f"{_SYSTEM_PROMPT}\n\n---\n\n{user_msg}"

@@ -95,9 +95,7 @@ class TestLoadReviewerConfig:
         assert result is not None
         assert result["backend"] == "rest"
 
-    def test_backend_codex_skips_api_key_requirement(
-        self, tmp_path, monkeypatch
-    ):
+    def test_backend_codex_skips_api_key_requirement(self, tmp_path, monkeypatch):
         """Subscription backends must not require OPENROUTER_API_KEY in
         the environment. The returned dict must not carry an api_key."""
         config_dir = tmp_path / ".mcloop"
@@ -120,9 +118,7 @@ class TestLoadReviewerConfig:
         assert result["model"] == "gpt-5.5"
         assert "api_key" not in result
 
-    def test_backend_claude_code_skips_api_key_requirement(
-        self, tmp_path, monkeypatch
-    ):
+    def test_backend_claude_code_skips_api_key_requirement(self, tmp_path, monkeypatch):
         config_dir = tmp_path / ".mcloop"
         config_dir.mkdir()
         config_dir.joinpath("config.json").write_text(
@@ -164,9 +160,7 @@ class TestLoadReviewerConfig:
         deliberate edit reviewers see, not a silent drift."""
         assert REVIEWER_BACKENDS == frozenset({"rest", "claude_code", "codex"})
 
-    def test_subscription_backend_force_flag_works(
-        self, tmp_path, monkeypatch
-    ):
+    def test_subscription_backend_force_flag_works(self, tmp_path, monkeypatch):
         """force=True (the --reviewer flag) should enable a subscription
         backend even when enabled is not set in the config."""
         config_dir = tmp_path / ".mcloop"
@@ -216,10 +210,7 @@ class TestFormatReviewerStatus:
 
     def test_claude_code_backend_status(self):
         config = {"backend": "claude_code", "model": "claude-opus-4-7"}
-        assert (
-            format_reviewer_status(config)
-            == "claude-opus-4-7 via Claude Code (subscription)"
-        )
+        assert format_reviewer_status(config) == "claude-opus-4-7 via Claude Code (subscription)"
 
     def test_subscription_backend_ignores_missing_api_key(self):
         """A subscription backend reports its model + provider regardless

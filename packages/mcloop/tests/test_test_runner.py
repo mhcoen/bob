@@ -54,11 +54,7 @@ def _write_runsh(
             'echo "default"\n'
         )
     else:
-        body = (
-            "#!/bin/bash\n"
-            "set -euo pipefail\n"
-            'exec ".venv/bin/python" -m mypkg "$@"\n'
-        )
+        body = '#!/bin/bash\nset -euo pipefail\nexec ".venv/bin/python" -m mypkg "$@"\n'
     run_sh.write_text(body, encoding="utf-8")
     if executable:
         run_sh.chmod(0o755)
@@ -166,9 +162,7 @@ def test_runsh_returns_none_when_present_but_not_executable(tmp_path: Path) -> N
 # ---- run.sh test-arm detection (the bug fix) -----------------------
 
 
-def _write_runsh_with_body(
-    project_dir: Path, body: str, executable: bool = True
-) -> None:
+def _write_runsh_with_body(project_dir: Path, body: str, executable: bool = True) -> None:
     run_sh = project_dir / "run.sh"
     run_sh.write_text(body, encoding="utf-8")
     if executable:
@@ -204,11 +198,7 @@ def test_runsh_picks_single_bracket_if_arm(tmp_path: Path) -> None:
     """``if [ "$1" = "test" ]`` (POSIX shape) is also valid."""
     _write_runsh_with_body(
         tmp_path,
-        "#!/bin/sh\n"
-        'if [ "$1" = "test" ]; then\n'
-        "    shift\n"
-        "    exec pytest \"$@\"\n"
-        "fi\n",
+        '#!/bin/sh\nif [ "$1" = "test" ]; then\n    shift\n    exec pytest "$@"\nfi\n',
     )
     assert _runsh_test_available(tmp_path) == "./run.sh test"
 
@@ -222,7 +212,7 @@ def test_runsh_picks_elif_test_arm(tmp_path: Path) -> None:
         "    exec make build\n"
         'elif [[ "$1" == "test" ]]; then\n'
         "    shift\n"
-        "    exec pytest \"$@\"\n"
+        '    exec pytest "$@"\n'
         "fi\n",
     )
     assert _runsh_test_available(tmp_path) == "./run.sh test"
@@ -239,10 +229,10 @@ def test_runsh_picks_case_arm(tmp_path: Path) -> None:
         "        ;;\n"
         "    test)\n"
         "        shift\n"
-        "        exec pytest \"$@\"\n"
+        '        exec pytest "$@"\n'
         "        ;;\n"
         "    *)\n"
-        "        exec python -m pkg \"$@\"\n"
+        '        exec python -m pkg "$@"\n'
         "        ;;\n"
         "esac\n",
     )
@@ -278,8 +268,7 @@ def test_runsh_rejects_test_only_inside_string(tmp_path: Path) -> None:
     """A printed message that mentions test is not a test arm."""
     _write_runsh_with_body(
         tmp_path,
-        '#!/bin/bash\n'
-        'echo "Pass test as an arg to invoke the test runner"\n',
+        '#!/bin/bash\necho "Pass test as an arg to invoke the test runner"\n',
     )
     assert _runsh_test_available(tmp_path) is None
 

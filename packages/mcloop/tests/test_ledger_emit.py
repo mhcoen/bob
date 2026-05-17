@@ -10,6 +10,7 @@ import pytest
 
 try:
     import bob_tools.ledger  # noqa: F401
+
     _BOB_TOOLS_AVAILABLE = True
 except ImportError:
     _BOB_TOOLS_AVAILABLE = False
@@ -38,11 +39,7 @@ class TestParsePlanPhaseIds:
         assert parse_plan_phase_ids(text) == ["phase_001"]
 
     def test_multiple_phases_in_order(self) -> None:
-        text = (
-            "## Phase phase_001: A\n\n"
-            "## Phase phase_002: B\n\n"
-            "## Phase phase_003: C\n"
-        )
+        text = "## Phase phase_001: A\n\n## Phase phase_002: B\n\n## Phase phase_003: C\n"
         assert parse_plan_phase_ids(text) == [
             "phase_001",
             "phase_002",
@@ -93,11 +90,7 @@ class TestFindExplicitPhaseIdForTask:
         # The synthesizer's primary mechanism is header-prefixed
         # phase_id; an inline comment is also accepted as the
         # current-phase signal.
-        text = (
-            "## Phase phase_001: Setup\n\n"
-            "<!-- phase_id: phase_001b -->\n"
-            "- [ ] task-001\n"
-        )
+        text = "## Phase phase_001: Setup\n\n<!-- phase_id: phase_001b -->\n- [ ] task-001\n"
         assert find_explicit_phase_id_for_task(text, "task-001") == "phase_001b"
 
     def test_empty_label_returns_none(self) -> None:
@@ -111,9 +104,7 @@ class TestFindExplicitPhaseIdForTask:
 
 
 class TestResolvePhaseId:
-    def _write_plan(
-        self, tmp_path: Path, phases: list[tuple[str, str]]
-    ) -> Path:
+    def _write_plan(self, tmp_path: Path, phases: list[tuple[str, str]]) -> Path:
         body_lines: list[str] = []
         for pid, label in phases:
             body_lines.append(f"## Phase {pid}: {pid} title")
@@ -128,9 +119,7 @@ class TestResolvePhaseId:
         plan_path = self._write_plan(
             tmp_path, [("phase_001", "task-001"), ("phase_002", "task-002")]
         )
-        result = resolve_phase_id(
-            plan_path=plan_path, task_label="task-002", ordinal_index=99
-        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-002", ordinal_index=99)
         assert result.phase_id == "phase_002"
         assert result.source == "explicit"
         assert result.plan_phase_count == 2
@@ -139,25 +128,19 @@ class TestResolvePhaseId:
         plan_path = self._write_plan(
             tmp_path, [("phase_001", "task-001"), ("phase_002", "task-002")]
         )
-        result = resolve_phase_id(
-            plan_path=plan_path, task_label="task-999", ordinal_index=1
-        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-999", ordinal_index=1)
         assert result.phase_id == "phase_002"
         assert result.source == "ordinal"
 
     def test_ordinal_out_of_range(self, tmp_path: Path) -> None:
         plan_path = self._write_plan(tmp_path, [("phase_001", "task-001")])
-        result = resolve_phase_id(
-            plan_path=plan_path, task_label="task-999", ordinal_index=5
-        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-999", ordinal_index=5)
         assert result.phase_id is None
         assert result.source == "none"
 
     def test_no_plan_file(self, tmp_path: Path) -> None:
         plan_path = tmp_path / "DOES_NOT_EXIST.md"
-        result = resolve_phase_id(
-            plan_path=plan_path, task_label="task-001", ordinal_index=0
-        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-001", ordinal_index=0)
         assert result.phase_id is None
         assert result.source == "none"
         assert result.plan_phase_count == 0
@@ -165,9 +148,7 @@ class TestResolvePhaseId:
     def test_pre_slice_c_plan_falls_through_to_none(self, tmp_path: Path) -> None:
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text("# Old-style plan\n\n- [ ] task-001\n")
-        result = resolve_phase_id(
-            plan_path=plan_path, task_label="task-001", ordinal_index=0
-        )
+        result = resolve_phase_id(plan_path=plan_path, task_label="task-001", ordinal_index=0)
         assert result.phase_id is None
         assert result.source == "none"
 
@@ -368,9 +349,7 @@ class TestEmitTaskLifecycleEvents:
         assert len(failed) == 1
         assert failed[0].payload["failure_kind"] == "task_abandoned"
 
-    def test_abandoned_without_phase_id_emits_finding_observed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_abandoned_without_phase_id_emits_finding_observed(self, tmp_path: Path) -> None:
         from bob_tools.ledger import EventType
 
         from mcloop.ledger_emit import emit_task_lifecycle_events
@@ -440,9 +419,7 @@ class TestRecordPhaseIdFallback:
 
         ledger_dir = tmp_path / "ledger"
         storage = Storage(ledger_dir, writer_id="mcloop-test")
-        resolution = PhaseIdResolution(
-            phase_id="phase_001", source="explicit", plan_phase_count=1
-        )
+        resolution = PhaseIdResolution(phase_id="phase_001", source="explicit", plan_phase_count=1)
         ev_id = record_phase_id_fallback(
             storage=storage,
             task_label="task-001",

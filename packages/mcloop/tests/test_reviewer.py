@@ -903,8 +903,7 @@ def test_live_run_review_via_codex(tmp_path):
 
 
 @pytest.mark.skipif(
-    shutil.which("claude") is None
-    or os.environ.get("ORCHESTRA_LIVE_CLAUDE_CODE") != "1",
+    shutil.which("claude") is None or os.environ.get("ORCHESTRA_LIVE_CLAUDE_CODE") != "1",
     reason="live Claude Code test requires claude on PATH and ORCHESTRA_LIVE_CLAUDE_CODE=1",
 )
 def test_live_run_review_via_claude_code(tmp_path):

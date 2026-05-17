@@ -90,9 +90,7 @@ def load_plan_ledger_settings(
         ``--no-auto-reauthor`` flag wins over env and config.
     """
     project_dir = Path(project_dir).resolve()
-    plan_path = Path(plan_path).resolve() if plan_path is not None else (
-        project_dir / "PLAN.md"
-    )
+    plan_path = Path(plan_path).resolve() if plan_path is not None else (project_dir / "PLAN.md")
 
     raw = _read_orchestra_config(project_dir)
     pl = raw.get("plan_ledger") if isinstance(raw, dict) else None
@@ -129,9 +127,7 @@ def load_plan_ledger_settings(
         auto_reauthor = True
 
     raw_params = pl_dict.get("threshold_params")
-    threshold_params = (
-        dict(raw_params) if isinstance(raw_params, dict) else {}
-    )
+    threshold_params = dict(raw_params) if isinstance(raw_params, dict) else {}
 
     return PlanLedgerSettings(
         enabled=enabled,

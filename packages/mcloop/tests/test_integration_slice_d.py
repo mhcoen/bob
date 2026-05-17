@@ -31,6 +31,7 @@ import pytest
 
 try:
     import bob_tools.ledger  # noqa: F401
+
     _BOB_TOOLS_AVAILABLE = True
 except ImportError:
     _BOB_TOOLS_AVAILABLE = False
@@ -61,9 +62,7 @@ class TestSliceDEndToEnd:
         storage = Storage(ledger_dir, writer_id="seed")
         storage.append(
             event_type=EventType.PHASE_STARTED,
-            payload=make_phase_started_payload(
-                phase_id="phase_001", title="P1"
-            ),
+            payload=make_phase_started_payload(phase_id="phase_001", title="P1"),
             run_id="seed",
         )
         storage.append(
@@ -83,9 +82,7 @@ class TestSliceDEndToEnd:
             run_id="seed",
         )
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted = record_crossings(storage, crossings, run_id="seed")
         return emitted[0]
 
@@ -132,9 +129,7 @@ class TestSliceDEndToEnd:
         from bob_tools.ledger import Storage
 
         storage = Storage(ledger_dir, writer_id="mcloop-int")
-        decision = evaluate_and_maybe_pause(
-            storage=storage, run_id="mcloop-run-int"
-        )
+        decision = evaluate_and_maybe_pause(storage=storage, run_id="mcloop-run-int")
         # The seeded crossing was already recorded by record_crossings;
         # a fresh evaluate_thresholds against the same state may
         # produce no new crossings (idempotent). Either branch is
@@ -142,12 +137,8 @@ class TestSliceDEndToEnd:
         # the seeded crossing is on the ledger.
         if decision is None:
             events = storage.read_all()
-            seeded = next(
-                e for e in events if e.event_id == crossing_id
-            )
-            assert (
-                seeded.payload.get("rule_id") == "unattributable_commit"
-            )
+            seeded = next(e for e in events if e.event_id == crossing_id)
+            assert seeded.payload.get("rule_id") == "unattributable_commit"
             return
 
         record_calls: dict = {}
@@ -158,15 +149,10 @@ class TestSliceDEndToEnd:
             ledger_dir=ledger_dir,
             project_dir=tmp_path,
         )
-        assert (
-            record_calls["called_with"]["crossing_event_id"]
-            == decision.crossing_event_id
-        )
+        assert record_calls["called_with"]["crossing_event_id"] == decision.crossing_event_id
         assert result.council_run_id == "reauthor-fake-run"
 
-    def test_no_auto_reauthor_path_does_not_invoke_duplo(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_auto_reauthor_path_does_not_invoke_duplo(self, tmp_path: Path) -> None:
         # Verify the gating: when auto_reauthor=False is in effect,
         # the McLoop driver would NOT call ledger_pause.auto_reauthor
         # at all. This test models that contract by checking that
@@ -180,9 +166,7 @@ class TestSliceDEndToEnd:
         from bob_tools.ledger import Storage
 
         storage = Storage(ledger_dir, writer_id="mcloop-int-noauto")
-        decision = evaluate_and_maybe_pause(
-            storage=storage, run_id="mcloop-run-noauto"
-        )
+        decision = evaluate_and_maybe_pause(storage=storage, run_id="mcloop-run-noauto")
         # Whether decision is None or surfaces the seeded crossing,
         # the contract is that the caller is free to skip the
         # auto_reauthor step. No exception, no duplo import.

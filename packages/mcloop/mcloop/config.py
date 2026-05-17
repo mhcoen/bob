@@ -37,9 +37,7 @@ def _read_user_config() -> dict[str, Any]:
     return data
 
 
-def load_role_config(
-    role: str, source: dict[str, Any] | None = None
-) -> dict[str, Any] | None:
+def load_role_config(role: str, source: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Return the per-role config block from ~/.mcloop/config.json.
 
     *role* must be one of "executor", "sync", or "reviewer".  When the

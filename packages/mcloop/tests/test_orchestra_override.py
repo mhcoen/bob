@@ -43,9 +43,7 @@ def _reset_banner_latch(monkeypatch: pytest.MonkeyPatch) -> None:
     process emits it once. Tests reset the latch so each case starts
     in a clean state, otherwise an earlier test's emission would
     suppress every later test's expected emission."""
-    monkeypatch.setattr(
-        "mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False
-    )
+    monkeypatch.setattr("mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False)
 
 
 @pytest.fixture(autouse=True)
@@ -57,12 +55,8 @@ def _isolate_orchestra_global_config(
     directory so the developer's real ``~/.orchestra/config.json`` does
     not influence test outcomes. Mirrors the fixture in
     ``tests/test_code_edit_wrapper.py``."""
-    isolated_global = (
-        tmp_path_factory.mktemp("isolated-orchestra-override") / "config.json"
-    )
-    monkeypatch.setattr(
-        "orchestra.config.global_config_path", lambda: isolated_global
-    )
+    isolated_global = tmp_path_factory.mktemp("isolated-orchestra-override") / "config.json"
+    monkeypatch.setattr("orchestra.config.global_config_path", lambda: isolated_global)
     return isolated_global
 
 
@@ -147,9 +141,7 @@ def test_is_acknowledged_false_after_config_edit(tmp_path: Path) -> None:
     )
     write_ack(project_dir, fingerprint(config_path))
     # Edit the config so the fingerprint changes.
-    config_path.write_text(
-        json.dumps({"workflows": {"code_edit": {"pattern": "single"}}})
-    )
+    config_path.write_text(json.dumps({"workflows": {"code_edit": {"pattern": "single"}}}))
     assert not is_acknowledged(project_dir, config_path)
 
 
@@ -230,12 +222,8 @@ def test_banner_returns_after_config_edit_invalidates_ack(
     # Edit the local config, simulating the user reaching for it
     # without re-acking. Reset the latch as if a new mcloop run
     # started.
-    config_path.write_text(
-        json.dumps({"workflows": {"code_edit": {"pattern": "single"}}})
-    )
-    monkeypatch.setattr(
-        "mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False
-    )
+    config_path.write_text(json.dumps({"workflows": {"code_edit": {"pattern": "single"}}}))
+    monkeypatch.setattr("mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False)
     _select_backend(project_dir)
     err = capsys.readouterr().err
     assert "[orchestra] PROJECT-LOCAL OVERRIDE DETECTED" in err
@@ -314,9 +302,7 @@ def test_ack_then_run_silences_banner_end_to_end(
 
     _cmd_ack_orchestra_override(project_dir)
     capsys.readouterr()  # discard ack confirmation
-    monkeypatch.setattr(
-        "mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False
-    )
+    monkeypatch.setattr("mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False)
 
     _select_backend(project_dir)
     err = capsys.readouterr().err

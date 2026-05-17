@@ -150,9 +150,7 @@ def _select_backend_for(project_dir: Path, workflow_name: str) -> str:
     # route through orchestra. The user's stated design is that the
     # global config is the single canonical surface; absence of any
     # config file means orchestra is not configured, so direct applies.
-    if not global_config_path().is_file() and not project_config_path(
-        project_dir
-    ).is_file():
+    if not global_config_path().is_file() and not project_config_path(project_dir).is_file():
         return "direct"
     try:
         cfg = load_config(project_dir)
@@ -503,32 +501,26 @@ def _invoke_bug_verify_orchestra(
     except Exception as exc:
         raise RuntimeError(
             "orchestra bug_verify workflow not available: "
-            f"{exc}. Configure workflows.bug_verify.pattern = \"direct\" "
+            f'{exc}. Configure workflows.bug_verify.pattern = "direct" '
             "in .orchestra/config.json to opt out, or wait for the "
             "orchestra-side bug_verify workflow to land."
         ) from exc
     return _orchestra_to_code_edit_result(result, fallback_log=log_dir)
 
 
-def _orchestra_to_code_edit_result(
-    result: Any, *, fallback_log: Path
-) -> CodeEditResult:
+def _orchestra_to_code_edit_result(result: Any, *, fallback_log: Path) -> CodeEditResult:
     summary = result.summary or {}
     output = summary.get("output", "")
     if not isinstance(output, str):
         output = ""
-    exit_code_raw = summary.get(
-        "exit_code", 1 if result.terminal != "done" else 0
-    )
+    exit_code_raw = summary.get("exit_code", 1 if result.terminal != "done" else 0)
     try:
         exit_code = int(exit_code_raw)
     except (TypeError, ValueError):
         exit_code = 1
     changed_files_raw = summary.get("changed_files") or []
     changed_files = (
-        [str(p) for p in changed_files_raw]
-        if isinstance(changed_files_raw, list)
-        else []
+        [str(p) for p in changed_files_raw] if isinstance(changed_files_raw, list) else []
     )
     adapter_log = summary.get("adapter_log")
     if isinstance(adapter_log, str) and adapter_log:

@@ -108,9 +108,7 @@ def test_read_returns_none_on_malformed_pyproject(tmp_path: Path) -> None:
 
 
 def test_read_returns_empty_when_no_deps_declared(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "0.1.0"\n'
-    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
     assert _read_declared_dependencies(tmp_path) == []
 
 
@@ -160,16 +158,13 @@ def test_no_pyproject_is_noop(tmp_path: Path) -> None:
 
 def test_no_venv_is_noop(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "0.1.0"\n'
-        'dependencies = ["pytest>=8"]\n'
+        '[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = ["pytest>=8"]\n'
     )
     validate_project_dependencies(tmp_path)
 
 
 def test_no_declared_deps_is_noop(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "0.1.0"\n'
-    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
     _make_fake_venv(tmp_path)
     validate_project_dependencies(tmp_path)
 

@@ -217,9 +217,7 @@ def _launch_app_verification(wt_path: Path) -> str | None:
             return "App hung during CLI verification"
         elif cli_result.exit_code != 0:
             print(
-                formatting.error_msg(
-                    f"Verification: app exited with code {cli_result.exit_code}"
-                ),
+                formatting.error_msg(f"Verification: app exited with code {cli_result.exit_code}"),
                 flush=True,
             )
             output_tail = ""
@@ -233,9 +231,7 @@ def _launch_app_verification(wt_path: Path) -> str | None:
             )
         else:
             print(
-                formatting.system_msg(
-                    f"Verification: app exited OK ({cli_result.duration:.1f}s)"
-                ),
+                formatting.system_msg(f"Verification: app exited OK ({cli_result.duration:.1f}s)"),
                 flush=True,
             )
             # Replay reproduction steps (e.g. re-run with specific args).

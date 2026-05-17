@@ -9,6 +9,7 @@ import pytest
 
 try:
     import bob_tools.ledger  # noqa: F401
+
     _BOB_TOOLS_AVAILABLE = True
 except ImportError:
     _BOB_TOOLS_AVAILABLE = False
@@ -67,9 +68,7 @@ class TestEvaluateAndMaybePause:
         storage = Storage(ledger_dir, writer_id="seed")
         storage.append(
             event_type=EventType.PHASE_STARTED,
-            payload=make_phase_started_payload(
-                phase_id="phase_001", title="P1"
-            ),
+            payload=make_phase_started_payload(phase_id="phase_001", title="P1"),
             run_id=run_id,
         )
         storage.append(
@@ -89,15 +88,11 @@ class TestEvaluateAndMaybePause:
             run_id=run_id,
         )
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted = record_crossings(storage, crossings, run_id=run_id)
         return emitted[0], "seed"
 
-    def test_returns_pause_decision_for_reauthor_action(
-        self, tmp_path: Path
-    ) -> None:
+    def test_returns_pause_decision_for_reauthor_action(self, tmp_path: Path) -> None:
         from bob_tools.ledger import Storage
 
         from mcloop.ledger_pause import evaluate_and_maybe_pause
@@ -113,9 +108,7 @@ class TestEvaluateAndMaybePause:
         # action is reauthor_plan, or None when there are no NEW
         # crossings to record.
         storage = Storage(ledger_dir, writer_id="mcloop-test")
-        decision = evaluate_and_maybe_pause(
-            storage=storage, run_id="test-eval"
-        )
+        decision = evaluate_and_maybe_pause(storage=storage, run_id="test-eval")
         # On a freshly-seeded ledger, either the seeded crossing
         # gets returned or evaluate_thresholds is idempotent and we
         # see None. Both are valid; the test verifies the call does
@@ -136,9 +129,7 @@ class TestEvaluateAndMaybePause:
         ledger_dir = tmp_path / "ledger"
         ledger_dir.mkdir()
         storage = Storage(ledger_dir, writer_id="mcloop-test")
-        decision = evaluate_and_maybe_pause(
-            storage=storage, run_id="test-eval"
-        )
+        decision = evaluate_and_maybe_pause(storage=storage, run_id="test-eval")
         assert decision is None
 
 
@@ -688,9 +679,7 @@ class TestAutoReauthorPhaseScoping:
 
 
 class _StubEvent:
-    def __init__(
-        self, payload: dict[str, Any], type: str = ""
-    ) -> None:
+    def __init__(self, payload: dict[str, Any], type: str = "") -> None:
         self.payload = payload
         self.type = type
 

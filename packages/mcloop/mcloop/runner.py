@@ -492,9 +492,7 @@ def _build_bug_prompt(
     return "\n\n".join(parts)
 
 
-def _warn_if_orchestra_bypassed(
-    project_dir: Path, *, cli: str, allowed_tools: str | None
-) -> None:
+def _warn_if_orchestra_bypassed(project_dir: Path, *, cli: str, allowed_tools: str | None) -> None:
     """Warn when a custom tool list or non-claude cli routes around
     orchestra even though the project configured a non-direct backend.
 
@@ -517,8 +515,7 @@ def _warn_if_orchestra_bypassed(
         return
     reason = "custom allowed_tools" if allowed_tools else f"cli={cli!r}"
     print(
-        f"[orchestra] bypassed for this call ({reason}); "
-        "configured workflow did not run.",
+        f"[orchestra] bypassed for this call ({reason}); configured workflow did not run.",
         file=_sys.stderr,
     )
 

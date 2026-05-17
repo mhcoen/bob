@@ -31,12 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_PHASE_HEADER_RE = re.compile(
-    r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
-)
-_PHASE_ID_COMMENT_RE = re.compile(
-    r"<!--\s*phase_id\s*:\s*(?P<id>[A-Za-z0-9_]+)\s*-->"
-)
+_PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")
+_PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*(?P<id>[A-Za-z0-9_]+)\s*-->")
 _LEDGER_DIR_DEFAULT_NAME = ".duplo/ledger"
 
 
@@ -93,9 +89,7 @@ def parse_plan_phase_ids(plan_text: str) -> list[str]:
     return ids
 
 
-def find_explicit_phase_id_for_task(
-    plan_text: str, task_label: str
-) -> str | None:
+def find_explicit_phase_id_for_task(plan_text: str, task_label: str) -> str | None:
     """Find the phase_id closest above ``task_label`` in PLAN.md.
 
     The Slice C synthesizer template puts phase_id in the header
@@ -166,9 +160,7 @@ def resolve_phase_id(
             plan_phase_count=plan_phase_count,
         )
 
-    return PhaseIdResolution(
-        phase_id=None, source="none", plan_phase_count=plan_phase_count
-    )
+    return PhaseIdResolution(phase_id=None, source="none", plan_phase_count=plan_phase_count)
 
 
 def record_phase_id_fallback(
@@ -247,16 +239,21 @@ def _classify_change(touched_paths: list[str]) -> str:
     if not touched_paths:
         return "code"
     is_test = all(
-        path.startswith("tests/") or path.startswith("test/")
-        or "/tests/" in path or path.endswith("_test.py")
-        or path.endswith(".test.ts") or path.endswith(".test.js")
+        path.startswith("tests/")
+        or path.startswith("test/")
+        or "/tests/" in path
+        or path.endswith("_test.py")
+        or path.endswith(".test.ts")
+        or path.endswith(".test.js")
         for path in touched_paths
     )
     if is_test:
         return "test"
     is_docs = all(
-        path.endswith(".md") or path.endswith(".rst")
-        or path.startswith("docs/") or "/docs/" in path
+        path.endswith(".md")
+        or path.endswith(".rst")
+        or path.startswith("docs/")
+        or "/docs/" in path
         for path in touched_paths
     )
     if is_docs:
@@ -347,9 +344,7 @@ def _git_parents(project_dir: Path, sha: str) -> list[str]:
     return [p for p in result.stdout.strip().split() if p]
 
 
-def _git_diff_numstat(
-    project_dir: Path, sha: str
-) -> tuple[int, int, int]:
+def _git_diff_numstat(project_dir: Path, sha: str) -> tuple[int, int, int]:
     """Return (files_changed, lines_added, lines_removed) for ``sha``."""
     try:
         result = subprocess.run(
@@ -468,9 +463,7 @@ def emit_task_lifecycle_events(
         sha = _git_head_sha(project_dir)
         if sha is None:
             return emitted
-        files_changed, lines_added, lines_removed = _git_diff_numstat(
-            project_dir, sha
-        )
+        files_changed, lines_added, lines_removed = _git_diff_numstat(project_dir, sha)
         change_class_str = _classify_change(list(outcome.changed_files))
         try:
             change_class = CommitChangeClass(change_class_str)

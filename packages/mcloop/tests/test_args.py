@@ -8432,9 +8432,7 @@ def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
     notify_messages = [str(c) for c in mock_notify.call_args_list]
     # Advancing across the boundary calls notify("Starting Stage 2:
     # Build").
-    assert any(
-        "Starting" in m and "Stage 2: Build" in m for m in notify_messages
-    )
+    assert any("Starting" in m and "Stage 2: Build" in m for m in notify_messages)
     # Final "All tasks completed!" notification fires after audit.
     assert any("All tasks completed" in m for m in notify_messages)
     # No failure notification.
@@ -9463,9 +9461,7 @@ def test_failed_task_summary_does_not_inherit_prior_changed_files(tmp_path):
         extra_patches={
             "mcloop.main.run_task": fake_run_task,
             "mcloop.main._changed_files": ["foo.py"],
-            "mcloop.main.run_checks": CheckResult(
-                passed=True, output="ok", command="true"
-            ),
+            "mcloop.main.run_checks": CheckResult(passed=True, output="ok", command="true"),
             "mcloop.main._build_and_write_summary": capture_summary,
         },
         max_retries=1,
@@ -9473,8 +9469,7 @@ def test_failed_task_summary_does_not_inherit_prior_changed_files(tmp_path):
 
     tasks_summary = captured.get("task_entries", [])
     assert len(tasks_summary) == 2, (
-        f"expected two task entries, got {len(tasks_summary)}: "
-        f"{tasks_summary}"
+        f"expected two task entries, got {len(tasks_summary)}: {tasks_summary}"
     )
     first, second = tasks_summary
     assert first.outcome == "success"

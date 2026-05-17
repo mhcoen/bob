@@ -236,8 +236,7 @@ def main() -> None:
         # a manual pause is required (manual_pause). Exit code 5 is
         # reserved for this class of pause per the Slice D design.
         print(
-            f"\nmcloop: Plan Ledger paused the run "
-            f"(reason={exc.reason})",
+            f"\nmcloop: Plan Ledger paused the run (reason={exc.reason})",
             file=sys.stderr,
         )
         print(f"  detail: {exc.detail}", file=sys.stderr)
@@ -878,9 +877,7 @@ def run_loop(
             terminal_status="failure",
             failure_detail=f"Missing project dependencies: {exc}",
         )
-        return RunStatus(
-            "failure", detail=f"Missing project dependencies: {exc}"
-        )
+        return RunStatus("failure", detail=f"Missing project dependencies: {exc}")
 
     def _ledger_settle(task_label: str, outcome: TaskOutcome) -> None:
         """Plan Ledger Slice D per-task settle hook.
@@ -1751,9 +1748,7 @@ def run_loop(
                     success=False,
                     exit_code=result.exit_code if result is not None else 0,
                     log_path=(
-                        str(result.log_path)
-                        if result is not None and result.log_path
-                        else ""
+                        str(result.log_path) if result is not None and result.log_path else ""
                     ),
                     changed_files=list(changed_files),
                 )
@@ -2317,8 +2312,7 @@ def _cmd_ack_orchestra_override(project_dir: Path) -> None:
     digest = fingerprint(config_path)
     written = write_ack(project_dir, digest)
     print(
-        f"Acknowledged {config_path}. Banner silenced until the file "
-        f"changes. Ack file: {written}"
+        f"Acknowledged {config_path}. Banner silenced until the file changes. Ack file: {written}"
     )
 
 

@@ -146,9 +146,11 @@ def evaluate_and_maybe_pause(
         )
         if recommended_action not in _REAUTHOR_ACTIONS:
             continue
-        target_phase_id = _extract_target_phase_id(
-            payload, by_id
-        ) if recommended_action == "reauthor_phase" else None
+        target_phase_id = (
+            _extract_target_phase_id(payload, by_id)
+            if recommended_action == "reauthor_phase"
+            else None
+        )
         return PauseDecision(
             crossing_event_id=ev.event_id,
             rule_id=rule_id_str,
@@ -209,20 +211,14 @@ def _extract_target_phase_id(
         # trig.type may be a bob_tools EventType enum or a plain str
         # depending on caller / fixture. Normalize to str via .value
         # when available, else the str() form.
-        trig_type_str = (
-            trig_type.value
-            if hasattr(trig_type, "value")
-            else str(trig_type)
-        )
+        trig_type_str = trig_type.value if hasattr(trig_type, "value") else str(trig_type)
         target = _derivative_target_for_event(trig_type_str, trig_payload)
         if target:
             return target
     return None
 
 
-def _derivative_target_for_event(
-    event_type: str, payload: dict[str, Any]
-) -> str | None:
+def _derivative_target_for_event(event_type: str, payload: dict[str, Any]) -> str | None:
     """Map a phase-scoped lifecycle event to its derivative phase id.
 
     Payload field names come from
@@ -344,6 +340,7 @@ def auto_reauthor(
     try:
         from duplo.reauthor import PlanArtifactError as _PlanArtifactError
     except ImportError:
+
         class _PlanArtifactError(Exception):  # type: ignore[no-redef]
             """Sentinel for older duplo installs that lack PlanArtifactError."""
 
@@ -357,6 +354,7 @@ def auto_reauthor(
             CommitAttributionError as _CommitAttributionError,
         )
     except ImportError:
+
         class _CommitAttributionError(Exception):  # type: ignore[no-redef]
             """Sentinel for older duplo installs that lack CommitAttributionError."""
 
@@ -373,6 +371,7 @@ def auto_reauthor(
             SchemaValidationError as _SchemaValidationError,
         )
     except ImportError:
+
         class _SchemaValidationError(Exception):  # type: ignore[no-redef]
             """Sentinel for older duplo installs that lack SchemaValidationError."""
 
@@ -463,9 +462,7 @@ def auto_reauthor(
         # exhausts the run's allotment). Distinct pause reason names
         # the primary failure kind so the operator can read the
         # audit log targeted at the right phase.
-        primary_kind = getattr(
-            getattr(exc, "classification", None), "primary", None
-        )
+        primary_kind = getattr(getattr(exc, "classification", None), "primary", None)
         kind_value = getattr(primary_kind, "value", None) or "unknown"
         raise HardStop(
             reason="schema_validation_invalid",

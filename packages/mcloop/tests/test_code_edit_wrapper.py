@@ -51,17 +51,11 @@ def _isolate_orchestra_global_config(
     developer machine where ``~/.orchestra/config.json`` happens to
     declare a ``code_edit`` workflow.
     """
-    isolated_global = (
-        tmp_path_factory.mktemp("isolated-orchestra") / "config.json"
-    )
-    monkeypatch.setattr(
-        "orchestra.config.global_config_path", lambda: isolated_global
-    )
+    isolated_global = tmp_path_factory.mktemp("isolated-orchestra") / "config.json"
+    monkeypatch.setattr("orchestra.config.global_config_path", lambda: isolated_global)
     # Reset the project-override warning latch so each test starts
     # with the same notification state.
-    monkeypatch.setattr(
-        "mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False
-    )
+    monkeypatch.setattr("mcloop.code_edit._PROJECT_OVERRIDE_NOTE_EMITTED", False)
     return isolated_global
 
 
@@ -116,9 +110,7 @@ def test_direct_backend_returns_code_edit_result(tmp_path: Path) -> None:
 
     log_path = tmp_path / "session.log"
     with (
-        patch(
-            "mcloop.runner._build_command", side_effect=_fake_build_command
-        ),
+        patch("mcloop.runner._build_command", side_effect=_fake_build_command),
         patch("mcloop.runner._run_session", return_value=("ok\n", 0)),
         patch("mcloop.runner._write_log", return_value=log_path),
     ):
@@ -356,9 +348,7 @@ def test_select_backend_emits_project_override_note_to_stderr(
     config_dir = project_dir / ".orchestra"
     config_dir.mkdir()
     (config_dir / "config.json").write_text(
-        json.dumps(
-            {"workflows": {"code_edit": {"pattern": "direct"}}}
-        )
+        json.dumps({"workflows": {"code_edit": {"pattern": "direct"}}})
     )
     # Even when the override forces direct, the banner still fires.
     assert _select_backend(project_dir) == "direct"
@@ -512,9 +502,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     captured_pre: dict[str, str] = {}
     captured_env: dict[str, str] = {}
 
-    def _capturing_build_session_env(
-        task_label: str = "", cli: str = "claude"
-    ) -> dict[str, str]:
+    def _capturing_build_session_env(task_label: str = "", cli: str = "claude") -> dict[str, str]:
         # Call the real builder so the test sees what the wrapper
         # actually constructs. Snapshot a copy before _build_command
         # mutates it via _apply_provider_env. Return the original
@@ -590,9 +578,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         "ANTHROPIC_API_KEY",
     ]
     for key in keys_to_set:
-        assert key in captured_env, (
-            f"bug-verify env missing {key!r}: {sorted(captured_env)}"
-        )
+        assert key in captured_env, f"bug-verify env missing {key!r}: {sorted(captured_env)}"
 
     assert captured_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert captured_env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key-1234"
@@ -628,8 +614,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     # key reaches the subprocess) without pinning the implementation.
     for key, value in captured_pre.items():
         assert key in captured_env, (
-            f"key {key!r} present at _build_session_env but missing "
-            f"at _run_session"
+            f"key {key!r} present at _build_session_env but missing at _run_session"
         )
         assert captured_env[key] == value, (
             f"key {key!r} value drifted between _build_session_env "
