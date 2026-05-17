@@ -35,6 +35,11 @@ def _setup_repo(tmp_path: Path) -> Path:
     return plan_md
 
 
+def _active_plan(plan_md: Path) -> Path:
+    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    return current_plan if current_plan.exists() else plan_md
+
+
 @pytest.mark.integration
 def test_minimal_run_file_created_task_checked_off_commit_made(tmp_path):
     """run_loop: task runs, file is created, task is checked off, commit is made."""
@@ -66,7 +71,7 @@ def test_minimal_run_file_created_task_checked_off_commit_made(tmp_path):
     assert output_file.exists(), "hello.txt should have been created by the task"
     assert output_file.read_text() == "hello from task\n"
 
-    plan_content = plan_md.read_text()
+    plan_content = _active_plan(plan_md).read_text()
     assert "- [x] Create hello.txt" in plan_content, (
         f"Task should be checked off in PLAN.md, got:\n{plan_content}"
     )

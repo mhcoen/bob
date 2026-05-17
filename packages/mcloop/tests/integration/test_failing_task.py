@@ -33,6 +33,11 @@ def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
     return plan_md
 
 
+def _active_plan(plan_md: Path) -> Path:
+    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    return current_plan if current_plan.exists() else plan_md
+
+
 def _fail_result() -> RunResult:
     return RunResult(
         success=False, output="error: something broke", exit_code=1, log_path=Path("/dev/null")
@@ -68,7 +73,7 @@ def test_task_marked_failed_after_max_retries(tmp_path):
     assert not result.ok
     assert attempt_count[0] == 3, f"Expected 3 attempts, got {attempt_count[0]}"
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [!] Impossible task" in content, (
         f"Task should be marked [!] after max retries, got:\n{content}"
     )
@@ -80,7 +85,7 @@ def test_task_marked_failed_after_max_retries(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert "Impossible task" not in log.stdout, (
+    assert "Complete: Impossible task" not in log.stdout, (
         f"No commit should exist for a failed task, git log:\n{log.stdout}"
     )
 
@@ -108,7 +113,7 @@ def test_loop_stops_after_failed_task_leaving_subsequent_tasks_unchecked(tmp_pat
         f"Loop should stop after first failed task; tasks run: {tasks_attempted}"
     )
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [!] Failing task" in content
     assert "- [ ] Should not run" in content
 
@@ -153,7 +158,7 @@ def test_task_succeeds_on_final_retry(tmp_path):
     assert result.ok, f"Expected success on third attempt, got: {result}"
     assert attempt_count[0] == 3
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Eventually works" in content, (
         f"Task should be checked off after succeeding on retry:\n{content}"
     )

@@ -33,6 +33,11 @@ def _setup_repo(tmp_path: Path, plan_content: str) -> Path:
     return plan_md
 
 
+def _active_plan(plan_md: Path) -> Path:
+    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    return current_plan if current_plan.exists() else plan_md
+
+
 def _make_fake_run_task(execution_order: list[str]) -> object:
     """Return a fake run_task that records execution order and creates a unique file per task."""
     counter = [0]
@@ -80,7 +85,7 @@ def test_children_execute_before_parent(tmp_path):
         f"Expected depth-first child execution, got: {execution_order}"
     )
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Parent task" in content
     assert "- [x] Child A" in content
     assert "- [x] Child B" in content
@@ -103,7 +108,7 @@ def test_parent_auto_checked_after_all_children_complete(tmp_path):
     assert "Feature" not in execution_order, "Parent should not be passed to run_task"
     assert execution_order == ["Step 1", "Step 2", "Step 3"]
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert content.count("- [x]") == 4  # all three children + parent
 
 
@@ -125,7 +130,7 @@ def test_deep_nesting_runs_depth_first(tmp_path):
         f"Only the leaf should be executed; got: {execution_order}"
     )
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Grandparent" in content
     assert "- [x] Parent" in content
     assert "- [x] Grandchild" in content
@@ -149,7 +154,7 @@ def test_mixed_parent_and_leaf_tasks_ordered_correctly(tmp_path):
         f"Expected standalone then children, got: {execution_order}"
     )
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Standalone task" in content
     assert "- [x] Group" in content
     assert "- [x] Sub A" in content

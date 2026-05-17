@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -63,6 +64,7 @@ def _make_stub_build_command(scenario_path: Path):
         prompt: str | None = None,
         model: str | None = None,
         allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
+        env: dict[str, str] | None = None,
     ) -> list[str]:
         cmd = [sys.executable, STUB_CLI, "--scenario", str(scenario_path)]
         if cli == "claude":
@@ -77,6 +79,20 @@ def _make_stub_build_command(scenario_path: Path):
         return cmd
 
     return build_command
+
+
+def _active_plan(plan_md: Path) -> Path:
+    """Return the split-plan file mcloop mutates during an active run."""
+    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    return current_plan if current_plan.exists() else plan_md
+
+
+@contextmanager
+def _stub_backend(build_command):
+    """Force the direct backend so _build_command is the offline test seam."""
+    with patch("mcloop.code_edit._select_backend", return_value="direct"):
+        with patch("mcloop.runner._build_command", build_command):
+            yield
 
 
 # -------------------------------------------------------------------
@@ -104,18 +120,19 @@ def test_stub_creates_file_and_checks_off_task(tmp_path):
         scenario,
     )
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
-            result = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(
+                plan_md,
+                max_retries=1,
+                no_audit=True,
+            )
 
     assert result.ok
     assert (tmp_path / "hello.txt").exists()
     assert (tmp_path / "hello.txt").read_text() == "hello from stub\n"
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Create hello.txt" in content
 
     log = subprocess.run(
@@ -150,15 +167,12 @@ def test_stub_failing_task_retried_and_marked_failed(tmp_path):
         scenario,
     )
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
             result = run_loop(plan_md, max_retries=2, no_audit=True)
 
-    assert result.ok
-    content = plan_md.read_text()
+    assert not result.ok
+    content = _active_plan(plan_md).read_text()
     assert "- [!] Impossible task" in content
 
 
@@ -207,7 +221,7 @@ def test_stub_check_failure_retries_with_prior_errors(tmp_path):
     prompts_seen = []
     original_build = _make_stub_build_command(scenario_path)
 
-    def tracking_build(cli, prompt=None, model=None, allowed_tools=None):
+    def tracking_build(cli, prompt=None, model=None, allowed_tools=None, env=None):
         if prompt:
             prompts_seen.append(prompt)
         kw = {}
@@ -215,12 +229,12 @@ def test_stub_check_failure_retries_with_prior_errors(tmp_path):
             kw["allowed_tools"] = allowed_tools
         return original_build(cli, prompt=prompt, model=model, **kw)
 
-    with patch("mcloop.runner._build_command", tracking_build):
+    with _stub_backend(tracking_build):
         with patch("mcloop.main.notify"):
             result = run_loop(plan_md, max_retries=3, no_audit=True)
 
     assert result.ok
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Create widget" in content
 
     # The second prompt should contain the check error from the first attempt
@@ -261,10 +275,7 @@ def test_stub_rate_limit_triggers_pause_and_retry(tmp_path):
             return True
         return False
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
             with patch(
                 "mcloop.main.is_rate_limited",
@@ -277,7 +288,7 @@ def test_stub_rate_limit_triggers_pause_and_retry(tmp_path):
                     result = run_loop(plan_md, max_retries=2, no_audit=True)
 
     assert result.ok
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Create output file" in content
     # Rate limit attempt should not count, so we should have seen at least 2 calls
     assert call_count >= 2
@@ -297,7 +308,7 @@ def test_stub_session_limit_triggers_polling(tmp_path):
         "tasks": [
             {
                 "match": "Create result",
-                "files": {"result.txt": "done\n"},
+                "files": {"result.txt": {"patch": "done\n"}},
                 "output": "Created result.txt",
                 "exit_code": 0,
             }
@@ -316,10 +327,7 @@ def test_stub_session_limit_triggers_polling(tmp_path):
             return True
         return False
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
             with patch(
                 "mcloop.main.is_session_limited",
@@ -329,7 +337,7 @@ def test_stub_session_limit_triggers_polling(tmp_path):
                     result = run_loop(plan_md, max_retries=2, no_audit=True)
 
     assert result.ok
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Create result file" in content
     assert call_count >= 2
 
@@ -368,24 +376,25 @@ def test_stub_batch_runs_one_session_checks_off_all(tmp_path):
     )
     plan_md, scenario_path = _setup_repo(tmp_path, plan_content, scenario)
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
-            result = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(
+                plan_md,
+                max_retries=1,
+                no_audit=True,
+            )
 
     assert result.ok
     assert (tmp_path / "part_a.txt").read_text() == "a\n"
     assert (tmp_path / "part_b.txt").read_text() == "b\n"
     assert (tmp_path / "part_c.txt").read_text() == "c\n"
 
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Create part_a.txt" in content
     assert "- [x] Create part_b.txt" in content
     assert "- [x] Create part_c.txt" in content
 
-    # Should have made exactly one commit for the batch (plus initial)
+    # Should have made exactly one task-completion commit for the batch.
     log = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=tmp_path,
@@ -393,19 +402,18 @@ def test_stub_batch_runs_one_session_checks_off_all(tmp_path):
         text=True,
     )
     lines = [line for line in log.stdout.strip().splitlines() if line]
-    # Expect: initial commit + 1 batch commit
-    assert len(lines) == 2
-    assert "BATCH" in lines[0]
+    batch_commits = [line for line in lines if "Complete: [BATCH]" in line]
+    assert len(batch_commits) == 1
 
 
 # -------------------------------------------------------------------
-# Test 7: batch failure falls back to individual execution
+# Test 7: batch failure halts and marks parent failed
 # -------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_stub_batch_failure_falls_back_to_individual(tmp_path):
-    """When batch session fails, tasks are retried individually."""
+def test_stub_batch_failure_halts_and_marks_parent_failed(tmp_path):
+    """When batch session fails, the batch parent is marked failed."""
     # The batch prompt ("Do all of the following") will match the
     # "batch_fail" task and exit 1. Individual tasks match their own
     # patterns and succeed.
@@ -444,20 +452,18 @@ def test_stub_batch_failure_falls_back_to_individual(tmp_path):
     )
     plan_md, scenario_path = _setup_repo(tmp_path, plan_content, scenario)
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
             result = run_loop(plan_md, max_retries=1, no_audit=True)
 
-    assert result.ok
-    assert (tmp_path / "alpha.txt").read_text() == "a\n"
-    assert (tmp_path / "beta.txt").read_text() == "b\n"
+    assert not result.ok
+    assert not (tmp_path / "alpha.txt").exists()
+    assert not (tmp_path / "beta.txt").exists()
 
-    content = plan_md.read_text()
-    assert "- [x] Write alpha component" in content
-    assert "- [x] Write beta component" in content
+    content = _active_plan(plan_md).read_text()
+    assert "- [!] [BATCH] Build things" in content
+    assert "- [!] Write alpha component" in content
+    assert "- [!] Write beta component" in content
 
 
 # -------------------------------------------------------------------
@@ -483,15 +489,16 @@ def test_stub_no_file_changes_checks_pass_auto_checked(tmp_path):
         scenario,
     )
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
-            result = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(
+                plan_md,
+                max_retries=1,
+                no_audit=True,
+            )
 
     assert result.ok
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Verify everything works" in content
 
 
@@ -526,10 +533,7 @@ def test_stub_reviewer_spawned_after_commit(tmp_path):
 
     fake_config = {"model": "test-model", "base_url": "http://localhost", "api_key": "test"}
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
             with patch(
                 "mcloop.main.load_reviewer_config",
@@ -550,7 +554,7 @@ def test_stub_reviewer_spawned_after_commit(tmp_path):
                         )
 
     assert result.ok
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [x] Add feature" in content
 
     # Reviewer should have been called exactly once after the commit
@@ -588,12 +592,14 @@ def test_stub_stage_boundary_full_suite(tmp_path, capsys):
     )
     plan_md, scenario_path = _setup_repo(tmp_path, plan_content, scenario)
 
-    with patch(
-        "mcloop.runner._build_command",
-        _make_stub_build_command(scenario_path),
-    ):
+    with _stub_backend(_make_stub_build_command(scenario_path)):
         with patch("mcloop.main.notify"):
-            result = run_loop(plan_md, max_retries=1, no_audit=True)
+            result = run_loop(
+                plan_md,
+                max_retries=1,
+                no_audit=True,
+                stop_after_stage=True,
+            )
 
     assert result.ok
 
@@ -640,7 +646,7 @@ def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
     prompts_seen = []
     original_build = _make_stub_build_command(scenario_path)
 
-    def tracking_build(cli, prompt=None, model=None, allowed_tools=None):
+    def tracking_build(cli, prompt=None, model=None, allowed_tools=None, env=None):
         if prompt:
             prompts_seen.append(prompt)
         kw = {}
@@ -648,31 +654,30 @@ def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
             kw["allowed_tools"] = allowed_tools
         return original_build(cli, prompt=prompt, model=model, **kw)
 
-    with patch("mcloop.runner._build_command", tracking_build):
+    with _stub_backend(tracking_build):
         with patch("mcloop.main.notify"):
             result = run_loop(plan_md, max_retries=2, no_audit=True)
 
     # Task failed (exhausted retries)
-    assert result.ok
+    assert not result.ok
 
     # hello.txt was created (task succeeds) but goodbye.txt never exists
     assert (tmp_path / "hello.txt").exists()
     assert not (tmp_path / "goodbye.txt").exists()
 
     # Task marked failed
-    content = plan_md.read_text()
+    content = _active_plan(plan_md).read_text()
     assert "- [!] Create hello.txt" in content
     assert "- [x]" not in content
 
-    # No commits beyond initial (checks never passed)
+    # No task-completion commit (checks never passed); checkpoint commits may exist.
     log = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
     )
-    lines = [line for line in log.stdout.strip().splitlines() if line]
-    assert len(lines) == 1
+    assert "Complete: Create hello.txt" not in log.stdout
 
     # Retry prompts should contain the check failure output
     assert len(prompts_seen) >= 2

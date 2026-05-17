@@ -33,6 +33,11 @@ def _setup_repo(tmp_path: Path) -> Path:
     return plan_md
 
 
+def _active_plan(plan_md: Path) -> Path:
+    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    return current_plan if current_plan.exists() else plan_md
+
+
 def _make_run_task(task_files: dict[str, str], kill_on: str | None = None):
     """Return a fake run_task.
 
@@ -81,7 +86,7 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
                 run_loop(plan_md, max_retries=1, no_audit=True)
 
     # After kill: task 1 committed and checked off; tasks 2-3 still unchecked
-    plan_content = plan_md.read_text()
+    plan_content = _active_plan(plan_md).read_text()
     assert "- [x] Create alpha.txt" in plan_content, "task 1 should be checked off"
     assert "- [ ] Create beta.txt" in plan_content, "task 2 should still be unchecked"
     assert "- [ ] Create gamma.txt" in plan_content, "task 3 should still be unchecked"
@@ -106,7 +111,7 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
         f"Restart should only run unchecked tasks, got: {second_run_tasks}"
     )
 
-    plan_content = plan_md.read_text()
+    plan_content = _active_plan(plan_md).read_text()
     assert "- [x] Create alpha.txt" in plan_content
     assert "- [x] Create beta.txt" in plan_content
     assert "- [x] Create gamma.txt" in plan_content
@@ -124,4 +129,6 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
     assert "Create alpha.txt" in log.stdout
     assert "Create beta.txt" in log.stdout
     assert "Create gamma.txt" in log.stdout
-    assert log.stdout.count("Create alpha.txt") == 1, "task 1 should be committed exactly once"
+    assert log.stdout.count("Complete: Create alpha.txt") == 1, (
+        "task 1 should be completed exactly once"
+    )
