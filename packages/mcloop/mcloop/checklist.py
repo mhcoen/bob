@@ -12,6 +12,9 @@ CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 STAGE_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 # Bugs header: any heading level followed by "Bugs" as the title.
 BUGS_RE = re.compile(r"^#+\s+Bugs\s*$", re.IGNORECASE)
+# Generic heading (any level). Used as a body-collection boundary for
+# multi-line [USER] task bodies.
+_ANY_HEADING_RE = re.compile(r"^#+\s")
 # H1 headers (single `#` followed by space). Used by the structural
 # sanity check to detect duplicated top-level headings (a hallmark
 # corruption pattern in PLAN.md files that have been bad-edited).
@@ -49,6 +52,7 @@ class Task:
     stage: str = ""
     children: list[Task] = field(default_factory=list)
     eliminated: list[str] = field(default_factory=list)
+    body: str = ""
 
 
 def count_unchecked(tasks: list[Task]) -> int:
@@ -220,6 +224,8 @@ def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
             indent_level=indent,
             stage=current_stage,
         )
+        if text == _USER_TAG or text.startswith(f"{_USER_TAG} "):
+            task.body = _collect_body(lines, i + 1)
 
         while stack and stack[-1].indent_level >= indent:
             stack.pop()
@@ -636,18 +642,45 @@ def is_user_task(task: Task) -> bool:
     return text == _USER_TAG or text.startswith(f"{_USER_TAG} ")
 
 
+def _collect_body(lines: list[str], start: int) -> str:
+    """Gather contiguous non-checkbox, non-heading lines for a [USER] body.
+
+    Stops at the next checkbox or any heading. Leading and trailing blank
+    lines are trimmed; internal blank lines and original indentation are
+    preserved (no reflow).
+    """
+    body_lines: list[str] = []
+    j = start
+    while j < len(lines):
+        line = lines[j]
+        if CHECKBOX_RE.match(line) or _ANY_HEADING_RE.match(line):
+            break
+        body_lines.append(line)
+        j += 1
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    while body_lines and not body_lines[-1].strip():
+        body_lines.pop()
+    return "\n".join(body_lines)
+
+
 def user_task_instructions(task: Task) -> str:
     """Extract the instruction text from a [USER] task.
 
-    Removes a leading [USER] tag and returns the remaining text,
-    which describes what the user should do and observe.
+    Removes a leading [USER] tag from the checkbox line and appends any
+    multi-line body captured at parse time, preserving newlines so the
+    banner can render it line-structured.
     """
     text = task.text.strip()
     if text == _USER_TAG:
-        return ""
-    if text.startswith(f"{_USER_TAG} "):
-        return text[len(_USER_TAG) :].strip()
-    return text
+        head = ""
+    elif text.startswith(f"{_USER_TAG} "):
+        head = text[len(_USER_TAG) :].strip()
+    else:
+        head = text
+    if task.body:
+        return f"{head}\n{task.body}" if head else task.body
+    return head
 
 
 def is_batch_task(task: Task) -> bool:

@@ -10,7 +10,10 @@ Provides distinct visual styles for:
 from __future__ import annotations
 
 import os
+import re
 import sys
+
+_COMMAND_RE = re.compile(r"^\s*\$\s")
 
 # ANSI escape codes
 BOLD = "\033[1m"
@@ -32,10 +35,31 @@ def _use_color() -> bool:
     return sys.stdout.isatty()
 
 
+def _format_user_instructions(instructions: str) -> str:
+    """Render multi-line [USER] instructions for the banner. No reflow.
+
+    Each input line is indented two spaces. Lines that look like shell
+    commands (start with ``$ ``) are flanked by blank lines so they
+    stand out and remain copy-pasteable.
+    """
+    raw = instructions.split("\n")
+    out: list[str] = []
+    for idx, line in enumerate(raw):
+        is_cmd = bool(_COMMAND_RE.match(line))
+        prev_cmd = idx > 0 and bool(_COMMAND_RE.match(raw[idx - 1]))
+        if is_cmd and not prev_cmd and out and out[-1] != "":
+            out.append("")
+        if not is_cmd and prev_cmd and line.strip():
+            out.append("")
+        out.append(f"  {line}" if line else "")
+    return "\n".join(out)
+
+
 def user_banner(label: str, instructions: str) -> str:
     """Format a [USER] task banner that's impossible to miss."""
     color = _use_color()
     width = 60
+    body_text = _format_user_instructions(instructions)
     if color:
         top = f"\n{BOLD}{REVERSE}{YELLOW} {'=' * (width - 2)} {RESET}"
         title = (
@@ -45,7 +69,7 @@ def user_banner(label: str, instructions: str) -> str:
             f"{RESET}"
         )
         bot = f"{BOLD}{REVERSE}{YELLOW} {'=' * (width - 2)} {RESET}"
-        body = f"\n{BOLD}  {instructions}{RESET}\n"
+        body = f"\n{BOLD}{body_text}{RESET}\n"
         sep = f"{DIM}{'-' * width}{RESET}"
         prompt_1 = "When done, type what you observed below."
         prompt_2 = "Press Enter on an empty line to finish:"
@@ -54,7 +78,7 @@ def user_banner(label: str, instructions: str) -> str:
         top = "\n" + "=" * width
         title = f"  >>> USER ACTION REQUIRED  (Task {label})"
         bot = "=" * width
-        body = f"\n  {instructions}\n"
+        body = f"\n{body_text}\n"
         sep = "-" * width
         prompt_1 = "When done, type what you observed below."
         prompt_2 = "Press Enter on an empty line to finish:"

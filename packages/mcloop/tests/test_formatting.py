@@ -70,6 +70,32 @@ class TestUserBanner:
             assert "USER ACTION REQUIRED" in user
             assert "AUTO OBSERVATION" in auto
 
+    def test_multiline_instructions_preserve_newlines(self):
+        with _force_no_color():
+            instructions = "First line\nSecond line\nThird line"
+            result = formatting.user_banner("1", instructions)
+            assert "  First line\n" in result
+            assert "  Second line\n" in result
+            assert "  Third line" in result
+
+    def test_command_lines_get_blank_isolation(self):
+        with _force_no_color():
+            instructions = "Open a terminal and run:\n$ ./run --check\nReport the output."
+            result = formatting.user_banner("1", instructions)
+            # Blank line inserted before the command and after it.
+            assert "Open a terminal and run:\n\n  $ ./run --check" in result
+            assert "$ ./run --check\n\n  Report the output." in result
+
+    def test_consecutive_command_lines_not_split(self):
+        with _force_no_color():
+            instructions = "Steps:\n$ first\n$ second\nDone."
+            result = formatting.user_banner("1", instructions)
+            # No blank between two adjacent command lines.
+            assert "  $ first\n  $ second" in result
+            # But a blank before the first command and after the last one.
+            assert "Steps:\n\n  $ first" in result
+            assert "  $ second\n\n  Done." in result
+
 
 class TestAutoBanner:
     def test_no_color_contains_info(self):

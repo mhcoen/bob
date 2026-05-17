@@ -429,6 +429,86 @@ def test_user_task_instructions_strips_tag(tmp_path):
     assert user_task_instructions(tasks[0]) == ("Launch the app and check if the icon appears")
 
 
+def test_user_task_body_collected_until_next_checkbox(tmp_path):
+    md = (
+        "- [ ] [USER] Run the diagnostic\n"
+        "  Open a terminal and run:\n"
+        "\n"
+        "  $ ./diagnose --verbose\n"
+        "\n"
+        "  Report the final exit line.\n"
+        "- [ ] Followup task\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert tasks[0].body == (
+        "  Open a terminal and run:\n\n  $ ./diagnose --verbose\n\n  Report the final exit line."
+    )
+    assert tasks[1].body == ""
+
+
+def test_user_task_body_stops_at_heading(tmp_path):
+    md = (
+        "## Stage 1\n"
+        "- [ ] [USER] Verify the UI\n"
+        "  Look at the menu bar.\n"
+        "## Stage 2\n"
+        "- [ ] Other work\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert tasks[0].body == "  Look at the menu bar."
+
+
+def test_user_task_body_empty_for_non_user_task(tmp_path):
+    md = "- [ ] Normal task\n  Some prose that would otherwise drop\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    assert tasks[0].body == ""
+
+
+def test_user_task_instructions_includes_body(tmp_path):
+    md = "- [ ] [USER] Step one\n  Step two on its own line.\n\n  $ run-me\n"
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    instructions = user_task_instructions(tasks[0])
+    assert instructions == ("Step one\n  Step two on its own line.\n\n  $ run-me")
+    assert "\n" in instructions
+
+
+def test_user_task_multiline_round_trip_to_banner(tmp_path):
+    from mcloop import formatting
+
+    md = (
+        "- [ ] [USER] Confirm the install\n"
+        "  Open a terminal and run:\n"
+        "\n"
+        "  $ ./installer.sh --check\n"
+        "\n"
+        "  Then report the last line of output.\n"
+    )
+    f = tmp_path / "tasks.md"
+    f.write_text(md)
+    tasks = parse(f)
+    instructions = user_task_instructions(tasks[0])
+    # Newlines survive parse -> user_task_instructions.
+    assert instructions.count("\n") >= 4
+    assert "Confirm the install" in instructions
+    assert "./installer.sh --check" in instructions
+    banner = formatting.user_banner("1", instructions)
+    # Each meaningful body line appears verbatim in the banner output.
+    assert "Confirm the install" in banner
+    assert "Open a terminal and run:" in banner
+    assert "$ ./installer.sh --check" in banner
+    assert "Then report the last line of output." in banner
+    # Newlines preserved, not collapsed to a single line.
+    assert "Confirm the install\n" in banner
+
+
 def test_is_auto_task_with_tag(tmp_path):
     md = "- [ ] [AUTO:run_cli] ./my_app --flag\n"
     f = tmp_path / "tasks.md"
