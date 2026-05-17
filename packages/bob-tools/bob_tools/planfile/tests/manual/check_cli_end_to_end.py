@@ -42,7 +42,8 @@ import sys
 import time
 from pathlib import Path
 
-BOB_PLAN = Path("/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan")
+VENV_PY = Path("/Users/mhcoen/proj/bob-tools/.venv/bin/python")
+CLI_INVOCATION: tuple[str, ...] = (str(VENV_PY), "-m", "bob_tools.planfile.cli")
 SOURCE_PLAN = Path("/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md")
 SCRATCH = Path("/tmp/bob-plan-stage7-check.PLAN.md")
 
@@ -121,7 +122,7 @@ def _setup() -> str | None:
 
 def _validate_expect_failure() -> str | None:
     _step(f"running: bob-plan validate {SCRATCH} (expecting exit=1)")
-    result = _run([str(BOB_PLAN), "validate", str(SCRATCH)])
+    result = _run([*CLI_INVOCATION, "validate", str(SCRATCH)])
     if result.returncode != EXIT_INVALID_PLAN:
         return (
             "expected validate to exit 1 before formatting, got "
@@ -133,7 +134,7 @@ def _validate_expect_failure() -> str | None:
 
 def _fmt() -> str | None:
     _step(f"running: bob-plan fmt {SCRATCH}")
-    result = _run([str(BOB_PLAN), "fmt", str(SCRATCH)])
+    result = _run([*CLI_INVOCATION, "fmt", str(SCRATCH)])
     if result.returncode != 0:
         return f"fmt failed\n{_format_result(result)}"
     _step("fmt exited 0")
@@ -142,7 +143,7 @@ def _fmt() -> str | None:
 
 def _validate_expect_success() -> str | None:
     _step(f"running: bob-plan validate {SCRATCH} (expecting exit=0)")
-    result = _run([str(BOB_PLAN), "validate", str(SCRATCH)])
+    result = _run([*CLI_INVOCATION, "validate", str(SCRATCH)])
     if result.returncode != 0:
         return (
             "expected validate to exit 0 after fmt, got "
@@ -154,7 +155,7 @@ def _validate_expect_success() -> str | None:
 
 def _next() -> str | None:
     _step(f"running: bob-plan next {SCRATCH}")
-    result = _run([str(BOB_PLAN), "next", str(SCRATCH)])
+    result = _run([*CLI_INVOCATION, "next", str(SCRATCH)])
     if result.returncode != 0:
         return f"next failed\n{_format_result(result)}"
     output = result.stdout.strip() or "(no actionable task)"
@@ -194,10 +195,10 @@ def _check_additive_diff() -> str | None:
 
 def main() -> int:
     _step("Stage 7 verification: bob-plan end-to-end check")
-    if not BOB_PLAN.exists():
+    if not VENV_PY.exists():
         print(
-            f"FAIL: {BOB_PLAN} not found. Install bob-tools into the venv "
-            "(pip install -e .) before running this check.",
+            f"FAIL: {VENV_PY} not found. Create the bob-tools venv "
+            "before running this check.",
             file=sys.stderr,
         )
         return 1

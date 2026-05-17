@@ -46,7 +46,8 @@ from bob_tools.planfile import (
     parse_plan,
 )
 
-BOB_PLAN = Path("/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan")
+VENV_PY = Path("/Users/mhcoen/proj/bob-tools/.venv/bin/python")
+CLI_INVOCATION: tuple[str, ...] = (str(VENV_PY), "-m", "bob_tools.planfile.cli")
 DUPLO_GLOB_ROOT = Path("/Users/mhcoen/proj")
 DUPLO_GLOB_PATTERN = "*/.duplo"
 SCRATCH = Path("/tmp/bob-plan-stage8-duplo-check.PLAN.md")
@@ -255,10 +256,10 @@ def _append_bugs_entry(source_plan: Path, divergences: list[str]) -> None:
 
 def main() -> int:
     _step("Stage 8 verification: bob-plan fmt additive-only on a duplo plan")
-    if not BOB_PLAN.exists():
+    if not VENV_PY.exists():
         print(
-            f"FAIL: {BOB_PLAN} not found. Install bob-tools into the venv "
-            "(pip install -e .) before running this check.",
+            f"FAIL: {VENV_PY} not found. Create the bob-tools venv "
+            "before running this check.",
             file=sys.stderr,
         )
         return 1
@@ -284,10 +285,10 @@ def main() -> int:
         print(f"FAIL: could not copy source plan: {exc}", file=sys.stderr)
         return 1
 
-    _step(f"running: {BOB_PLAN.name} fmt {SCRATCH}")
+    _step(f"running: bob-plan fmt {SCRATCH}")
     try:
         result = subprocess.run(
-            [str(BOB_PLAN), "fmt", str(SCRATCH)],
+            [*CLI_INVOCATION, "fmt", str(SCRATCH)],
             capture_output=True,
             text=True,
             timeout=SUBPROCESS_TIMEOUT_S,
