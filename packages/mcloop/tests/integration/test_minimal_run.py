@@ -9,7 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -73,9 +73,7 @@ def test_minimal_run_file_created_task_checked_off_commit_made(tmp_path):
     assert output_file.read_text() == "hello from task\n"
 
     plan_content = _active_plan(plan_md).read_text()
-    assert "- [x] Create hello.txt" in plan_content, (
-        f"Task should be checked off in PLAN.md, got:\n{plan_content}"
-    )
+    assert_canonical_checkbox(plan_content, "x", "Create hello.txt")
 
     log_result = subprocess.run(
         ["git", "log", "--oneline"],

@@ -80,7 +80,7 @@ from mcloop.review_integration import (
     _terminate_reviewers,
 )
 from mcloop.session_context import SessionContext
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _parse(*argv):
@@ -6463,7 +6463,7 @@ def test_check_interrupted_skip_marks_failed(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _="": "s")
     result = _check_interrupted(tmp_path, plan)
     assert result == "skip"
-    assert "- [!] Fix something" in plan.read_text()
+    assert_canonical_checkbox(plan.read_text(), "!", "Fix something")
 
 
 def test_check_interrupted_audit_prompt(tmp_path, monkeypatch):
@@ -6908,11 +6908,17 @@ def test_run_loop_batch_detection(tmp_path):
             # Check off tasks in the active file (CURRENT_PLAN.md) to
             # stop the loop under split-plan semantics.
             content = current.read_text()
-            content = content.replace("- [ ] Add feature A", "- [x] Add feature A")
-            content = content.replace("- [ ] Add feature B", "- [x] Add feature B")
             content = content.replace(
-                "- [ ] [BATCH] Build components",
-                "- [x] [BATCH] Build components",
+                "- [ ] T-000001: Add feature A",
+                "- [x] T-000001: Add feature A",
+            )
+            content = content.replace(
+                "- [ ] T-000002: Add feature B",
+                "- [x] T-000002: Add feature B",
+            )
+            content = content.replace(
+                "- [ ] T-000003: [BATCH] Build components",
+                "- [x] T-000003: [BATCH] Build components",
             )
             current.write_text(content)
             return ("success", "")
@@ -9800,7 +9806,7 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
     current = tmp_path / "CURRENT_PLAN.md"
     current.write_text(canonical_plan_text("# Plan\n- [!] failed feature\n- [ ] next feature\n"))
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("## Bugs\n- [!] failed bug\n")
+    bugs.write_text(canonical_plan_text("## Bugs\n- [!] failed bug\n"))
     (tmp_path / ".git").mkdir()
 
     with (
@@ -9825,7 +9831,11 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
         def runner_side_effect(*a, **kw):
             (tmp_path / "bugfix.txt").write_text("done")
             content = bugs.read_text()
-            content = content.replace("- [ ] failed bug", "- [x] failed bug", 1)
+            content = content.replace(
+                "- [ ] T-000001: failed bug",
+                "- [x] T-000001: failed bug",
+                1,
+            )
             bugs.write_text(content)
             return MagicMock(success=True, output="done", exit_code=0)
 
@@ -9834,7 +9844,7 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
         run_loop(plan, max_retries=3, stop_after_one=True, retry=True)
 
     assert "- [!]" not in current.read_text()
-    assert "- [ ] failed feature" in current.read_text()
+    assert_canonical_checkbox(current.read_text(), " ", "failed feature")
     assert "- [!]" not in bugs.read_text()
 
 
@@ -9845,7 +9855,7 @@ def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
     current = tmp_path / "CURRENT_PLAN.md"
     current.write_text(canonical_plan_text("# Plan\n- [!] failed feature\n- [ ] next feature\n"))
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("## Bugs\n- [!] failed bug\n")
+    bugs.write_text(canonical_plan_text("## Bugs\n- [!] failed bug\n"))
     (tmp_path / ".git").mkdir()
 
     with (
@@ -9867,7 +9877,11 @@ def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
 
         def runner_side_effect(*a, **kw):
             content = current.read_text()
-            content = content.replace("- [ ] next feature", "- [x] next feature", 1)
+            content = content.replace(
+                "- [ ] T-000002: next feature",
+                "- [x] T-000002: next feature",
+                1,
+            )
             current.write_text(content)
             return MagicMock(success=True, output="done", exit_code=0)
 
@@ -9876,8 +9890,8 @@ def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
         run_loop(plan, max_retries=3, stop_after_one=True, retry=False)
 
     # The [!] markers must survive when --retry is not passed.
-    assert "- [!] failed feature" in current.read_text()
-    assert "- [!] failed bug" in bugs.read_text()
+    assert_canonical_checkbox(current.read_text(), "!", "failed feature")
+    assert_canonical_checkbox(bugs.read_text(), "!", "failed bug")
 
 
 def test_stop_after_one_exits_after_single_task(tmp_path):

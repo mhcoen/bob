@@ -9,7 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -92,9 +92,9 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
 
     # After kill: task 1 committed and checked off; tasks 2-3 still unchecked
     plan_content = _active_plan(plan_md).read_text()
-    assert "- [x] Create alpha.txt" in plan_content, "task 1 should be checked off"
-    assert "- [ ] Create beta.txt" in plan_content, "task 2 should still be unchecked"
-    assert "- [ ] Create gamma.txt" in plan_content, "task 3 should still be unchecked"
+    assert_canonical_checkbox(plan_content, "x", "Create alpha.txt")
+    assert_canonical_checkbox(plan_content, " ", "Create beta.txt")
+    assert_canonical_checkbox(plan_content, " ", "Create gamma.txt")
     assert (tmp_path / "alpha.txt").exists(), "alpha.txt should exist after first run"
     assert not (tmp_path / "beta.txt").exists(), "beta.txt should not exist yet"
 
@@ -117,9 +117,9 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
     )
 
     plan_content = _active_plan(plan_md).read_text()
-    assert "- [x] Create alpha.txt" in plan_content
-    assert "- [x] Create beta.txt" in plan_content
-    assert "- [x] Create gamma.txt" in plan_content
+    assert_canonical_checkbox(plan_content, "x", "Create alpha.txt")
+    assert_canonical_checkbox(plan_content, "x", "Create beta.txt")
+    assert_canonical_checkbox(plan_content, "x", "Create gamma.txt")
 
     assert (tmp_path / "alpha.txt").exists()
     assert (tmp_path / "beta.txt").exists()

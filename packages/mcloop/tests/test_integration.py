@@ -7,7 +7,7 @@ from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
 from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _make_project(tmp_path, checklist_text):
@@ -132,7 +132,7 @@ def test_retry_then_succeed(
     assert result.ok
     assert mock_run.call_count == 2
     content = md.read_text()
-    assert "- [x] Flaky task" in content
+    assert_canonical_checkbox(content, "x", "Flaky task")
 
     # No per-retry or per-task notifications — only "All tasks completed"
     calls = _notify_calls(mock_notify)
@@ -188,8 +188,8 @@ def test_max_retries_exhausted_stops_loop(
     assert mock_run.call_count == 3
     # Under split-plan, task marker is written to CURRENT_PLAN.md (the active file)
     content = (md.parent / "CURRENT_PLAN.md").read_text()
-    assert "- [!] Hopeless task" in content
-    assert "- [ ] Next task" in content
+    assert_canonical_checkbox(content, "!", "Hopeless task")
+    assert_canonical_checkbox(content, " ", "Next task")
 
     # Only "giving up" after all retries exhausted — no per-retry notifications
     calls = _notify_calls(mock_notify)
@@ -312,8 +312,8 @@ def test_noop_task_checks_fail_treated_as_failure(
     mock_commit.assert_not_called()
     mock_checks.assert_not_called()
     content = md.read_text()
-    assert "- [ ] Already done task" in content
-    assert "- [x] Already done task" not in content
+    assert_canonical_checkbox(content, " ", "Already done task")
+    assert "- [x] T-" not in content
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
@@ -340,8 +340,8 @@ def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
     mock_commit.assert_not_called()
     mock_checks.assert_not_called()
     content = md.read_text()
-    assert "- [ ] Already done task" in content
-    assert "- [x] Already done task" not in content
+    assert_canonical_checkbox(content, " ", "Already done task")
+    assert "- [x] T-" not in content
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
@@ -379,7 +379,7 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
     assert mock_checks.call_count == 0
 
     bugs_content = (tmp_path / "BUGS.md").read_text()
-    assert "- [!] Fix the thing" in bugs_content
+    assert_canonical_checkbox(bugs_content, "!", "Fix the thing")
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
@@ -406,8 +406,8 @@ def test_single_task_noop_false_positive_does_not_check_off_without_acceptance_e
     mock_checks.assert_not_called()
     mock_commit.assert_not_called()
     content = md.read_text()
-    assert "- [ ] Already done plan task" in content
-    assert "- [x] Already done plan task" not in content
+    assert_canonical_checkbox(content, " ", "Already done plan task")
+    assert "- [x] T-" not in content
 
 
 @patch("mcloop.main.notify")
@@ -432,7 +432,7 @@ def test_noop_then_checks_fail_is_terminal(
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = (md.parent / "CURRENT_PLAN.md").read_text()
-    assert "- [!] Retry task" in content
+    assert_canonical_checkbox(content, "!", "Retry task")
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
@@ -458,7 +458,7 @@ def test_noop_with_max_retries_one(
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
     content = (md.parent / "CURRENT_PLAN.md").read_text()
-    assert "- [!] One-shot task" in content
+    assert_canonical_checkbox(content, "!", "One-shot task")
 
     # Only "giving up" — no per-retry notifications
     calls = _notify_calls(mock_notify)

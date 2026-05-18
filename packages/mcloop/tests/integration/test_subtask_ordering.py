@@ -9,7 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -87,9 +87,9 @@ def test_children_execute_before_parent(tmp_path):
     )
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Parent task" in content
-    assert "- [x] Child A" in content
-    assert "- [x] Child B" in content
+    assert_canonical_checkbox(content, "x", "Parent task")
+    assert_canonical_checkbox(content, "x", "Child A")
+    assert_canonical_checkbox(content, "x", "Child B")
 
 
 @pytest.mark.integration
@@ -132,9 +132,9 @@ def test_deep_nesting_runs_depth_first(tmp_path):
     )
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Grandparent" in content
-    assert "- [x] Parent" in content
-    assert "- [x] Grandchild" in content
+    assert_canonical_checkbox(content, "x", "Grandparent")
+    assert_canonical_checkbox(content, "x", "Parent")
+    assert_canonical_checkbox(content, "x", "Grandchild")
 
 
 @pytest.mark.integration
@@ -156,7 +156,7 @@ def test_mixed_parent_and_leaf_tasks_ordered_correctly(tmp_path):
     )
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Standalone task" in content
-    assert "- [x] Group" in content
-    assert "- [x] Sub A" in content
-    assert "- [x] Sub B" in content
+    assert_canonical_checkbox(content, "x", "Standalone task")
+    assert_canonical_checkbox(content, "x", "Group")
+    assert_canonical_checkbox(content, "x", "Sub A")
+    assert_canonical_checkbox(content, "x", "Sub B")

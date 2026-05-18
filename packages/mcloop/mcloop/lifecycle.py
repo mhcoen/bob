@@ -14,6 +14,7 @@ from mcloop import formatting
 from mcloop.checklist import (
     CHECKBOX_RE,
     Task,
+    _checkbox_task_text,
     mark_failed,
     parse,
 )
@@ -254,7 +255,7 @@ def _write_ruledout_to_plan(
     lines = checklist_path.read_text().splitlines()
     for i, line in enumerate(lines):
         m = CHECKBOX_RE.match(line)
-        if m and m.group(3).strip() == task_text.strip():
+        if m and _checkbox_task_text(line) == task_text.strip():
             indent = len(m.group(1))
             ruledout_line = " " * (indent + 2) + f"[RULEDOUT] {description}"
             lines.insert(i + 1, ruledout_line)

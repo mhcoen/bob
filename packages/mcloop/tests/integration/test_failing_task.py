@@ -9,7 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -75,9 +75,7 @@ def test_task_marked_failed_after_max_retries(tmp_path):
     assert attempt_count[0] == 3, f"Expected 3 attempts, got {attempt_count[0]}"
 
     content = _active_plan(plan_md).read_text()
-    assert "- [!] Impossible task" in content, (
-        f"Task should be marked [!] after max retries, got:\n{content}"
-    )
+    assert_canonical_checkbox(content, "!", "Impossible task")
 
     # No commit should have been made for the failing task
     log = subprocess.run(
@@ -115,8 +113,8 @@ def test_loop_stops_after_failed_task_leaving_subsequent_tasks_unchecked(tmp_pat
     )
 
     content = _active_plan(plan_md).read_text()
-    assert "- [!] Failing task" in content
-    assert "- [ ] Should not run" in content
+    assert_canonical_checkbox(content, "!", "Failing task")
+    assert_canonical_checkbox(content, " ", "Should not run")
 
 
 @pytest.mark.integration
@@ -160,9 +158,7 @@ def test_task_succeeds_on_final_retry(tmp_path):
     assert attempt_count[0] == 3
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Eventually works" in content, (
-        f"Task should be checked off after succeeding on retry:\n{content}"
-    )
+    assert_canonical_checkbox(content, "x", "Eventually works")
     assert (tmp_path / "success.txt").exists()
 
     log = subprocess.run(

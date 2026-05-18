@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
+_TASK_ID_RE = re.compile(r"^(T-\d{6}):\s*(.*)$")
 # Section headers: any heading level (# or more) whose title contains
 # "Stage N" or "Phase N" anywhere in the line. The number is captured.
 STAGE_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
@@ -25,6 +26,23 @@ _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 _USER_TAG = "[USER]"
 _BATCH_TAG = "[BATCH]"
 _AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
+
+
+def _strip_task_id(text: str) -> tuple[str | None, str]:
+    """Split a leading canonical task id from checkbox text, if present."""
+    match = _TASK_ID_RE.match(text)
+    if match is None:
+        return None, text
+    return match.group(1), match.group(2).strip()
+
+
+def _checkbox_task_text(line: str) -> str | None:
+    """Return checkbox task text without a leading canonical id."""
+    match = CHECKBOX_RE.match(line)
+    if match is None:
+        return None
+    _, text = _strip_task_id(match.group(3).strip())
+    return text
 
 
 class PlanCorruptionError(Exception):
@@ -218,7 +236,7 @@ def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
         marker = m.group(2)
         checked = marker in ("x", "X")
         failed = marker == "!"
-        text = m.group(3).strip()
+        task_id, text = _strip_task_id(m.group(3).strip())
         task = Task(
             text=text,
             checked=checked,
@@ -226,6 +244,7 @@ def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
             line_number=i,
             indent_level=indent,
             stage=current_stage,
+            task_id=task_id,
         )
         if text == _USER_TAG or text.startswith(f"{_USER_TAG} "):
             task.body = _collect_body(lines, i + 1)
@@ -491,7 +510,11 @@ def _find_task_line(lines: list[str], task: Task) -> int:
     # (e.g. file was edited externally and lines shifted).
     if task.line_number < len(lines):
         m = CHECKBOX_RE.match(lines[task.line_number])
-        if m and m.group(3).strip() == task.text and len(m.group(1)) == task.indent_level:
+        if (
+            m
+            and _checkbox_task_text(lines[task.line_number]) == task.text
+            and len(m.group(1)) == task.indent_level
+        ):
             # Verify stage by scanning headers above this line
             line_stage = ""
             for j in range(task.line_number):
@@ -519,7 +542,7 @@ def _find_task_line(lines: list[str], task: Task) -> int:
             current_stage = "Bugs"
             continue
         m = CHECKBOX_RE.match(line)
-        if not m or m.group(3).strip() != task.text:
+        if not m or _checkbox_task_text(line) != task.text:
             continue
         indent = len(m.group(1))
         if indent != task.indent_level:

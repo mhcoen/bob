@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from mcloop.main import run_loop
-from tests.plan_fixtures import canonical_plan_text
+from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 STUB_CLI = str(Path(__file__).resolve().parent.parent / "stubs" / "stub_cli.py")
 
@@ -134,7 +134,7 @@ def test_stub_creates_file_and_checks_off_task(tmp_path):
     assert (tmp_path / "hello.txt").read_text() == "hello from stub\n"
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Create hello.txt" in content
+    assert_canonical_checkbox(content, "x", "Create hello.txt")
 
     log = subprocess.run(
         ["git", "log", "--oneline"],
@@ -174,7 +174,7 @@ def test_stub_failing_task_retried_and_marked_failed(tmp_path):
 
     assert not result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [!] Impossible task" in content
+    assert_canonical_checkbox(content, "!", "Impossible task")
 
 
 # -------------------------------------------------------------------
@@ -236,7 +236,7 @@ def test_stub_check_failure_retries_with_prior_errors(tmp_path):
 
     assert result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Create widget" in content
+    assert_canonical_checkbox(content, "x", "Create widget")
 
     # The second prompt should contain the check error from the first attempt
     assert len(prompts_seen) >= 2
@@ -290,7 +290,7 @@ def test_stub_rate_limit_triggers_pause_and_retry(tmp_path):
 
     assert result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Create output file" in content
+    assert_canonical_checkbox(content, "x", "Create output file")
     # Rate limit attempt should not count, so we should have seen at least 2 calls
     assert call_count >= 2
 
@@ -339,7 +339,7 @@ def test_stub_session_limit_triggers_polling(tmp_path):
 
     assert result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Create result file" in content
+    assert_canonical_checkbox(content, "x", "Create result file")
     assert call_count >= 2
 
 
@@ -391,9 +391,9 @@ def test_stub_batch_runs_one_session_checks_off_all(tmp_path):
     assert (tmp_path / "part_c.txt").read_text() == "c\n"
 
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Create part_a.txt" in content
-    assert "- [x] Create part_b.txt" in content
-    assert "- [x] Create part_c.txt" in content
+    assert_canonical_checkbox(content, "x", "Create part_a.txt")
+    assert_canonical_checkbox(content, "x", "Create part_b.txt")
+    assert_canonical_checkbox(content, "x", "Create part_c.txt")
 
     # Should have made exactly one task-completion commit for the batch.
     log = subprocess.run(
@@ -462,9 +462,9 @@ def test_stub_batch_failure_halts_and_marks_parent_failed(tmp_path):
     assert not (tmp_path / "beta.txt").exists()
 
     content = _active_plan(plan_md).read_text()
-    assert "- [!] [BATCH] Build things" in content
-    assert "- [!] Write alpha component" in content
-    assert "- [!] Write beta component" in content
+    assert_canonical_checkbox(content, "!", "[BATCH] Build things")
+    assert_canonical_checkbox(content, "!", "Write alpha component")
+    assert_canonical_checkbox(content, "!", "Write beta component")
 
 
 # -------------------------------------------------------------------
@@ -500,7 +500,7 @@ def test_stub_no_file_changes_checks_pass_auto_checked(tmp_path):
 
     assert result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Verify everything works" in content
+    assert_canonical_checkbox(content, "x", "Verify everything works; do not modify any files")
 
 
 # -------------------------------------------------------------------
@@ -556,7 +556,7 @@ def test_stub_reviewer_spawned_after_commit(tmp_path):
 
     assert result.ok
     content = _active_plan(plan_md).read_text()
-    assert "- [x] Add feature" in content
+    assert_canonical_checkbox(content, "x", "Add feature")
 
     # Reviewer should have been called exactly once after the commit
     assert len(reviewer_calls) == 1
@@ -606,9 +606,9 @@ def test_stub_stage_boundary_full_suite(tmp_path, capsys):
 
     content = plan_md.read_text()
     # Stage 1 task checked off
-    assert "- [x] Create stage1 file" in content
+    assert_canonical_checkbox(content, "x", "Create stage1 file")
     # Stage 2 task NOT attempted
-    assert "- [ ] Create stage2 file" in content
+    assert_canonical_checkbox(content, " ", "Create stage2 file")
 
     assert (tmp_path / "stage1.txt").exists()
     assert not (tmp_path / "stage2.txt").exists()
@@ -668,7 +668,7 @@ def test_stub_check_always_fails_retries_and_marked_failed(tmp_path):
 
     # Task marked failed
     content = _active_plan(plan_md).read_text()
-    assert "- [!] Create hello.txt" in content
+    assert_canonical_checkbox(content, "!", "Create hello.txt")
     assert "- [x]" not in content
 
     # No task-completion commit (checks never passed); checkpoint commits may exist.
